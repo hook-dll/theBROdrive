@@ -82,6 +82,14 @@
   drive (the window, the moonlit desert road), Settings (the toolbox). Moonlight through
   the window, the desk lamp, a night-light, dust in the beam, a ticking clock. Its own
   WebGL context, released before the drive builds its renderer.
+- The title room, second pass (owner's notes): adventures, not dreams, in every word the
+  player reads; the play mat painted as the opening desert (its sand, crests, poles,
+  cacti, a mesa) with only the toy car standing on it; an articulated desk lamp aimed at
+  the map, casting no shadow of itself; the shelf clear of the curtain and a Lada 1600
+  calendar (1986) whose photograph is the kit's 2106 rendered at load; a deep double-
+  glazed window onto a real night outside — a road passing the house, poles and wires,
+  cacti, mesas, the moon; a proper bedside table and a «Маяк» alarm clock at 10:08. No
+  coplanar overlapping faces left in the room (checked by a scan of every triangle).
 
 - Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
   (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's

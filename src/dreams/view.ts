@@ -33,7 +33,7 @@ export class DreamView {
     const cargo = run.def.cargoName;
     const goal = run.route.goalName;
     let text: string;
-    if (run.outside) text = 'You are drifting out of the dream — turn back to the road';
+    if (run.outside) text = 'You are drifting out of the adventure — turn back to the road';
     else if (cargo !== null && run.cargo === 'window') text = `Take the ${cargo} from the terminal in front of the car`;
     else if (cargo !== null && run.cargo === 'away') {
       text = run.departed
@@ -103,13 +103,13 @@ export class DreamView {
       line(`The ride: ${ride}${moments}`);
       line(trip.carDamage < 0.005 ? 'The car: not a scratch' : trip.carDamage < 0.1 ? 'The car: a few scratches' : 'The car: knocked about');
       const next = DREAMS[DREAMS.findIndex((dream) => dream.id === run.def.id) + 1];
-      if (next) line(`Tonight you may dream «${next.title}».`);
+      if (next) line(`Next time: «${next.title}».`);
     } else if (run.phase === 'late') {
       title.textContent = 'Too late';
-      line(`${run.route.goalName} could not wait any longer. It will be there again tonight.`);
+      line(`${run.route.goalName} could not wait any longer. It will be there again next time.`);
     } else {
-      title.textContent = 'The dream slipped away';
-      line('You drove out of it. It will be there again tonight.');
+      title.textContent = 'The adventure slipped away';
+      line('You drove out of it. It will be there again next time.');
     }
     const wake = document.createElement('button');
     wake.textContent = 'Wake up';

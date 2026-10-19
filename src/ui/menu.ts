@@ -2355,9 +2355,9 @@ export class MainMenu {
       const items: Record<RoomSpot, RoomItem> = {
         toy: next
           ? { label: 'Daydream', detail: `«${next.title}» — ${next.brief}`, disabled: false }
-          : { label: 'Daydream', detail: 'Nothing to dream of tonight', disabled: true },
-        map: { label: 'Dreams', detail: `${dreamt} of ${DREAMS.length} dreamt — pick one`, disabled: false },
-        shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one dream dreamt' : `${dreamt} toy cars: one for every dream dreamt`, disabled: false },
+          : { label: 'Daydream', detail: 'Nothing to daydream of tonight', disabled: true },
+        map: { label: 'Adventures', detail: `${dreamt} of ${DREAMS.length} had — pick one`, disabled: false },
+        shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one adventure had' : `${dreamt} toy cars: one for every adventure had`, disabled: false },
         keys: latest
           ? {
               label: 'Drives',
@@ -2394,7 +2394,7 @@ export class MainMenu {
 
     /** Every dream, in order: each opens once the one before it is done; a done one carries its best night. */
     const renderDreams = (): void => {
-      const { head } = screenHead('Dreams', () => backToFront('dreams'));
+      const { head } = screenHead('Adventures', () => backToFront('dreams'));
       const nav = el('nav', 'menu-actions');
       const progress = loadDreamProgress();
       const next = nextDream(progress);
@@ -2402,7 +2402,7 @@ export class MainMenu {
         const best = progress[dream.id];
         const open = dreamOpen(dream.id, progress);
         const detail = !open
-          ? `Dream «${DREAMS[index - 1]!.title}» first`
+          ? `Adventure «${DREAMS[index - 1]!.title}» first`
           : best
             ? `✓ best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
               (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
@@ -2427,9 +2427,9 @@ export class MainMenu {
           text(best ? dream.title : 'An empty place', 'menu-shelf-title'),
           text(
             best
-              ? `${best.times === 1 ? 'Dreamt once' : `Dreamt ${best.times} times`} · best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
+              ? `${best.times === 1 ? 'Had once' : `Had ${best.times} times`} · best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
                   (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
-              : 'for a dream not dreamt yet',
+              : 'for an adventure not had yet',
             'menu-shelf-detail',
           ),
         );

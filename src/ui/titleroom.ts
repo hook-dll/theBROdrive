@@ -9,10 +9,10 @@ import { buildRoomScene, type RoomScene } from './roomscene';
  * sweeps the camera, low, across the room to the thing that item is about, and choosing
  * it acts (GAME_DESIGN.md §14.1).
  *
- *   Daydream   — the play mat on the floor and the next dream's toy car on its road:
- *                the boy does not go to bed to dream, he plays and drifts off
- *   Dreams     — the map of the dreams on the desk
- *   Shelf      — the die-cast toys, one for every dream dreamt
+ *   Daydream   — the play mat on the floor and the next adventure's toy car on its
+ *                road: the boy does not go to bed for it, he plays and drifts off
+ *   Adventures — the map of the adventures on the desk
+ *   Shelf      — the die-cast toys, one for every adventure had
  *   Drives     — the car keys on their hook by the door: the saved drives
  *   Free drive — the window, the desert road under the moon
  *   Settings   — the toolbox
@@ -38,11 +38,11 @@ const ITEMS: readonly RoomSpot[] = ['toy', 'map', 'shelf', 'keys', 'window', 'to
 const POSES: Readonly<Record<RoomSpot | 'wide', { readonly at: THREE.Vector3; readonly look: THREE.Vector3; readonly fov: number }>> = {
   wide: { at: new THREE.Vector3(1.35, 1.55, 1.55), look: new THREE.Vector3(-0.7, 0.85, -1.0), fov: 52 },
   toy: { at: new THREE.Vector3(-0.2, 0.26, 0.85), look: new THREE.Vector3(-0.47, 0.05, 0.22), fov: 38 },
-  map: { at: new THREE.Vector3(0.95, 1.45, -0.25), look: new THREE.Vector3(1.75, 0.76, -0.9), fov: 42 },
-  shelf: { at: new THREE.Vector3(0.95, 1.5, -0.2), look: new THREE.Vector3(1.32, 1.56, -1.75), fov: 34 },
+  map: { at: new THREE.Vector3(1.3, 1.5, -0.45), look: new THREE.Vector3(1.68, 0.77, -0.9), fov: 42 },
+  shelf: { at: new THREE.Vector3(1.1, 1.72, -0.3), look: new THREE.Vector3(1.5, 1.82, -1.75), fov: 42 },
   keys: { at: new THREE.Vector3(1.5, 1.45, 0.6), look: new THREE.Vector3(2.08, 1.36, 0.3), fov: 30 },
   window: { at: new THREE.Vector3(-0.1, 1.3, 0.85), look: new THREE.Vector3(-0.2, 1.45, -3.5), fov: 50 },
-  toolbox: { at: new THREE.Vector3(0.35, 0.85, 0.75), look: new THREE.Vector3(1.15, 0.2, -0.1), fov: 40 },
+  toolbox: { at: new THREE.Vector3(0.65, 0.85, 1.35), look: new THREE.Vector3(1.35, 0.2, 0.55), fov: 40 },
 };
 
 /** How long the camera takes from one thing to the next, seconds. */
@@ -51,7 +51,7 @@ const MOVE_S = 1.5;
 const MOVE_DIP = 0.18;
 /**
  * Daydreaming: the camera goes down to the toy car on the mat, to its level, close
- * enough that the mat is a road, while the room goes dark; then the dream loads.
+ * enough that the mat is a road, while the room goes dark; then the adventure loads.
  */
 const DIVE = { at: new THREE.Vector3(-0.43, 0.045, 0.52), look: new THREE.Vector3(-0.47, 0.035, 0.18), fov: 36 };
 const DIVE_S = 1.3;
@@ -62,7 +62,8 @@ export class TitleRoom {
   private readonly rows = new Map<RoomSpot, HTMLButtonElement>();
   private readonly details = new Map<RoomSpot, HTMLElement>();
   private readonly renderer: THREE.WebGLRenderer | null;
-  private readonly camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.03, 40);
+  /** Far enough for the sky and the mesas outside the window. */
+  private readonly camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.03, 400);
   private readonly room: RoomScene | null;
   private diving = false;
   private frame = 0;
@@ -266,15 +267,16 @@ export class TitleRoom {
     this.room.tick(t, dt);
     this.renderer.render(this.room.scene, this.camera);
 
-    // The toys are built after the room is on screen, one at a time between frames.
-    if (this.toyTimer === 0 && t > 0.3) this.scheduleToy();
+    // The slow work (toys, the calendar's photograph) after the room is on screen, one
+    // piece at a time between frames.
+    if (this.toyTimer === 0 && t > 0.3) this.scheduleWork();
   };
 
-  private scheduleToy(): void {
+  private scheduleWork(): void {
     this.toyTimer = window.setTimeout(() => {
-      if (this.disposed || !this.room) return;
-      const more = this.room.buildNextToy();
-      if (more) this.scheduleToy();
+      if (this.disposed || !this.room || !this.renderer) return;
+      const more = this.room.buildNext(this.renderer);
+      if (more) this.scheduleWork();
       else this.toyTimer = -1;
     }, 60);
   }

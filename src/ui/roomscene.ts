@@ -6,19 +6,38 @@ import { CAR_SURFACE_ATTRIBUTE } from '../render/materials';
 import { factoryPaintHex } from '../vehicle/carpaint';
 import { DREAM_CAR_ID, DREAMS, type DreamDef } from '../dreams/dream';
 import type { DreamProgress } from '../dreams/progress';
+import {
+  adventuresMap,
+  calendarPage,
+  clockFace,
+  dustSprite,
+  floorboards,
+  MAT_LOOP,
+  moonDisc,
+  nightSky,
+  playMat,
+  quilt,
+  rng,
+  roadSurface,
+  sandGround,
+  wallCarpet,
+  wallpaper,
+} from './roomart';
 
 /**
  * THE BOY'S ROOM, IN 3D: the title screen's set (ui/titleroom.ts points the camera).
  *
  * A small room at night, every thing in it a thing the menu is about, built from
- * primitives and painted canvases so it costs no download: the bed under a Soviet wall
- * carpet, a play-mat road on the floor with the next dream's car on it, the desk with
- * the dreams' map under a lamp, a shelf of die-cast toys — one for every dream dreamt,
- * each the car that dream lends, in its colour — the keys on their hook by the door,
- * the window onto the moonlit desert road, a toolbox, a ticking clock.
+ * primitives and painted canvases (ui/roomart.ts): the play mat painted as the desert
+ * the drive opens on, with the next adventure's car on its road; the desk with the
+ * adventures' map under the lamp; a shelf of die-cast toys — one for every adventure
+ * done, each the car that adventure lends, in its colour — beside a Lada 1600 calendar
+ * whose photograph is the kit's own 2106; the keys on their board by the door; a deep
+ * double-glazed window onto the desert at night, the road passing the house; the bed
+ * under a wall carpet, the bedside table and its alarm clock; a toolbox; a clock.
  *
- * Lit by the moon through the window, whose frame throws its shadow across the floor and
- * the bed, and by the desk lamp; dust drifts in the moonbeam.
+ * NO SURFACE LIES IN ANOTHER: pieces that meet only touch along their edges, decals sit
+ * clear of what they are laid on and draw with a polygon offset, so nothing z-fights.
  *
  * Metres, +y up; the back wall (the window's) is at z = -ROOM_D/2, the bed along the
  * left wall, the desk and the door on the right.
@@ -31,26 +50,23 @@ const X0 = -ROOM_W / 2;
 const X1 = ROOM_W / 2;
 const Z0 = -ROOM_D / 2;
 const Z1 = ROOM_D / 2;
+/** The back wall's thickness: a Soviet block wall, the window deep in it. */
+const WALL_T = 0.38;
 
-/** The window in the back wall: left, right, sill, top. */
+/** The window's opening in the back wall: left, right, sill, top. */
 const WIN = { x0: -0.85, x1: 0.45, y0: 0.88, y1: 2.12 };
+/** The ground outside, under the floor: the flat is a step up from the desert. */
+const GROUND_Y = -0.55;
 
 /** The desk lamp's bulb, candela. */
-const DESK_LAMP_CD = 14;
+const DESK_LAMP_CD = 7;
 
-/** A soft round speck for the dust. */
-function dustSprite(): THREE.CanvasTexture {
-  return canvas(32, 32, (g) => {
-    const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 32, 32);
-  });
-}
+/** The calendar's year: the 2106's own heyday. */
+const CALENDAR_YEAR = 1986;
+
 /** What each menu thing focuses on, for the camera (titleroom.ts). */
 export interface RoomAnchors {
-  /** The next dream's toy car on the play mat. */
+  /** The next adventure's toy car on the play mat. */
   readonly toy: THREE.Vector3;
   readonly map: THREE.Vector3;
   readonly shelf: THREE.Vector3;
@@ -65,509 +81,141 @@ export interface RoomScene {
   /** Animate the clock, the lamp, the dust and the curtains; `t` seconds. */
   tick(t: number, dt: number): void;
   /**
-   * Build the next die-cast toy, if any is left: one kit car per call, so the work is
-   * spread over idle moments. False when every toy is on its place.
+   * The next piece of slow work — a die-cast toy, the calendar's photograph — if any is
+   * left: one kit car per call, so the work is spread over idle moments. False when all
+   * is done.
    */
-  buildNextToy(): boolean;
+  buildNext(renderer: THREE.WebGLRenderer): boolean;
   dispose(): void;
 }
 
 /* ------------------------------------------------------------------ *
- *  Canvas paint                                                      *
+ *  Building blocks                                                   *
  * ------------------------------------------------------------------ */
 
-function canvas(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  draw(c.getContext('2d')!);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
+class Kit {
+  readonly disposables: { dispose(): void }[] = [];
+
+  mat(params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
+    const m = new THREE.MeshStandardMaterial(params);
+    this.disposables.push(m);
+    if (params.map) this.disposables.push(params.map);
+    return m;
+  }
+
+  /** A material for a flat thing laid on a surface: drawn pulled towards the eye. */
+  decal(params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
+    const m = this.mat(params);
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = -2;
+    m.polygonOffsetUnits = -2;
+    return m;
+  }
+
+  mesh(geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0, cast = true): THREE.Mesh {
+    this.disposables.push(geometry);
+    const m = new THREE.Mesh(geometry, material);
+    m.position.set(x, y, z);
+    m.castShadow = cast;
+    m.receiveShadow = true;
+    return m;
+  }
+
+  box(w: number, h: number, d: number, material: THREE.Material, x: number, y: number, z: number, radius = 0): THREE.Mesh {
+    const geometry = radius > 0 ? new RoundedBoxGeometry(w, h, d, 3, Math.min(radius, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d);
+    return this.mesh(geometry, material, x, y, z);
+  }
+
+  /** A box between two corners: (x0, y0, z0) to (x1, y1, z1). */
+  span(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, material: THREE.Material, radius = 0): THREE.Mesh {
+    return this.box(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0), material, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, radius);
+  }
+
+  /** A rod from `a` to `b`. */
+  rod(a: THREE.Vector3, b: THREE.Vector3, radius: number, material: THREE.Material, sides = 10): THREE.Mesh {
+    const length = a.distanceTo(b);
+    const m = this.mesh(new THREE.CylinderGeometry(radius, radius, length, sides), material);
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    return m;
+  }
+
+  /** A plane of `w` × `h` with its texture's repeat following its own size. */
+  wallPlane(w: number, h: number, unit: number): THREE.PlaneGeometry {
+    const geometry = new THREE.PlaneGeometry(w, h);
+    const uv = geometry.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / unit, (uv.getY(i) * h) / unit);
+    return geometry;
+  }
 }
 
-/** Deterministic noise for the painted textures. */
-function rng(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+/**
+ * A window sash: its members laid edge to edge so none lies in another — stiles full
+ * height, rails between them, a mullion between the rails, a transom in two halves
+ * between stile and mullion — and a pane of glass in each opening.
+ */
+function sash(k: Kit, x0: number, x1: number, y0: number, y1: number, z: number, depth: number, member: number, frameMat: THREE.Material, glassMat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const cx = (x0 + x1) / 2;
+  const bottom = member * 1.3;
+  const yt = y0 + (y1 - y0) * 0.68;
+  const z0 = z - depth / 2;
+  const z1 = z + depth / 2;
+  g.add(
+    k.span(x0, y0, z0, x0 + member, y1, z1, frameMat),
+    k.span(x1 - member, y0, z0, x1, y1, z1, frameMat),
+    k.span(x0 + member, y1 - member, z0, x1 - member, y1, z1, frameMat),
+    k.span(x0 + member, y0, z0, x1 - member, y0 + bottom, z1, frameMat),
+    k.span(cx - member / 2, y0 + bottom, z0, cx + member / 2, y1 - member, z1, frameMat),
+    k.span(x0 + member, yt - member / 2, z0, cx - member / 2, yt + member / 2, z1, frameMat),
+    k.span(cx + member / 2, yt - member / 2, z0, x1 - member, yt + member / 2, z1, frameMat),
+  );
+  const pane = (px0: number, px1: number, py0: number, py1: number): void => {
+    const p = k.mesh(new THREE.PlaneGeometry(px1 - px0, py1 - py0), glassMat, (px0 + px1) / 2, (py0 + py1) / 2, z, false);
+    p.receiveShadow = false;
+    g.add(p);
   };
+  pane(x0 + member, cx - member / 2, y0 + bottom, yt - member / 2);
+  pane(cx + member / 2, x1 - member, y0 + bottom, yt - member / 2);
+  pane(x0 + member, cx - member / 2, yt + member / 2, y1 - member);
+  pane(cx + member / 2, x1 - member, yt + member / 2, y1 - member);
+  return g;
 }
 
-/** Soviet wallpaper: faded stripes and a small repeating flower. */
-function wallpaper(): THREE.CanvasTexture {
-  const tex = canvas(512, 512, (g) => {
-    g.fillStyle = '#8c8270';
-    g.fillRect(0, 0, 512, 512);
-    for (let x = 0; x < 512; x += 64) {
-      g.fillStyle = 'rgba(120,108,88,0.55)';
-      g.fillRect(x + 26, 0, 12, 512);
-      g.fillStyle = 'rgba(160,150,128,0.35)';
-      g.fillRect(x + 4, 0, 3, 512);
-    }
-    for (let y = 0; y < 512; y += 64) {
-      for (let x = 0; x < 512; x += 64) {
-        const cx = x + 32 + ((y / 64) % 2) * 0;
-        const cy = y + 32;
-        g.fillStyle = 'rgba(122,74,62,0.55)';
-        for (let k = 0; k < 4; k++) {
-          const a = (k / 4) * Math.PI * 2;
-          g.beginPath();
-          g.ellipse(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, 5, 3, a, 0, Math.PI * 2);
-          g.fill();
-        }
-        g.fillStyle = 'rgba(90,110,72,0.6)';
-        g.beginPath();
-        g.arc(cx, cy, 2.5, 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-    const r = rng(7);
-    for (let i = 0; i < 4000; i++) {
-      g.fillStyle = `rgba(40,30,20,${r() * 0.05})`;
-      g.fillRect(r() * 512, r() * 512, 2, 2);
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(ROOM_W / 0.9, ROOM_H / 0.9);
-  return tex;
+/**
+ * A key's outline as one closed run, so it extrudes as one solid: up the blade's toothed
+ * edge, round the bow, down its plain edge; a hole through the bow.
+ */
+function keyShape(bow: number, blade: number, width: number): THREE.Shape {
+  const w = width / 2;
+  const neck = -Math.sqrt(bow * bow - w * w);
+  const tip = neck - blade;
+  const s = new THREE.Shape();
+  s.moveTo(-w, tip + w);
+  s.lineTo(w * 0.2, tip);
+  s.lineTo(w, tip + w);
+  for (let i = 0; i < 4; i++) {
+    const y = tip + w + ((i + 1) * (blade - w)) / 5;
+    s.lineTo(w * 1.7, y - (blade - w) / 10);
+    s.lineTo(w, y);
+  }
+  s.lineTo(w, neck);
+  s.absarc(0, 0, bow, Math.atan2(neck, w), Math.atan2(neck, -w) + Math.PI * 2, false);
+  s.lineTo(-w, tip + w);
+  const hole = new THREE.Path();
+  hole.absarc(0, bow * 0.45, bow * 0.28, 0, Math.PI * 2, true);
+  s.holes.push(hole);
+  return s;
 }
 
-/** Painted floorboards, warm and worn. */
-function floorboards(): THREE.CanvasTexture {
-  const tex = canvas(1024, 1024, (g) => {
-    const r = rng(11);
-    const plank = 1024 / 8;
-    for (let i = 0; i < 8; i++) {
-      const base = 52 + r() * 14;
-      g.fillStyle = `hsl(18, 42%, ${base * 0.42}%)`;
-      g.fillRect(i * plank, 0, plank, 1024);
-      for (let k = 0; k < 60; k++) {
-        g.strokeStyle = `rgba(30,16,8,${0.05 + r() * 0.1})`;
-        g.lineWidth = 1 + r() * 2;
-        const x = i * plank + r() * plank;
-        g.beginPath();
-        g.moveTo(x, 0);
-        g.bezierCurveTo(x + r() * 10 - 5, 300, x + r() * 10 - 5, 700, x + r() * 6 - 3, 1024);
-        g.stroke();
-      }
-      g.fillStyle = 'rgba(15,8,4,0.85)';
-      g.fillRect(i * plank, 0, 3, 1024);
-      const joint = r() * 1024;
-      g.fillRect(i * plank, joint, plank, 3);
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(ROOM_W / 1.6, ROOM_D / 1.6);
-  return tex;
+function extrudeKey(k: Kit, shape: THREE.Shape, thickness: number, material: THREE.Material): THREE.Mesh {
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 16 });
+  geometry.translate(0, 0, -thickness / 2);
+  return k.mesh(geometry, material);
 }
 
-/** The wall carpet over the bed: red ground, a medallion, a patterned border. */
-function wallCarpet(): THREE.CanvasTexture {
-  return canvas(1024, 704, (g) => {
-    const W = 1024;
-    const H = 704;
-    g.fillStyle = '#7a1c1a';
-    g.fillRect(0, 0, W, H);
-    // Border bands.
-    const band = (inset: number, width: number, color: string): void => {
-      g.strokeStyle = color;
-      g.lineWidth = width;
-      g.strokeRect(inset, inset, W - inset * 2, H - inset * 2);
-    };
-    band(14, 18, '#2c1c3a');
-    band(40, 22, '#c9a35a');
-    band(66, 10, '#2c1c3a');
-    for (let x = 60; x < W - 60; x += 34) {
-      g.fillStyle = '#7a1c1a';
-      g.beginPath();
-      g.moveTo(x, 40);
-      g.lineTo(x + 10, 30);
-      g.lineTo(x + 20, 40);
-      g.lineTo(x + 10, 50);
-      g.fill();
-      g.beginPath();
-      g.moveTo(x, H - 40);
-      g.lineTo(x + 10, H - 30);
-      g.lineTo(x + 20, H - 40);
-      g.lineTo(x + 10, H - 50);
-      g.fill();
-    }
-    // The field's small repeating motif.
-    for (let y = 110; y < H - 100; y += 56) {
-      for (let x = 110; x < W - 100; x += 56) {
-        g.fillStyle = (x + y) % 112 === 0 ? '#c9a35a' : '#1d2a4a';
-        g.beginPath();
-        g.moveTo(x, y - 9);
-        g.lineTo(x + 9, y);
-        g.lineTo(x, y + 9);
-        g.lineTo(x - 9, y);
-        g.fill();
-      }
-    }
-    // The medallion.
-    const cx = W / 2;
-    const cy = H / 2;
-    const rings: [number, string][] = [
-      [210, '#2c1c3a'], [190, '#c9a35a'], [170, '#8f2a22'], [140, '#1d2a4a'], [110, '#e2c88a'], [80, '#7a1c1a'], [46, '#c9a35a'], [22, '#2c1c3a'],
-    ];
-    for (const [r, color] of rings) {
-      g.fillStyle = color;
-      g.beginPath();
-      g.moveTo(cx, cy - r);
-      g.lineTo(cx + r * 1.4, cy);
-      g.lineTo(cx, cy + r);
-      g.lineTo(cx - r * 1.4, cy);
-      g.closePath();
-      g.fill();
-    }
-    // Pile: a soft noise.
-    const r = rng(23);
-    for (let i = 0; i < 26000; i++) {
-      g.fillStyle = `rgba(0,0,0,${r() * 0.12})`;
-      g.fillRect(r() * W, r() * H, 1.5, 1.5);
-    }
-  });
-}
-
-/** The play mat: grass, a road loop with a crossing, little houses. */
-function playMat(): THREE.CanvasTexture {
-  return canvas(1024, 704, (g) => {
-    g.fillStyle = '#4f6a3a';
-    g.fillRect(0, 0, 1024, 704);
-    const r = rng(31);
-    for (let i = 0; i < 9000; i++) {
-      g.fillStyle = `rgba(${r() < 0.5 ? '30,50,20' : '120,150,80'},${r() * 0.18})`;
-      g.fillRect(r() * 1024, r() * 704, 2, 2);
-    }
-    const road = (draw: () => void): void => {
-      g.lineCap = 'round';
-      g.lineJoin = 'round';
-      g.strokeStyle = '#3b3b3e';
-      g.lineWidth = 78;
-      g.beginPath();
-      draw();
-      g.stroke();
-      g.strokeStyle = '#e8e2c8';
-      g.lineWidth = 5;
-      g.setLineDash([26, 22]);
-      g.beginPath();
-      draw();
-      g.stroke();
-      g.setLineDash([]);
-    };
-    road(() => g.roundRect(120, 110, 784, 484, 150));
-    road(() => {
-      g.moveTo(512, 110);
-      g.lineTo(512, 594);
-    });
-    // Little houses and trees.
-    const house = (x: number, y: number, color: string): void => {
-      g.fillStyle = color;
-      g.fillRect(x, y, 70, 52);
-      g.fillStyle = '#7a2a22';
-      g.beginPath();
-      g.moveTo(x - 8, y);
-      g.lineTo(x + 35, y - 34);
-      g.lineTo(x + 78, y);
-      g.fill();
-      g.fillStyle = '#e8d38a';
-      g.fillRect(x + 12, y + 14, 16, 16);
-      g.fillRect(x + 42, y + 14, 16, 16);
-    };
-    house(250, 290, '#d8cba4');
-    house(650, 300, '#a9c0d8');
-    for (const [x, y] of [[180, 40], [360, 640], [880, 650], [940, 50], [330, 380], [740, 420]] as const) {
-      g.fillStyle = '#2f4a24';
-      g.beginPath();
-      g.arc(x, y, 26, 0, Math.PI * 2);
-      g.fill();
-    }
-  });
-}
-
-/** The dreams' map: the road from stop to stop, a stop per dream, done ones in green. */
-function dreamMap(progress: DreamProgress): THREE.CanvasTexture {
-  return canvas(1024, 720, (g) => {
-    g.fillStyle = '#e4d5ae';
-    g.fillRect(0, 0, 1024, 720);
-    const r = rng(41);
-    for (let i = 0; i < 6000; i++) {
-      g.fillStyle = `rgba(110,80,40,${r() * 0.06})`;
-      g.fillRect(r() * 1024, r() * 720, 3, 3);
-    }
-    // Folds.
-    g.strokeStyle = 'rgba(120,90,50,0.35)';
-    g.lineWidth = 3;
-    for (const x of [341, 683]) {
-      g.beginPath();
-      g.moveTo(x, 0);
-      g.lineTo(x, 720);
-      g.stroke();
-    }
-    g.beginPath();
-    g.moveTo(0, 360);
-    g.lineTo(1024, 360);
-    g.stroke();
-    // Contours of the desert.
-    g.strokeStyle = 'rgba(160,110,60,0.35)';
-    g.lineWidth = 2;
-    for (let k = 0; k < 7; k++) {
-      g.beginPath();
-      g.ellipse(250 + k * 90, 560 - k * 40, 120 + k * 10, 50 + k * 4, 0.3, 0, Math.PI * 2);
-      g.stroke();
-    }
-    const count = DREAMS.length;
-    const at = (i: number): [number, number] => {
-      const t = (i + 0.5) / count;
-      return [90 + t * 844, 380 + Math.sin(t * Math.PI * 2.2) * 170];
-    };
-    g.strokeStyle = '#a7462a';
-    g.lineWidth = 12;
-    g.lineCap = 'round';
-    g.beginPath();
-    for (let k = 0; k <= 120; k++) {
-      const t = k / 120;
-      const x = 40 + t * 944;
-      const y = 380 + Math.sin(((x - 90) / 844) * Math.PI * 2.2) * 170;
-      if (k === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
-    }
-    g.stroke();
-    g.font = '600 26px "Barlow Condensed", "Arial Narrow", sans-serif';
-    g.textAlign = 'center';
-    DREAMS.forEach((dream, i) => {
-      const [x, y] = at(i);
-      const done = progress[dream.id] !== undefined;
-      g.fillStyle = done ? '#3f8f4f' : '#f2e8d0';
-      g.strokeStyle = done ? '#1f3a22' : '#6a4a30';
-      g.lineWidth = 5;
-      g.beginPath();
-      g.arc(x, y, done ? 20 : 15, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-      g.fillStyle = '#3a2a1a';
-      g.fillText(dream.title, x, y + (i % 2 === 0 ? -34 : 52));
-    });
-    g.font = '800 italic 44px "Barlow Condensed", "Arial Narrow", sans-serif';
-    g.textAlign = 'left';
-    g.fillStyle = 'rgba(80,50,30,0.8)';
-    g.fillText('DREAMS', 40, 70);
-  });
-}
-
-/** The poster above the shelf: a Zhiguli on a red ground. */
-function poster(): THREE.CanvasTexture {
-  return canvas(512, 720, (g) => {
-    g.fillStyle = '#c7362a';
-    g.fillRect(0, 0, 512, 720);
-    g.fillStyle = '#f0e2c4';
-    g.fillRect(24, 24, 464, 672);
-    g.fillStyle = '#c7362a';
-    g.fillRect(40, 40, 432, 470);
-    // The road and the car's side.
-    g.fillStyle = '#2a2a2e';
-    g.fillRect(40, 400, 432, 110);
-    g.fillStyle = '#f0e2c4';
-    for (let x = 60; x < 460; x += 70) g.fillRect(x, 452, 40, 6);
-    g.fillStyle = '#f2f2ea';
-    g.beginPath();
-    g.moveTo(80, 400);
-    g.lineTo(110, 350);
-    g.lineTo(170, 350);
-    g.lineTo(210, 300);
-    g.lineTo(330, 300);
-    g.lineTo(380, 350);
-    g.lineTo(440, 360);
-    g.lineTo(440, 400);
-    g.closePath();
-    g.fill();
-    g.fillStyle = '#7fa6c2';
-    g.fillRect(222, 312, 50, 36);
-    g.fillRect(282, 312, 50, 36);
-    g.fillStyle = '#1a1a1a';
-    for (const x of [150, 370]) {
-      g.beginPath();
-      g.arc(x, 402, 28, 0, Math.PI * 2);
-      g.fill();
-    }
-    g.fillStyle = '#c7362a';
-    g.font = '800 italic 96px "Barlow Condensed", "Arial Narrow", sans-serif';
-    g.textAlign = 'center';
-    g.fillText('ЖИГУЛИ', 256, 610);
-    g.font = '600 30px "Barlow Condensed", "Arial Narrow", sans-serif';
-    g.fillStyle = '#3a2a1a';
-    g.fillText('ВАЗ · ТОЛЬЯТТИ', 256, 660);
-  });
-}
-
-/** The quilt: faded patchwork squares. */
-function quilt(): THREE.CanvasTexture {
-  const tex = canvas(512, 512, (g) => {
-    const colors = ['#7c3a35', '#a8714a', '#4b5f7a', '#8a7a52', '#6a3f5a', '#9a4a3a'];
-    const r = rng(53);
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        g.fillStyle = colors[Math.floor(r() * colors.length)]!;
-        g.fillRect(x * 64, y * 64, 64, 64);
-        g.strokeStyle = 'rgba(240,220,180,0.35)';
-        g.setLineDash([6, 5]);
-        g.lineWidth = 2;
-        g.strokeRect(x * 64 + 4, y * 64 + 4, 56, 56);
-      }
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1.5, 2.5);
-  return tex;
-}
-
-/** Outside the window: the night desert, the moon and the road going away. */
-function nightDesert(): THREE.CanvasTexture {
-  return canvas(2048, 1024, (g) => {
-    const sky = g.createLinearGradient(0, 0, 0, 640);
-    sky.addColorStop(0, '#08102a');
-    sky.addColorStop(0.65, '#24375e');
-    sky.addColorStop(1, '#58506c');
-    g.fillStyle = sky;
-    g.fillRect(0, 0, 2048, 1024);
-    const r = rng(61);
-    for (let i = 0; i < 900; i++) {
-      const s = r() < 0.06 ? 2.4 : 1.2;
-      g.fillStyle = `rgba(242,232,208,${0.3 + r() * 0.7})`;
-      g.fillRect(r() * 2048, r() * 560, s, s);
-    }
-    // The moon and its halo, high in the window's right pane.
-    const [mx, my] = [1110, 330];
-    const halo = g.createRadialGradient(mx, my, 20, mx, my, 240);
-    halo.addColorStop(0, 'rgba(230,226,210,0.45)');
-    halo.addColorStop(1, 'rgba(230,226,210,0)');
-    g.fillStyle = halo;
-    g.fillRect(mx - 300, my - 300, 600, 600);
-    g.fillStyle = '#f2ecd8';
-    g.beginPath();
-    g.arc(mx, my, 40, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = 'rgba(160,160,150,0.35)';
-    for (const [x, y, s] of [[mx - 11, my - 11, 8], [mx + 13, my + 12, 6], [mx + 6, my - 17, 5]] as const) {
-      g.beginPath();
-      g.arc(x, y, s, 0, Math.PI * 2);
-      g.fill();
-    }
-    // Mesas.
-    g.fillStyle = '#2a2232';
-    g.beginPath();
-    g.moveTo(0, 640);
-    g.lineTo(160, 600);
-    g.lineTo(220, 520);
-    g.lineTo(420, 515);
-    g.lineTo(470, 600);
-    g.lineTo(900, 620);
-    g.lineTo(1500, 610);
-    g.lineTo(1580, 540);
-    g.lineTo(1760, 535);
-    g.lineTo(1820, 610);
-    g.lineTo(2048, 620);
-    g.lineTo(2048, 1024);
-    g.lineTo(0, 1024);
-    g.fill();
-    // The desert floor in moonlight.
-    const ground = g.createLinearGradient(0, 610, 0, 1024);
-    ground.addColorStop(0, '#5a4c58');
-    ground.addColorStop(1, '#8a6c50');
-    g.fillStyle = ground;
-    g.fillRect(0, 630, 2048, 400);
-    // The road to the horizon.
-    g.fillStyle = '#1e1c22';
-    g.beginPath();
-    g.moveTo(1010, 630);
-    g.lineTo(1038, 630);
-    g.lineTo(1500, 1024);
-    g.lineTo(560, 1024);
-    g.closePath();
-    g.fill();
-    g.fillStyle = 'rgba(232,226,200,0.75)';
-    for (let k = 0; k < 9; k++) {
-      const t = k / 9;
-      const t2 = t + 0.045;
-      const y0 = 630 + Math.pow(t, 2.2) * 394;
-      const y1 = 630 + Math.pow(t2, 2.2) * 394;
-      const w0 = 1 + t * 10;
-      g.fillRect(1024 - w0 / 2, y0, w0, Math.max(1, y1 - y0));
-    }
-    // Poles along the road.
-    g.strokeStyle = '#141218';
-    g.lineWidth = 3;
-    for (let k = 1; k < 7; k++) {
-      const t = k / 7;
-      const x = 1046 + Math.pow(t, 2) * 700;
-      const y = 630 + Math.pow(t, 2.2) * 394;
-      const h = 20 + t * 220;
-      g.beginPath();
-      g.moveTo(x, y);
-      g.lineTo(x, y - h);
-      g.stroke();
-    }
-  });
-}
-
-/** The alarm clock's and the wall clock's face. */
-function clockFace(): THREE.CanvasTexture {
-  return canvas(256, 256, (g) => {
-    g.fillStyle = '#efe6cf';
-    g.beginPath();
-    g.arc(128, 128, 126, 0, Math.PI * 2);
-    g.fill();
-    g.strokeStyle = '#2a2018';
-    for (let i = 0; i < 60; i++) {
-      const a = (i / 60) * Math.PI * 2;
-      const long = i % 5 === 0;
-      g.lineWidth = long ? 6 : 2;
-      g.beginPath();
-      g.moveTo(128 + Math.sin(a) * (long ? 92 : 104), 128 - Math.cos(a) * (long ? 92 : 104));
-      g.lineTo(128 + Math.sin(a) * 114, 128 - Math.cos(a) * 114);
-      g.stroke();
-    }
-    g.font = '700 30px "Barlow Condensed", sans-serif';
-    g.fillStyle = '#2a2018';
-    g.textAlign = 'center';
-    g.fillText('МАЯК', 128, 90);
-  });
-}
-
-/* ------------------------------------------------------------------ *
- *  Building                                                          *
- * ------------------------------------------------------------------ */
-
-const disposables: { dispose(): void }[] = [];
-
-function mat(params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial(params);
-  disposables.push(m);
-  return m;
-}
-
-function mesh(geometry: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z = 0, cast = true): THREE.Mesh {
-  disposables.push(geometry);
-  const m = new THREE.Mesh(geometry, material);
-  m.position.set(x, y, z);
-  m.castShadow = cast;
-  m.receiveShadow = true;
-  return m;
-}
-
-function box(w: number, h: number, d: number, material: THREE.Material, x: number, y: number, z: number, radius = 0): THREE.Mesh {
-  const geometry = radius > 0 ? new RoundedBoxGeometry(w, h, d, 3, radius) : new THREE.BoxGeometry(w, h, d);
-  return mesh(geometry, material, x, y, z);
-}
-
-/** A die-cast toy of a kit car: the built car merged into one draw, its paint in `color`, at `scale`. */
-function dieCast(modelId: string, color: number, scale: number): THREE.Mesh {
+/** A die-cast model of a kit car: the built car merged into one draw, its paint in `color`, at `scale`. */
+function dieCast(k: Kit, modelId: string, color: number, scale: number, material: THREE.Material): THREE.Mesh {
   const root = buildKitCar(modelId.replace(/^kit_/, ''));
   root.updateMatrixWorld(true);
   const paint = new THREE.Color(color);
@@ -575,74 +223,73 @@ function dieCast(modelId: string, color: number, scale: number): THREE.Mesh {
   root.traverse((node) => {
     const m = node as THREE.Mesh;
     if (!m.isMesh) return;
-    let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
     g.applyMatrix4(m.matrixWorld);
+    if (!g.getAttribute('normal')) g.computeVertexNormals();
     const count = g.getAttribute('position').count;
     const colors = new Float32Array(count * 3);
     const built = g.getAttribute('color');
     const surface = g.getAttribute(CAR_SURFACE_ATTRIBUTE);
     for (let i = 0; i < count; i++) {
-      let c: [number, number, number];
-      if (!built) c = [0.06, 0.08, 0.1]; // the glass: dark and glossy
-      else if (surface && surface.getX(i) > 0.5) c = [paint.r, paint.g, paint.b];
-      else c = [built.getX(i), built.getY(i), built.getZ(i)];
-      colors.set(c, i * 3);
+      if (!built) colors.set([0.05, 0.07, 0.09], i * 3); // the glass: dark and glossy
+      else if (surface && surface.getX(i) > 0.5) colors.set([paint.r, paint.g, paint.b], i * 3);
+      else colors.set([built.getX(i), built.getY(i), built.getZ(i)], i * 3);
     }
     const out = new THREE.BufferGeometry();
     out.setAttribute('position', g.getAttribute('position'));
-    if (!g.getAttribute('normal')) g.computeVertexNormals();
     out.setAttribute('normal', g.getAttribute('normal'));
     out.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     parts.push(out);
-    g = out;
+    g.dispose();
   });
   const merged = mergeGeometries(parts, false)!;
   for (const part of parts) part.dispose();
   merged.scale(scale, scale, scale);
-  const toy = mesh(merged, toyMaterial());
-  return toy;
+  return k.mesh(merged, material);
 }
 
-let toyMat: THREE.MeshStandardMaterial | null = null;
-function toyMaterial(): THREE.MeshStandardMaterial {
-  toyMat ??= mat({ vertexColors: true, roughness: 0.28, metalness: 0.25, side: THREE.DoubleSide });
-  return toyMat;
-}
-
-/** The dream a toy stands for, its car and colour. */
+/** The adventure a toy stands for: its car and that car's colour. */
 function toyOf(dream: DreamDef): { modelId: string; color: number } {
   return { modelId: dream.modelId, color: factoryPaintHex(dream.modelId, DREAM_CAR_ID) };
 }
 
+/* ------------------------------------------------------------------ *
+ *  The room                                                          *
+ * ------------------------------------------------------------------ */
+
 export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | null, lowDetail: boolean): RoomScene {
-  disposables.length = 0;
-  toyMat = null;
+  const k = new Kit();
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050608);
+  // Haze outside only: inside the room nothing is far enough to feel it.
+  scene.fog = new THREE.Fog(0x2a2840, 40, 260);
 
-  const wallMat = mat({ map: wallpaper(), roughness: 0.92 });
-  const floorMat = mat({ map: floorboards(), roughness: 0.62 });
-  const ceilMat = mat({ color: 0xb9b0a0, roughness: 0.95 });
-  const woodDark = mat({ color: 0x4a2f1e, roughness: 0.55 });
-  const woodMid = mat({ color: 0x7a5236, roughness: 0.5 });
-  const woodPale = mat({ color: 0xa47a52, roughness: 0.55 });
-  const paintWhite = mat({ color: 0xd8d2c2, roughness: 0.5 });
-  const metalDark = mat({ color: 0x2a2a2c, roughness: 0.4, metalness: 0.7 });
-  const brass = mat({ color: 0xb08a45, roughness: 0.35, metalness: 0.85 });
-  const red = mat({ color: 0xa8302a, roughness: 0.38, metalness: 0.3 });
+  const wallMat = k.mat({ map: wallpaper(1, 1), roughness: 0.92 });
+  const floorMat = k.mat({ map: floorboards(ROOM_W / 1.6, ROOM_D / 1.6), roughness: 0.62 });
+  const plaster = k.mat({ color: 0xd6cfbf, roughness: 0.9 });
+  const ceilMat = k.mat({ color: 0xb9b0a0, roughness: 0.95 });
+  const woodDark = k.mat({ color: 0x4a2f1e, roughness: 0.55 });
+  const woodMid = k.mat({ color: 0x7a5236, roughness: 0.5 });
+  const woodPale = k.mat({ color: 0xa47a52, roughness: 0.55 });
+  const paintWhite = k.mat({ color: 0xd8d2c2, roughness: 0.5 });
+  const metalDark = k.mat({ color: 0x2a2a2c, roughness: 0.4, metalness: 0.7 });
+  const brass = k.mat({ color: 0xb08a45, roughness: 0.35, metalness: 0.85 });
+  const steel = k.mat({ color: 0xcfcac0, roughness: 0.25, metalness: 0.95 });
+  const red = k.mat({ color: 0xa8302a, roughness: 0.38, metalness: 0.3 });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fb4d0, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0, depthWrite: false });
+  k.disposables.push(glass);
+  const toyMat = k.mat({ vertexColors: true, roughness: 0.28, metalness: 0.25, side: THREE.DoubleSide });
 
-  // The room's shell. The back wall is built round the window's opening.
-  const floor = mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat, 0, 0, 0, false);
+  /* --- The shell ---------------------------------------------------- */
+
+  const floor = k.mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat, 0, 0, 0, false);
   floor.rotation.x = -Math.PI / 2;
-  const ceiling = mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), ceilMat, 0, ROOM_H, 0, false);
+  // The ceiling casts: without it the moon, high behind the house, lights the walls' tops.
+  const ceiling = k.mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), ceilMat, 0, ROOM_H, 0, true);
   ceiling.rotation.x = Math.PI / 2;
   scene.add(floor, ceiling);
   const wall = (w: number, h: number, x: number, y: number, z: number, ry: number): THREE.Mesh => {
-    const geometry = new THREE.PlaneGeometry(w, h);
-    // The wallpaper's repeat follows the wall piece's own size.
-    const uv = geometry.getAttribute('uv');
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / ROOM_W, (uv.getY(i) * h) / ROOM_H);
-    const m = mesh(geometry, wallMat, x, y, z);
+    const m = k.mesh(k.wallPlane(w, h, 0.9), wallMat, x, y, z);
     m.rotation.y = ry;
     return m;
   };
@@ -655,91 +302,212 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     wall(ROOM_D, ROOM_H, X1, ROOM_H / 2, 0, -Math.PI / 2),
     wall(ROOM_W, ROOM_H, 0, ROOM_H / 2, Z1, Math.PI),
   );
-  // The back wall is a thin slab for the moon's shadow: a plane casts from one side only.
-  for (const [w, h, x, y] of [
-    [WIN.x0 - X0, ROOM_H, (X0 + WIN.x0) / 2, ROOM_H / 2],
-    [X1 - WIN.x1, ROOM_H, (WIN.x1 + X1) / 2, ROOM_H / 2],
-    [WIN.x1 - WIN.x0, WIN.y0, (WIN.x0 + WIN.x1) / 2, WIN.y0 / 2],
-    [WIN.x1 - WIN.x0, ROOM_H - WIN.y1, (WIN.x0 + WIN.x1) / 2, (WIN.y1 + ROOM_H) / 2],
-  ] as const) {
-    const slab = box(w, h, 0.12, woodDark, x, y, Z0 - 0.065);
-    slab.receiveShadow = false;
-    scene.add(slab);
-  }
-  // Skirting boards.
+  // The back wall's body, behind the paper: the moon's shadow is cast by it, and the
+  // window's reveal is cut through it.
+  const backZ0 = Z0 - 0.004;
+  const backZ1 = Z0 - WALL_T;
+  scene.add(
+    k.span(X0, 0, backZ1, WIN.x0, ROOM_H, backZ0, plaster),
+    k.span(WIN.x1, 0, backZ1, X1, ROOM_H, backZ0, plaster),
+    k.span(WIN.x0, 0, backZ1, WIN.x1, WIN.y0 - 0.03, backZ0, plaster),
+    k.span(WIN.x0, WIN.y1, backZ1, WIN.x1, ROOM_H, backZ0, plaster),
+  );
+  // Skirting boards, each stopping short of the next at the corners, and on the right
+  // wall broken for the door's architrave rather than running behind it.
+  const doorZ0 = 1.05 - 0.535;
+  const doorZ1 = 1.05 + 0.535;
   for (const [w, x, z, ry] of [
-    [ROOM_W, 0, Z0 + 0.01, 0],
-    [ROOM_W, 0, Z1 - 0.01, 0],
-    [ROOM_D, X0 + 0.01, 0, Math.PI / 2],
-    [ROOM_D, X1 - 0.01, 0, Math.PI / 2],
+    [ROOM_W - 0.04, 0, Z0 + 0.011, 0],
+    [ROOM_W - 0.04, 0, Z1 - 0.011, 0],
+    [ROOM_D - 0.04, X0 + 0.011, 0, Math.PI / 2],
+    [doorZ0 - (Z0 + 0.02), X1 - 0.011, (Z0 + 0.02 + doorZ0) / 2, Math.PI / 2],
+    [Z1 - 0.02 - doorZ1, X1 - 0.011, (doorZ1 + Z1 - 0.02) / 2, Math.PI / 2],
   ] as const) {
-    const b = box(w, 0.09, 0.02, woodDark, x, 0.045, z);
+    const b = k.box(w, 0.09, 0.018, woodDark, x, 0.045, z);
     b.rotation.y = ry;
     scene.add(b);
   }
 
-  // The window: frame, cross bars, sill, the night outside and a faint pane.
-  const frameMat = mat({ color: 0xcfc6b2, roughness: 0.55 });
-  const wx = (WIN.x0 + WIN.x1) / 2;
-  const wy = (WIN.y0 + WIN.y1) / 2;
-  const ww = WIN.x1 - WIN.x0;
-  const wh = WIN.y1 - WIN.y0;
-  scene.add(
-    box(ww + 0.12, 0.07, 0.16, frameMat, wx, WIN.y1 + 0.035, Z0 - 0.02),
-    box(ww + 0.12, 0.06, 0.16, frameMat, wx, WIN.y0 - 0.03, Z0 - 0.02),
-    box(0.07, wh, 0.16, frameMat, WIN.x0 - 0.035, wy, Z0 - 0.02),
-    box(0.07, wh, 0.16, frameMat, WIN.x1 + 0.035, wy, Z0 - 0.02),
-    box(0.04, wh, 0.06, frameMat, wx, wy, Z0 - 0.06),
-    box(ww, 0.04, 0.06, frameMat, wx, WIN.y0 + wh * 0.68, Z0 - 0.06),
-    box(ww + 0.3, 0.04, 0.26, paintWhite, wx, WIN.y0 - 0.02, Z0 + 0.08, 0.01),
-  );
-  const pane = mesh(new THREE.PlaneGeometry(ww, wh), new THREE.MeshPhysicalMaterial({ color: 0x8aa0c0, transparent: true, opacity: 0.08, roughness: 0.05 }), wx, wy, Z0 - 0.07, false);
-  pane.receiveShadow = false;
-  disposables.push(pane.material as THREE.Material);
-  scene.add(pane);
-  const outside = new THREE.Mesh(new THREE.PlaneGeometry(14, 7), new THREE.MeshBasicMaterial({ map: nightDesert(), toneMapped: false }));
-  disposables.push(outside.geometry, outside.material as THREE.Material);
-  // Its horizon at the eye of someone standing at the window.
-  outside.position.set(wx + 0.3, 1.95, Z0 - 5);
-  scene.add(outside);
-  // A radiator under the sill.
-  for (let k = 0; k < 9; k++) scene.add(box(0.06, 0.5, 0.08, paintWhite, WIN.x0 + 0.12 + k * 0.13, 0.42, Z0 + 0.09, 0.02));
+  /* --- The window: deep in the wall, double-glazed -------------------- */
 
-  // Curtains: hanging cloth with folds, on a rod.
-  const curtainMat = mat({ color: 0x5e2a2a, roughness: 0.9, side: THREE.DoubleSide });
+  const wx = (WIN.x0 + WIN.x1) / 2;
+  const frameMat = k.mat({ color: 0xd9d2c0, roughness: 0.5 });
+  // The interior sill board: a deep painted board, out over the radiator.
+  const sillTop = WIN.y0;
+  scene.add(k.span(WIN.x0 - 0.12, sillTop - 0.035, Z0 - 0.14, WIN.x1 + 0.12, sillTop, Z0 + 0.16, paintWhite, 0.008));
+  // The two sashes: the inner just behind the wall's face, the outer near its back.
+  scene.add(
+    sash(k, WIN.x0 + 0.005, WIN.x1 - 0.005, sillTop, WIN.y1 - 0.005, Z0 - 0.08, 0.05, 0.055, frameMat, glass),
+    sash(k, WIN.x0 + 0.005, WIN.x1 - 0.005, sillTop - 0.03, WIN.y1 - 0.005, Z0 - WALL_T + 0.07, 0.05, 0.055, frameMat, glass),
+  );
+  // A latch on the inner sash, a brass handle on its mullion.
+  scene.add(k.box(0.018, 0.07, 0.02, brass, wx, WIN.y0 + (WIN.y1 - WIN.y0) * 0.45, Z0 - 0.045, 0.005));
+  // The outside tin sill under the outer sash, sloping off.
+  const tin = k.span(WIN.x0 - 0.05, -0.012, -0.12, WIN.x1 + 0.05, 0, 0.0, k.mat({ color: 0x8a8a86, roughness: 0.4, metalness: 0.6 }));
+  tin.position.set(wx, sillTop - 0.05, Z0 - WALL_T - 0.05);
+  tin.rotation.x = 0.18;
+  scene.add(tin);
+  // Curtains: hanging cloth with folds, on a rod, clear of the shelf.
+  const curtainMat = k.mat({ color: 0x5e2a2a, roughness: 0.9, side: THREE.DoubleSide });
   const curtains: THREE.Mesh[] = [];
-  for (const [x, flip] of [[WIN.x0 - 0.22, 1], [WIN.x1 + 0.22, -1]] as const) {
-    const geometry = new THREE.PlaneGeometry(0.5, 2.2, 24, 12);
+  for (const [x, flip] of [[WIN.x0 - 0.2, 1], [WIN.x1 + 0.2, -1]] as const) {
+    const geometry = new THREE.PlaneGeometry(0.46, 2.2, 24, 12);
     const p = geometry.getAttribute('position');
     for (let i = 0; i < p.count; i++) {
-      const u = p.getX(i) / 0.5 + 0.5;
+      const u = p.getX(i) / 0.46 + 0.5;
       p.setZ(i, Math.sin(u * Math.PI * 6) * 0.035 * (0.6 + 0.4 * u));
     }
     geometry.computeVertexNormals();
-    const c = mesh(geometry, curtainMat, x, 2.25 - 1.1, Z0 + 0.14);
+    const c = k.mesh(geometry, curtainMat, x, 2.25 - 1.1, Z0 + 0.16);
     c.scale.x = flip;
     curtains.push(c);
     scene.add(c);
   }
-  scene.add(box(ww + 1.1, 0.025, 0.025, brass, wx, 2.3, Z0 + 0.14));
+  scene.add(k.rod(new THREE.Vector3(WIN.x0 - 0.5, 2.3, Z0 + 0.16), new THREE.Vector3(WIN.x1 + 0.5, 2.3, Z0 + 0.16), 0.012, brass));
+  for (const x of [WIN.x0 - 0.47, WIN.x1 + 0.47]) scene.add(k.rod(new THREE.Vector3(x, 2.3, Z0), new THREE.Vector3(x, 2.3, Z0 + 0.16), 0.008, brass));
+  // A radiator under the sill: fins on two pipes.
+  for (let i = 0; i < 9; i++) scene.add(k.box(0.06, 0.5, 0.08, paintWhite, WIN.x0 + 0.12 + i * 0.13, 0.42, Z0 + 0.09, 0.02));
+  for (const y of [0.24, 0.6]) scene.add(k.rod(new THREE.Vector3(WIN.x0 + 0.06, y, Z0 + 0.09), new THREE.Vector3(WIN.x0 + 0.12 + 8 * 0.13 + 0.06, y, Z0 + 0.09), 0.015, paintWhite));
 
-  // The wall carpet over the bed, on the left wall.
-  const carpet = mesh(new THREE.PlaneGeometry(1.75, 1.2), mat({ map: wallCarpet(), roughness: 1 }), X0 + 0.012, 1.45, -0.55, false);
+  /* --- Outside: the desert at night, the road passing the house ------ */
+
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(190, 48, 24), new THREE.MeshBasicMaterial({ map: nightSky(), side: THREE.BackSide, fog: false, toneMapped: false }));
+  k.disposables.push(sky.geometry, sky.material as THREE.Material, (sky.material as THREE.MeshBasicMaterial).map!);
+  sky.position.y = GROUND_Y;
+  scene.add(sky);
+  // The moon low in the window's upper right, where the light through it comes from.
+  const moonDir = new THREE.Vector3(0.14, 0.2, -1).normalize();
+  const moonSprite = new THREE.Mesh(new THREE.PlaneGeometry(26, 26), new THREE.MeshBasicMaterial({ map: moonDisc(), transparent: true, fog: false, toneMapped: false, depthWrite: false }));
+  k.disposables.push(moonSprite.geometry, moonSprite.material as THREE.Material, (moonSprite.material as THREE.MeshBasicMaterial).map!);
+  moonSprite.position.copy(moonDir).multiplyScalar(170).add(new THREE.Vector3(0, 1.3, 0));
+  moonSprite.lookAt(0, 1.3, 0);
+  scene.add(moonSprite);
+  // Outside lies under the moon at a grazing angle: matte (Lambert) so the sand and the
+  // road do not catch its sheen, and darker than daylight's, seen from a lit room.
+  const groundMat = new THREE.MeshLambertMaterial({ map: sandGround(), color: 0x8a7480 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), groundMat);
+  k.disposables.push(ground.geometry, groundMat, groundMat.map!);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = GROUND_Y;
+  scene.add(ground);
+  // The road: from the left, close in front of the house, away to the right and the
+  // horizon — the house stands beside it, not across it.
+  const roadPath = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-70, GROUND_Y + 0.02, -15),
+    new THREE.Vector3(-18, GROUND_Y + 0.02, -18),
+    new THREE.Vector3(6, GROUND_Y + 0.02, -26),
+    new THREE.Vector3(24, GROUND_Y + 0.02, -50),
+    new THREE.Vector3(36, GROUND_Y + 0.02, -100),
+    new THREE.Vector3(42, GROUND_Y + 0.02, -175),
+  ]);
+  {
+    const segments = 160;
+    const half = 3.2;
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const index: number[] = [];
+    const length = roadPath.getLength();
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const p = roadPath.getPointAt(t);
+      const tangent = roadPath.getTangentAt(t);
+      const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      positions.push(p.x + side.x * half, p.y, p.z + side.z * half, p.x - side.x * half, p.y, p.z - side.z * half);
+      const v = (t * length) / 9;
+      uvs.push(0, v, 1, v);
+      if (i < segments) index.push(i * 2, i * 2 + 2, i * 2 + 1, i * 2 + 1, i * 2 + 2, i * 2 + 3);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(index);
+    geometry.computeVertexNormals();
+    const roadMat = new THREE.MeshLambertMaterial({ map: roadSurface(), color: 0x8a8690, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    k.disposables.push(roadMat, roadMat.map!);
+    const road = new THREE.Mesh(geometry, roadMat);
+    k.disposables.push(geometry);
+    scene.add(road);
+    // Telegraph poles along its far side, wires between them.
+    const poleMat = k.mat({ color: 0x2c2420, roughness: 0.9 });
+    const tops: THREE.Vector3[] = [];
+    for (let i = 1; i < 14; i++) {
+      const t = i / 14;
+      const p = roadPath.getPointAt(t);
+      const tangent = roadPath.getTangentAt(t);
+      const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const at = p.clone().addScaledVector(side, -6);
+      const top = at.clone().setY(GROUND_Y + 7);
+      const pole = k.rod(at.clone().setY(GROUND_Y), top, 0.11, poleMat, 6);
+      pole.castShadow = false;
+      const bar = k.rod(top.clone().addScaledVector(tangent.clone().cross(new THREE.Vector3(0, 1, 0)), 0.9).setY(GROUND_Y + 6.6), top.clone().addScaledVector(tangent.clone().cross(new THREE.Vector3(0, 1, 0)), -0.9).setY(GROUND_Y + 6.6), 0.06, poleMat, 5);
+      bar.castShadow = false;
+      scene.add(pole, bar);
+      tops.push(top.setY(GROUND_Y + 6.6));
+    }
+    const wirePoints: THREE.Vector3[] = [];
+    for (let i = 0; i + 1 < tops.length; i++) {
+      for (let s = 0; s < 12; s++) {
+        const u = s / 12;
+        const p = tops[i]!.clone().lerp(tops[i + 1]!, u);
+        p.y -= Math.sin(Math.PI * u) * 0.6;
+        wirePoints.push(p);
+      }
+    }
+    const wire = new THREE.Line(new THREE.BufferGeometry().setFromPoints(wirePoints), new THREE.LineBasicMaterial({ color: 0x14121a }));
+    k.disposables.push(wire.geometry, wire.material as THREE.Material);
+    scene.add(wire);
+  }
+  // Saguaros about the desert, dark against the sand.
+  {
+    const cactusMat = k.mat({ color: 0x2f4a2a, roughness: 0.8 });
+    const r = rng(17);
+    for (const [x, z, s] of [[-9, -34, 1.3], [3, -40, 1], [-26, -30, 0.9], [-22, -55, 1.5], [30, -78, 1.6], [-4, -70, 1.2], [14, -110, 1.8]] as const) {
+      const base = new THREE.Vector3(x, GROUND_Y, z);
+      const h = 3.2 * s;
+      const trunk = k.mesh(new THREE.CapsuleGeometry(0.28 * s, h, 4, 8), cactusMat, x, GROUND_Y + h / 2, z, false);
+      scene.add(trunk);
+      for (const side of [-1, 1]) {
+        if (r() < 0.25) continue;
+        const ay = GROUND_Y + h * (0.35 + r() * 0.25);
+        const out = base.clone().set(x + side * 0.75 * s, ay, z);
+        const up = out.clone().setY(ay + h * 0.35);
+        scene.add(k.rod(new THREE.Vector3(x, ay, z), out, 0.18 * s, cactusMat, 8), k.rod(out, up, 0.18 * s, cactusMat, 8));
+      }
+    }
+  }
+  // Mesas on the horizon: flat-topped, steep-sided, in the haze.
+  {
+    const mesaMat = k.mat({ color: 0x6a4248, roughness: 1 });
+    for (const [x, z, w, h] of [[-60, -110, 40, 16], [-14, -125, 22, 11], [52, -115, 34, 19], [95, -90, 26, 12]] as const) {
+      const shape = new THREE.Shape();
+      shape.moveTo(-w / 2, 0);
+      shape.lineTo(-w / 2 + w * 0.12, h * 0.85);
+      shape.lineTo(-w / 2 + w * 0.2, h);
+      shape.lineTo(w / 2 - w * 0.22, h);
+      shape.lineTo(w / 2 - w * 0.1, h * 0.8);
+      shape.lineTo(w / 2, 0);
+      shape.closePath();
+      const mesa = k.mesh(new THREE.ExtrudeGeometry(shape, { depth: w * 0.5, bevelEnabled: false }), mesaMat, x, GROUND_Y, z, false);
+      mesa.lookAt(0, GROUND_Y, 0);
+      scene.add(mesa);
+    }
+  }
+
+  /* --- The bed, the wall carpet, the bedside table -------------------- */
+
+  const carpet = k.mesh(new THREE.PlaneGeometry(1.75, 1.2), k.decal({ map: wallCarpet(), roughness: 1 }), X0 + 0.006, 1.45, -0.55, false);
   carpet.rotation.y = Math.PI / 2;
   scene.add(carpet);
 
-  // The bed along the left wall, its head to the back.
-  const bed = new THREE.Group();
   const bx = X0 + 0.5;
-  bed.add(
-    box(0.98, 0.3, 2.02, woodMid, bx, 0.25, -0.55, 0.02),
-    box(0.06, 0.25, 0.06, woodDark, bx - 0.44, 0.12, 0.42),
-    box(0.06, 0.25, 0.06, woodDark, bx + 0.44, 0.12, 0.42),
-    box(1.04, 0.95, 0.07, woodMid, bx, 0.6, -1.58, 0.02),
-    box(1.04, 0.55, 0.06, woodMid, bx, 0.42, 0.46, 0.02),
-    box(0.92, 0.18, 1.94, mat({ color: 0xd9d0bc, roughness: 0.9 }), bx, 0.48, -0.55, 0.06),
+  scene.add(
+    k.box(0.98, 0.3, 2.0, woodMid, bx, 0.25, -0.55, 0.02),
+    k.box(0.06, 0.1, 0.06, woodDark, bx - 0.44, 0.05, 0.4),
+    k.box(0.06, 0.1, 0.06, woodDark, bx + 0.44, 0.05, 0.4),
+    k.box(1.04, 0.95, 0.07, woodMid, bx, 0.6, -1.6, 0.02),
+    k.box(1.04, 0.55, 0.06, woodMid, bx, 0.42, 0.48, 0.02),
+    k.box(0.92, 0.18, 1.94, k.mat({ color: 0xd9d0bc, roughness: 0.9 }), bx, 0.48, -0.55, 0.06),
   );
-  // The quilt, rumpled: a slab with its top pushed about and its edges falling.
   {
     const geometry = new THREE.BoxGeometry(1.0, 0.08, 1.45, 30, 2, 40);
     const p = geometry.getAttribute('position');
@@ -750,302 +518,504 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
       const z = p.getZ(i);
       let y = p.getY(i);
       for (const [bx2, bz, h] of bumps) y += h * Math.exp(-((x - bx2) ** 2 + (z - bz) ** 2) / 0.04);
-      // Over the mattress's sides the quilt hangs down.
-      const over = Math.max(0, Math.abs(x) - 0.44);
-      y -= over * 2.2;
+      y -= Math.max(0, Math.abs(x) - 0.44) * 2.2;
       p.setY(i, y);
     }
     geometry.computeVertexNormals();
-    bed.add(mesh(geometry, mat({ map: quilt(), roughness: 0.95 }), bx, 0.6, -0.25));
+    scene.add(k.mesh(geometry, k.mat({ map: quilt(), roughness: 0.95 }), bx, 0.6, -0.25));
   }
-  // The pillow.
   {
     const geometry = new RoundedBoxGeometry(0.62, 0.14, 0.4, 4, 0.06);
     const p = geometry.getAttribute('position');
     for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) * (1 - (p.getX(i) / 0.34) ** 2 * 0.5));
     geometry.computeVertexNormals();
-    const pillow = mesh(geometry, mat({ color: 0xece4d2, roughness: 0.95 }), bx, 0.64, -1.3);
+    const pillow = k.mesh(geometry, k.mat({ color: 0xece4d2, roughness: 0.95 }), bx, 0.64, -1.3);
     pillow.rotation.x = -0.25;
-    bed.add(pillow);
+    scene.add(pillow);
   }
-  scene.add(bed);
+  // The bedside table: a top over a carcass of panels, a drawer with a brass knob, an
+  // open shelf of books below, on four tapered legs.
+  {
+    const t = new THREE.Group();
+    const W = 0.42;
+    const D = 0.36;
+    const y0 = 0.12;
+    const y1 = 0.56;
+    const veneer = k.mat({ color: 0x8a5a36, roughness: 0.42 });
+    t.add(
+      k.span(-W / 2, y0, -D / 2, -W / 2 + 0.018, y1, D / 2, veneer),
+      k.span(W / 2 - 0.018, y0, -D / 2, W / 2, y1, D / 2, veneer),
+      k.span(-W / 2 + 0.018, y0, -D / 2, W / 2 - 0.018, y0 + 0.018, D / 2, veneer),
+      k.span(-W / 2 + 0.018, 0.36, -D / 2 + 0.01, W / 2 - 0.018, 0.378, D / 2, veneer),
+      k.span(-W / 2 + 0.019, y0 + 0.018, -D / 2, W / 2 - 0.019, y1, -D / 2 + 0.01, woodDark),
+      k.box(W + 0.04, 0.026, D + 0.03, veneer, 0, y1 + 0.013, 0.005, 0.008),
+      // The drawer front fills the carcass's upper opening, a hair inside its edges.
+      k.span(-W / 2 + 0.02, 0.38, D / 2 - 0.018, W / 2 - 0.02, y1 - 0.002, D / 2 + 0.002, k.mat({ color: 0x7a4c2c, roughness: 0.4 }), 0.004),
+      k.mesh(new THREE.SphereGeometry(0.014, 12, 8), brass, 0, 0.47, D / 2 + 0.014),
+    );
+    // Books in the open shelf, upright and one lying.
+    const r = rng(29);
+    let bxk = -W / 2 + 0.03;
+    for (let i = 0; i < 6; i++) {
+      const w = 0.025 + r() * 0.02;
+      const h = 0.14 + r() * 0.06;
+      t.add(k.span(bxk, y0 + 0.018, -D / 2 + 0.02, bxk + w, y0 + 0.018 + h, D / 2 - 0.04, k.mat({ color: new THREE.Color().setHSL(r(), 0.4, 0.3).getHex(), roughness: 0.7 })));
+      bxk += w + 0.002;
+    }
+    for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      const leg = k.mesh(new THREE.CylinderGeometry(0.016, 0.01, y0, 10), woodDark, lx * (W / 2 - 0.03), y0 / 2, lz * (D / 2 - 0.03));
+      t.add(leg);
+    }
+    t.position.set(X0 + 1.25, 0, -1.48);
+    scene.add(t);
+  }
+  // The alarm clock «Маяк» on it, stopped at ten past ten, its alarm hand on seven.
+  {
+    const alarm = new THREE.Group();
+    const bodyMat = k.mat({ color: 0xb8302a, roughness: 0.3, metalness: 0.4 });
+    const body = k.mesh(new THREE.CylinderGeometry(0.068, 0.068, 0.05, 32), bodyMat);
+    body.rotation.x = Math.PI / 2;
+    const rim = k.mesh(new THREE.TorusGeometry(0.066, 0.006, 8, 32), steel, 0, 0, 0.026);
+    const face = k.mesh(new THREE.CircleGeometry(0.06, 32), k.decal({ map: clockFace('МАЯК', true), roughness: 0.6 }), 0, 0, 0.0263, false);
+    const hand = (len: number, width: number, z: number, angle: number, color: number): THREE.Mesh => {
+      const g = new THREE.BoxGeometry(width, len, 0.0012);
+      g.translate(0, len / 2 - 0.006, 0);
+      const m = k.mesh(g, k.mat({ color, roughness: 0.4, metalness: 0.3 }), 0, 0, z, false);
+      m.rotation.z = -angle;
+      return m;
+    };
+    const hourAngle = ((10 + 8 / 60) / 12) * Math.PI * 2;
+    const minuteAngle = (8 / 60) * Math.PI * 2;
+    alarm.add(
+      body,
+      rim,
+      face,
+      hand(0.03, 0.005, 0.0275, (7 / 12) * Math.PI * 2, 0xb8302a),
+      hand(0.034, 0.006, 0.029, hourAngle, 0x161210),
+      hand(0.05, 0.004, 0.0305, minuteAngle, 0x161210),
+      k.mesh(new THREE.SphereGeometry(0.004, 8, 6), brass, 0, 0, 0.032),
+    );
+    for (const sx of [-1, 1]) {
+      const bell = k.mesh(new THREE.SphereGeometry(0.028, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), steel, sx * 0.042, 0.072, 0);
+      bell.rotation.z = -sx * 0.4;
+      alarm.add(bell);
+      alarm.add(k.rod(new THREE.Vector3(sx * 0.04, -0.06, 0), new THREE.Vector3(sx * 0.05, -0.078, 0.01), 0.004, steel, 6));
+    }
+    alarm.add(k.rod(new THREE.Vector3(0, 0.068, 0), new THREE.Vector3(0, 0.1, 0), 0.003, steel, 6), k.mesh(new THREE.SphereGeometry(0.009, 10, 8), steel, 0, 0.104, 0));
+    alarm.position.set(X0 + 1.2, 0.61 + 0.078, -1.42);
+    alarm.rotation.y = 0.55;
+    scene.add(alarm);
+  }
 
-  // The bedside table with the alarm clock.
-  const faceTex = clockFace();
-  const faceMat = mat({ map: faceTex, roughness: 0.6 });
-  scene.add(box(0.42, 0.55, 0.38, woodPale, X0 + 1.25, 0.275, -1.5, 0.02));
-  const alarm = new THREE.Group();
-  alarm.add(mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.05, 28), red), mesh(new THREE.CircleGeometry(0.066, 28), faceMat, 0, 0, 0.026, false));
-  alarm.children[0]!.rotation.x = Math.PI / 2;
-  for (const sx of [-1, 1]) alarm.add(mesh(new THREE.SphereGeometry(0.028, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), brass, sx * 0.045, 0.075, 0));
-  alarm.position.set(X0 + 1.2, 0.64, -1.42);
-  alarm.rotation.y = 0.5;
-  scene.add(alarm);
+  /* --- The play mat and the next adventure's car on it ----------------- */
 
-  // The play mat on the floor, and on it the next dream's car.
-  const matMesh = mesh(new THREE.PlaneGeometry(1.6, 1.1), mat({ map: playMat(), roughness: 1 }), 0.15, 0.004, 0.15, false);
+  const MAT = { x: 0.15, z: 0.15, w: 1.6, d: 1.1 };
+  const matMesh = k.mesh(new THREE.PlaneGeometry(MAT.w, MAT.d), k.decal({ map: playMat(), roughness: 1 }), MAT.x, 0.003, MAT.z, false);
   matMesh.rotation.x = -Math.PI / 2;
   scene.add(matMesh);
+  /** A point on the mat's canvas (1024 × 704) in the room. */
+  const onMat = (u: number, v: number): THREE.Vector3 => new THREE.Vector3(MAT.x - MAT.w / 2 + (u / 1024) * MAT.w, 0.003, MAT.z - MAT.d / 2 + (v / 704) * MAT.d);
+  const toyAt = onMat(MAT_LOOP.x, 420);
 
-  // The desk against the right wall, its drawers, the lamp and the map.
+  /* --- The desk, its lamp, the map, the chair -------------------------- */
+
   const dx = X1 - 0.38;
   const dz = -1.0;
+  const deskTop = 0.77;
   scene.add(
-    box(0.72, 0.04, 1.3, woodPale, dx, 0.75, dz, 0.01),
-    box(0.68, 0.7, 0.42, woodMid, dx, 0.37, dz - 0.42, 0.01),
-    box(0.04, 0.72, 0.04, woodDark, dx - 0.32, 0.36, dz + 0.6),
-    box(0.04, 0.72, 0.04, woodDark, dx + 0.32, 0.36, dz + 0.6),
+    k.box(0.72, 0.04, 1.3, woodPale, dx, deskTop - 0.02, dz, 0.01),
+    k.box(0.68, 0.7, 0.42, woodMid, dx, 0.37, dz - 0.42, 0.01),
+    k.box(0.04, 0.73, 0.04, woodDark, dx - 0.32, 0.365, dz + 0.6),
+    k.box(0.04, 0.73, 0.04, woodDark, dx + 0.32, 0.365, dz + 0.6),
   );
-  for (let k = 0; k < 3; k++) {
-    scene.add(box(0.02, 0.18, 0.36, woodPale, dx - 0.35, 0.58 - k * 0.22, dz - 0.42, 0.005));
-    scene.add(box(0.03, 0.02, 0.08, brass, dx - 0.37, 0.58 - k * 0.22, dz - 0.42));
+  for (let i = 0; i < 3; i++) {
+    const y = 0.58 - i * 0.22;
+    scene.add(k.span(dx - 0.346, y - 0.09, dz - 0.6, dx - 0.341, y + 0.09, dz - 0.24, woodPale, 0.002));
+    scene.add(k.box(0.025, 0.018, 0.08, brass, dx - 0.36, y, dz - 0.42, 0.005));
   }
-  const mapMesh = mesh(new THREE.PlaneGeometry(0.62, 0.44), mat({ map: dreamMap(progress), roughness: 0.85 }), dx - 0.03, 0.773, dz + 0.12, false);
-  mapMesh.rotation.x = -Math.PI / 2;
-  mapMesh.rotation.z = -Math.PI / 2 + 0.08;
+  const mapAt = new THREE.Vector3(dx - 0.05, deskTop + 0.0015, dz + 0.14);
+  const mapMesh = k.mesh(new THREE.PlaneGeometry(0.62, 0.44), k.decal({ map: adventuresMap(progress), roughness: 0.85 }), mapAt.x, mapAt.y, mapAt.z, false);
+  mapMesh.rotation.set(-Math.PI / 2, 0, -Math.PI / 2 + 0.08);
   scene.add(mapMesh);
-  // A pencil and a mug.
-  const pencil = mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.17, 6), mat({ color: 0xd8a830, roughness: 0.5 }), dx - 0.2, 0.778, dz + 0.42);
-  pencil.rotation.z = Math.PI / 2;
-  pencil.rotation.y = 0.6;
+  const pencil = k.rod(new THREE.Vector3(dx - 0.24, deskTop + 0.005, dz + 0.42), new THREE.Vector3(dx - 0.1, deskTop + 0.005, dz + 0.5), 0.004, k.mat({ color: 0xd8a830, roughness: 0.5 }), 6);
   scene.add(pencil);
-  scene.add(mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.09, 20), mat({ color: 0xe8e0cc, roughness: 0.3 }), dx + 0.2, 0.815, dz + 0.45));
-  // The desk lamp: foot, two arms, a cone shade, its bulb lit.
-  const lamp = new THREE.Group();
-  const lampMat = mat({ color: 0x2f4a3a, roughness: 0.35, metalness: 0.5 });
-  lamp.add(mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.025, 24), lampMat, 0, 0.012, 0));
-  const arm1 = mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.36, 8), metalDark, 0.04, 0.18, 0);
-  arm1.rotation.z = -0.25;
-  const arm2 = mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.3, 8), metalDark, -0.02, 0.43, 0);
-  arm2.rotation.z = 1.0;
-  const shade = mesh(new THREE.ConeGeometry(0.1, 0.14, 24, 1, true), mat({ color: 0x2f4a3a, roughness: 0.35, metalness: 0.5, side: THREE.DoubleSide }), -0.16, 0.5, 0);
-  shade.rotation.z = 0.6;
-  const bulb = mesh(new THREE.SphereGeometry(0.03, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1c8 }), -0.17, 0.47, 0, false);
-  disposables.push(bulb.material as THREE.Material);
-  lamp.add(arm1, arm2, shade, bulb);
-  lamp.position.set(dx + 0.12, 0.77, dz - 0.4);
-  lamp.rotation.y = Math.PI / 2 + 0.3;
-  scene.add(lamp);
-  // An old radio at the desk's back.
-  const radio = new THREE.Group();
-  radio.add(
-    box(0.34, 0.2, 0.16, mat({ color: 0x5a3a22, roughness: 0.4 }), 0, 0.1, 0, 0.015),
-    mesh(new THREE.PlaneGeometry(0.2, 0.08), mat({ color: 0xd9c89a, roughness: 0.7, emissive: 0x5a4020, emissiveIntensity: 0.4 }), -0.04, 0.14, 0.081, false),
-    mesh(new THREE.PlaneGeometry(0.1, 0.12), mat({ color: 0x2a2018, roughness: 0.9 }), 0.1, 0.1, 0.081, false),
-  );
-  radio.position.set(dx + 0.15, 0.77, dz + 0.45);
-  radio.rotation.y = -Math.PI / 2;
-  scene.add(radio);
+  scene.add(k.mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.09, 20), k.mat({ color: 0xe8e0cc, roughness: 0.3 }), dx + 0.24, deskTop + 0.045, dz - 0.15));
+  // The desk lamp, a Soviet articulated one: foot at the back corner, an arm up and an
+  // arm out, the shade over the map and pointing at it. None of it casts a shadow: its
+  // own light is inside it.
+  const lampMat = k.mat({ color: 0x2f4a3a, roughness: 0.35, metalness: 0.5 });
+  const footAt = new THREE.Vector3(dx + 0.2, deskTop, dz - 0.5);
+  const elbow = new THREE.Vector3(dx + 0.17, deskTop + 0.42, dz - 0.32);
+  const shadeAt = new THREE.Vector3(dx + 0.02, deskTop + 0.36, dz - 0.02);
+  const aimAt = mapAt.clone().setY(deskTop);
+  const lampParts: THREE.Mesh[] = [
+    k.mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.025, 28), lampMat, footAt.x, footAt.y + 0.0125, footAt.z),
+    k.rod(footAt.clone().setY(deskTop + 0.02), elbow, 0.009, metalDark),
+    k.rod(elbow, shadeAt, 0.009, metalDark),
+    k.mesh(new THREE.SphereGeometry(0.016, 12, 8), metalDark, elbow.x, elbow.y, elbow.z),
+  ];
+  const aim = aimAt.clone().sub(shadeAt).normalize();
+  const shade = k.mesh(new THREE.ConeGeometry(0.1, 0.15, 28, 1, true), lampMat, 0, 0, 0);
+  const shadeInside = k.mesh(new THREE.ConeGeometry(0.098, 0.148, 28, 1, true), k.mat({ color: 0xf2e6c8, emissive: 0xffc27a, emissiveIntensity: 0.35, side: THREE.BackSide }), 0, 0, 0);
+  for (const m of [shade, shadeInside]) {
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), aim);
+    m.position.copy(shadeAt).addScaledVector(aim, 0.05);
+  }
+  (shade.material as THREE.MeshStandardMaterial).side = THREE.FrontSide;
+  const bulbAt = shadeAt.clone().addScaledVector(aim, 0.03);
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.026, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfff1c8 }));
+  k.disposables.push(bulb.geometry, bulb.material as THREE.Material);
+  bulb.position.copy(bulbAt);
+  for (const m of [...lampParts, shade, shadeInside]) {
+    m.castShadow = false;
+    scene.add(m);
+  }
+  scene.add(bulb);
+  // An old valve radio at the desk's front corner, its dial to the room.
+  {
+    const radio = new THREE.Group();
+    radio.add(
+      k.box(0.34, 0.2, 0.16, k.mat({ color: 0x5a3a22, roughness: 0.4 }), 0, 0.1, 0, 0.015),
+      k.mesh(new THREE.PlaneGeometry(0.2, 0.07), k.decal({ color: 0xd9c89a, roughness: 0.7, emissive: 0x5a4020, emissiveIntensity: 0.5 }), -0.045, 0.14, 0.0815, false),
+      k.mesh(new THREE.PlaneGeometry(0.09, 0.12), k.decal({ color: 0x2a2018, roughness: 0.9 }), 0.105, 0.1, 0.0815, false),
+    );
+    for (const x of [-0.11, -0.03]) {
+      const knob = k.mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.018, 16), k.mat({ color: 0x1a1410, roughness: 0.4 }), x, 0.055, 0.088);
+      knob.rotation.x = Math.PI / 2;
+      radio.add(knob);
+    }
+    radio.position.set(dx + 0.12, deskTop, dz + 0.44);
+    radio.rotation.y = -Math.PI / 2;
+    scene.add(radio);
+  }
+  // The chair at the desk, turned a little out.
+  {
+    const chair = new THREE.Group();
+    const seatY = 0.45;
+    chair.add(k.box(0.42, 0.03, 0.4, woodMid, 0, seatY, 0, 0.01));
+    for (const [cx2, cz] of [[-0.18, -0.17], [0.18, -0.17], [-0.18, 0.17], [0.18, 0.17]] as const) {
+      chair.add(k.box(0.032, seatY - 0.015, 0.032, woodDark, cx2, (seatY - 0.015) / 2, cz));
+    }
+    for (const cx2 of [-0.18, 0.18]) chair.add(k.box(0.032, 0.48, 0.032, woodDark, cx2, seatY + 0.255, 0.17));
+    chair.add(k.box(0.36, 0.16, 0.02, woodMid, 0, seatY + 0.36, 0.17, 0.008), k.box(0.36, 0.04, 0.02, woodMid, 0, seatY + 0.16, 0.17, 0.006));
+    // Pulled out into the room and turned to it, as left after homework.
+    chair.position.set(dx - 0.62, 0, dz + 0.78);
+    chair.rotation.y = Math.PI / 2 + 0.9;
+    scene.add(chair);
+  }
 
-  // The shelf on the back wall right of the window, its toys, the poster over it.
-  const sx0 = 0.78;
-  const sx1 = X1 - 0.12;
+  /* --- The shelf and the calendar --------------------------------------- */
+
+  const sx0 = 1.02;
+  const sx1 = X1 - 0.1;
   const sy = 1.52;
-  scene.add(box(sx1 - sx0, 0.03, 0.2, woodPale, (sx0 + sx1) / 2, sy, Z0 + 0.1, 0.005));
-  for (const x of [sx0 + 0.1, sx1 - 0.1]) scene.add(box(0.025, 0.12, 0.16, metalDark, x, sy - 0.075, Z0 + 0.08));
-  const posterMesh = mesh(new THREE.PlaneGeometry(0.42, 0.59), mat({ map: poster(), roughness: 0.8 }), (sx0 + sx1) / 2 - 0.12, 2.0, Z0 + 0.012, false);
-  scene.add(posterMesh);
+  scene.add(k.box(sx1 - sx0, 0.03, 0.2, woodPale, (sx0 + sx1) / 2, sy, Z0 + 0.1, 0.005));
+  for (const x of [sx0 + 0.1, sx1 - 0.1]) {
+    scene.add(k.span(x - 0.012, sy - 0.015 - 0.14, Z0, x + 0.012, sy - 0.015, Z0 + 0.018, metalDark));
+    // Its arm a millimetre under the board: two faces in one plane would fight.
+    scene.add(k.span(x - 0.012, sy - 0.016 - 0.014, Z0 + 0.018, x + 0.012, sy - 0.016, Z0 + 0.16, metalDark));
+  }
+  // The calendar: a paper page, the photograph laid on it, a red binding strip, on a nail.
+  const calW = 0.36;
+  const calH = 0.54;
+  const calAt = new THREE.Vector3((sx0 + sx1) / 2, 2.07, Z0 + 0.006);
+  const calPage = k.mesh(new THREE.PlaneGeometry(calW, calH), k.decal({ map: calendarPage(CALENDAR_YEAR), roughness: 0.8 }), calAt.x, calAt.y, calAt.z, false);
+  scene.add(calPage);
+  scene.add(k.box(calW + 0.01, 0.022, 0.008, k.mat({ color: 0x8a1e1a, roughness: 0.5 }), calAt.x, calAt.y + calH / 2 + 0.011, calAt.z + 0.004, 0.003));
+  scene.add(k.mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 6), steel, calAt.x, calAt.y + calH / 2 + 0.04, calAt.z + 0.008));
+  const photoW = calW * (464 / 512);
+  const photoH = calH * (330 / 768);
+  const photoAt = new THREE.Vector3(calAt.x, calAt.y + calH / 2 - calH * (24 / 768) - photoH / 2, calAt.z + 0.0015);
+  const photoMat = new THREE.MeshBasicMaterial({ color: 0x9a9080 });
+  photoMat.polygonOffset = true;
+  photoMat.polygonOffsetFactor = -4;
+  photoMat.polygonOffsetUnits = -4;
+  k.disposables.push(photoMat);
+  const photo = k.mesh(new THREE.PlaneGeometry(photoW, photoH), photoMat, photoAt.x, photoAt.y, photoAt.z, false);
+  scene.add(photo);
 
-  // The wall clock over the desk.
+  /* --- The wall clock over the desk -------------------------------------- */
+
   const wallClock = new THREE.Group();
-  wallClock.add(mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.04, 36), woodDark));
-  wallClock.children[0]!.rotation.x = Math.PI / 2;
-  const face = mesh(new THREE.CircleGeometry(0.135, 36), faceMat, 0, 0, 0.021, false);
-  const hand = (len: number, width: number): THREE.Mesh => {
-    const g = new THREE.PlaneGeometry(width, len);
-    g.translate(0, len / 2 - 0.01, 0);
-    return mesh(g, mat({ color: 0x1a1410 }), 0, 0, 0.024, false);
+  {
+    const rimMesh = k.mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.04, 36), woodDark);
+    rimMesh.rotation.x = Math.PI / 2;
+    wallClock.add(rimMesh, k.mesh(new THREE.CircleGeometry(0.135, 36), k.decal({ map: clockFace('', true), roughness: 0.6 }), 0, 0, 0.0213, false));
+  }
+  const clockHand = (len: number, width: number, z: number, color: number): THREE.Mesh => {
+    const g = new THREE.BoxGeometry(width, len, 0.0015);
+    g.translate(0, len / 2 - 0.012, 0);
+    return k.mesh(g, k.mat({ color, roughness: 0.4 }), 0, 0, z, false);
   };
-  const hourHand = hand(0.075, 0.012);
-  const minuteHand = hand(0.11, 0.008);
-  const secondHand = hand(0.12, 0.003);
-  (secondHand.material as THREE.MeshStandardMaterial).color.set(0xa8302a);
-  wallClock.add(face, hourHand, minuteHand, secondHand);
-  wallClock.position.set(X1 - 0.02, 1.95, dz);
+  const hourHand = clockHand(0.075, 0.01, 0.023, 0x1a1410);
+  const minuteHand = clockHand(0.11, 0.007, 0.0255, 0x1a1410);
+  const secondHand = clockHand(0.12, 0.003, 0.028, 0xa8302a);
+  wallClock.add(hourHand, minuteHand, secondHand);
+  wallClock.position.set(X1 - 0.021, 1.98, dz);
   wallClock.rotation.y = -Math.PI / 2;
   scene.add(wallClock);
 
-  // The door on the right wall in its frame, and the key board beside it.
-  const doorWood = mat({ color: 0x6a4428, roughness: 0.45 });
-  const door = new THREE.Group();
-  door.add(
-    box(0.9, 2.04, 0.045, doorWood, 0, 1.02, 0, 0.008),
-    box(0.66, 0.74, 0.012, mat({ color: 0x5a3820, roughness: 0.4 }), 0, 1.5, 0.026, 0.006),
-    box(0.66, 0.74, 0.012, mat({ color: 0x5a3820, roughness: 0.4 }), 0, 0.58, 0.026, 0.006),
-    box(0.035, 0.17, 0.05, brass, 0.36, 1.0, 0.05, 0.012),
-    box(0.02, 0.05, 0.02, brass, 0.36, 0.9, 0.05, 0.006),
-    // The architrave round it.
-    box(0.08, 2.12, 0.03, paintWhite, -0.49, 1.06, 0.0, 0.006),
-    box(0.08, 2.12, 0.03, paintWhite, 0.49, 1.06, 0.0, 0.006),
-    box(1.06, 0.08, 0.03, paintWhite, 0, 2.1, 0.0, 0.006),
-  );
-  door.position.set(X1 - 0.03, 0, 1.05);
-  door.rotation.y = -Math.PI / 2;
-  scene.add(door);
-  // The key board: a varnished plank with three brass hooks; on one the car's keys
-  // (a black-headed ignition key and a door key on a ring, a red leather fob with a
-  // brass number tag), on another the flat's key on a string.
-  const keyBoard = new THREE.Group();
-  keyBoard.add(box(0.36, 0.15, 0.022, woodMid, 0, 0, 0, 0.01));
-  for (const x of [-0.11, 0, 0.11]) {
-    keyBoard.add(box(0.012, 0.012, 0.045, brass, x, -0.035, 0.03, 0.004));
-    keyBoard.add(box(0.012, 0.025, 0.012, brass, x, -0.025, 0.05, 0.004));
+  /* --- The door, its architrave, the key board ----------------------------- */
+
+  {
+    const door = new THREE.Group();
+    const doorWood = k.mat({ color: 0x6a4428, roughness: 0.45 });
+    const panelWood = k.mat({ color: 0x5a3820, roughness: 0.4 });
+    door.add(
+      k.box(0.88, 2.03, 0.04, doorWood, 0, 1.015, 0.02, 0.006),
+      k.box(0.64, 0.72, 0.01, panelWood, 0, 1.5, 0.044, 0.004),
+      k.box(0.64, 0.72, 0.01, panelWood, 0, 0.6, 0.044, 0.004),
+      k.box(0.03, 0.17, 0.03, brass, 0.36, 1.0, 0.058, 0.01),
+      k.box(0.018, 0.045, 0.012, brass, 0.36, 0.9, 0.046, 0.004),
+      // The architrave, outside the door's edges: the head over the two sides, none overlapping.
+      k.span(-0.53, 0, 0, -0.45, 2.04, 0.025, paintWhite, 0.004),
+      k.span(0.45, 0, 0, 0.53, 2.04, 0.025, paintWhite, 0.004),
+      k.span(-0.53, 2.04, 0, 0.53, 2.12, 0.025, paintWhite, 0.004),
+    );
+    door.position.set(X1, 0, 1.05);
+    door.rotation.y = -Math.PI / 2;
+    scene.add(door);
   }
-  const steel = mat({ color: 0xcfcac0, roughness: 0.25, metalness: 0.95 });
-  const blackPlastic = mat({ color: 0x141414, roughness: 0.35 });
-  const carKeys = new THREE.Group();
-  carKeys.add(mesh(new THREE.TorusGeometry(0.022, 0.0035, 8, 28), steel, 0, -0.02, 0));
-  const key = (rot: number, head: THREE.Material): THREE.Group => {
-    const k = new THREE.Group();
-    k.add(box(0.026, 0.032, 0.009, head, 0, -0.016, 0, 0.004), box(0.01, 0.055, 0.003, steel, 0, -0.058, 0));
-    for (let n = 0; n < 4; n++) k.add(box(0.004, 0.006, 0.003, steel, 0.006, -0.045 - n * 0.01, 0));
-    k.position.set(0, -0.04, 0.004);
-    k.rotation.z = rot;
-    return k;
-  };
-  const fob = new THREE.Group();
-  fob.add(box(0.032, 0.075, 0.006, mat({ color: 0x8a1e1a, roughness: 0.6 }), 0, -0.04, 0, 0.004), mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.003, 20), brass, 0, -0.065, 0.005));
-  (fob.children[1] as THREE.Mesh).rotation.x = Math.PI / 2;
-  fob.position.set(0, -0.04, -0.004);
-  fob.rotation.z = -0.12;
-  carKeys.add(key(0.32, blackPlastic), key(-0.18, steel), fob);
-  carKeys.position.set(-0.11, -0.035, 0.05);
-  const flatKey = new THREE.Group();
-  flatKey.add(mesh(new THREE.CylinderGeometry(0.0015, 0.0015, 0.08, 4), mat({ color: 0xd8cfa8, roughness: 0.9 }), 0, -0.04, 0), key(0.05, brass));
-  flatKey.children[1]!.position.y = -0.08;
-  flatKey.position.set(0.11, -0.035, 0.05);
-  keyBoard.add(carKeys, flatKey);
-  keyBoard.position.set(X1 - 0.013, 1.45, 0.3);
-  keyBoard.rotation.y = -Math.PI / 2;
-  scene.add(keyBoard);
+  const keysAt = new THREE.Vector3(X1, 1.45, 0.3);
+  {
+    // Wall-local frame: +x along the wall towards the back, +z out of the wall.
+    const board = new THREE.Group();
+    board.add(k.box(0.36, 0.15, 0.022, woodMid, 0, 0, 0.011, 0.008));
+    // Three brass hooks, each one bent outline.
+    const hookShape = new THREE.Shape();
+    hookShape.moveTo(-0.006, 0);
+    hookShape.lineTo(0.006, 0);
+    hookShape.lineTo(0.006, 0.034);
+    hookShape.lineTo(0.02, 0.034);
+    hookShape.lineTo(0.02, 0.046);
+    hookShape.lineTo(-0.006, 0.046);
+    hookShape.closePath();
+    const hookGeo = new THREE.ExtrudeGeometry(hookShape, { depth: 0.008, bevelEnabled: false });
+    hookGeo.translate(0, 0, -0.004);
+    k.disposables.push(hookGeo);
+    for (const x of [-0.11, 0, 0.11]) {
+      const hook = new THREE.Mesh(hookGeo, brass);
+      hook.castShadow = true;
+      hook.receiveShadow = true;
+      // Laid on its side: the outline's x out of the board, its y up the wall.
+      hook.rotation.y = -Math.PI / 2;
+      hook.position.set(x, -0.06, 0.022);
+      board.add(hook);
+    }
+    const blackPlastic = k.mat({ color: 0x141414, roughness: 0.35 });
+    // The car's keys on a ring on the left hook, a red leather fob with a brass tag.
+    const carKeys = new THREE.Group();
+    const ring = k.mesh(new THREE.TorusGeometry(0.02, 0.0028, 8, 28), steel, 0, -0.02, 0);
+    ring.rotation.y = 0.5;
+    const ignition = extrudeKey(k, keyShape(0.013, 0.05, 0.01), 0.0028, steel);
+    const ignitionHead = k.box(0.03, 0.026, 0.008, blackPlastic, 0, 0, 0, 0.005);
+    const ignitionKey = new THREE.Group();
+    ignitionKey.add(ignition, ignitionHead);
+    ignitionKey.position.set(-0.004, -0.052, 0.004);
+    ignitionKey.rotation.z = 0.28;
+    const doorKey = extrudeKey(k, keyShape(0.011, 0.04, 0.009), 0.0024, steel);
+    doorKey.position.set(0.006, -0.05, -0.003);
+    doorKey.rotation.z = -0.18;
+    const fob = new THREE.Group();
+    fob.add(
+      k.box(0.03, 0.07, 0.006, k.mat({ color: 0x8a1e1a, roughness: 0.6 }), 0, -0.035, 0, 0.004),
+      k.mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.002, 20), brass, 0, -0.058, 0.0045),
+    );
+    (fob.children[1] as THREE.Mesh).rotation.x = Math.PI / 2;
+    fob.position.set(0.002, -0.04, -0.012);
+    fob.rotation.z = -0.08;
+    carKeys.add(ring, ignitionKey, doorKey, fob);
+    carKeys.position.set(-0.11 + 0.012, -0.03, 0.046);
+    // The flat's key on a string on the right hook.
+    const flatKey = new THREE.Group();
+    flatKey.add(k.rod(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.07, 0), 0.0012, k.mat({ color: 0xd8cfa8, roughness: 0.9 }), 4));
+    const flat = extrudeKey(k, keyShape(0.012, 0.045, 0.01), 0.0026, brass);
+    flat.position.set(0, -0.082, 0);
+    flatKey.add(flat);
+    flatKey.position.set(0.11 + 0.012, -0.03, 0.046);
+    board.add(carKeys, flatKey);
+    board.position.copy(keysAt);
+    board.rotation.y = -Math.PI / 2;
+    scene.add(board);
+  }
 
-  // The toolbox on the floor by the desk.
-  const toolbox = new THREE.Group();
-  toolbox.add(
-    box(0.5, 0.22, 0.24, red, 0, 0.11, 0, 0.012),
-    box(0.52, 0.04, 0.26, mat({ color: 0xc4473d, roughness: 0.35, metalness: 0.3 }), 0, 0.235, 0, 0.01),
-    box(0.22, 0.02, 0.02, metalDark, 0, 0.3, 0),
-    box(0.02, 0.06, 0.02, metalDark, -0.1, 0.27, 0),
-    box(0.02, 0.06, 0.02, metalDark, 0.1, 0.27, 0),
-    box(0.05, 0.03, 0.01, brass, 0, 0.17, 0.125),
-  );
-  // A spanner left on the lid.
-  const spanner = box(0.2, 0.008, 0.024, mat({ color: 0xb8b8b0, roughness: 0.25, metalness: 0.95 }), 0.04, 0.26, 0.02);
-  spanner.rotation.y = 0.4;
-  toolbox.add(spanner);
-  toolbox.position.set(X1 - 0.95, 0, -0.1);
-  toolbox.rotation.y = -0.35;
-  scene.add(toolbox);
+  /* --- The toolbox, the night-light, the ceiling lamp ----------------------- */
 
-  // A night-light in the socket by the bed: a small amber mushroom, and the glow the
-  // play mat is seen by.
-  const nightLight = new THREE.Group();
-  nightLight.add(
-    box(0.07, 0.1, 0.03, paintWhite, 0, 0, 0, 0.01),
-    mesh(new THREE.SphereGeometry(0.035, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xffb060, emissive: 0xff9a3a, emissiveIntensity: 2.5 }), 0, 0.02, 0.03, false),
-  );
-  disposables.push((nightLight.children[1] as THREE.Mesh).material as THREE.Material);
-  nightLight.position.set(X0 + 0.02, 0.32, 0.75);
-  nightLight.rotation.y = Math.PI / 2;
-  scene.add(nightLight);
-  // Its light falls on the mat from where the glow would reach: a little out from the wall.
-  const nightGlow = new THREE.PointLight(0xffa050, 3.5, 3, 2);
-  nightGlow.position.set(X0 + 0.75, 0.45, 0.85);
-  scene.add(nightGlow);
+  const toolboxAt = new THREE.Vector3(X1 - 0.75, 0, 0.55);
+  {
+    const toolbox = new THREE.Group();
+    toolbox.add(
+      k.box(0.5, 0.22, 0.24, red, 0, 0.11, 0, 0.012),
+      k.box(0.52, 0.04, 0.26, k.mat({ color: 0xc4473d, roughness: 0.35, metalness: 0.3 }), 0, 0.24, 0, 0.01),
+      k.span(-0.09, 0.29, -0.01, 0.09, 0.305, 0.01, metalDark),
+      k.span(-0.11, 0.26, -0.01, -0.09, 0.305, 0.01, metalDark),
+      k.span(0.09, 0.26, -0.01, 0.11, 0.305, 0.01, metalDark),
+      k.box(0.05, 0.03, 0.01, brass, 0, 0.17, 0.125, 0.004),
+    );
+    const spanner = k.box(0.2, 0.008, 0.024, k.mat({ color: 0xb8b8b0, roughness: 0.25, metalness: 0.95 }), 0.06, 0.264, 0.06);
+    spanner.rotation.y = 0.4;
+    toolbox.add(spanner);
+    toolbox.position.copy(toolboxAt);
+    toolbox.rotation.y = -0.35;
+    scene.add(toolbox);
+  }
+  {
+    const nightLight = new THREE.Group();
+    const glow = new THREE.MeshStandardMaterial({ color: 0xffb060, emissive: 0xff9a3a, emissiveIntensity: 2.5 });
+    k.disposables.push(glow);
+    nightLight.add(
+      k.box(0.07, 0.1, 0.03, paintWhite, 0, 0, 0.015, 0.01),
+      k.mesh(new THREE.SphereGeometry(0.035, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), glow, 0, 0.02, 0.045, false),
+    );
+    nightLight.position.set(X0, 0.32, 0.75);
+    nightLight.rotation.y = Math.PI / 2;
+    scene.add(nightLight);
+  }
+  scene.add(k.mesh(new THREE.CylinderGeometry(0.22, 0.16, 0.12, 24), k.mat({ color: 0xe8e2d0, roughness: 0.4, emissive: 0x302a20 }), 0, ROOM_H - 0.06, 0, false));
 
-  // A ceiling lamp, off.
-  scene.add(mesh(new THREE.CylinderGeometry(0.22, 0.16, 0.12, 24), mat({ color: 0xe8e2d0, roughness: 0.4, emissive: 0x302a20 }), 0, ROOM_H - 0.12, 0, false));
+  /* --- Light ------------------------------------------------------------- */
 
-  // LIGHT. The moon through the window, the desk lamp, a little sky in the corners.
-  const hemi = new THREE.HemisphereLight(0x42506e, 0x22170f, 1.4);
-  scene.add(hemi);
+  scene.add(new THREE.HemisphereLight(0x42506e, 0x22170f, 1.4));
   const moon = new THREE.DirectionalLight(0xa9bcff, 5);
-  moon.position.set(wx - 1.2, 4.2, Z0 - 4.5);
-  moon.target.position.set(wx + 0.6, 0, 0.9);
+  moon.target.position.set(wx + 0.2, 0.2, 0.4);
+  // Steeper than the disc in the window, so the light lands on the floor and the bed
+  // rather than raking the far wall: the eye forgives the difference, not a lit ceiling.
+  moon.position.copy(moon.target.position).addScaledVector(new THREE.Vector3(0.15, 0.6, -1).normalize(), 12);
   moon.castShadow = true;
   moon.shadow.mapSize.set(lowDetail ? 1024 : 2048, lowDetail ? 1024 : 2048);
-  moon.shadow.camera.left = -3.2;
-  moon.shadow.camera.right = 3.2;
-  moon.shadow.camera.top = 3.2;
-  moon.shadow.camera.bottom = -3.2;
+  // The whole room inside the shadow's box: outside it the moon would light the walls
+  // and ceiling straight through the back wall.
+  moon.shadow.camera.left = -4.6;
+  moon.shadow.camera.right = 4.6;
+  moon.shadow.camera.top = 4.6;
+  moon.shadow.camera.bottom = -4.6;
   moon.shadow.camera.near = 1;
-  moon.shadow.camera.far = 14;
+  moon.shadow.camera.far = 30;
   moon.shadow.bias = -0.0004;
   moon.shadow.normalBias = 0.02;
   scene.add(moon, moon.target);
-  const lampAt = new THREE.Vector3();
-  bulb.getWorldPosition(lampAt);
-  scene.updateMatrixWorld(true);
-  bulb.getWorldPosition(lampAt);
-  const deskLight = new THREE.SpotLight(0xffc27a, DESK_LAMP_CD, 5, 0.95, 0.6, 2);
-  deskLight.position.copy(lampAt);
-  deskLight.target.position.set(dx - 0.05, 0.75, dz + 0.1);
+  const deskLight = new THREE.SpotLight(0xffc27a, DESK_LAMP_CD, 5, 0.72, 0.55, 2);
+  deskLight.position.copy(bulbAt);
+  deskLight.target.position.copy(aimAt);
   deskLight.castShadow = true;
   deskLight.shadow.mapSize.set(lowDetail ? 512 : 1024, lowDetail ? 512 : 1024);
   deskLight.shadow.bias = -0.0006;
   deskLight.shadow.camera.near = 0.05;
   scene.add(deskLight, deskLight.target);
-  const lampGlow = new THREE.PointLight(0xffb066, 4, 7, 2);
-  lampGlow.position.copy(lampAt).add(new THREE.Vector3(-0.15, 0.1, 0));
+  const lampGlow = new THREE.PointLight(0xffb066, 3, 6, 2);
+  lampGlow.position.copy(shadeAt).add(new THREE.Vector3(-0.2, -0.05, 0.1));
   scene.add(lampGlow);
+  // The night-light's glow on the mat, from a little out from the wall.
+  const nightGlow = new THREE.PointLight(0xffa050, 3.5, 3, 2);
+  nightGlow.position.set(X0 + 0.75, 0.45, 0.85);
+  scene.add(nightGlow);
 
   // Dust in the moonbeam.
   const DUST = lowDetail ? 120 : 360;
   const dustGeo = new THREE.BufferGeometry();
   const dustPos = new Float32Array(DUST * 3);
   const dustSeed = new Float32Array(DUST);
-  const r = rng(91);
-  for (let i = 0; i < DUST; i++) {
-    dustPos[i * 3] = wx - 0.6 + r() * 1.8;
-    dustPos[i * 3 + 1] = 0.2 + r() * 2.0;
-    dustPos[i * 3 + 2] = Z0 + 0.2 + r() * 2.4;
-    dustSeed[i] = r() * 100;
+  {
+    const r = rng(91);
+    for (let i = 0; i < DUST; i++) {
+      dustPos[i * 3] = wx - 0.6 + r() * 1.8;
+      dustPos[i * 3 + 1] = 0.2 + r() * 2.0;
+      dustPos[i * 3 + 2] = Z0 + 0.2 + r() * 2.4;
+      dustSeed[i] = r() * 100;
+    }
   }
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
   const dustMat = new THREE.PointsMaterial({ color: 0xcfd8ff, size: 0.006, map: dustSprite(), transparent: true, opacity: 0.5, depthWrite: false });
-  disposables.push(dustGeo, dustMat);
-  const dust = new THREE.Points(dustGeo, dustMat);
-  scene.add(dust);
+  k.disposables.push(dustGeo, dustMat, dustMat.map!);
+  scene.add(new THREE.Points(dustGeo, dustMat));
 
-  // TOYS. One die-cast per dream on the shelf (built one at a time, `buildNextToy`),
-  // and the next dream's car, larger, on the play mat. A dream not dreamt yet leaves
-  // its place on the shelf empty but for a small price card.
-  const toyQueue: (() => void)[] = [];
-  const slot = (sx1 - sx0 - 0.2) / Math.max(1, DREAMS.length);
+  /* --- The slow work: toys and the calendar's photograph ------------------ */
+
+  const work: ((renderer: THREE.WebGLRenderer) => void)[] = [];
+  if (nextDream) {
+    work.push(() => {
+      const { modelId, color } = toyOf(nextDream);
+      const toy = dieCast(k, modelId, color, 1 / 24, toyMat);
+      // On the mat's road, its left side, driving away towards the window.
+      toy.position.copy(toyAt);
+      toy.rotation.y = 0.04;
+      scene.add(toy);
+    });
+  }
+  // The calendar's photograph: the kit's own 2106 in the sun, photographed once into a
+  // texture, as a Soviet export calendar showed it.
+  let photoTarget: THREE.WebGLRenderTarget | null = null;
+  work.push((renderer) => {
+    const studio = new THREE.Scene();
+    studio.background = new THREE.Color(0x8fb4d6);
+    studio.add(new THREE.HemisphereLight(0xcfe2f5, 0x6a7a4a, 2.2));
+    const sun = new THREE.DirectionalLight(0xfff2dc, 4);
+    sun.position.set(-6, 8, 6);
+    studio.add(sun);
+    const field = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x9aa25a, roughness: 1 }));
+    field.rotation.x = -Math.PI / 2;
+    const tarmac = new THREE.Mesh(new THREE.PlaneGeometry(200, 7), new THREE.MeshStandardMaterial({ color: 0x55524e, roughness: 0.9 }));
+    tarmac.rotation.x = -Math.PI / 2;
+    tarmac.position.y = 0.01;
+    const birch = new THREE.MeshStandardMaterial({ color: 0x5a8a44, roughness: 1 });
+    studio.add(field, tarmac);
+    for (let i = 0; i < 9; i++) {
+      const tree = new THREE.Mesh(new THREE.SphereGeometry(3 + (i % 3), 12, 8), birch);
+      tree.position.set(-30 + i * 7, 4.5, -26 - (i % 2) * 7);
+      tree.scale.y = 1.6;
+      studio.add(tree);
+    }
+    const car = dieCast(k, 'kit_vaz2106', 0xc0392b, 1, toyMat);
+    car.rotation.y = -0.6;
+    studio.add(car);
+    const cam = new THREE.PerspectiveCamera(24, photoW / photoH, 0.1, 400);
+    cam.position.set(4.6, 1.1, 5.6);
+    cam.lookAt(0, 0.7, 0);
+    photoTarget = new THREE.WebGLRenderTarget(640, Math.round((640 * photoH) / photoW), { samples: 4 });
+    photoTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
+    const before = renderer.getRenderTarget();
+    renderer.setRenderTarget(photoTarget);
+    renderer.render(studio, cam);
+    renderer.setRenderTarget(before);
+    photoMat.map = photoTarget.texture;
+    photoMat.color.set(0xffffff);
+    photoMat.needsUpdate = true;
+    studio.traverse((node) => {
+      const m = node as THREE.Mesh;
+      if (m.isMesh && m !== car) {
+        m.geometry.dispose();
+        (m.material as THREE.Material).dispose();
+      }
+    });
+    studio.remove(car);
+    car.geometry.dispose();
+  });
+  // The shelf: a die-cast per adventure done; an adventure not yet had leaves a price card.
+  const slot = (sx1 - sx0 - 0.16) / Math.max(1, DREAMS.length);
   DREAMS.forEach((dream, i) => {
-    const x = sx0 + 0.1 + slot * (i + 0.5);
+    const x = sx0 + 0.08 + slot * (i + 0.5);
     if (progress[dream.id] === undefined) {
-      const card = box(0.05, 0.035, 0.004, mat({ color: 0xe6dcc0, roughness: 0.8 }), x, sy + 0.035, Z0 + 0.14);
+      const card = k.box(0.05, 0.035, 0.004, k.mat({ color: 0xe6dcc0, roughness: 0.8 }), x, sy + 0.034, Z0 + 0.15);
       card.rotation.x = -0.3;
       scene.add(card);
       return;
     }
-    toyQueue.push(() => {
+    work.push(() => {
       const { modelId, color } = toyOf(dream);
-      const toy = dieCast(modelId, color, 1 / 43);
-      toy.position.set(x, sy + 0.016, Z0 + 0.11);
+      const toy = dieCast(k, modelId, color, 1 / 43, toyMat);
+      toy.position.set(x, sy + 0.0152, Z0 + 0.11);
       toy.rotation.y = Math.PI / 2 - 0.35;
       scene.add(toy);
     });
   });
-  if (nextDream) {
-    toyQueue.unshift(() => {
-      const { modelId, color } = toyOf(nextDream);
-      const toy = dieCast(modelId, color, 1 / 24);
-      // On the mat's road, its left side, driving away towards the window and its road.
-      toy.position.set(0.15 - 0.8 + (120 / 1024) * 1.6, 0.006, 0.15 + 0.12);
-      toy.rotation.y = 0.12;
-      scene.add(toy);
-    });
-  }
 
   const anchors: RoomAnchors = {
-    toy: new THREE.Vector3(0.15 - 0.62, 0.05, 0.15 + 0.18),
-    map: new THREE.Vector3(dx - 0.03, 0.77, dz + 0.12),
+    toy: toyAt.clone().setY(0.05),
+    map: mapAt.clone(),
     shelf: new THREE.Vector3((sx0 + sx1) / 2, sy + 0.05, Z0 + 0.1),
-    keys: new THREE.Vector3(X1 - 0.02, 1.4, 0.38),
-    window: new THREE.Vector3(wx, wy, Z0),
-    toolbox: new THREE.Vector3(X1 - 0.95, 0.2, -0.1),
+    keys: keysAt.clone(),
+    window: new THREE.Vector3(wx, (WIN.y0 + WIN.y1) / 2, Z0),
+    toolbox: toolboxAt.clone().setY(0.2),
   };
 
   const now = new Date();
@@ -1053,7 +1023,7 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     scene,
     anchors,
     tick(t: number, dt: number): void {
-      // The clocks keep the real time; the second hand steps.
+      // The wall clock keeps the real time; its second hand steps.
       const seconds = now.getSeconds() + Math.floor(t);
       const minutes = now.getMinutes() + seconds / 60;
       const hours = (now.getHours() % 12) + minutes / 60;
@@ -1062,9 +1032,7 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
       hourHand.rotation.z = -(hours / 12) * Math.PI * 2;
       // The lamp breathes a little, as a filament on a tired line does.
       deskLight.intensity = DESK_LAMP_CD * (1 + Math.sin(t * 2.3) * 0.015 + Math.sin(t * 13.7) * 0.01);
-      // The curtains stir in a draught from the frame.
       curtains.forEach((c, i) => (c.rotation.x = Math.sin(t * 0.6 + i * 1.7) * 0.012));
-      // Dust drifts and turns in the beam.
       const p = dustGeo.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < DUST; i++) {
         const s = dustSeed[i]!;
@@ -1074,20 +1042,16 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
       }
       p.needsUpdate = true;
     },
-    buildNextToy(): boolean {
-      const next = toyQueue.shift();
+    buildNext(renderer: THREE.WebGLRenderer): boolean {
+      const next = work.shift();
       if (!next) return false;
-      next();
-      return toyQueue.length > 0;
+      next(renderer);
+      return work.length > 0;
     },
     dispose(): void {
-      scene.traverse((node) => {
-        const m = node as THREE.Mesh;
-        const material = m.material as THREE.MeshStandardMaterial | undefined;
-        if (material?.map) material.map.dispose();
-      });
-      for (const d of disposables) d.dispose();
-      disposables.length = 0;
+      for (const d of k.disposables) d.dispose();
+      k.disposables.length = 0;
+      photoTarget?.dispose();
     },
   };
 }
