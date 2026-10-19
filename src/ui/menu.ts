@@ -61,7 +61,7 @@ import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/ite
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
 import { DREAMS } from '../dreams/dream';
 import { dreamOpen, loadDreamProgress, type DreamProgress } from '../dreams/progress';
-import { buildRoom, type Room } from './room';
+import { TitleRoom, type RoomItem, type RoomSpot } from './titleroom';
 
 /** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
 const COMPUTE_LEVELS: readonly { level: ComputeLevel; label: string }[] = [
@@ -2217,8 +2217,8 @@ export class MainMenu {
     const hero = el('div', 'menu-hero');
     hero.appendChild(wordmark());
     const sheet = el('div', 'menu-sheet');
-    /** The room (ui/room.ts), drawn behind every view; its things answer only on the front. */
-    let room: Room | null = null;
+    /** The room (ui/titleroom.ts), made once and shown behind every view; its list answers only on the front. */
+    let room: TitleRoom | null = null;
     overlay.append(hero, sheet);
 
     let listings: SaveListing[] = [];
@@ -2236,7 +2236,7 @@ export class MainMenu {
     const backToFront = (from: 'dreams' | 'shelf' | 'saves' | 'settings'): void => {
       view = 'front';
       render();
-      overlay.querySelector<HTMLButtonElement>(`.menu-room-spot[data-key="${SPOT_OF_VIEW[from]}"]`)?.focus();
+      room?.focus(SPOT_OF_VIEW[from]);
     };
 
     const showError = (message: string): void => {
@@ -2250,15 +2250,8 @@ export class MainMenu {
         backToFront(view);
         return;
       }
-      if (view === 'front' && room) {
-        // The room is a picture: left and right walk it as up and down do.
-        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-          ev.preventDefault();
-          moveFocus(room.element, ev.key === 'ArrowLeft' ? -1 : 1, 0);
-          return;
-        }
-        walkRows(room.element, ev);
-      } else if (view !== 'settings') walkRows(sheet, ev);
+      if (view === 'front' && room) walkRows(room.element, ev);
+      else if (view !== 'settings') walkRows(sheet, ev);
     };
 
     const finish = (choice: TitleChoice): void => {
@@ -2269,6 +2262,8 @@ export class MainMenu {
       window.removeEventListener('keydown', onKey);
       this.loading.classList.remove('is-hidden');
       overlay.remove();
+      room?.dispose();
+      room = null;
       resolve(choice);
     };
 
@@ -2345,45 +2340,54 @@ export class MainMenu {
       return card;
     };
 
-    /** The first open dream not dreamt yet, else the last open one: what the bed dreams. */
+    /** The first open dream not dreamt yet, else the last open one: what the boy daydreams next. */
     const nextDream = (progress: DreamProgress): (typeof DREAMS)[number] | null => {
       const open = DREAMS.filter((dream) => dreamOpen(dream.id, progress));
       return open.find((dream) => progress[dream.id] === undefined) ?? open[open.length - 1] ?? null;
     };
 
-    /** The room: the bed, the map, the keys, the window, the shelf, the toolbox (ui/room.ts). */
+    /** The room: Daydream, Dreams, Shelf, Drives, Free drive, Settings (ui/titleroom.ts). */
     const renderRoom = (): void => {
-      room?.element.remove();
       const progress = loadDreamProgress();
       const latest = listings[0];
       const next = nextDream(progress);
       const dreamt = DREAMS.filter((dream) => progress[dream.id] !== undefined).length;
-      room = buildRoom(
+      const items: Record<RoomSpot, RoomItem> = {
+        toy: next
+          ? { label: 'Daydream', detail: `«${next.title}» — ${next.brief}`, disabled: false }
+          : { label: 'Daydream', detail: 'Nothing to dream of tonight', disabled: true },
+        map: { label: 'Dreams', detail: `${dreamt} of ${DREAMS.length} dreamt — pick one`, disabled: false },
+        shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one dream dreamt' : `${dreamt} toy cars: one for every dream dreamt`, disabled: false },
+        keys: latest
+          ? {
+              label: 'Drives',
+              detail: `${latest.drive?.carLabel ?? latest.meta.name} · ${formatKm(latest.drive?.km ?? latest.meta.km)} km · saved ${formatSavedDay(latest.meta.savedAt).toLowerCase()}`,
+              disabled: false,
+            }
+          : { label: 'Drives', detail: 'No drive saved yet', disabled: true },
+        window: { label: 'Free drive', detail: 'The endless road: how far can you get?', disabled: false },
+        toolbox: { label: 'Settings', detail: 'Graphics, controls and sound', disabled: false },
+      };
+      if (room) {
+        room.setItems(items);
+        return;
+      }
+      const graphics = loadStoredSettings(prefersMobilePresentation())?.graphicsQuality;
+      room = new TitleRoom(
         progress,
-        {
-          bed: next
-            ? { label: 'Sleep', detail: `«${next.title}» — ${next.brief}`, disabled: false }
-            : { label: 'Sleep', detail: 'No dream tonight', disabled: true },
-          map: { label: 'Dreams', detail: `${dreamt} of ${DREAMS.length} dreamt — pick one`, disabled: false },
-          keys: latest
-            ? {
-                label: 'Your drives',
-                detail: `${latest.drive?.carLabel ?? latest.meta.name} · ${formatKm(latest.drive?.km ?? latest.meta.km)} km · saved ${formatSavedDay(latest.meta.savedAt).toLowerCase()}`,
-                disabled: false,
-              }
-            : { label: 'Your drives', detail: 'No drive saved yet', disabled: true },
-          window: { label: 'Free drive', detail: 'The endless road: how far can you get?', disabled: false },
-          shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one dream dreamt' : `${dreamt} toy cars: one for every dream dreamt`, disabled: false },
-          toolbox: { label: 'Settings', detail: 'Graphics, controls and sound', disabled: false },
-        },
+        next,
+        items,
         (spot) => {
-          if (spot === 'bed' && next) finish({ kind: 'dream', dreamId: next.id });
-          else if (spot === 'window') finish({ kind: 'new' });
+          if (spot === 'toy') {
+            const dream = nextDream(loadDreamProgress());
+            if (dream) finish({ kind: 'dream', dreamId: dream.id });
+          } else if (spot === 'window') finish({ kind: 'new' });
           else {
             view = spot === 'map' ? 'dreams' : spot === 'keys' ? 'saves' : spot === 'shelf' ? 'shelf' : 'settings';
             render();
           }
         },
+        graphics === 'retro' || prefersMobilePresentation(),
       );
       overlay.insertBefore(room.element, hero);
     };
@@ -2478,6 +2482,7 @@ export class MainMenu {
       overlay.classList.toggle('is-settings', view === 'settings');
       overlay.classList.toggle('is-away', view !== 'front');
       renderRoom();
+      room?.setAway(view !== 'front');
       if (view === 'front') {
         room?.focusFirst();
         return;

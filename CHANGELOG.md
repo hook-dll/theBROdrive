@@ -73,11 +73,15 @@
   «Handle with care» now carries a real table lamp with a milk-glass shade, and a sixth
   dream, «A bear for a birthday», a teddy bear in a Moskvich-2141 in a light wind,
   Clatter to Dimwell. Flat materials only: no new shader programs.
-- The title screen is the boy's room at night (`src/ui/room.ts`): one SVG picture with
-  its things as buttons. The bed sleeps straight into the next dream (Enter on launch),
-  the map on the desk lists the dreams, the keys the saved drives, the window starts
-  the free drive, the shelf holds a toy car per dream dreamt, the toolbox is settings.
-  Arrows, pad and Esc walk it like the old menu; panels open over the dimmed room.
+- The title screen is the boy's room at night in 3D, after the first Mafia's menu
+  (`src/ui/titleroom.ts`, `roomscene.ts`): a plain list on the left, and the camera
+  sweeping low across the room to each item's thing. Daydream (the play mat and the next
+  dream's die-cast car on it; choosing it takes the camera down to the toy's road and
+  fades into the dream), Dreams (the map under the desk lamp), Shelf (a 1:43 die-cast
+  of each dream dreamt, built from the kit), Drives (the car keys by the door), Free
+  drive (the window, the moonlit desert road), Settings (the toolbox). Moonlight through
+  the window, the desk lamp, a night-light, dust in the beam, a ticking clock. Its own
+  WebGL context, released before the drive builds its renderer.
 
 - Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
   (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's
