@@ -292,6 +292,12 @@ const CREST_PROBE_SAMPLES = 32;
  * roadspine.ts imports this module. 10 km = 2500 nodes to replay, ~0.5 ms.
  */
 export const CHECKPOINT_SPACING = 10_000;
+/**
+ * Metres between the spine's coarse position samples; `RoadDistance` indexes the road
+ * at the same step. Here for the same reason: the swells are built inside the spine's
+ * walk and read this, and roadspine.ts imports roadswells.ts.
+ */
+export const COARSE_SPACING = 200;
 const INTERVAL_NODES = CHECKPOINT_SPACING / NODE_SPACING;
 /** Eligible phrases one interval can hold: phrases are over a kilometre long. */
 const MAX_INTERVAL_PHRASES = 32;

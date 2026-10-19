@@ -62,13 +62,21 @@
   GAZ-31029: the sedan tail is back (no fastback C pillar to 4.42, the tail station at 4.805
   again), and below the belt the doors meet at the drawn B shut line 2.50. The boot lid's
   drawn extent [3.92, 4.805] is recorded as `accepted` in `refs/gaz31029.json`.
+- VIRTUAL DASHBOARD ON / OFF (Settings → Camera & View, `Settings.virtualDashboard`). The
+  on-screen driving dashboard is off by default, older saves included; the slider below it
+  is now Virtual Dashboard Size.
+- THE COURIER'S AIR DANCER stands on the shoulder 3 m short of its lay-by's entry slip,
+  where the road starts widening into the pad (`world/poi.ts` `buildCourier`), not
+  between the building and the courier car. A courier without a lay-by keeps the old place.
 
 - THE POLICE: POSTS, RADAR, CHASE, STOP, FINES (`src/world/police.ts`, `RoadTraffic`
   `spawnPolice`…`releasePolice`, `src/audio/sirenvoice.ts`).
-  - The speed limit is 90 km/h everywhere. Police stand at posts placed from the seed: on
-    30 % of the roadside lay-bys (angled on the pad, nose to the road) and on a shoulder
-    pull-off in 40 % of 3 km slots on straight road clear of lay-bys (`shoulderPullOff`
-    in `world/layby.ts`, a lay-by shape the stop machinery drives but nothing builds).
+  - The speed limit is 90 km/h everywhere. Police stand at posts placed from the seed, one
+    every 5–10 km of road (each gap its own roll; the first 7–12 km from the house): on
+    the roadside lay-by on the player's side when one is within 300 m (angled on the pad,
+    nose to the road), otherwise on a shoulder pull-off (`shoulderPullOff` in
+    `world/layby.ts`, a lay-by shape the stop machinery drives but nothing builds). Posts
+    are read a full traffic reach ahead, so each is known before its spawn band.
     A post faces the way the player travels, on that side. Its car, the black-and-white
     UAZ-469, is put down parked in the stream's unseen band (500–760 m ahead) and leaves
     at the support edge like a rival; nothing of it is saved.
@@ -94,8 +102,7 @@
     drive off first, then rejoins the stream.
   - A flight (driving off from the stop, 35 s of ignoring the lights within 150 m, or a
     400 m lead) meets the chase's own roll, taken when it began: give up after 1.5–4 km,
-    or escalate — one wanted level (up to 3) for 20 minutes of play, raising the share of
-    manned posts (lay-bys 30/50/70/90 %, shoulders 40/60/80/100 %), stopping him at every
+    or escalate — one wanted level (up to 3) for 20 minutes of play, stopping him at every
     post and multiplying the next fine — and keep after him for 6 km or until lost.
   - `PlayerState.police` (`heat`, `heatUntil`) is saved through the `police_heat` delta,
     not a save trigger; older saves load with none. Dev: `__bro.police.devPost`,

@@ -1,9 +1,9 @@
 import { hashUnit3 } from '../core/rng';
+import { Landscape } from './landscape';
 import { characterOf, districtAt, newDistrictBuffer, type RoadCharacter } from './roadcharacter';
-import { NODE_SPACING, stepNode, type NodeState, type RoadHeading } from './roadcurve';
+import { COARSE_SPACING, NODE_SPACING } from './roadcurve';
 import { RoadDistance } from './roaddistance';
 import type { Road } from './road';
-import { COARSE_SPACING } from './roadspine';
 
 /**
  * SWELLS: the rises and falls the road is driven over, laid where the road is.
@@ -64,8 +64,11 @@ import { COARSE_SPACING } from './roadspine';
  * then the profile that is driven. And it may not make the road anywhere steeper than
  * `ROAD_GRADE_MAX`, bands included.
  *
- * Everything is a pure function of (seed, spine): the same swells in the spine worker,
- * the tile and vista workers and the main thread, and after a reload.
+ * WHEN: once, in the spine's own walk (`SwellWalk`, run by `buildSpine` in the spine
+ * worker), which has every node of the road in hand anyway. The swells are a table in
+ * the `RoadSpine`, moved out of the worker and cached with it, and `RoadSwells` only
+ * reads it: no thread that draws or drives ever builds a swell. Everything is a pure
+ * function of the seed and the road, so the table is the same after a reload.
  */
 
 /** Road per swell slot, metres. A swell lies wholly inside its slot. */
@@ -207,10 +210,54 @@ function swellHeight(w: Swell, x: number, z: number): number {
   return profileAt(w, u) * lateral;
 }
 
+/**
+ * Doubles per slot in the spine's swell table (`RoadSpine.swells`). A slot with no
+ * swell holds NaN in `x`. The grades, the sag and the bounds are derived on reading
+ * (`swellAt`), by the very expressions the build made them with.
+ */
+export const SWELL_FIELDS = 11;
+const F_X = 0;
+const F_Z = 1;
+const F_AX = 2;
+const F_AZ = 3;
+const F_CLIMB = 4;
+const F_DESCENT = 5;
+const F_RISE = 6;
+const F_CREST = 7;
+const F_CORE = 8;
+const F_FADE = 9;
+const F_CREST_S = 10;
+
+/** The swell in `table`'s row starting at `at`. The one way a `Swell` is made. */
+function swellAt(table: Float64Array, at: number): Swell {
+  const x = table[at + F_X]!;
+  const z = table[at + F_Z]!;
+  const ax = table[at + F_AX]!;
+  const az = table[at + F_AZ]!;
+  const climb = table[at + F_CLIMB]!;
+  const descent = table[at + F_DESCENT]!;
+  const rise = table[at + F_RISE]!;
+  const crestIn = table[at + F_CREST]!;
+  const crestOut = crestIn;
+  const core = table[at + F_CORE]!;
+  const fade = table[at + F_FADE]!;
+  const sag = Math.max(SAG_MIN_M, descent * 0.3);
+  const climbGrade = rise / (climb - TOE_M / 2 - crestIn / 2);
+  const descentGrade = rise / (descent - sag / 2 - crestOut / 2);
+  const extentU = Math.max(climb, descent);
+  const span = core + fade;
+  const ex = Math.abs(ax) * extentU + Math.abs(az) * span;
+  const ez = Math.abs(az) * extentU + Math.abs(ax) * span;
+  return {
+    x, z, ax, az, climb, descent, rise, climbGrade, descentGrade,
+    crestIn, crestOut, sag, core, fade,
+    minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, crestS: table[at + F_CREST_S]!,
+  };
+}
+
 /** Side of a query cell, metres. A cell's swell list is built once and reused. */
 const QUERY_CELL_M = 1024;
 const QUERY_CELL_LIMIT = 16_384;
-const SWELL_CACHE_LIMIT = 65_536;
 const CELL_BIAS = 1 << 20;
 const CELL_STRIDE = 1 << 21;
 
@@ -230,49 +277,18 @@ const CORNER_REACH_M = 120;
 const MAX_SLOT_CORNERS = 6;
 
 /**
- * The swells along one road, and the field they add to the landscape.
+ * The swells along one road, and the field they add to the landscape: a reader of
+ * the spine's swell table (see `SwellWalk`).
  *
- * Built by `Road` and handed to its `Landscape` as an overlay; `baseHeight` is the
- * landscape WITHOUT the overlay, which the budget drives over.
+ * Built by `Road` and handed to its `Landscape` as an overlay.
  */
 export class RoadSwells {
-  private readonly swells = new Map<number, Swell | null>();
   private readonly cells = new Map<number, readonly Swell[]>();
   private readonly distance: RoadDistance;
   private readonly near: number[] = [];
-  private readonly passes: number[] = [];
   private readonly slotScratch: number[] = [];
-  private readonly district = newDistrictBuffer();
-  private readonly node: NodeState = { x: 0, z: 0 };
-  private readonly corners: Corner[] = Array.from({ length: MAX_SLOT_CORNERS }, () => ({
-    entry: 0,
-    apex: 0,
-    exit: 0,
-  }));
-  /**
-   * The road under the slot being built, one entry per node from `windowFirst`: x and
-   * z. Either a replay into `ownX`/`ownZ`, or the arrays a road
-   * block just walked (`adoptBlock`), which hold the same doubles.
-   */
-  private xs: Float64Array = new Float64Array(0);
-  private zs: Float64Array = new Float64Array(0);
-  private windowFirst = 0;
-  private ownX = new Float64Array(0);
-  private ownZ = new Float64Array(0);
-  /** A road block lent by `adoptBlock` for the duration of the call, or null. */
-  private lentFirst = 0;
-  private lentCount = 0;
-  private lentX: Float64Array | null = null;
-  private lentZ: Float64Array | null = null;
-  /** The bands' height under the road at every second node of the budget's drive. */
-  private bases = new Float64Array(0);
 
-  constructor(
-    private readonly seed: number,
-    private readonly road: Road,
-    private readonly heading: RoadHeading,
-    private readonly baseHeight: (x: number, z: number) => number,
-  ) {
+  constructor(private readonly road: Road) {
     this.distance = new RoadDistance(road);
   }
 
@@ -308,12 +324,10 @@ export class RoadSwells {
 
   /** The swell of slot `slot`, or null when it has none. Public for tools. */
   swellOf(slot: number): Swell | null {
-    const hit = this.swells.get(slot);
-    if (hit !== undefined) return hit;
-    if (this.swells.size >= SWELL_CACHE_LIMIT) this.swells.clear();
-    const built = this.build(slot);
-    this.swells.set(slot, built);
-    return built;
+    const table = this.road.spine.swells;
+    const at = slot * SWELL_FIELDS;
+    if (slot < 0 || at >= table.length || Number.isNaN(table[at + F_X]!)) return null;
+    return swellAt(table, at);
   }
 
   private cellList(cx: number, cz: number): readonly Swell[] {
@@ -349,73 +363,139 @@ export class RoadSwells {
     this.cells.set(key, list);
     return list;
   }
+}
 
-  /**
-   * Builds every swell whose road window lies inside a block of nodes the road has
-   * just walked, from that walk: `xs`/`zs` hold nodes `first`..`first + count - 1`
-   * (positions), exactly the doubles a replay makes.
-   * `Road` calls it before it reads the block's heights, so a road block pays for its
-   * own swells without walking the road a second time; only the slots straddling its
-   * ends are replayed, and the next block finds them cached.
-   */
-  adoptBlock(first: number, xs: Float64Array, zs: Float64Array, count: number): void {
-    this.lentFirst = first;
-    this.lentCount = count;
-    this.lentX = xs;
-    this.lentZ = zs;
-    const from = Math.ceil(((first + 1) * NODE_SPACING + LEAD_M) / SLOT_M);
-    const to = Math.floor(((first + count - 2) * NODE_SPACING - NEAR_M) / SLOT_M) - 1;
-    for (let slot = from; slot <= to; slot++) this.swellOf(slot);
-    this.lentX = this.lentZ = null;
+/** Radius of the other-pass search around a crest: its reach and half a coarse step. */
+const PASS_RADIUS_M = SWELL_REACH_M + COARSE_SPACING / 2;
+/** Slack on the other-pass search's z bounds, metres, for the rounding of a squared distance. */
+const PASS_Z_SLACK_M = 1;
+/** Nodes the walk's ring holds to begin with; it doubles if a slot is held longer. */
+const RING_NODES = 4096;
+
+/** First node of slot `slot`'s road window: the budget's lead-in, and one for a chord. */
+function windowFirst(slot: number): number {
+  return Math.floor((slot * SLOT_M - LEAD_M) / NODE_SPACING) - 1;
+}
+/** Last node of slot `slot`'s road window: `NEAR_M` past it, and one for a chord. */
+function windowLast(slot: number): number {
+  return Math.ceil(((slot + 1) * SLOT_M + NEAR_M) / NODE_SPACING) + 1;
+}
+
+/**
+ * Builds the swell table inside the spine's walk (`buildSpine`), which is the one place
+ * every node of the road is in hand: the walk hands each node to `node` and each coarse
+ * sample to `coarse`, and gets the table from `finish`.
+ *
+ * A slot's swell reads the road under it — `windowFirst` to `windowLast`, kept in a ring
+ * of recent nodes — and, for the other passes of the road that might cross it, every
+ * coarse sample within `PASS_RADIUS_M` of its crest, anywhere along the road. The
+ * heading never turns 90 degrees off +Z, so z strictly increases along the road (see
+ * `roadcurve.ts`): every such sample has z within the radius of the crest's, and the
+ * crest lies no further along than the slot's end. So a slot is built once its window
+ * is walked and a coarse sample has passed the z of its end plus the radius; the
+ * search then scans the coarse table either way from the crest until z leaves the
+ * radius, and finds exactly the samples a whole-road spatial query would.
+ */
+export class SwellWalk {
+  private readonly table: Float64Array;
+  /** Slots that may hold a swell: every one ending `END_CLEAR_M` before the road does. */
+  private readonly slots: number;
+  private readonly landscape: Landscape;
+  /** The next slot to build; slots are built in order. */
+  private next = 0;
+  /** Walked node positions, node `i` at `i & (length - 1)`, from `windowFirst(next)`. */
+  private ringX = new Float64Array(RING_NODES);
+  private ringZ = new Float64Array(RING_NODES);
+  private keepFrom = windowFirst(0);
+  /** The road under the slot being built, one entry per node from `windowFirst`. */
+  private xs = new Float64Array(0);
+  private zs = new Float64Array(0);
+  private first = 0;
+  /** The bands' height under the road at every second node of the budget's drive. */
+  private bases = new Float64Array(0);
+  /** The swell being sized, as a table row. */
+  private readonly row = new Float64Array(SWELL_FIELDS);
+  private readonly district = newDistrictBuffer();
+  private readonly corners: Corner[] = Array.from({ length: MAX_SLOT_CORNERS }, () => ({
+    entry: 0,
+    apex: 0,
+    exit: 0,
+  }));
+
+  constructor(
+    private readonly seed: number,
+    private readonly length: number,
+    private readonly coarseX: Float64Array,
+    private readonly coarseZ: Float64Array,
+  ) {
+    this.slots = Math.max(0, Math.floor((length - END_CLEAR_M) / SLOT_M));
+    this.table = new Float64Array(this.slots * SWELL_FIELDS).fill(Number.NaN);
+    // The budget drives over the bands alone: this landscape never gets an overlay.
+    this.landscape = new Landscape(seed);
   }
 
-  /**
-   * Points `xs`/`zs` at the road over node indices [first, last]: the lent block
-   * when it covers them, otherwise a replay from the nearest coarse sample.
-   */
-  private window(first: number, last: number): void {
-    const lent = this.lentX;
-    if (lent && first >= this.lentFirst && last < this.lentFirst + this.lentCount) {
-      const offset = first - this.lentFirst;
-      this.xs = lent.subarray(offset);
-      this.zs = this.lentZ!.subarray(offset);
-      this.windowFirst = first;
-      return;
+  /** Node `i` of the walk is at (x, z). Called for every node, in order, from 0. */
+  node(i: number, x: number, z: number): void {
+    if (i - this.keepFrom >= this.ringX.length) this.growRing(i);
+    const j = i & (this.ringX.length - 1);
+    this.ringX[j] = x;
+    this.ringZ[j] = z;
+  }
+
+  /** Coarse sample `k` has been written. Builds every slot the walk is now far enough past. */
+  coarse(k: number): void {
+    const walked = (k * COARSE_SPACING) / NODE_SPACING;
+    const reached = this.coarseZ[k]! - PASS_RADIUS_M - PASS_Z_SLACK_M;
+    const mask = this.ringZ.length - 1;
+    while (this.next < this.slots) {
+      const slot = this.next;
+      if (windowLast(slot) > walked) return;
+      if (!(reached > this.ringZ[Math.ceil(((slot + 1) * SLOT_M) / NODE_SPACING) & mask]!)) return;
+      this.settle(slot);
     }
-    const count = last - first + 1;
-    if (this.ownX.length < count) {
-      this.ownX = new Float64Array(count);
-      this.ownZ = new Float64Array(count);
+  }
+
+  /** Builds the slots still held, the coarse table now whole, and returns the table. */
+  finish(): Float64Array {
+    while (this.next < this.slots) this.settle(this.next);
+    return this.table;
+  }
+
+  private settle(slot: number): void {
+    if (this.build(slot)) this.table.set(this.row, slot * SWELL_FIELDS);
+    this.next = slot + 1;
+    this.keepFrom = windowFirst(this.next);
+  }
+
+  /** Doubles the ring, keeping nodes `keepFrom` to `i - 1`. */
+  private growRing(i: number): void {
+    let size = this.ringX.length * 2;
+    while (i - this.keepFrom >= size) size *= 2;
+    const x = new Float64Array(size);
+    const z = new Float64Array(size);
+    const from = Math.max(0, this.keepFrom);
+    const oldMask = this.ringX.length - 1;
+    const mask = size - 1;
+    for (let n = from; n < i; n++) {
+      x[n & mask] = this.ringX[n & oldMask]!;
+      z[n & mask] = this.ringZ[n & oldMask]!;
     }
-    const spine = this.road.spine;
-    const stride = COARSE_SPACING / NODE_SPACING;
-    const k = Math.floor(first / stride);
-    const node = this.node;
-    node.x = spine.coarseX[k]!;
-    node.z = spine.coarseZ[k]!;
-    for (let i = k * stride; i < first; i++) stepNode(node, this.heading, i);
-    for (let i = first; i <= last; i++) {
-      this.ownX[i - first] = node.x;
-      this.ownZ[i - first] = node.z;
-      stepNode(node, this.heading, i);
-    }
-    this.xs = this.ownX;
-    this.zs = this.ownZ;
-    this.windowFirst = first;
+    this.ringX = x;
+    this.ringZ = z;
   }
 
   /**
    * The corners whose apex lies in [from, to], in order, written to `corners`; returns
    * how many (at most `MAX_SLOT_CORNERS`). Curvature is the turn between the window's
-   * two chords either side of a node, so a lent block and a replay agree to the bit
-   * and a replay need not evaluate the heading field per node.
+   * two chords either side of a node, so it is read off the walked nodes without
+   * evaluating the heading field per node.
    */
   private findCorners(from: number, to: number): number {
     let inside = false;
     let peak = 0;
     let count = 0;
     let c = this.corners[0]!;
-    const base = this.windowFirst;
+    const base = this.first;
     for (let s = from - CORNER_REACH_M; s <= to + CORNER_REACH_M; s += CORNER_PROBE_M) {
       const i = Math.round(s / NODE_SPACING) - base;
       const before = Math.atan2(this.xs[i]! - this.xs[i - 1]!, this.zs[i]! - this.zs[i - 1]!);
@@ -446,7 +526,7 @@ export class RoadSwells {
   private build(slot: number): Swell | null {
     const slotStart = slot * SLOT_M;
     const slotEnd = slotStart + SLOT_M;
-    if (slotStart < HOME_CLEAR_M || slotEnd > this.road.length - END_CLEAR_M) return null;
+    if (slotStart < HOME_CLEAR_M) return null;
     const seed = this.seed;
     districtAt(seed, slotStart + SLOT_M / 2, this.district);
     const c: RoadCharacter = characterOf(seed, this.district.index);
@@ -464,11 +544,20 @@ export class RoadSwells {
     if (descent < climb * 1.5) return null;
 
     // The road under the whole slot, from the budget's lead-in to `NEAR_M` past it:
-    // every node anything below reads lies inside this window.
-    const first = Math.floor((slotStart - LEAD_M) / NODE_SPACING) - 1;
-    const last = Math.ceil((slotEnd + NEAR_M) / NODE_SPACING) + 1;
-    if (last * NODE_SPACING > this.road.length) return null;
-    this.window(first, last);
+    // every node anything below reads lies inside this window, and the walk has passed
+    // it (`END_CLEAR_M` is far more than `NEAR_M`).
+    const first = windowFirst(slot);
+    const nodes = windowLast(slot) - first + 1;
+    if (this.xs.length < nodes) {
+      this.xs = new Float64Array(nodes);
+      this.zs = new Float64Array(nodes);
+    }
+    const mask = this.ringX.length - 1;
+    for (let i = 0; i < nodes; i++) {
+      this.xs[i] = this.ringX[(first + i) & mask]!;
+      this.zs[i] = this.ringZ[(first + i) & mask]!;
+    }
+    this.first = first;
 
     // Paired with a corner of the slot when one fits: the corners are tried from a
     // rolled start, each as the rolled kind of pairing, and a swell that has to give up
@@ -540,17 +629,20 @@ export class RoadSwells {
     let core = CORE_MIN_M + roll(8) * CORE_SPREAD_M;
     let fade = FADE_MIN_M + roll(9) * FADE_SPREAD_M;
 
+    const row = this.row;
     const make = (r: number): Swell => {
-      const climbGrade = r / (climb - TOE_M / 2 - crestIn / 2);
-      const descentGrade = r / (descent - sag / 2 - crestOut / 2);
-      const extentU = Math.max(climb, descent);
-      const ex = Math.abs(ax) * extentU + Math.abs(az) * span;
-      const ez = Math.abs(az) * extentU + Math.abs(ax) * span;
-      return {
-        x, z, ax, az, climb, descent, rise: r, climbGrade, descentGrade,
-        crestIn, crestOut, sag, core, fade,
-        minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, crestS,
-      };
+      row[F_X] = x;
+      row[F_Z] = z;
+      row[F_AX] = ax;
+      row[F_AZ] = az;
+      row[F_CLIMB] = climb;
+      row[F_DESCENT] = descent;
+      row[F_RISE] = r;
+      row[F_CREST] = crestIn;
+      row[F_CORE] = core;
+      row[F_FADE] = fade;
+      row[F_CREST_S] = crestS;
+      return swellAt(row, 0);
     };
     // A descent has to READ as one: on country the bands are already lifting, a swell
     // whose fall is gentler than that lift leaves a level shelf, which is the plateau
@@ -558,7 +650,7 @@ export class RoadSwells {
     // own grade under it by `DESCENT_READ`, as far as the caps allow; the budget below
     // has the last word.
     const lift =
-      (this.baseHeight(this.xs[endNode]!, this.zs[endNode]!) - this.baseHeight(x, z)) / descent;
+      (this.landscape.baseHeightAt(this.xs[endNode]!, this.zs[endNode]!) - this.landscape.baseHeightAt(x, z)) / descent;
     rise = Math.max(rise, (Math.max(0, lift) + DESCENT_READ) * (descent - sag / 2 - crestOut / 2));
     rise = Math.min(rise, SWELL_RISE_MAX, CLIMB_GRADE_MAX * (climb - TOE_M / 2 - crestIn / 2));
 
@@ -571,13 +663,22 @@ export class RoadSwells {
     const ownFrom = crestS - climbS - NEAR_M + allowance;
     const ownTo = crestS + descentS + NEAR_M - allowance;
     let clear = Infinity;
-    const count = this.distance.coarseNear(x, z, SWELL_REACH_M + allowance, this.passes);
-    for (let k = 0; k < count; k++) {
-      const index = this.passes[k]!;
+    // Every coarse sample within `PASS_RADIUS_M` of the crest, which is exactly what a
+    // whole-road spatial query returns: z only grows along the road, so they all lie in
+    // one run of the table around the crest's own sample (see `SwellWalk`).
+    const coarseX = this.coarseX;
+    const coarseZ = this.coarseZ;
+    const r2 = PASS_RADIUS_M * PASS_RADIUS_M;
+    let passFrom = Math.round(crestS / COARSE_SPACING);
+    let passTo = passFrom;
+    while (passFrom > 0 && coarseZ[passFrom - 1]! >= z - PASS_RADIUS_M - PASS_Z_SLACK_M) passFrom--;
+    while (passTo + 1 < coarseZ.length && coarseZ[passTo + 1]! <= z + PASS_RADIUS_M + PASS_Z_SLACK_M) passTo++;
+    for (let index = passFrom; index <= passTo; index++) {
       const s = index * COARSE_SPACING;
       if (s >= ownFrom && s <= ownTo) continue;
-      const dx = this.road.spine.coarseX[index]! - x;
-      const dz = this.road.spine.coarseZ[index]! - z;
+      const dx = coarseX[index]! - x;
+      const dz = coarseZ[index]! - z;
+      if (dx * dx + dz * dz > r2) continue;
       const u = dx * ax + dz * az;
       if (u <= -climb - allowance || u >= descent + allowance) continue;
       clear = Math.min(clear, Math.abs(dx * az - dz * ax) - allowance - OTHER_PASS_CLEAR_M);
@@ -588,7 +689,6 @@ export class RoadSwells {
       rise = Math.min(rise, fade / FLANK_RUN);
       if (rise < SWELL_RISE_MIN) return null;
     }
-    const span = core + fade;
 
     // The budget: drive the weak car over it from the limit, and lower it until it pays.
     // The bands under the road are read once; only the swell changes between attempts.
@@ -597,7 +697,7 @@ export class RoadSwells {
     if (this.bases.length < samples) this.bases = new Float64Array(samples);
     for (let j = 0; j < samples; j++) {
       const i = leadNode + j * 2;
-      this.bases[j] = this.baseHeight(this.xs[i]!, this.zs[i]!);
+      this.bases[j] = this.landscape.baseHeightAt(this.xs[i]!, this.zs[i]!);
     }
     for (let attempt = 0; attempt < 8 && rise >= SWELL_RISE_MIN; attempt++) {
       const w = make(rise);

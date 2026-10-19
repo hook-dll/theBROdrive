@@ -2671,7 +2671,7 @@ async function boot(): Promise<void> {
     streamer.setLamps(night);
     frameProfiler?.end('lights');
 
-    if (driving) {
+    if (driving && s.settings.virtualDashboard) {
       const stats = driving.stats;
       const car = s.cars[drivingId!];
       const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);

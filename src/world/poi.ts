@@ -34,7 +34,7 @@ import {
   DancerField,
   type DancerHandle,
 } from './props/airdancer';
-import { halfWidthAt } from './roadprofile';
+import { halfWidthAt, SHOULDER_WIDTH_M } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import { mesaFieldOf } from './mesas';
 import type { RoadDistance } from './roaddistance';
@@ -42,7 +42,7 @@ import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
 import { POI_SPACING, roadsideSlot, rollStructure, type PoiStock } from './poislots';
-import { laybyCourierLateral, laybyNear, laybyOuterAt } from './layby';
+import { laybyCourierLateral, laybyNear, laybyOuterAt, type Layby } from './layby';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
@@ -800,6 +800,7 @@ function buildCourier(
   registeredCouriers: string[],
   dancers: DancerField,
   registeredDancers: DancerHandle[],
+  layby: Layby | null,
   deferredVisuals: Array<() => void>,
 ): void {
   const def = pick(COURIER_MODELS, stop.appearanceSeed);
@@ -877,13 +878,18 @@ function buildCourier(
   }
   if (!collider) return;
 
-  // The air dancer advertising the stop. It stands on the POI side of the car, a
-  // couple of metres off its flank so it is visible from the lane and never in it,
-  // and is turned to face the road. Its ground is the LOWEST of the blower's own
-  // footprint, so no corner of the box floats on ground that is only nearly flat.
+  // The air dancer advertising the stop. With a lay-by it stands on the shoulder just
+  // before the entry slip, where the road starts widening into the pad: the sign you
+  // see before you have to turn in. A mast has no lay-by, and there it stands on the
+  // POI side of the car, off its flank. Either way it is turned to face the road. Its
+  // ground is the LOWEST of the blower's own footprint, so no corner of the box floats
+  // on ground that is only nearly flat.
   const side = stop.lateral < 0 ? -1 : 1;
-  const dancerS = stop.s + DANCER_ALONG_M;
-  const dancerPoint = ctx.road.offsetPoint(dancerS, stop.lateral + side * DANCER_OUT_M);
+  const dancerS = layby ? layby.sEntry - DANCER_BEFORE_ENTRY_M : stop.s + DANCER_ALONG_M;
+  const dancerLateral = layby
+    ? layby.side * (ctx.road.halfWidthAt(dancerS) + SHOULDER_WIDTH_M)
+    : stop.lateral + side * DANCER_OUT_M;
+  const dancerPoint = ctx.road.offsetPoint(dancerS, dancerLateral);
   let dancerY = ctx.terrain.heightAt(dancerPoint.x, dancerPoint.z, dancerS);
   for (const corner of DANCER_FOOTPRINT_CORNERS) {
     const h = ctx.terrain.heightAt(
@@ -916,6 +922,8 @@ const DANCER_FOOTPRINT_CORNERS: readonly (readonly [number, number])[] = [
 ];
 /** Sunk this far under that lowest corner, so the seam never shows air. */
 const DANCER_SINK_M = 0.03;
+/** Along the road short of a lay-by's entry slip, metres: on the plain shoulder still. */
+const DANCER_BEFORE_ENTRY_M = 3;
 
 /**
  * Layout of one roadside wreck field.
@@ -1292,14 +1300,12 @@ export class PoiProvider implements ChunkProvider {
       // beside it stays free (world/layby.ts); a mast has none, and the car stands on
       // the verge as it always did.
       const layby = laybyNear(ctx.world.seed, stop.s);
+      const own = layby?.poiIndex === courierPoi.index ? layby : null;
       buildCourier(
         ctx,
         {
           ...stop,
-          lateral:
-            layby?.poiIndex === courierPoi.index
-              ? laybyCourierLateral(layby)
-              : courierParkingLateral(courierPoi.lateral),
+          lateral: own ? laybyCourierLateral(own) : courierParkingLateral(courierPoi.lateral),
         },
         group,
         bodies,
@@ -1308,6 +1314,7 @@ export class PoiProvider implements ChunkProvider {
         registeredCouriers,
         this.dancers,
         registeredDancers,
+        own,
         deferredVisuals,
       );
     }

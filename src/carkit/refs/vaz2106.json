@@ -16,6 +16,15 @@
       "what": "Commons 'File:Budapest, Hungexpo, AMTS 2017, 90.jpg' (r_3, 2106 dashboard, measurements-classics.md §0)",
       "url": "https://commons.wikimedia.org/wiki/File:Budapest,_Hungexpo,_AMTS_2017,_90.jpg",
       "image": "build/carshape/_refs/bp/img/vaz2106_r3_Budapest_Hungexpo_AMTS_2017_90.jpg"
+    },
+    "P2": {
+      "what": "Avito sale listing of a 1989 VAZ-2106 with 6600 km, reposted on AvtoGurman '1989 ВАЗ 2106 пробег 6600 км как новый': the whole dash from the open passenger's door (measurements-classics.md §4; licence unchecked, reference only)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2019/06/5675516090.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2106_p2_avito_1989_cabin.jpg"
+    },
+    "C": {
+      "what": "the VAZ-2103/2106 owner's manual's controls list as printed by Monolith: '4. Дефлектор (левый), 5. Часы, 6. Дефлектор (правый), 7. Пепельница ... 9. Крышка перчаточного ящика' (read 2026-10-19)",
+      "url": "https://monolith-publisher.com/organy-upravlenija-vaz-2103-2106/"
     }
   },
   "body": {
@@ -112,15 +121,23 @@
     },
     "clock": {
       "v": true,
-      "src": "P clock at the top of the centre console (measurements-classics.md §4, manual illustration ratios)"
+      "src": "P2 a round clock on the fascia under the driver's-side oval vent (x 678 against the vent's 675), over the chrome heater strip at the console's top, on the car's centre line (console 600-790 px); P the same round face right of the wheel's hub; C 'Часы' between the vents (measurements-classics.md §4; corrected 2026-10-19 from 'the top of the centre console')"
     },
     "wheelSpokes": {
       "v": 2,
-      "src": "P 2 spokes with a wide padded hub (measurements-classics.md §4; r_3)"
+      "src": "P 2 spokes with a wide padded hub (measurements-classics.md §4; r_3); P2 the same"
     },
     "stack": {
       "v": true,
-      "src": "P centre console with heater levers (measurements-classics.md §4); radio panel down to the tunnel in r_3"
+      "src": "P/P2 a console from the heater levers' chrome strip down to the tunnel, the radio slot and ashtray in it (measurements-classics.md §4)"
+    },
+    "vents": {
+      "v": 2,
+      "src": "P2 two oval grilled vents side by side under the top roll right of the binnacle (x 675 and 770 px); C left and right vents"
+    },
+    "glovebox": {
+      "v": "passenger",
+      "src": "P2 the lid with its handle over the wood strip on the passenger's half; C 'Крышка перчаточного ящика'"
     }
   },
   "gaps": [
@@ -129,7 +146,7 @@
     "mirror: only a front-view position is measured, none in profile",
     "roofHalfWidth, beltHalfWidth: no front-view widths measured for the 124 shell",
     "bonnet, bootLid: lid edges not measured (bonnetFront/bootEnd in specs.ts are untagged)",
-    "dash glovebox/console/vents/wheelDiameter: not measured; the kit builds the classic platform default dash (interior.ts LAYOUTS.classic)",
+    "dash console/wheelDiameter: not measured",
     "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
   ],
   "overlay": {

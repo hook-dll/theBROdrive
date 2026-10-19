@@ -1,5 +1,5 @@
 import type { Road } from './road';
-import { COARSE_SPACING } from './roadspine';
+import { COARSE_SPACING } from './roadcurve';
 
 /**
  * How far any point in the world is from the nearest pass of the road, and which pass

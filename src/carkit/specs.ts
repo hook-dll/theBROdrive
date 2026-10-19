@@ -21,7 +21,7 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A } from './interior';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_ASTRA_F, BODY_VECTRA_A, LOOK_ASTRA_F, LOOK_VECTRA_A } from './opel';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
@@ -518,9 +518,8 @@ const LOOK_2107: KitLook = {
 
 /**
  * Sun visors sized so that, lowered, they end at the driver's eye height (2026-10-18): the
- * 2106's (the 2101's layout as is) and the Samaras' (the platform's layout as is).
+ * Samaras' (the platform's layout as is).
  */
-const VISOR_CLASSIC = { half: 0.16, depth: 0.13 } as const;
 const VISOR_SAMARA = { half: 0.16, depth: 0.134 } as const;
 
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
@@ -540,8 +539,7 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
     cabinLayout: { ...CABIN_2105, bench: { from: 'rearBase', offset: -1.115 } },
   },
   vaz2105: { id: 'vaz2105', ...BODY_05, look: LOOK_2105, cabinLayout: CABIN_2105 },
-  // Lowered, the visors end at the driver's eye height (the stock 0.15 hung under it, 2026-10-18).
-  vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106, cabinLayout: { visor: VISOR_CLASSIC } },
+  vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106, cabinLayout: CABIN_2106 },
   vaz2107: { id: 'vaz2107', ...onBody(BODY_05, 0.012, 4.145), look: LOOK_2107, cabinLayout: CABIN_2107 },
   vaz2108: { id: 'vaz2108', ...BODY_2108, look: LOOK_2108, cabinLayout: { visor: VISOR_SAMARA } },
   vaz2109: { id: 'vaz2109', ...BODY_2109, look: LOOK_2109, cabinLayout: { visor: VISOR_SAMARA } },

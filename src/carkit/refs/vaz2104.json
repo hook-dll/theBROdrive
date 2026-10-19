@@ -14,6 +14,30 @@
     },
     "F": {
       "what": "passport 4115 x 1620 x 1443 (measurements-estates.md §3.8)"
+    },
+    "P": {
+      "what": "drive2.ru 'Lada 2104 Сарайка' (LEO-TVER), a 1992 VAZ-21043: the dash straight on from the driver's seat; the owner's review lists a 2106 tachometer in the pod, 2106 extra dials under the dash and a 2105 wheel, the panel otherwise stock (measurements-estates.md §5; licence unchecked, reference only)",
+      "url": "https://www.drive2.ru/r/lada/2104/288230376152009137/",
+      "image": "build/carshape/_refs/bp/img/vaz2104_p_drive2_21043_1992_dash.jpg"
+    },
+    "P2": {
+      "what": "auto.ru sale listing of a 1987 VAZ-2104 1.3 with 5800 km, reposted on AvtoGurman '1987 ВАЗ 2104 1.3 л / 64 л.с. — новый автомобиль с консервации': the cabin from the driver's door (measurements-estates.md §5; licence unchecked, reference only)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2016/05/1200x900-7-1.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2104_p2_autoru_1987_cabin.jpg"
+    },
+    "P3": {
+      "what": "the same 1987 listing: the cluster pod's right half close up (measurements-estates.md §5)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2016/05/1200x900-12-2.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2104_p3_autoru_1987_cluster.jpg"
+    },
+    "P4": {
+      "what": "the same 1987 listing: the passenger's end of the dash (measurements-estates.md §5)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2016/05/1200x900-8-2.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2104_p4_autoru_1987_passenger.jpg"
+    },
+    "C": {
+      "what": "ru.wikipedia 'ВАЗ-2104': the base car's 'стандартная панель'; the 2107's cabin only on the late-1990s 21043-20 and the 21041i/VF (read 2026-10-19)",
+      "url": "https://ru.wikipedia.org/wiki/ВАЗ-2104"
     }
   },
   "body": {
@@ -131,7 +155,39 @@
       "src": "D front view 773 at y 900 (measurements-classics.md §1 (vaz_2107_1982.jpg, 1.668 mm/px) §1.1; 2104 front is the 2105's)"
     }
   },
-  "dashNote": "No photo of a 2104 dashboard is named in the sources; the kit borrows CABIN_2105 (specs.ts KIT_SPECS), and the 2104 sharing it is not sourced.",
+  "dash": {
+    "photo": {
+      "src": "P",
+      "view": "driver"
+    },
+    "gauges": {
+      "v": 3,
+      "src": "P2/P3 the 2105's rectangular pod on a 1987 car with 5800 km: a big dial left, the speedometer 0-160 right, a small voltmeter 8-16 low between them under a lamp window (measurements-estates.md §5); C: the 2105's panel until the 21043-20"
+    },
+    "dialRows": {
+      "v": [
+        2,
+        1
+      ],
+      "src": "P3 the voltmeter's centre (y 590) about 4 cm under the speedometer's (y 420; bezel 440 px for about 100 mm) (measurements-estates.md §5)"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P the pod behind the wheel, centred on the column"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "P/P2 two spokes down from a wide T-shaped pad"
+    },
+    "glovebox": {
+      "v": "passenger",
+      "src": "P/P4 a wide lid with a knob and the 'ЖИГУЛИ' badge on the passenger's half"
+    },
+    "vents": {
+      "v": 2,
+      "src": "P/P2 a slatted vent at the driver's end, P4 its twin at the passenger's end; the middle carries the heater's three sliders, no vent (measurements-estates.md §5)"
+    }
+  },
   "gaps": [
     "wheelbase, overhangs: vaz_2104.jpg is undimensioned and registered on the 05 shell's own hubs; no 2104 passport axle figures in the sources",
     "mirror: front view only (x 730-850, y 955-1055); its profile s is not measured",

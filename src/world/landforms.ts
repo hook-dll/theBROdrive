@@ -1,7 +1,7 @@
 import { hashUnit3 } from '../core/rng';
 import { BASIN_OUTER_M, type LakeBasins } from './lakes';
 import type { Road } from './road';
-import { COARSE_SPACING } from './roadspine';
+import { COARSE_SPACING } from './roadcurve';
 
 /**
  * ROADSIDE LANDFORMS: the desert opening a view, or closing one, beside the road.

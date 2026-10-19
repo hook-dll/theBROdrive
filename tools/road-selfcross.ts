@@ -21,8 +21,8 @@
  * Nothing here is part of the game bundle.
  */
 
-import { RoadHeading, MIN_CORNER_RADIUS, NODE_SPACING } from '../src/world/roadcurve';
-import { buildSpine, COARSE_SPACING } from '../src/world/roadspine';
+import { COARSE_SPACING, RoadHeading, MIN_CORNER_RADIUS, NODE_SPACING } from '../src/world/roadcurve';
+import { buildSpine } from '../src/world/roadspine';
 import { ROAD_LENGTH } from '../src/world/road';
 
 const SEEDS = [1, 7, 42, 1337];

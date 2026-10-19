@@ -14,6 +14,16 @@
     },
     "F": {
       "what": "passport 4059 x 1611 x 1458 (measurements-estates.md §3.8)"
+    },
+    "P": {
+      "what": "auto.ru sale listing of a 1975 VAZ-2102 (green, tan vinyl), reposted on AvtoGurman '1975 ВАЗ 2102 - состояние нового авто, оригинал': the whole dash straight on through the open tailgate (measurements-estates.md §5; licence unchecked, reference only)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2016/09/1200x900-54-1.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2102_p_autoru_1975_dash_from_boot.jpg"
+    },
+    "P2": {
+      "what": "the same listing: the dash and driver's seat from the open driver's door (measurements-estates.md §5; licence unchecked, reference only)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2016/09/1200x900-55-1.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2102_p2_autoru_1975_cabin.jpg"
     }
   },
   "body": {
@@ -90,7 +100,34 @@
       "tol": 0.05
     }
   },
-  "dashNote": "No photo of a 2102 dashboard is named in the sources; the kit borrows CABIN_2101 (specs.ts KIT_SPECS), and that the 2102 shares the 2101's dash is not sourced.",
+  "dash": {
+    "photo": {
+      "src": "P",
+      "view": "driver"
+    },
+    "gauges": {
+      "v": 3,
+      "src": "P/P2 the 2101's hooded binnacle: one window with the ribbon speedometer across it and the small dials at its ends, six square lamps in a row under the ribbon (measurements-estates.md §5)"
+    },
+    "dialRows": {
+      "v": [
+        3
+      ],
+      "src": "P2 all in the one window (measurements-estates.md §5)"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P binnacle behind the wheel, left of the dash's middle"
+    },
+    "wheelSpokes": {
+      "v": 2,
+      "src": "P/P2 two spokes under a chrome horn ring (measurements-estates.md §5)"
+    },
+    "vents": {
+      "v": 2,
+      "src": "P two round grilled vents on the dash right of the binnacle, x 615 and 667 of 1200 px (measurements-estates.md §5)"
+    }
+  },
   "gaps": [
     "sideGlassBelt, sideGlassRail: no pane extents written as [D]/[P] for the 124 shell (the vent/drop columns in specs.ts carry no tag)",
     "mirror: only a front-view position is measured, none in profile",

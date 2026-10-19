@@ -1,11 +1,19 @@
-import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
+import {
+  CHECKPOINT_SPACING,
+  COARSE_SPACING,
+  NODE_SPACING,
+  RoadHeading,
+  stepNode,
+  type NodeState,
+} from './roadcurve';
+import { SwellWalk } from './roadswells';
 
 /**
- * The road spine: two small tables that make an arbitrarily long road affordable.
+ * The road spine: small tables that make an arbitrarily long road affordable.
  *
  * The centreline has ten million 4 m nodes, and retaining them all would be 240 MB
  * before elevation or headings. Nothing about that survives a forty-thousand-
- * kilometre road, so the spine is two sparse tables from one sequential walk:
+ * kilometre road, so the spine is sparse tables from one sequential walk:
  *
  *  - CHECKPOINTS every `CHECKPOINT_SPACING` metres: exact `(x, z)` snapshots. Any
  *    node can be reached by replaying at most 2500 steps from one, so `Road` keeps a
@@ -14,6 +22,11 @@ import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState
  *  - A COARSE POSITION INDEX every `COARSE_SPACING` metres. `RoadDistance` and
  *    hintless `Road.project` need the whole road spatially searchable without
  *    forcing those blocks into memory.
+ *
+ *  - THE SWELLS (`roadswells.ts`), one row per 950 m slot. A swell is placed from the
+ *    road under its slot, so building one needs that road's nodes: here they are
+ *    walked anyway, and a `SwellWalk` builds each slot as soon as the walk is far
+ *    enough past it. Nothing else builds a swell; every thread reads this table.
  *
  * Heading is absent now for a stronger reason than elevation. Elevation is read
  * from the landscape and heading from `RoadHeading`; both are pure functions of
@@ -31,9 +44,6 @@ import { CHECKPOINT_SPACING, NODE_SPACING, RoadHeading, stepNode, type NodeState
  * two intervals, so the walk never needs a checkpoint it has not reached yet.
  */
 
-/** Metres between coarse position samples. Matches `RoadDistance`'s own coarse step. */
-export const COARSE_SPACING = 200;
-
 /**
  * Format tag for the persisted cache. Bump on any change to the tables' MEANING —
  * which includes any change to the heading field, because a cached checkpoint is a
@@ -47,8 +57,9 @@ export const COARSE_SPACING = 200;
  * 10: corners closer together on pan/highway/rolling/derelict; the first district
  *     after the homestead is rolling or esses.
  * 11: closer corners and wider radius ranges on every kind but switchbacks.
+ * 12: the swell table, built in the walk; also bump on any change to the swells.
  */
-export const SPINE_FORMAT = 11;
+export const SPINE_FORMAT = 12;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */
@@ -59,13 +70,15 @@ export interface RoadSpine {
   /** Centreline position every `COARSE_SPACING`, index 0 at s = 0. */
   readonly coarseX: Float64Array;
   readonly coarseZ: Float64Array;
+  /** The road's swells, `SWELL_FIELDS` doubles per slot; see `SwellWalk`. */
+  readonly swells: Float64Array;
 }
 
 /** Nodes replayed to cross one checkpoint interval. */
 export const CHECKPOINT_NODES = CHECKPOINT_SPACING / NODE_SPACING;
 
 /**
- * Walks the whole centreline once and snapshots both tables.
+ * Walks the whole centreline once and snapshots the tables.
  *
  * Runs in a worker at load and is persisted by `spinecache.ts`. Allocation-free
  * inside the ten-million-step loop: one mutable `NodeState`, no per-node objects.
@@ -92,11 +105,14 @@ export function buildSpine(seed: number, length: number): RoadSpine {
     checkpointX: checkpointX.subarray(0, recorded),
     checkpointZ: checkpointZ.subarray(0, recorded),
   }));
+  const swells = new SwellWalk(seed, length, coarseX, coarseZ);
 
   const node: NodeState = { x: 0, z: 0 };
   // Node 0 is the origin, and it is both checkpoint 0 and coarse sample 0.
+  swells.node(0, 0, 0);
   for (let i = 1; i <= lastNode; i++) {
     stepNode(node, heading, i - 1);
+    swells.node(i, node.x, node.z);
     if (i % CHECKPOINT_NODES === 0) {
       const k = i / CHECKPOINT_NODES;
       checkpointX[k] = node.x;
@@ -107,8 +123,9 @@ export function buildSpine(seed: number, length: number): RoadSpine {
       const k = i / coarseStride;
       coarseX[k] = node.x;
       coarseZ[k] = node.z;
+      swells.coarse(k);
     }
   }
 
-  return { length, checkpointX, checkpointZ, coarseX, coarseZ };
+  return { length, checkpointX, checkpointZ, coarseX, coarseZ, swells: swells.finish() };
 }

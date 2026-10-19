@@ -634,7 +634,7 @@ export const CABIN_2131: CabinLayoutOverride = { bench: { from: 'hip', offset: 1
 
 // Per-model dashboards on the classic platform. Sizes are ratios read off interior
 // photos and the 2105/2107 cluster schematics, scaled to absolutes from a 1.36 m cabin
-// width (no dashboard photo carries a scale). The 2106 is the platform's own layout.
+// width (no dashboard photo carries a scale).
 
 /**
  * VAZ-2101: a flat dash without wood, a shallow chrome-bezelled hood (about 0.30 x
@@ -660,9 +660,19 @@ export const CABIN_2101: CabinLayoutOverride = {
 };
 
 /**
- * VAZ-2103: the 2106's hood and wood band, a wood panel behind five dials in one row
+ * VAZ-2103: the hood and wood band, a wood panel behind five dials in one row
  * (fuel, temperature, oil pressure, then tachometer and speedometer at twice their
- * size) and three rockers under the small dials, the first switching the lights.
+ * size) and three rockers under the small dials, the first switching the lights. In the
+ * dash's middle two oval vents side by side under the top roll, a round clock under the
+ * driver's-side one, a chrome strip with the heater levers and the ashtray, and a console
+ * from the fascia's foot to the tunnel carrying the radio. The middle read off an Avito
+ * photo of a 1978 car (refs/vaz2103.json P2) and the factory manual's controls list
+ * ("4. Дефлектор (левый), 5. Часы, 6. Дефлектор (правый)", monolith-publisher.com): the
+ * clock stands on the car's centre line (the console's middle, x 1005 of 840-1210 px)
+ * straight under the left vent; the right vent 210 px further over, about 0.14 at the
+ * chrome strip's 0.68 mm/px [P]. The vents about 105 x 55 mm, the clock's bezel about
+ * 65 mm across (measurements-classics.md §4) [P ratios, E absolutes]; heights stacked
+ * down the fascia under the wood band in the photo's order [E].
  */
 export const CABIN_2103: CabinLayoutOverride = {
   clusterFace: { right: 0, up: 0.062, half: [0.21, 0.05], colour: COLOURS.wood, frame: 'black' },
@@ -677,16 +687,35 @@ export const CABIN_2103: CabinLayoutOverride = {
   lamps: { right: -0.12, up: 0.022, cols: 7, pitch: 0.016, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
   lights: { right: -0.18, dy: -0.05, kind: 'rocker' },
   rockers: { on: 'fascia', at: [[LAYOUTS.classic.seatX + 0.12, -0.05], [LAYOUTS.classic.seatX + 0.06, -0.05]] },
+  vents: [{ x: 0, dy: -0.05, half: [0.05, 0.027] }, { x: -0.14, dy: -0.05, half: [0.05, 0.027] }],
+  clock: { right: 0, up: -0.11, radius: 0.026, on: 'fascia' },
+  ashtray: [-0.1, -0.135],
+  stack: { half: 0.1 },
+  radio: [0, -0.22],
   wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
   // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.4 cm below it, 2026-10-18).
   visor: { half: 0.16, depth: 0.13 },
 };
 
 /**
+ * VAZ-2106: the 2103's panel (two big and three small dials in one row on the wood, the
+ * oval vents, the clock under the driver's-side one, the console with the radio), seen on
+ * Commons r_3 (refs/vaz2106.json P) and an Avito photo of a 1989 car with 6600 km (P2):
+ * the same order and places [P]. Its wheel has the wide padded bar across the hub [P].
+ */
+export const CABIN_2106: CabinLayoutOverride = {
+  ...CABIN_2103,
+  wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
+};
+
+/**
  * VAZ-2105: a padded black dash without wood and its own rectangular cluster pod
  * (about 0.37 x 0.115 m): a combined fuel and temperature dial on the left, the
  * speedometer on the right, a small voltmeter between under a block of six warning
- * lamps, and two rockers at each end, the top left one for the lights.
+ * lamps, and two rockers at each end, the top left one for the lights. A slatted vent at
+ * each end of the fascia, level with the glovebox lid's top (the 2104's panel, the same
+ * part: refs/vaz2104.json P, P2, P4) [P]; the heater's three sliders in the middle are not
+ * modelled.
  */
 export const CABIN_2105: CabinLayoutOverride = {
   wood: undefined,
@@ -709,6 +738,7 @@ export const CABIN_2105: CabinLayoutOverride = {
   lamps: { right: 0, up: 0.088, cols: 3, pitch: 0.014, show: ['turn', 'beam', 'fuel', 'brake', 'oil', 'charge'] },
   lights: { right: -0.163, dy: 0.0885, kind: 'rocker', on: 'cluster' },
   rockers: { on: 'cluster', at: [[-0.163, 0.0335], [0.163, 0.0885], [0.163, 0.0335]] },
+  vents: [{ dy: -0.04 }],
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
   // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.6 cm below it, 2026-10-18).
   visor: { half: 0.16, depth: 0.128 },

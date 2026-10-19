@@ -1,13 +1,8 @@
 import { Landscape } from './landscape';
 import { roadConditionAt, type RoadConditionBuffer } from './gradient';
-import { MIN_CORNER_RADIUS, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
+import { COARSE_SPACING, MIN_CORNER_RADIUS, NODE_SPACING, RoadHeading, stepNode, type NodeState } from './roadcurve';
 import { RoadSwells } from './roadswells';
-import {
-  buildSpine,
-  CHECKPOINT_NODES,
-  COARSE_SPACING,
-  type RoadSpine,
-} from './roadspine';
+import { buildSpine, CHECKPOINT_NODES, type RoadSpine } from './roadspine';
 import { curveWidening, halfWidthAt, lanesPerSideAt, laneOffsetFor, LANE_WIDTH } from './roadprofile';
 
 /**
@@ -232,12 +227,9 @@ export class Road {
     // The heading's crest scouts replay from the spine's checkpoints, so a decision
     // deep in the road costs one interval rather than a walk from the house.
     this.headingField = new RoadHeading(this.seed, () => this.spine);
-    // The swells are laid from the spine and read back through the landscape, so the
-    // road, the terrain, the tiles and the vista all see them in one field. Their own
-    // budget drives over the bare bands.
-    this.swells = new RoadSwells(this.seed, this, this.headingField, (x, z) =>
-      this.landscape.baseHeightAt(x, z),
-    );
+    // The swells are built with the spine and read back through the landscape, so the
+    // road, the terrain, the tiles and the vista all see them in one field.
+    this.swells = new RoadSwells(this);
     this.landscape.setOverlay(this.swells);
     this.lastNode = Math.floor(this.length / NODE_SPACING);
     if (spine && spine.length !== this.length) {
@@ -247,7 +239,7 @@ export class Road {
     if (spine) this.swells.prepare();
   }
 
-  /** The checkpoint and coarse tables, built on demand if none was injected. */
+  /** The spine's tables, built on demand if none was injected. */
   get spine(): RoadSpine {
     if (!this.spineTables) {
       this.spineTables = buildSpine(this.seed, this.length);
@@ -357,18 +349,13 @@ export class Road {
     victim.xs[0] = node.x;
     victim.zs[0] = node.z;
     victim.headings[0] = this.headingField.at(first * NODE_SPACING);
+    victim.ys[0] = this.landscape.heightAt(node.x, node.z);
     for (let k = 1; k <= CHECKPOINT_NODES; k++) {
       stepNode(node, this.headingField, first + k - 1);
       victim.xs[k] = node.x;
       victim.zs[k] = node.z;
       victim.headings[k] = this.headingField.at((first + k) * NODE_SPACING);
-    }
-    // The swells under this block are built from the walk just made, before the
-    // heights below ask for them; see `RoadSwells.adoptBlock`.
-    victim.index = -1;
-    this.swells.adoptBlock(first, victim.xs, victim.zs, CHECKPOINT_NODES + 1);
-    for (let k = 0; k <= CHECKPOINT_NODES; k++) {
-      victim.ys[k] = this.landscape.heightAt(victim.xs[k]!, victim.zs[k]!);
+      victim.ys[k] = this.landscape.heightAt(node.x, node.z);
     }
 
     victim.index = index;

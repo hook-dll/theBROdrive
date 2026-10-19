@@ -3,16 +3,16 @@
  * radar across the road, a chase with the light bar and the siren, a stop on the
  * shoulder and a fine out of the pack.
  *
- * POSTS. Where the police stand is a pure function of the seed and the road: some of the
- * lay-bys in front of the roadside stops (`LAYBY_POST_CHANCE`; the car angled on the
- * pad, its nose to the road), and a pull-off on the open road's shoulder in some slots of
- * `SHOULDER_POST_SPACING_M` (`SHOULDER_POST_CHANCE`, only on a straight, clear of every
- * lay-by). A post faces the way the player travels when it is first met and stands on
- * that direction's own side; a lay-by post on the other side of the road stays empty. A
- * post is manned while the player's `heat` allows (`POLICE_HEAT_MAX` levels; each raises
- * both chances): a wanted driver meets more of them. The car is ephemeral, like a race
- * rival: the traffic stream (`RoadTraffic.spawnPolice`) puts it down parked when its post
- * comes into the stream's own unseen spawn band, and it leaves at the support edge.
+ * POSTS. Where the police stand is a pure function of the seed and the road: one post
+ * every `POST_GAP_MIN_M`–`POST_GAP_MAX_M` of road (each gap its own roll), the first that
+ * far past `POST_START_CLEAR_M`. A post faces the way the player travels when it is first
+ * met and stands on that direction's own side: on the lay-by in front of a roadside stop
+ * when one on that side reaches within `POST_LAYBY_SNAP_M` (the car angled on the pad,
+ * its nose to the road), otherwise on a pull-off on the shoulder. Every post is manned;
+ * `heat` (`POLICE_HEAT_MAX` levels) makes every one of them stop him. The car is
+ * ephemeral, like a race rival: the traffic stream (`RoadTraffic.spawnPolice`) puts it
+ * down parked when its post comes into the stream's own unseen spawn band, and it leaves
+ * at the support edge.
  *
  * THE RADAR. A posted car watches its own direction's traffic within `WATCH_M` of it.
  * Once the player's car is past it, it decides: faster than `SPEED_LIMIT_KMH` (90 km/h
@@ -38,7 +38,7 @@
  * THE FLIGHT. Driving off from a stop, ignoring the lights for `FLEE_TIME_S`, or opening
  * `FLEE_GAP_M` on the car is a flight. Each chase rolls once, at its start, what the
  * police do then: give up after `GIVE_UP_MIN_M`-`GIVE_UP_MIN_M + GIVE_UP_SPAN_M` of road,
- * or escalate — one more level of heat (more posts, a larger fine next stop) for
+ * or escalate — one more level of heat (stopped at every post, a larger fine next stop) for
  * `HEAT_COOL_S` of played time — and keep after him until he is lost.
  */
 
@@ -70,21 +70,18 @@ const CHECK_CHANCE = 0.12;
 /** A collision with a traffic car is still on the police's mind this long, seconds. */
 const ACCIDENT_MEMORY_S = 300;
 
-/** Shoulder post slots, one every this much road; the post somewhere in its middle half. */
-const SHOULDER_POST_SPACING_M = 3000;
-/** Chances a lay-by and a shoulder slot are manned, by heat (0..POLICE_HEAT_MAX). */
-const LAYBY_POST_CHANCE = [0.3, 0.5, 0.7, 0.9] as const;
-const SHOULDER_POST_CHANCE = [0.4, 0.6, 0.8, 1] as const;
+/** Road between one post and the next, metres: a fresh roll in this range per gap. */
+const POST_GAP_MIN_M = 5000;
+const POST_GAP_MAX_M = 10000;
 /** No post before this far from the start (the house), or this near the road's end. */
 const POST_START_CLEAR_M = 2000;
 const POST_END_CLEAR_M = 600;
-/** A shoulder post stands on a straight: no bend tighter than this radius within reach. */
-const SHOULDER_POST_MIN_RADIUS_M = 600;
-const SHOULDER_POST_STRAIGHT_M = 120;
-/** And clear of every lay-by by this much, metres. */
-const SHOULDER_POST_LAYBY_CLEAR_M = 300;
+/** A post this near a lay-by on its side moves onto it, metres (a pull-off there would overlap the pad). */
+const POST_LAYBY_SNAP_M = 300;
 /** Posts are read this far either side of the player and forgotten past twice it. */
 const POST_READ_M = TRAFFIC_REACH_M + 200;
+/** Read posts at least this far ahead (and behind): past the spawn band's far edge. */
+const POST_READ_LEAD_M = TRAFFIC_REACH_M;
 /** A post is put down when it is this far ahead: the stream's own unseen band. */
 const SPAWN_MIN_AHEAD_M = TRAFFIC_UNSEEN_M;
 const SPAWN_MAX_AHEAD_M = TRAFFIC_REACH_M - 40;
@@ -195,10 +192,22 @@ const POST_SALT = 0x504f5354;
 const CHECK_SALT = 0x43484b31;
 const CHASE_SALT = 0x43485345;
 /**
- * Post keys: a shoulder slot's even, a lay-by's odd (from its `Poi.index`), a dev post's
- * negative. A shoulder pull-off's own id is `-(slot + 1)`, a dev one's past `DEV_PULL_OFF_ID`.
+ * Post keys: a road post's `2 * index`, a dev lay-by post's `2 * Poi.index + 1`, a dev
+ * shoulder post's negative. A shoulder pull-off's own id is `-(index + 1)`, a dev one's
+ * past `DEV_PULL_OFF_ID`.
  */
 const DEV_PULL_OFF_ID = -(2 ** 30);
+
+/** Post places along the road per seed, grown on demand: `[0]` is `POST_START_CLEAR_M`, posts are `[1..]`. */
+const postPlaceCache = new Map<number, number[]>();
+function postPlaces(seed: number): number[] {
+  let places = postPlaceCache.get(seed);
+  if (!places) {
+    places = [POST_START_CLEAR_M];
+    postPlaceCache.set(seed, places);
+  }
+  return places;
+}
 
 /** What the police host has to offer: the traffic stream (`RoadTraffic`). */
 export interface PoliceHost {
@@ -478,10 +487,15 @@ export class PolicePatrol {
     }
   }
 
-  /** Re-reads the posts within `POST_READ_M` once he has left the stretch last read. */
+  /**
+   * Re-reads the posts within `POST_READ_M` once less than `POST_READ_LEAD_M` of the
+   * stretch last read is left ahead of him either way, so every post is known before it
+   * enters the spawn band (one first read inside the band could be passed before its car
+   * is placed).
+   */
   private refreshPosts(): void {
     const s = this.playerS;
-    if (s - POST_READ_M * 0.5 >= this.postsFrom && s + POST_READ_M * 0.5 <= this.postsTo) return;
+    if (s - POST_READ_LEAD_M >= this.postsFrom && s + POST_READ_LEAD_M <= this.postsTo) return;
     for (const [key, post] of this.posts) {
       const far = Math.abs(post.pullOff.s - s) > POST_READ_M * 2;
       if (far && post.state !== 'live' && post.state !== 'spawning' && this.chase?.post !== post) this.posts.delete(key);
@@ -492,32 +506,25 @@ export class PolicePatrol {
     this.postsTo = s + POST_READ_M;
     if (to <= from) return;
     const seed = this.world.seed;
-    const heat = this.heat;
-    for (const layby of laybysBetween(seed, from, to)) {
-      const key = layby.poiIndex * 2 + 1;
-      if (this.posts.has(key)) continue;
-      if (hash01(seed, POST_SALT, layby.poiIndex) >= LAYBY_POST_CHANCE[heat]!) continue;
-      this.posts.set(key, this.newPost(key, layby.side === 1 ? -1 : 1, layby, false));
+    const places = postPlaces(seed);
+    while (places[places.length - 1]! <= to) {
+      const index = places.length;
+      places.push(places[index - 1]! + POST_GAP_MIN_M + hash01(seed, POST_SALT, index) * (POST_GAP_MAX_M - POST_GAP_MIN_M));
     }
-    const first = Math.ceil(from / SHOULDER_POST_SPACING_M);
-    const last = Math.floor(to / SHOULDER_POST_SPACING_M);
-    for (let slot = first; slot <= last; slot++) {
-      if (this.posts.has(slot * 2)) continue;
-      if (hash01(seed, POST_SALT, slot, 1) >= SHOULDER_POST_CHANCE[heat]!) continue;
-      const at = (slot + 0.25 + 0.5 * hash01(seed, POST_SALT, slot, 2)) * SHOULDER_POST_SPACING_M;
-      if (at < from || at > to || !this.straightAt(at)) continue;
-      if (laybysBetween(seed, at - SHOULDER_POST_LAYBY_CLEAR_M, at + SHOULDER_POST_LAYBY_CLEAR_M).length > 0) continue;
+    for (let index = 1; index < places.length; index++) {
+      const at = places[index]!;
+      if (at < from) continue;
+      if (at > to) break;
+      const key = index * 2;
+      if (this.posts.has(key)) continue;
       // It faces the way he is going, on that direction's own side of the road.
       const direction = this.travel;
-      this.posts.set(slot * 2, this.newPost(slot * 2, direction, shoulderPullOff(seed, at, direction === 1 ? -1 : 1, -(slot + 1)), false));
+      const side = direction === 1 ? -1 : 1;
+      const layby = laybysBetween(seed, at - POST_LAYBY_SNAP_M, at + POST_LAYBY_SNAP_M)
+        .filter((l) => l.side === side)
+        .sort((a, b) => Math.abs(a.s - at) - Math.abs(b.s - at))[0];
+      this.posts.set(key, this.newPost(key, direction, layby ?? shoulderPullOff(seed, at, side, -(index + 1)), false));
     }
-  }
-
-  private straightAt(s: number): boolean {
-    for (let d = -SHOULDER_POST_STRAIGHT_M; d <= SHOULDER_POST_STRAIGHT_M; d += 20) {
-      if (Math.abs(this.road.curvatureAt(s + d)) > 1 / SHOULDER_POST_MIN_RADIUS_M) return false;
-    }
-    return true;
   }
 
   private newPost(key: number, direction: 1 | -1, pullOff: Layby, dev: boolean): Post {
@@ -723,7 +730,7 @@ export class PolicePatrol {
     }
     const heat = Math.min(POLICE_HEAT_MAX, this.heat + 1);
     this.setHeat(heat);
-    this.notify(`you fled the police — they radioed ahead: wanted level ${heat}, more patrols and a bigger fine`);
+    this.notify(`you fled the police — they radioed ahead: wanted level ${heat}, every post stops you and a bigger fine`);
   }
 
   /** A fled chase that has run its course goes back on patrol; true when it has. */

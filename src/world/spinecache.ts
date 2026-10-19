@@ -30,6 +30,7 @@ interface StoredSpine {
   readonly checkpointZ: ArrayBuffer;
   readonly coarseX: ArrayBuffer;
   readonly coarseZ: ArrayBuffer;
+  readonly swells: ArrayBuffer;
 }
 
 function openDb(): Promise<IDBDatabase | null> {
@@ -92,6 +93,7 @@ function fromBuffers(stored: Omit<StoredSpine, 'format'>): RoadSpine {
     checkpointZ: new Float64Array(stored.checkpointZ),
     coarseX: new Float64Array(stored.coarseX),
     coarseZ: new Float64Array(stored.coarseZ),
+    swells: new Float64Array(stored.swells),
   };
 }
 
@@ -146,6 +148,7 @@ export async function loadSpine(seed: number, length: number): Promise<RoadSpine
       checkpointZ: built.checkpointZ.buffer as ArrayBuffer,
       coarseX: built.coarseX.buffer as ArrayBuffer,
       coarseZ: built.coarseZ.buffer as ArrayBuffer,
+      swells: built.swells.buffer as ArrayBuffer,
     });
     db.close();
   }

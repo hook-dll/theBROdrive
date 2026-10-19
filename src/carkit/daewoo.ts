@@ -495,9 +495,10 @@ export const LOOK_ESPERO: KitLook = {
   headrests: true,
   brightwork: 'black', // [P]
   sill: null,
-  // On the sail at the glass's front foot (owner's review 2: see the columns) [D side: the
-  // head s 1.78–1.90 against the glass from 1.79; here the glass from 1.62].
-  mirrorS: 1.74,
+  // On the sail (owner's review 2: where the driver sees it; review 3: the sail now under
+  // the glass's raised foot, 1.367–1.66 along the belt) [D side: the head s 1.78–1.90 on a
+  // sail to 1.78, 0.04–0.12 ahead of its rear end; here as far ahead of the sail's 1.66].
+  mirrorS: 1.6,
   // The black rubbing strip along both doors [D side y 243: 0.488; P beige front, h].
   waist: { y: 0.49, height: 0.035, finish: 'black' },
   // Amber, on the wing behind the front arch [P dark green front].

@@ -3,7 +3,7 @@ import { BASIN_OUTER_M } from './lakes';
 import type { LandformFootprint } from './landforms';
 import type { Road } from './road';
 import { RoadDistance } from './roaddistance';
-import { COARSE_SPACING } from './roadspine';
+import { COARSE_SPACING } from './roadcurve';
 import type { Terrain } from './terrain';
 
 /**

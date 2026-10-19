@@ -16,6 +16,15 @@
       "what": "Commons 'File:VAZ-2103-interior.jpg' (i_2103 in measurements-classics.md §0)",
       "url": "https://commons.wikimedia.org/wiki/File:VAZ-2103-interior.jpg",
       "image": "build/carshape/_refs/bp/img/vaz2103_i_VAZ-2103-interior.jpg"
+    },
+    "P2": {
+      "what": "Avito sale listing of a 1978 VAZ-2103 ('капсула времени'), reposted on AvtoGurman '1978 ВАЗ 2103 — капсула времени': the dash's driver's half and middle from the open driver's door (measurements-classics.md §4; licence unchecked, reference only)",
+      "url": "https://xn--80aafe9bhdrpm.com/wp-content/uploads/2019/09/5826634543.jpg",
+      "image": "build/carshape/_refs/bp/img/vaz2103_p2_avito_1978_dash.jpg"
+    },
+    "C": {
+      "what": "the VAZ-2103/2106 owner's manual's controls list as printed by Monolith: '4. Дефлектор (левый), 5. Часы, 6. Дефлектор (правый), 7. Пепельница' (read 2026-10-19)",
+      "url": "https://monolith-publisher.com/organy-upravlenija-vaz-2103-2106/"
     }
   },
   "body": {
@@ -112,11 +121,19 @@
     },
     "clock": {
       "v": true,
-      "src": "P 'clock elsewhere on the panel' (measurements-classics.md §4)"
+      "src": "P2 a round clock (bezel about 90 px against the 145 px oval vents) on the fascia on the car's centre line (x 1005 of the console's 840-1210 px), straight under the driver's-side vent; C 'Часы' between the left and right vents (measurements-classics.md §4)"
     },
     "wheelSpokes": {
       "v": 2,
-      "src": "P 2 spokes (measurements-classics.md §4, r_3)"
+      "src": "P2 two spokes under a chrome bar (measurements-classics.md §4)"
+    },
+    "vents": {
+      "v": 2,
+      "src": "P2 two oval grilled vents side by side under the top roll right of the binnacle, x 1000 and 1215 px; C left and right vents (measurements-classics.md §4)"
+    },
+    "stack": {
+      "v": true,
+      "src": "P2 a black console from the heater strip down to the tunnel, the radio and a speaker grille in it (measurements-classics.md §4)"
     }
   },
   "gaps": [
@@ -126,7 +143,7 @@
     "roofHalfWidth, beltHalfWidth: no front-view widths measured for the 124 shell",
     "bonnet, bootLid: lid edges not measured (bonnetFront/bootEnd in specs.ts are untagged)",
     "body below the belt and glass: no 2103 side readings; the 124 shell values from the 2101 drawing are shifted +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)",
-    "dash glovebox/stack/console/vents/wheelDiameter: not visible or not measured in i_2103",
+    "dash glovebox/console/wheelDiameter: not visible or not measured in i_2103 or P2",
     "height: passport/dimension value; the kit shells stand lower before the loader's fit (specs.ts header, STATUS.md 'Height')"
   ],
   "overlay": {

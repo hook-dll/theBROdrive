@@ -47,7 +47,7 @@ import {
 import { WorldOrigin } from '../src/world/origin';
 import { Road } from '../src/world/road';
 import { RoadDistance } from '../src/world/roaddistance';
-import { COARSE_SPACING } from '../src/world/roadspine';
+import { COARSE_SPACING } from '../src/world/roadcurve';
 import { Terrain } from '../src/world/terrain';
 
 const DEFAULT_SEEDS = [1, 7, 42, 1337, 90210, 2225416641, 3094605770];

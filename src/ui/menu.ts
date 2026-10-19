@@ -1172,10 +1172,32 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
+      segmented('Virtual dashboard', [
+        {
+          label: 'On',
+          icon: 'drive',
+          hint: 'The speedometer and gauges are drawn on screen while you drive.',
+          active: () => settings.virtualDashboard,
+          pick: () => {
+            settings.virtualDashboard = true;
+            apply();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'fov',
+          hint: 'No dashboard on screen; the car’s own instruments still read from the seat.',
+          active: () => !settings.virtualDashboard,
+          pick: () => {
+            settings.virtualDashboard = false;
+            apply();
+          },
+        },
+      ]),
       sliderField(
-        'Dashboard Size',
+        'Virtual Dashboard Size',
         'gameplay',
-        'How big the driving dashboard is drawn. 100% is the default size.',
+        'How big the virtual dashboard is drawn. 100% is the default size.',
         DASHBOARD_SIZE_MIN,
         DASHBOARD_SIZE_MAX,
         DASHBOARD_SIZE_STEP,
@@ -2476,6 +2498,7 @@ export class MainMenu {
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
         dashboardSize: base.dashboardSize,
+        virtualDashboard: base.virtualDashboard,
         viewDistance: base.viewDistance,
         trafficDensity: base.trafficDensity,
       };
@@ -2511,6 +2534,7 @@ export class MainMenu {
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
           dashboardSize: settings.dashboardSize,
+          virtualDashboard: settings.virtualDashboard,
           viewDistance: settings.viewDistance,
           trafficDensity: settings.trafficDensity,
         });

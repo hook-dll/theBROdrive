@@ -3,12 +3,12 @@ import { buildSpine } from './roadspine';
 /**
  * Worker entry for the road spine walk.
  *
- * The walk is ten million iterations at 40 000 km. On the main thread that is six
- * tenths of a second of a frozen tab before the menu even hands over, and it would
- * land again on every session that does not hit the persisted cache. Here it lands
- * nowhere the player can see.
+ * The walk is ten million iterations at 40 000 km, and it builds the road's swells as
+ * it goes. On the main thread that would be seconds of a frozen tab before the menu
+ * even hands over, and it would land again on every session that does not hit the
+ * persisted cache. Here it lands nowhere the player can see.
  *
- * The four tables go back as transferable buffers, so the payload is moved rather
+ * The five tables go back as transferable buffers, so the payload is moved rather
  * than structured-cloned. That also means this worker's copies are detached
  * afterwards, which is fine: it is done with them and is torn down immediately.
  */
@@ -24,6 +24,7 @@ export interface SpineResponse {
   readonly checkpointZ: ArrayBuffer;
   readonly coarseX: ArrayBuffer;
   readonly coarseZ: ArrayBuffer;
+  readonly swells: ArrayBuffer;
 }
 
 /**
@@ -51,11 +52,13 @@ scope.onmessage = (event: MessageEvent<SpineRequest>) => {
     checkpointZ: spine.checkpointZ.buffer as ArrayBuffer,
     coarseX: spine.coarseX.buffer as ArrayBuffer,
     coarseZ: spine.coarseZ.buffer as ArrayBuffer,
+    swells: spine.swells.buffer as ArrayBuffer,
   };
   scope.postMessage(response, [
     response.checkpointX,
     response.checkpointZ,
     response.coarseX,
     response.coarseZ,
+    response.swells,
   ]);
 };
