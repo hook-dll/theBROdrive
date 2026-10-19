@@ -35,6 +35,7 @@ import { PartBuilder, lerp, table, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, attach, fineDetail, mirrorFrame, pivotGroup, type KitContext } from './context';
 import type { KitControl, KitMotion } from './rig';
 import type { KitCarSpec } from './spec';
+import type { CabinPlace, PlaceRoom } from '../vehicle/cabin';
 
 type P2 = readonly [number, number];
 
@@ -1595,6 +1596,22 @@ export interface KitDashItem {
  * unturned: the Vehicle hangs the cabin's light from it (`Vehicle.syncDomeLight`).
  */
 export const KIT_DOME_LAMP_NODE = 'kit_dome_lamp';
+/**
+ * Prefix of the empty nodes marking where things may lie in the cabin
+ * (`kit_place:<place>`, vehicle/cabin.ts `CABIN_PLACES`): each at the middle of its
+ * room on the surface it stands on, turned with that surface, its +z forward; the room
+ * (`PlaceRoom`, kit metres) in `userData.kitPlace`. The front seat's rides in its seat's
+ * pivot. They stay in every instance: vehicle/cabincargo.ts hangs what lies there from them.
+ */
+export const KIT_PLACE_NODE = 'kit_place';
+/** Room kept clear of the seat back, the doors' lining and the tunnel round a place, metres. */
+const PLACE_CLEAR = 0.03;
+/** A seat's room: how tall a thing on it may stand, and how far it may hang over the cushion's front edge. */
+const SEAT_ROOM_HEIGHT = 0.5;
+const SEAT_OVERHANG = 0.1;
+/** The floors' rooms: under the dash and glovebox in front, under the front seat's back behind. */
+const FRONT_FLOOR_HEIGHT = 0.3;
+const REAR_FLOOR_HEIGHT = 0.32;
 /** The rear bench's two seats' centre lines off the car's centre, where its inserts are. */
 const BENCH_SEAT_X = 0.25;
 /** Seated eye over the driver's cushion top, metres: a mid-size adult sitting upright. */
@@ -1955,6 +1972,7 @@ class Cabin {
     this.engineCover();
     for (const side of [1, -1]) this.frontSeat(side);
     this.bench();
+    if (!this.van) this.floorPlaces();
     this.driverEye();
     this.rearEye();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
@@ -2964,6 +2982,17 @@ class Cabin {
       inlay(b.color(insert), 'trim', [[-0.11, 0.065, -0.19], [0.11, 0.065, -0.19], [0.11, 0.065, 0.19], [-0.11, 0.065, 0.19]]);
       b.pop();
     });
+    // The front passenger's cushion holds things (vehicle/cabin.ts): the room over its
+    // flat top, from just behind the rounded front edge back to the seat back's foot.
+    if (side < 0) {
+      const cushion = this.P(x, top - 0.065, hip - 0.17);
+      const back = hip + 0.07 - 0.015 - 0.02;
+      const front = hip - 0.17 - 0.26 + 0.04;
+      const mid = (back + front) / 2;
+      const at = add(cushion, rotX([0, 0.065, hip - 0.17 - mid], -0.07));
+      const halfX = Math.min(0.21, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT) - this.x0);
+      this.place(seat, baseAt, 'seat', at, -0.07, { halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
+    }
 
     const t = L.recline;
     const backAt = this.P(x, top - 0.035, hip + 0.07);
@@ -3023,6 +3052,86 @@ class Cabin {
     group.name = KIT_BENCH_NODE;
     addBuilt(group, b, ORIGIN, 'bench', true);
     this.group.add(group);
+    // The bench holds things on either half or across the whole of it: the room over
+    // its flat top from behind the front edge to the back's foot, clear of the doors.
+    const cushion = this.P(0, top - 0.07, H - 0.13);
+    const back = H - 0.015 - 0.02;
+    const front = H - 0.13 - 0.25 + 0.04;
+    const mid = (back + front) / 2;
+    const at = add(cushion, rotX([0, 0.07, H - 0.13 - mid], -0.06));
+    const edge = Math.min(half - 0.045, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT));
+    const room = (halfX: number): PlaceRoom => ({ halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
+    const inner = 0.01;
+    const halfWidth = (edge - inner) / 2;
+    this.place(group, ORIGIN, 'bench', at, -0.06, room(edge));
+    this.place(group, ORIGIN, 'bench_l', add(at, [inner + halfWidth, 0, 0]), -0.06, room(halfWidth));
+    this.place(group, ORIGIN, 'bench_r', add(at, [-(inner + halfWidth), 0, 0]), -0.06, room(halfWidth));
+  }
+
+  /**
+   * The floor in front of the passenger's seat and of the bench, where a thing that
+   * comes off a seat lands (vehicle/cabin.ts `FALLS_TO`). Laid out generously — in front
+   * from the toe board's foot to under the seat's frame, behind from the seat's rails to
+   * the bench's base, between the tunnel and the door — and cut clear of the seats, the
+   * dash and the sills by places.ts. Behind: a half either side of the tunnel, or the
+   * whole width lying across its top. A van's floor is its wheel boxes and engine
+   * cover: it has none.
+   */
+  private floorPlaces(): void {
+    const L = this.lay;
+    const t = L.tunnel;
+    const y = this.floorY;
+    const hip = this.hipS;
+    {
+      const s0 = this.fw + L.toeRun + PLACE_CLEAR;
+      const s1 = hip - 0.17 - 0.2;
+      const inner = t.base[0] + PLACE_CLEAR;
+      const outer = this.sideRoom(s0, s1, y, y + FRONT_FLOOR_HEIGHT);
+      const halfX = (outer - inner) / 2;
+      const at = this.P(-(inner + halfX), y, (s0 + s1) / 2);
+      this.place(this.group, ORIGIN, 'floor_front', at, 0, { halfX, halfZ: (s1 - s0) / 2, height: FRONT_FLOOR_HEIGHT, overhang: 0 });
+    }
+    const s0 = hip + 0.1 + PLACE_CLEAR;
+    const s1 = this.benchS - 0.13 - 0.25;
+    if (s1 <= s0) return;
+    const halfZ = (s1 - s0) / 2;
+    const mid = (s0 + s1) / 2;
+    const outer = this.sideRoom(s0, s1, y, y + REAR_FLOOR_HEIGHT);
+    const inner = Math.max(t.base[0], t.base[1]) + PLACE_CLEAR;
+    const halfX = (outer - inner) / 2;
+    const room: PlaceRoom = { halfX, halfZ, height: REAR_FLOOR_HEIGHT, overhang: 0 };
+    this.place(this.group, ORIGIN, 'floor_rear_l', this.P(inner + halfX, y, mid), 0, room);
+    this.place(this.group, ORIGIN, 'floor_rear_r', this.P(-(inner + halfX), y, mid), 0, room);
+    const tunnelTop = Math.max(t.heights[1], t.heights[2]);
+    this.place(this.group, ORIGIN, 'floor_rear', this.P(0, y + tunnelTop, mid), 0, {
+      halfX: outer,
+      halfZ,
+      height: REAR_FLOOR_HEIGHT - tunnelTop,
+      overhang: 0,
+    });
+  }
+
+  /**
+   * The least half width the lining leaves between `s0` and `s1` and heights `y0` to
+   * `y1`, less `PLACE_CLEAR`: how far out a thing in the cabin may reach there.
+   */
+  private sideRoom(s0: number, s1: number, y0: number, y1: number): number {
+    let least = Infinity;
+    for (let i = 0; i <= 4; i++) {
+      const s = lerp(s0, s1, i / 4);
+      for (let j = 0; j <= 4; j++) least = Math.min(least, this.inner(s, lerp(y0, y1, j / 4)));
+    }
+    return least - PLACE_CLEAR;
+  }
+
+  /** One `KIT_PLACE_NODE` under `parent` (standing at `parentAt`), at `at`, turned `tilt` about x. */
+  private place(parent: THREE.Object3D, parentAt: Vec3, kind: CabinPlace, at: Vec3, tilt: number, room: PlaceRoom): void {
+    const node = new THREE.Object3D();
+    node.name = `${KIT_PLACE_NODE}:${kind}`;
+    node.position.set(at[0] - parentAt[0], at[1] - parentAt[1], at[2] - parentAt[2]);
+    node.rotation.x = tilt;
+    node.userData.kitPlace = room;
+    parent.add(node);
   }
 
   // ---- doors ----

@@ -11,6 +11,7 @@ import {
   type TrunkGridRayHit,
 } from '../src/vehicle/trunk';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { emptyCabin } from '../src/vehicle/cabin';
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -35,6 +36,7 @@ const car: CarState = {
   oilLitres: 4,
   engineTempC: COLD_SOAK_C,
   storage: new Array(TRUNK_CELL_COUNT).fill(null),
+  cabin: emptyCabin(),
   odometer: 0,
   x: 0,
   y: 1,

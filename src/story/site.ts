@@ -36,6 +36,7 @@ import { oilCapacity } from '../parts/registry';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { CarState, GameWorld } from '../game/state';
 import type { LoosePartField } from '../parts/loose';
+import { emptyCabin } from '../vehicle/cabin';
 
 // ---------------------------------------------------------------------------
 // Layout constants. Positions are expressed in the road frame: `s` is arclength
@@ -402,6 +403,7 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
     engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet,
+    cabin: emptyCabin(),
     odometer: 0,
     x: geometry.car.x,
     y: carY,

@@ -33,7 +33,9 @@ import {
   type EngineSpec,
   type GearboxSpec,
 } from '../parts/registry';
-import { itemMass } from '../items/items';
+import { itemMass, type Item } from '../items/items';
+import { CabinCargoView } from './cabincargo';
+import type { CabinRooms } from './cabin';
 import {
   carModel,
   frontWeightFraction,
@@ -846,6 +848,16 @@ class HiddenStillGroup extends THREE.Group {
   }
 }
 
+/** No cabin places: a car whose model is not built yet. */
+const NO_CABIN_ROOMS: CabinRooms = [];
+
+/** What lies in a cabin weighs, kg. */
+function cabinMass(cabin: readonly (Item | null)[]): number {
+  let mass = 0;
+  for (const item of cabin) if (item) mass += itemMass(item);
+  return mass;
+}
+
 /** Where this frame is seen from (scene frame) and its length; see `Vehicle.viewFrom`. */
 const kitEye = new THREE.Vector3();
 let kitEyeKnown = false;
@@ -1008,6 +1020,8 @@ export class Vehicle implements Rebasable {
   private kitIgnition = false;
   /** The kit courtesy lamp's node, which the cabin's light hangs from (`syncDomeLight`). */
   private kitDome: THREE.Object3D | null = null;
+  /** What lies on the seats and floor of a kit car's cabin, drawn (vehicle/cabincargo.ts). */
+  private cabinView: CabinCargoView | null = null;
   private readonly domeSource = new THREE.Vector3();
   private readonly domeTarget = new THREE.Vector3();
   /** This car's lamps: beam mode, indicator, lens materials and the beams they cast. */
@@ -1536,6 +1550,19 @@ export class Vehicle implements Rebasable {
    */
   get kit(): KitRig | null {
     return this.kitRig;
+  }
+
+  /**
+   * Each cabin place's room on this car (vehicle/cabin.ts), metres; null where it has
+   * none, all null until its model is built.
+   */
+  get cabinRooms(): CabinRooms {
+    return this.cabinView?.rooms ?? NO_CABIN_ROOMS;
+  }
+
+  /** The cabin place a ray hit on this car's drawn cabin cargo belongs to, or -1. */
+  cabinPlaceOf(object: THREE.Object3D): number {
+    return this.cabinView?.placeOf(object) ?? -1;
   }
 
   /**
@@ -3831,6 +3858,7 @@ export class Vehicle implements Rebasable {
         (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
     if (this.kitRig) this.driveKit(this.kitRig);
+    this.cabinView?.sync(this.car.cabin, performance.now());
   }
 
   /**
@@ -5144,11 +5172,11 @@ export class Vehicle implements Rebasable {
     );
 
     // Cargo: the hold's own cells behind the rear axle, and what the driver is
-    // carrying, which rides in the seat with him.
+    // carrying, which rides in the seat with him, as does what lies in the cabin.
     let cargo = 0;
     for (const item of this.car.storage) if (item) cargo += itemMass(item);
     mass += load('cargo', cargo, anchors.hold);
-    mass += load('carried', this.carriedMassKg, anchors.seat);
+    mass += load('carried', this.carriedMassKg + cabinMass(this.car.cabin), anchors.seat);
 
     return {
       mass: Math.max(1, mass),
@@ -6325,6 +6353,7 @@ export class Vehicle implements Rebasable {
         }
       }
       this.kitDome = instance.body.getObjectByName(KIT_DOME_LAMP_NODE) ?? null;
+      this.cabinView = new CabinCargoView(instance.body);
     } else {
       // The body subtree is cloned per vehicle, so this node belongs to this car and
       // turning it cannot turn anybody else's wheel.
@@ -6379,6 +6408,8 @@ export class Vehicle implements Rebasable {
     this.lamps.clear();
     this.surface?.dispose();
     this.surface = null;
+    this.cabinView?.dispose();
+    this.cabinView = null;
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.bodyGroup = null;
     // Its materials are the paint's and glass's, which the surface disposed; its geometry is the model's.

@@ -1255,6 +1255,11 @@ export class PoiProvider implements ChunkProvider {
     private readonly dancers: DancerField,
     /** The vending machines and lot cars' registry (world/market.ts). */
     private readonly market: MarketField,
+    /**
+     * `Poi.index` of stops where no courier parks: a dream's start and goal, whose
+     * parking pocket takes the courier's place on the pad (dreams/dream.ts).
+     */
+    private readonly courierFreeStops: ReadonlySet<number>,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1295,7 +1300,7 @@ export class PoiProvider implements ChunkProvider {
     }
     for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
       const courierPoi = pois.find((poi) => poi.s === stop.s);
-      if (!courierPoi) continue;
+      if (!courierPoi || this.courierFreeStops.has(courierPoi.index)) continue;
       // On the stop's lay-by when it has one, on its building side so the parking line
       // beside it stays free (world/layby.ts); a mast has none, and the car stands on
       // the verge as it always did.

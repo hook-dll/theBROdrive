@@ -573,6 +573,7 @@ const MAX_RESIDUAL_M = 0.6;
     roadDistance,
     undefined as never,
     new MarketField(),
+    new Set(),
   );
 
   /**

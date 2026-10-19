@@ -312,6 +312,11 @@ export class PolicePatrol {
   private devKey = 0;
   /** What the HUD's prompt line says while the police are after him; null otherwise. */
   prompt: string | null = null;
+  /**
+   * Whether posts stand on the road at all. A dream can ask for none (dreams/dream.ts
+   * `police`); set before the first step, so no post is ever read.
+   */
+  postsEnabled = true;
 
   constructor(
     private readonly world: GameWorld,
@@ -494,6 +499,7 @@ export class PolicePatrol {
    * is placed).
    */
   private refreshPosts(): void {
+    if (!this.postsEnabled) return;
     const s = this.playerS;
     if (s - POST_READ_LEAD_M >= this.postsFrom && s + POST_READ_LEAD_M <= this.postsTo) return;
     for (const [key, post] of this.posts) {
@@ -786,14 +792,15 @@ export class PolicePatrol {
       fine += FINE_NO_PAPERS;
       items.push('no papers for this car');
     }
-    // THE WAYBILL is the boot up to the body's contract slots; anything past it, and
-    // anything carried in the pack, is undeclared.
+    // THE WAYBILL is the boot and the cabin up to the body's contract slots; anything
+    // past it, and anything carried in the pack, is undeclared.
     let undeclared = 0;
     for (const item of state.player.carried) if (item.type === 'contract_cargo') undeclared++;
     if (car) {
-      let boot = 0;
-      for (const item of car.storage) if (item?.type === 'contract_cargo') boot++;
-      undeclared += Math.max(0, boot - contractSlotsFor(car.modelId));
+      let aboard = 0;
+      for (const item of car.storage) if (item?.type === 'contract_cargo') aboard++;
+      for (const item of car.cabin) if (item?.type === 'contract_cargo') aboard++;
+      undeclared += Math.max(0, aboard - contractSlotsFor(car.modelId));
     }
     if (undeclared > 0) {
       fine += FINE_UNDECLARED * undeclared;

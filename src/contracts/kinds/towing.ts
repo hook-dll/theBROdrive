@@ -36,6 +36,7 @@ export const towingKind: ContractKindDef = {
       return `bring it within ${DELIVERY_RANGE_M} m — on the bar is fine`;
     }
     if (car.storage.some((cell) => cell !== null)) return 'empty its boot before handing it over';
+    if (car.cabin.some((place) => place !== null)) return 'take your things off its seats before handing it over';
     return null;
   },
   onDelivered: (item) => {

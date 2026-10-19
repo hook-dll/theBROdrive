@@ -55,6 +55,9 @@ export class ContractRuntime {
       for (const item of car.storage) {
         if (isCargo(item)) this.visit(item, 'car', carId, knock, onContractItem);
       }
+      for (const item of car.cabin) {
+        if (isCargo(item)) this.visit(item, 'car', carId, knock, onContractItem);
+      }
     }
     for (const key of Object.keys(state.looseItems)) {
       const item = state.looseItems[key]?.item;
@@ -88,5 +91,15 @@ export class ContractRuntime {
     const dropped = place === 'loose' && (previous === 'hand' || previous === 'car');
     const wear = knock * RADIO_WEAR_PER_SCRATCH + (dropped ? RADIO_DROP_WEAR : 0);
     if (wear > 0) item.progress.condition = Math.max(0, (item.progress.condition ?? 1) - wear);
+  }
+
+  /**
+   * A thing came off a seat in the cabin onto the floor or into a door (vehicle/cabin.ts
+   * `CabinRide`): a fragile radio takes it as it takes a drop.
+   */
+  fell(item: ContractCargoItem): void {
+    if (item.contractKind !== 'fragile_radio') return;
+    if (!item.progress) item.progress = defaultProgress();
+    item.progress.condition = Math.max(0, (item.progress.condition ?? 1) - RADIO_DROP_WEAR);
   }
 }

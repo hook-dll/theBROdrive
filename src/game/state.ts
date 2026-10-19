@@ -121,6 +121,11 @@ export interface CarState {
   /** Four fixed, typed service cells under the bonnet. */
   readonly bonnet: (Item | null)[];
   /**
+   * What lies in the cabin, by place (vehicle/cabin.ts `CABIN_PLACES`): the front
+   * passenger's seat, the rear bench and the floor in front of them.
+   */
+  readonly cabin: (Item | null)[];
+  /**
    * Cosmetic body condition of the SHELL, 0..1 each, distinct from the per-part
    * `dirt`/`rust` a `PartInstance` carries: those describe a component that can be
    * removed and carried around, these describe the car.
@@ -381,6 +386,8 @@ export type WorldDelta =
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
+  /** One place in a car's cabin (vehicle/cabin.ts) laid on, cleared, or slid onto. */
+  | { t: 'car_cabin'; carId: string; place: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
   | { t: 'wreck_bonnet'; wreckId: string; cell: number; item: Item | null }
   /**
@@ -574,6 +581,9 @@ export class GameWorld {
       for (const item of car.storage) {
         if (item) bump(item.id);
       }
+      for (const item of car.cabin) {
+        if (item) bump(item.id);
+      }
     }
     for (const storage of Object.values(state.wreckStorage)) {
       for (const item of storage) {
@@ -763,6 +773,11 @@ export class GameWorld {
         if (car && delta.cell >= 0 && delta.cell < car.storage.length) {
           car.storage[delta.cell] = delta.item;
         }
+        break;
+      }
+      case 'car_cabin': {
+        const car = s.cars[delta.carId];
+        if (car && delta.place >= 0 && delta.place < car.cabin.length) car.cabin[delta.place] = delta.item;
         break;
       }
       case 'wreck_storage': {

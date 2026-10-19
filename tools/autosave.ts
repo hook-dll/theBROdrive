@@ -4,6 +4,7 @@ import { decodeSaveCode, encodeSaveCode, installVehicleAutosave } from '../src/s
 import { DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../src/vehicle/trunk';
 import { COLD_SOAK_C } from '../src/vehicle/cooling';
+import { emptyCabin } from '../src/vehicle/cabin';
 
 interface SavedCall {
   id: string;
@@ -34,6 +35,7 @@ initial.cars['car:test'] = {
   oilLitres: 3,
   engineTempC: COLD_SOAK_C,
   storage: new Array<Item | null>(TRUNK_CELL_COUNT).fill(null),
+  cabin: emptyCabin(),
   odometer: 50,
   x: 0,
   y: 1,

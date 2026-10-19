@@ -59,6 +59,8 @@ import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
+import { DREAMS } from '../dreams/dream';
+import { dreamOpen, loadDreamProgress } from '../dreams/progress';
 
 /** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
 const COMPUTE_LEVELS: readonly { level: ComputeLevel; label: string }[] = [
@@ -286,6 +288,11 @@ function clockIcon(dayFraction: number): string {
  */
 function formatKm(km: number): string {
   return km < 100 ? km.toFixed(1) : String(Math.floor(km));
+}
+
+/** A dream's best time, m:ss. */
+function formatDreamTime(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 }
 
 const SAVED_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
@@ -748,12 +755,13 @@ export interface PauseHooks {
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /**
-   * Write the drive in progress to its slot; resolves once the write has landed.
+   * Write the drive in progress to its slot; resolves once the write has landed. Null
+   * where there is nothing to save (a dream): the pause sheet then has no save row.
    *
    * A hook rather than a pause action: saving does not close the pause sheet — the
    * player paused to save, not to leave — so the menu has to know when it finished.
    */
-  saveDrive: () => Promise<void>;
+  saveDrive: (() => Promise<void>) | null;
   /**
    * The canvas CSS size the resolution policy is resolved against.
    *
@@ -2174,6 +2182,12 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
   };
 }
 
+/** What the title screen starts: a stored drive, a fresh free drive, or a dream. */
+export type TitleChoice =
+  | { readonly kind: 'load'; readonly state: WorldState }
+  | { readonly kind: 'new' }
+  | { readonly kind: 'dream'; readonly dreamId: string };
+
 export class MainMenu {
   private pauseOverlay: HTMLElement | null = null;
   private pauseCleanup: (() => void) | null = null;
@@ -2184,7 +2198,8 @@ export class MainMenu {
   ) {}
 
   /**
-   * The title screen. Resolves with the save to load, or null for a new drive.
+   * The title screen. Resolves with what to start: a save to load, a new free drive,
+   * or a dream (dreams/dream.ts).
    *
    * The front is at most three rows, and a first launch sees one: New drive. Continue
    * is the latest save, and says which drive it is. Saved drives is the one place drives
@@ -2195,8 +2210,8 @@ export class MainMenu {
    * There is no seed field: a new drive's world is random, and a number the player
    * cannot read anything from is not a choice. Tools pin it with `?seed=` (see main).
    */
-  show(backend: SaveBackend): Promise<WorldState | null> {
-    const { promise, resolve } = Promise.withResolvers<WorldState | null>();
+  show(backend: SaveBackend): Promise<TitleChoice> {
+    const { promise, resolve } = Promise.withResolvers<TitleChoice>();
     const overlay = el('div', 'menu menu-title-screen');
     const hero = el('div', 'menu-hero');
     hero.appendChild(wordmark());
@@ -2233,7 +2248,7 @@ export class MainMenu {
       if (view !== 'settings') walkRows(sheet, ev);
     };
 
-    const finish = (state: WorldState | null): void => {
+    const finish = (choice: TitleChoice): void => {
       if (settled) return;
       settled = true;
       detachPad?.();
@@ -2241,7 +2256,7 @@ export class MainMenu {
       window.removeEventListener('keydown', onKey);
       this.loading.classList.remove('is-hidden');
       overlay.remove();
-      resolve(state);
+      resolve(choice);
     };
 
     const load = (listing: SaveListing, control: HTMLButtonElement): void => {
@@ -2251,7 +2266,7 @@ export class MainMenu {
         .catch(() => null)
         .then((state) => {
           if (state) {
-            finish(state);
+            finish({ kind: 'load', state });
             return;
           }
           control.disabled = false;
@@ -2320,6 +2335,27 @@ export class MainMenu {
     const renderFront = (): void => {
       const nav = el('nav', 'menu-actions');
       const latest = listings[0];
+      // Dreams lead: they are the game. The free drive below is the open road without one.
+      // Each opens once the one before it is done; a done one carries its best night.
+      const progress = loadDreamProgress();
+      let firstOpen: HTMLButtonElement | null = null;
+      for (const [index, dream] of DREAMS.entries()) {
+        const best = progress[dream.id];
+        const open = dreamOpen(dream.id, progress);
+        const detail = !open
+          ? `Dream «${DREAMS[index - 1]!.title}» first`
+          : best
+            ? `✓ best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
+              (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
+            : dream.brief;
+        // The first open dream not yet done is the one the title offers first.
+        const next = open && !best && firstOpen === null;
+        const row = actionButton(open ? dream.title : `${dream.title} — locked`, detail, next && latest === undefined);
+        row.disabled = !open;
+        if (next) firstOpen = row;
+        row.addEventListener('click', () => finish({ kind: 'dream', dreamId: dream.id }));
+        nav.appendChild(row);
+      }
       if (latest) {
         const car = latest.drive?.carLabel ?? latest.meta.name;
         const km = formatKm(latest.drive?.km ?? latest.meta.km);
@@ -2328,8 +2364,8 @@ export class MainMenu {
         resume.addEventListener('click', () => load(latest, resume));
         nav.appendChild(resume);
       }
-      const fresh = actionButton('New drive', null, latest === undefined);
-      fresh.addEventListener('click', () => finish(null));
+      const fresh = actionButton('Free drive', 'The endless road: how far can you get?', false);
+      fresh.addEventListener('click', () => finish({ kind: 'new' }));
       nav.appendChild(fresh);
       if (latest) {
         const count = listings.length === 1 ? '1 drive' : `${listings.length} drives`;
@@ -2612,38 +2648,43 @@ export class MainMenu {
 
         const nav = el('nav', 'menu-actions');
         const resumeBtn = actionButton('Resume', null, true);
-        const saveBtn = actionButton('Save drive', null, false);
         const settingsBtn = actionButton('Settings', null, false);
         const quitBtn = actionButton('Quit to title', null, false);
-        nav.append(resumeBtn, saveBtn, settingsBtn, quitBtn);
+        nav.append(resumeBtn);
+        const saveDrive = hooks.saveDrive;
+        if (saveDrive) {
+          const saveBtn = actionButton('Save drive', null, false);
+          nav.append(saveBtn);
+          // The row answers for itself, green `Saved` for a moment, and the sheet stays
+          // up: a save is something done in passing, and the player may still want to
+          // change a setting or quit. A second press while the row speaks is ignored.
+          const saveLabel = saveBtn.querySelector('.menu-action-label');
+          let saving = false;
+          const answer = (text: string, cls: string): void => {
+            if (saveLabel) saveLabel.textContent = text;
+            saveBtn.classList.add(cls);
+            window.setTimeout(() => {
+              if (saveLabel) saveLabel.textContent = 'Save drive';
+              saveBtn.classList.remove(cls);
+              saving = false;
+            }, SAVE_ANSWER_MS);
+          };
+          saveBtn.addEventListener('click', () => {
+            if (saving) return;
+            saving = true;
+            saveDrive().then(
+              () => answer('Saved', 'is-saved'),
+              (error: unknown) => {
+                console.error('save failed', error);
+                answer('Save failed', 'is-failed');
+              },
+            );
+          });
+        }
+        nav.append(settingsBtn, quitBtn);
         panel.appendChild(nav);
 
         resumeBtn.addEventListener('click', () => finish('resume'));
-        // The row answers for itself, green `Saved` for a moment, and the sheet stays
-        // up: a save is something done in passing, and the player may still want to
-        // change a setting or quit. A second press while the row speaks is ignored.
-        const saveLabel = saveBtn.querySelector('.menu-action-label');
-        let saving = false;
-        const answer = (text: string, cls: string): void => {
-          if (saveLabel) saveLabel.textContent = text;
-          saveBtn.classList.add(cls);
-          window.setTimeout(() => {
-            if (saveLabel) saveLabel.textContent = 'Save drive';
-            saveBtn.classList.remove(cls);
-            saving = false;
-          }, SAVE_ANSWER_MS);
-        };
-        saveBtn.addEventListener('click', () => {
-          if (saving) return;
-          saving = true;
-          hooks.saveDrive().then(
-            () => answer('Saved', 'is-saved'),
-            (error: unknown) => {
-              console.error('save failed', error);
-              answer('Save failed', 'is-failed');
-            },
-          );
-        });
         settingsBtn.addEventListener('click', () => showScreen('settings'));
         quitBtn.addEventListener('click', () => finish('quit'));
 

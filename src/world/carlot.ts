@@ -11,6 +11,7 @@ import type { Poi } from './poi';
 import type { PoiStock } from './poislots';
 import { box, C } from './poi/kit';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
+import { emptyCabin } from '../vehicle/cabin';
 
 /**
  * The car lots: one car for sale, with its price on a board beside it, at some of the
@@ -103,6 +104,7 @@ export function makeLotCar(
     engineTempC: COLD_SOAK_C,
     storage: new Array(def.storageCells).fill(null),
     bonnet,
+    cabin: emptyCabin(),
     odometer: Math.floor(roll(4) * 180_000),
     x,
     y,

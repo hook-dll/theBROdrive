@@ -48,7 +48,7 @@ const noWreckTrunks = { register: () => {}, attachLids: () => {}, forget: () => 
 const noCouriers = { register: () => {}, attachLids: () => {}, forget: () => {} } as unknown as CourierField;
 
 const roadDistance = new RoadDistance(road);
-const provider = new PoiProvider(noTrailers, noWreckTrunks, noCouriers, roadDistance, undefined as never, new MarketField());
+const provider = new PoiProvider(noTrailers, noWreckTrunks, noCouriers, roadDistance, undefined as never, new MarketField(), new Set());
 
 interface Piece {
   readonly minX: number;

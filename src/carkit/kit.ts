@@ -16,6 +16,7 @@ import { buildBay } from './bay';
 import { addBuilt, pivotGroup, type KitContext, type KitNode } from './context';
 import { buildExterior } from './exterior';
 import { buildInterior } from './interior';
+import { fitCabinPlaces } from './places';
 import { finishKitSurfaces } from './materials';
 import { buildLivery } from './police';
 import { simplifyFlats } from './simplify';
@@ -104,6 +105,8 @@ export function buildKitCar(id: string): THREE.Group {
   if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
   // The finished shape in the fewest faces: flat runs merged, zero-area triangles gone.
   simplifyFlats(root);
+  // The cabin's places for things (interior.ts `KIT_PLACE_NODE`) cut clear of the finished car.
+  fitCabinPlaces(root);
   // For tools (tools/kit-zfight.ts checks every hole is covered): the cut outlines, leant.
   root.userData.kitHoles = ctx.holes;
 

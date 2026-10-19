@@ -226,6 +226,12 @@ export interface ContractCargoItem {
    */
   raceLegs?: 1 | 2;
   /**
+   * How it looks when it is not a box of its kind: `carpet`, a rug rolled up and tied,
+   * longer than a front seat, a half of the bench or the boot is wide (vehicle/cabin.ts):
+   * it goes across the whole rear bench. Absent: the kind's own shape.
+   */
+  shape?: 'carpet';
+  /**
    * Contract state, saved on the item so it travels with every physical move.
    * The contract runtime (`contracts/runtime.ts`) is its only writer.
    */

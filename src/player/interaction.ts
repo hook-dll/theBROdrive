@@ -17,7 +17,9 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { CABIN_PLACES, cabinIndex, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
+import { cabinItemBounds } from '../vehicle/cabincargo';
 import type { CarStats, PartInstance } from '../parts/registry';
 import {
   applySponge,
@@ -162,7 +164,26 @@ type Target =
     }
   | { kind: 'loose-part'; partId: string }
   /** A vending machine's front; `slot` is the window slot aimed at, or -1 off the window. */
-  | { kind: 'vending'; machineId: string; slot: number };
+  | { kind: 'vending'; machineId: string; slot: number }
+  /** An `InteractionFixture`, by its index in the list the composition root gave. */
+  | { kind: 'fixture'; index: number };
+
+/**
+ * A fixed thing put in reach from outside the world catalogue — a dream's parcel
+ * terminal (dreams/terminal.ts) — that aims, prompts and acts through itself, so the
+ * interaction knows nothing about what it is.
+ */
+export interface InteractionFixture {
+  /**
+   * Distance along the eye ray to its face, metres, or Infinity for a miss. The eye is
+   * in the physics frame (relative to the floating origin); `dx..dz` a unit direction.
+   */
+  aim(eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number, range: number): number;
+  /** The prompt while it is aimed at, or null for none. */
+  prompt(): string | null;
+  /** [F] on it; the sound it makes, or null. */
+  act(): FoleyEvent | null;
+}
 
 /**
  * What one tick of interaction produced: the prompt to draw, at most one
@@ -401,6 +422,11 @@ interface Resolved {
   /** F gets in, to this seat: the eye looks at it through an open side door's opening. */
   kitSeat: PlayerSeat | null;
   /**
+   * The cabin place (vehicle/cabin.ts index) whose thing the eye looks at through that
+   * open door, or -1: F takes it.
+   */
+  kitPlace: number;
+  /**
    * A roadside shell's lid or a courier's boot lid the eye ray meets (`aimWreckLid`), or
    * null: E works it as it does a car's.
    */
@@ -529,6 +555,18 @@ function isGlassHit(hit: THREE.Intersection): boolean {
   return material instanceof THREE.Material && /glass/.test(material.name);
 }
 
+/**
+ * Longest thing a boot's cell takes, metres: a rolled carpet is longer, and goes across
+ * the rear bench instead (vehicle/cabin.ts).
+ */
+const BOOT_ITEM_MAX_M = 0.8;
+
+/** Why `item` does not go in a boot, or null. */
+function bootRefusal(item: Item): string | null {
+  const size = cabinItemBounds(item);
+  return Math.max(size.x, size.z) > BOOT_ITEM_MAX_M ? `the ${itemLabel(item)} is too long for the boot — lay it across the back seat` : null;
+}
+
 export type TrunkCellAction = 'none' | 'refused' | 'stored' | 'retrieved';
 
 /**
@@ -628,6 +666,8 @@ export class Interaction {
     part: null as KitPicked | null,
     distance: Infinity,
     seat: null as PlayerSeat | null,
+    /** A thing lying in the cabin (vehicle/cabin.ts index), or -1. */
+    place: -1,
     throughGlass: false,
   };
   /** The lid `aimWreckLid` last found, valid for the call that filled it. */
@@ -717,6 +757,8 @@ export class Interaction {
     private readonly raceCoins: (itemId: string) => number,
     /** The vending machines and lot cars in the physics band (world/market.ts). */
     private readonly market: MarketField,
+    /** Fixed things in reach that are not world catalogue items; see `InteractionFixture`. */
+    private readonly fixtures: readonly InteractionFixture[],
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
     this.raycaster.layers.enable(KIT_PICK_LAYER);
@@ -1078,16 +1120,17 @@ export class Interaction {
   }
 
   /**
-   * Why this car's boot takes no more contracts, or null. How many it carries at once
-   * is the body's (economy/economy.ts `contractSlotsFor`): one in a saloon, two in an
-   * estate, three in the van.
+   * Why this car takes no more contracts, or null. How many it carries at once, in the
+   * boot and the cabin together, is the body's (economy/economy.ts `contractSlotsFor`):
+   * one in a saloon, two in an estate, three in the van.
    */
-  private contractSlotsRefusal(carId: string, cells: readonly (Item | null)[]): string | null {
+  private contractSlotsRefusal(carId: string): string | null {
     const car = this.world.state.cars[carId];
     if (!car) return null;
     const slots = contractSlotsFor(car.modelId);
     let aboard = 0;
-    for (const cell of cells) if (cell?.type === 'contract_cargo') aboard++;
+    for (const cell of car.storage) if (cell?.type === 'contract_cargo') aboard++;
+    for (const place of car.cabin) if (place?.type === 'contract_cargo') aboard++;
     if (aboard < slots) return null;
     return slots === 1
       ? 'one contract is already aboard — this car carries one'
@@ -1644,10 +1687,16 @@ export class Interaction {
       }
     }
 
+    for (let index = 0; index < this.fixtures.length; index++) {
+      const distance = this.fixtures[index]!.aim(eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
+      if (distance <= RAY_RANGE) keep(distance, { kind: 'fixture', index });
+    }
+
     // The kit aim answers only when nothing else stands nearer in the ray (a loose part,
     // a trailer); the car's own entry and compartment targets never occlude it.
     let kitPart: KitPicked | null = null;
     let kitSeat: PlayerSeat | null = null;
+    let kitPlace = -1;
     const rig = vehicle?.kit ?? null;
     if (kitHit && rig && vehicle) {
       const aim = this.kitAimed;
@@ -1660,6 +1709,7 @@ export class Interaction {
         // ray reaches it through an open side door's opening (`kitOpenDoorDistance`).
         if (aim.seat && !aim.throughGlass && this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity) {
           kitSeat = aim.seat;
+          kitPlace = aim.place;
         }
       } else {
         kitHit = false;
@@ -1677,7 +1727,7 @@ export class Interaction {
       }
     }
 
-    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, wreckLid };
+    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, kitPlace, wreckLid };
   }
 
   /**
@@ -1819,6 +1869,7 @@ export class Interaction {
     aim.part = null;
     aim.distance = Infinity;
     aim.seat = null;
+    aim.place = -1;
     aim.throughGlass = false;
     const root = vehicle.root;
     this.raycaster.set(
@@ -1854,6 +1905,16 @@ export class Interaction {
       if ((!picked || pane) && isGlassHit(hit)) {
         aim.throughGlass = true;
         continue;
+      }
+      // A thing lying in the cabin answers for itself: F takes it, through an open door.
+      const place = vehicle.cabinPlaceOf(hit.object);
+      if (place >= 0) {
+        if (seated) continue;
+        found = true;
+        aim.distance = hit.distance;
+        aim.place = place;
+        aim.seat = placeSeats(CABIN_PLACES[place]!)[0]!;
+        break;
       }
       const seat = this.kitSeatOf(hit);
       // From a seat the eye looks back past its own seat's back and head restraint,
@@ -2222,6 +2283,7 @@ export class Interaction {
     if (t.kind === 'aircraft') return '[F] board the plane';
 
     if (t.kind === 'vending') return this.vendingPrompt(t.machineId, t.slot);
+    if (t.kind === 'fixture') return this.fixtures[t.index]?.prompt() ?? null;
     const lot = this.lotCarAimed(resolved);
     if (lot) {
       const coins = coinsHeld(this.world.state);
@@ -2317,8 +2379,12 @@ export class Interaction {
         return `[F] deliver ${itemLabel(held)} — ${contractPay(this.world.seed, held)} coins`;
       }
       if (held?.type === 'contract_cargo' && t.owner === 'car') {
-        const full = this.contractSlotsRefusal(t.id, cells);
+        const full = this.contractSlotsRefusal(t.id);
         if (full) return full;
+      }
+      if (held && !cells[t.cell]) {
+        const tooLong = bootRefusal(held);
+        if (tooLong) return tooLong;
       }
       if (held) return `[F] stow ${itemLabel(held)}`;
       return null;
@@ -2350,7 +2416,21 @@ export class Interaction {
     // that F sits in (`actionable`). Only a refusal the eye cannot see is told.
     const kitRig = resolved.vehicle?.kit ?? null;
     if (kitRig && resolved.carId && (t.kind === 'none' || t.kind === 'car-body' || t.kind === 'car-entry')) {
-      return resolved.kitSeat ? this.cabinRefusal() : null;
+      if (!resolved.kitSeat) return null;
+      const action = this.cabinAction(resolved);
+      const car = this.world.state.cars[resolved.carId];
+      switch (action.kind) {
+        case 'refuse':
+          return action.why;
+        case 'take': {
+          const item = car?.cabin[action.place];
+          return item ? `[F] take ${itemLabel(item)}` : null;
+        }
+        case 'lay':
+          return `[F] lay ${itemLabel(action.item)} on the seat`;
+        case 'sit':
+          return this.cabinRefusal();
+      }
     }
 
     if (
@@ -2644,6 +2724,11 @@ export class Interaction {
       return;
     }
 
+    if (t.kind === 'fixture') {
+      this.sound = this.fixtures[t.index]?.act() ?? null;
+      return;
+    }
+
     if (t.kind === 'loose-part') {
       const loose = this.world.state.looseParts[t.partId];
       if (!loose) return;
@@ -2769,8 +2854,12 @@ export class Interaction {
         this.sound = 'mount';
         return;
       }
+      if (held && !cells[t.cell] && bootRefusal(held)) {
+        this.sound = 'refused';
+        return;
+      }
       if (held?.type === 'contract_cargo' && t.owner === 'car' && cells[t.cell]?.type !== 'contract_cargo') {
-        if (this.contractSlotsRefusal(t.id, cells)) {
+        if (this.contractSlotsRefusal(t.id)) {
           this.sound = 'refused';
           return;
         }
@@ -3017,6 +3106,27 @@ export class Interaction {
         if (resolved.kitDoor && resolved.kitHit) this.sound = 'refused';
         return;
       }
+      const action = this.cabinAction(resolved);
+      if (action.kind === 'refuse') {
+        this.sound = 'refused';
+        return;
+      }
+      if (action.kind === 'take') {
+        const item = this.world.state.cars[resolved.carId]?.cabin[action.place];
+        if (!item || !this.inventory.add(item)) {
+          this.sound = 'refused';
+          return;
+        }
+        this.world.apply({ t: 'car_cabin', carId: resolved.carId, place: action.place, item: null });
+        this.sound = 'pickup';
+        return;
+      }
+      if (action.kind === 'lay') {
+        this.inventory.remove(action.item.id);
+        this.world.apply({ t: 'car_cabin', carId: resolved.carId, place: action.place, item: action.item });
+        this.sound = 'drop';
+        return;
+      }
     } else if (
       (target.kind !== 'car-body' && target.kind !== 'car-entry') ||
       target.carId !== resolved.carId ||
@@ -3032,13 +3142,49 @@ export class Interaction {
   }
 
   /**
+   * What F does at a kit car's seat seen through its open door (`resolve`): takes the
+   * thing looked at, or the thing lying on that seat; lays what he holds there when he
+   * could not sit with it (a contract's cargo, something too big for a lap); else sits
+   * (vehicle/cabin.ts).
+   */
+  private cabinAction(resolved: Resolved):
+    | { readonly kind: 'sit' }
+    | { readonly kind: 'take'; readonly place: number }
+    | { readonly kind: 'lay'; readonly place: number; readonly item: Item }
+    | { readonly kind: 'refuse'; readonly why: string } {
+    const car = resolved.carId ? this.world.state.cars[resolved.carId] : undefined;
+    const seat = resolved.kitSeat;
+    if (!car || !seat || !resolved.vehicle) return { kind: 'sit' };
+    const cabin = car.cabin;
+    const takeAt = resolved.kitPlace >= 0 ? resolved.kitPlace : seatTaken(cabin, seat) ? cabinIndex(takePlace(cabin, seat)!) : -1;
+    if (takeAt >= 0 && cabin[takeAt]) {
+      if (this.inventory.contents.length >= INVENTORY_ITEM_LIMIT && cabin[takeAt]!.type !== 'coin') {
+        return { kind: 'refuse', why: 'your hands are full' };
+      }
+      return { kind: 'take', place: takeAt };
+    }
+    const held = this.inventory.held;
+    if (held && this.cabinRefusal() !== null && seat !== 'driver') {
+      if (held.type === 'contract_cargo') {
+        const full = this.contractSlotsRefusal(car.id);
+        if (full) return { kind: 'refuse', why: full };
+      }
+      const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held));
+      if ('refusal' in lay) return { kind: 'refuse', why: lay.refusal };
+      return { kind: 'lay', place: cabinIndex(lay.place), item: held };
+    }
+    return { kind: 'sit' };
+  }
+
+  /**
    * Why the player cannot sit down with what they carry, else null. The pack rides in
-   * the cabin, so a contract parcel in it was a second parcel aboard past the boot's
-   * one-parcel rule; a parcel goes in the boot. And an engine does not fit on a lap.
+   * the cabin, so a contract parcel in it was a second parcel aboard past the car's
+   * contract rule; a parcel goes in the boot or on a seat. And an engine does not fit
+   * on a lap.
    */
   private cabinRefusal(): string | null {
     for (const item of this.inventory.contents) {
-      if (item.type === 'contract_cargo') return `stow the ${itemLabel(item)} in the boot first`;
+      if (item.type === 'contract_cargo') return `stow the ${itemLabel(item)} in the boot or lay it on a seat first`;
       if (itemMass(item) > CABIN_ITEM_LIMIT_KG) return `the ${itemLabel(item)} won't fit in the cabin`;
     }
     return null;

@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+- Dreams, the first mission layer (`src/dreams/dream.ts`, `view.ts`): the title screen leads
+  with «First delivery»; it starts at km 12 of its own seed with a VAZ-2106 on the verge and
+  ends 8 km on, when the car stops at the goal. The road between is free to drive both ways;
+  70 m off the road, 400 m behind the start or 600 m past the goal, the picture blurs and
+  pales and after 8 s the dream ends on a «Wake up» card that returns to the title. Dreams
+  are never saved. «New drive» is now «Free drive» and is unchanged.
+  A green sign 40 m ahead of the car names the goal and its distance; a gate over the road
+  marks the goal itself («STATION / STOP HERE», `src/dreams/markers.ts`). Both are built from
+  the market sign kit, so no shader program links on the way (101 programs at the start
+  and at the gate).
+  The dream asks for its parcel: a «medical parcel» (`contract_cargo`, `NO_COURIER`) waits
+  on the verge behind the boot, the goal counts only with it in the driven car or in hand,
+  and no courier will sign it. The goal line says where it is when it is not aboard.
+  A dream sets its sky and its police: the first one starts at 10:00 under a
+  clear sky held for the whole run (`forceWeather`), with no police posts on the road
+  (`PolicePatrol.postsEnabled`).
+  Start and goal are parking bays on roadside lay-bys, deep on the pad where the stop's
+  courier would stand (no courier parks on a dream's two stops): a dashed white frame,
+  the car in it at the start. The run begins when the car has wholly left the start bay
+  and ends when it stands in the goal bay; the gate and the start sign are gone. The
+  first dream runs from the stop at km 7.7 to the one at km 15.4.
+  The parcel waits in a parcel terminal standing at the front of the start bay (one
+  window, a screen with its six-digit PIN, also printed on the parcel's label); [F]
+  takes it. At the goal bay, with the car parked there, [F] on the other terminal opens
+  a rotary dial (`src/dreams/dial.ts`): drag each hole round to the finger stop, or
+  type the digits; a wrong digit clears the number, Esc hangs up. Six right digits
+  open the window, the parcel goes in and the dream ends (`src/dreams/terminal.ts`,
+  through the new `InteractionFixture` hook).
+- Place names and signposts, in the free drive too: every roadside stop is named from a
+  hand-written list of 240 (`src/world/placenames.ts`, shuffled per seed, neighbours never
+  alike), and every lay-by has a green board facing the road with the stop's name and the
+  stops either way, arrows as the driver reads them and road distances
+  (`src/world/signposts.ts`). A dream names its goal from it: the first one runs from
+  Hollow Spoon to Tinderly, and the parcel's label and the start terminal say so.
+- The dream's closing card says how the drive went (`TripRecord`, dreams/dream.ts): the
+  time and petrol from bay to bay, the parcel's condition (knocks to the car while it is
+  aboard wear it), the ride (smoothed horizontal acceleration: comfort falls above
+  2.5 m/s², a harsh moment above 3.5) and the car's new scratches.
+- Dream progress (`src/dreams/progress.ts`): finished dreams are recorded in browser
+  storage apart from the drive saves, each with its best time, ride and cargo condition;
+  the title shows them and opens the dreams in order. The second dream, «Handle with
+  care», carries a glass lamp (`fragility` 3: knocks wear it three times harder, a harsh
+  moment 6%) in a Niva at 17:00 in the heat, Fumble to Inchworm, 15.4 km.
+- A dream sets its traffic, its mirages and its clock (`DreamDef.traffic`, `mirages`,
+  `deadline`). Traffic is a share of the machine's ceiling (`RoadTraffic.share`); mirages
+  stand only between the two bays, at most one per 3 km (`MirageStretch` in
+  render/mirage-schedule.ts; the free drive's schedule is unchanged), none in the first
+  dream. A deadline is an average speed plus a minute for the terminal, counted from the
+  start bay: the goal line shows the time left or how late, a soft one still delivers
+  («Late by 0:40» on the card), a hard one ends the dream «Too late». Two new dreams:
+  «A car to Grandad» (a Volga at sunset, nothing to carry, light traffic) and «Before
+  the lunch break» (spare parts in a 2108 at noon, busy road, police, soft deadline).
+- A graphics change that reloads the page (Very Low and back, grass on or off) inside a
+  dream brings back the same dream from its start bay instead of the free drive
+  (`dreamResumeTarget`, save/resume.ts); the pause sheet in a dream has no «Save drive».
+- Cargo in the cabin (`src/vehicle/cabin.ts`, `CarState.cabin`): the front passenger's
+  seat, either half of the rear bench or the whole of it, and the floor in front of
+  them. Every kit car marks them (`kit_place:<place>`, carkit/interior.ts), each room
+  cut clear of the finished car (carkit/places.ts; `tools/cabin-places.ts` checks all 27
+  cars), and a thing lies there only if it fits, so nothing stands in a seat. Through
+  an open side door F lays a contract's cargo on the seat looked at, or takes what lies
+  there; nobody sits on a taken seat. Things ride with the car and are drawn through
+  the glass (vehicle/cabincargo.ts); a hard stop (about 0.4 g) or a hard turn slides
+  them off onto the floor (`CabinRide`), which costs a dream's cargo 5% per unit of
+  fragility and a courier's radio a drop. A rolled carpet is too long for the boot and
+  for the front seat: it goes across the whole rear bench. Fifth dream, «Grandma's
+  carpet», carries one at night in a 2107, Forsook to Ashcan.
+
 - Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
   (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's
   mirrors, whose foot met no skin at all, sit on the door (`src/carkit/exterior.ts`).

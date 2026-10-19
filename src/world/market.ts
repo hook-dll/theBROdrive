@@ -102,19 +102,28 @@ const signCache = new Map<string, THREE.MeshStandardMaterial>();
 
 /**
  * The board's material: the 20 km sign's shape (a map, roughness 0.6, metalness 0.1, no
- * shadows), whose program `marketProgramAnchor` links at boot.
+ * shadows), whose program `marketProgramAnchor` links at boot. Cached per text.
  */
 export function signMaterial(lines: readonly string[], bg: string, fg: string, width = 512, height = 256): THREE.MeshStandardMaterial {
   const key = `${lines.join('\n')}|${bg}|${fg}|${width}x${height}`;
   const cached = signCache.get(key);
   if (cached) return cached;
+  const material = paintSign(lines, bg, fg, width, height);
+  signCache.set(key, material);
+  return material;
+}
+
+/**
+ * A board's material painted fresh, the same shape as `signMaterial`'s, NOT cached: for
+ * text that is never painted twice (a stop's own signpost), owned and disposed —
+ * material and map — by whoever built it.
+ */
+export function paintSign(lines: readonly string[], bg: string, fg: string, width = 512, height = 256): THREE.MeshStandardMaterial {
   // The headless tools (tools/poi-*.ts) build stops with no DOM: their boards are blank.
   if (typeof document === 'undefined') {
     const blank = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
     blank.needsUpdate = true;
-    const material = new THREE.MeshStandardMaterial({ map: blank, roughness: 0.6, metalness: 0.1 });
-    signCache.set(key, material);
-    return material;
+    return new THREE.MeshStandardMaterial({ map: blank, roughness: 0.6, metalness: 0.1 });
   }
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -142,9 +151,7 @@ export function signMaterial(lines: readonly string[], bg: string, fg: string, w
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = maxAnisotropy();
-  const material = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6, metalness: 0.1 });
-  signCache.set(key, material);
-  return material;
+  return new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6, metalness: 0.1 });
 }
 
 /** One unit plane, faced +Z; every sign scales it. */

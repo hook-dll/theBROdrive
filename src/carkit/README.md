@@ -830,6 +830,7 @@ are all in place. Neither is optional and neither is judged by eye. `kit-check`
 | Check | Tool | Gate (exit 1) |
 |---|---|---|
 | zfight | `kit-zfight.ts` | any visible z-fight cluster in any band, any shell slit |
+| cabin places | `cabin-places.ts` | any cabin place's room (`kit_place:*`, interior.ts; fitted by places.ts) touching any triangle of the car, doors shut |
 | proportions | `kit-proportions.ts` | the fit row against the fresh measure and the factory; a hub moved over 10 mm in its arch |
 | reality | `reality.ts` | the running gear against the factory targets (cars with a `TARGETS` entry) |
 | mirrors | `kit-mirrors.ts` | from the cabin camera's eye (`kit_driver_eye`, what `cabinEye` and vehicle/cabincamera.ts use; not the lab's `look()`), rays to 160 points on each door mirror's glass past every opaque face: under 60 % seen; the driver's mirror over 55° off the axis (outside the straight-ahead 85° view), the far one over 70°; either outside −30°..+10° of the eye's level. The mirror's support is generated from `skinX` at its mounting height and sunk into the body; a new car must not leave a floating foot. |

@@ -3975,10 +3975,16 @@ export class RoadTraffic {
 
   /** This machine's traffic ceiling; see `TRAFFIC_CAPS`. Read live so the menu applies at once. */
   private get trafficCap(): number {
-    return this.capOverride ?? TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
+    return this.capOverride ?? Math.round(TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity] * this.share);
   }
 
   private capOverride: number | null = null;
+
+  /**
+   * Share of the machine's ceiling the stream fills, 0..1: a dream's mood
+   * (`DreamDef.traffic`), 1 in the free drive. The console override ignores it.
+   */
+  share = 1;
 
   /**
    * Console override of the menu's traffic ceiling (`__bro.traffic.cap = 30`; `null`

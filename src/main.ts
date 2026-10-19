@@ -28,14 +28,17 @@ import {
 import { warmPoiStructures } from './world/poistructures';
 import {
   Inventory,
+  itemLabel,
   type CameraItem,
   type ContractCargoItem,
 } from './items/items';
+import { CabinRide, cabinIndex, type CabinSlip } from './vehicle/cabin';
+import { cabinItemBounds } from './vehicle/cabincargo';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
-import { loadCarModel } from './render/carmodel';
+import { carModelMeasure, carSpawnYAboveGround, loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
@@ -46,7 +49,7 @@ import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { ContractRuntime } from './contracts/runtime';
 import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
-import type { ContractPlace } from './contracts/types';
+import { NO_COURIER, type ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
 import { IMMOVABLE, Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
@@ -106,7 +109,7 @@ import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
-import { updateWeather, weather, windAt } from './world/weather';
+import { forceWeather, updateWeather, weather, windAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
@@ -138,7 +141,9 @@ import {
   claimResumeSlot,
   clearResumeSlot,
   confirmResumeHealthy,
+  dreamResumeTarget,
   markResumeTarget,
+  resumedDreamId,
   RESUME_HEALTHY_SECONDS,
 } from './save/resume';
 import { bonnetWaterCapacity } from './vehicle/bonnet';
@@ -156,6 +161,28 @@ import { RivalRace, newRaceProgress } from './contracts/race';
 import { PolicePatrol } from './world/police';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
+import {
+  dreamById,
+  dreamCargo,
+  DREAM_CAR_ID,
+  DREAM_CARGO_ID,
+  dreamPin,
+  dreamMirageStretch,
+  dreamRoute,
+  DreamRun,
+  dreamStops,
+  POCKET_HALF_WIDTH_M,
+  type CargoPlace,
+  type DreamCarPose,
+  TripRecord,
+} from './dreams/dream';
+import { DreamView } from './dreams/view';
+import { ParcelTerminal, type TerminalHooks } from './dreams/terminal';
+import { dialPin } from './dreams/dial';
+import { recordDream } from './dreams/progress';
+import { DreamMarkers } from './dreams/markers';
+import { SignpostProvider } from './world/signposts';
+import { createServiceableCarState } from './game/spawn';
 
 /**
  * Composition root. The only file allowed to know about every subsystem.
@@ -261,23 +288,46 @@ async function boot(): Promise<void> {
    * player is never left with a black screen and no way forward.
    */
   const resumeSlot = claimResumeSlot();
-  const resumedState = resumeSlot === null
+  // A reload inside a dream (a graphics profile change) dreams it again from the start.
+  const resumedDream = resumeSlot === null ? null : resumedDreamId(resumeSlot);
+  const resumedState = resumeSlot === null || resumedDream !== null
     ? null
     : await saves.load(resumeSlot).catch(() => null);
   // A slot that no longer loads leaves nothing to resume, so the marker goes with it
   // rather than being retried into the attempt budget on every later reload.
-  if (resumeSlot !== null && resumedState === null) clearResumeSlot();
-  const resumed = resumedState !== null;
+  if (resumeSlot !== null && (resumedDream === null ? resumedState === null : !dreamById(resumedDream))) clearResumeSlot();
+  const resumed = resumedState !== null || resumedDream !== null;
   // The title screen keeps the launch cover up until a drive is chosen; when a resume
   // lands instead there is nothing to show, so the cover simply stays until boot ends.
   //
   // A new drive gets a random world. `?seed=` pins it — the look tools reproduce the same
   // road run after run with it, against the dev server and the preview build alike — and
   // it is in the URL rather than on the title screen because a player has no use for it.
-  const chosenState = resumedState ?? (await menu.show(saves));
+  const choice = resumedState !== null
+    ? { kind: 'load' as const, state: resumedState }
+    : resumedDream !== null && dreamById(resumedDream)
+      ? { kind: 'dream' as const, dreamId: resumedDream }
+      : await menu.show(saves);
+  /**
+   * A dream is the free drive's world with a start, a goal and a corridor laid over it
+   * (dreams/dream.ts). It is never saved: waking or arriving ends it, and the title
+   * screen is where the next one begins.
+   */
+  const dreamDef = choice.kind === 'dream' ? dreamById(choice.dreamId) : null;
+  /** Where the dream starts and ends: two parking pockets on lay-bys (dreams/dream.ts). */
+  const dreamRouteValue = dreamDef ? dreamRoute(dreamDef) : null;
+  const dream = dreamDef && dreamRouteValue ? new DreamRun(dreamDef, dreamRouteValue) : null;
+  const chosenState = choice.kind === 'load' ? choice.state : null;
   const loadedFromSave = chosenState !== null;
   const pinnedSeed = new URLSearchParams(location.search).get('seed');
-  const world = new GameWorld(chosenState ?? newWorldState(parseSeed(pinnedSeed ?? '')));
+  const world = new GameWorld(
+    chosenState ?? newWorldState(dreamDef ? dreamDef.seed : parseSeed(pinnedSeed ?? '')),
+  );
+  if (dreamDef) {
+    world.apply({ t: 'time_of_day', timeOfDay: dreamDef.dayFraction * DAY_LENGTH });
+    // Held at the episode's start for the whole dream: the sky it was written with.
+    forceWeather(dreamDef.weather, 0);
+  }
 
   // Machine preferences outrank whatever the save carried. Graphics quality and view
   // distance describe the GPU in front of the player, not the drive, so a save made on
@@ -319,6 +369,36 @@ async function boot(): Promise<void> {
   // at all. See world/spinecache.ts.
   const road = new Road(world.seed, await loadSpine(world.seed, ROAD_LENGTH));
   const terrain = new Terrain(world.seed, road);
+  /**
+   * The dream's start: the car parked in the start pocket, nose down the road, and the
+   * player on the pad beside it, on the road side, facing the same way. Written into
+   * state before the origin is placed, so the first frame is already local to the start.
+   */
+  if (dreamDef && dreamRouteValue) {
+    const pocket = dreamRouteValue.start;
+    const side = pocket.layby.side;
+    const heading = road.sampleAt(pocket.s).heading;
+    const carPoint = road.offsetPoint(pocket.s, pocket.lateral);
+    const carY = carSpawnYAboveGround(
+      carModelMeasure(dreamDef.modelId),
+      terrain.laybySurfaceY(pocket.s, pocket.lateral, side),
+      0.08,
+    );
+    const car = createServiceableCarState(DREAM_CAR_ID, dreamDef.modelId, carPoint.x, carY, carPoint.z, heading);
+    world.apply({ t: 'car_add', car: { ...car, papers: true } });
+    const feetS = pocket.s - 2;
+    const feetLateral = pocket.lateral - side * (POCKET_HALF_WIDTH_M + 1.2);
+    const feet = road.offsetPoint(feetS, feetLateral);
+    world.apply({
+      t: 'player_move',
+      x: feet.x,
+      y: terrain.laybySurfaceY(feetS, feetLateral, side) + 0.05,
+      z: feet.z,
+      yaw: heading,
+      pitch: 0,
+      s: feetS,
+    });
+  }
   // The floating origin, before anything that could hold a position relative to it.
   // A saved driver may be far from the capsule position last recorded when they got
   // in, so start at the driven car when there is one. The first frame is then already
@@ -540,7 +620,12 @@ async function boot(): Promise<void> {
   const debris = new DebrisField(physics, world, renderer.scene, origin);
   const vista = new VistaMesh(renderer.scene, terrain, road, origin);
   // One deck for both mirage systems, so vessels and tableaus take turns on the road.
-  const mirageSchedule = new MirageSchedule(world.seed, road.length);
+  // A dream deals only its own few, between its bays.
+  const mirageSchedule = new MirageSchedule(
+    world.seed,
+    road.length,
+    dreamDef && dreamRouteValue ? dreamMirageStretch(dreamDef, dreamRouteValue) : null,
+  );
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
   // Heat-haze inputs: surface heat and the ground the view is grazing.
@@ -623,6 +708,8 @@ async function boot(): Promise<void> {
   // The paved lay-bys in front of the roadside stops (world/layby.ts), hung off the
   // ribbon's edge rows, so they build right after it.
   streamer.register(new LaybyMeshProvider());
+  // Every lay-by's signpost: the stop's name and the stops either way (world/signposts.ts).
+  streamer.register(new SignpostProvider());
   const startSite = new StartSiteProvider(boardable);
   streamer.register(startSite);
   streamer.register(new TerminusPadProvider());
@@ -640,7 +727,17 @@ async function boot(): Promise<void> {
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
   streamer.register(new MonumentProvider());
-  streamer.register(new PoiProvider(trailerField, wreckTrunks, couriers, roadDistance, dancers, market));
+  streamer.register(
+    new PoiProvider(
+      trailerField,
+      wreckTrunks,
+      couriers,
+      roadDistance,
+      dancers,
+      market,
+      dreamRouteValue ? dreamStops(dreamRouteValue) : new Set(),
+    ),
+  );
 
   let initialYaw = 0;
   const player = new Player(physics, world, origin);
@@ -868,6 +965,10 @@ async function boot(): Promise<void> {
   const raceProgress = newRaceProgress();
   /** Police posts, chases and stops; see world/police.ts. */
   const police = new PolicePatrol(world, road, traffic, inventory, (text) => hud.setToast(text));
+  if (dreamDef) {
+    police.postsEnabled = dreamDef.police;
+    traffic.share = dreamDef.traffic;
+  }
   /** Reused receiver for the chasing police car's position; see `PolicePatrol.sirenAt`. */
   const sirenPoint = { x: 0, y: 0, z: 0 };
   const NO_RIVALS: readonly number[] = [];
@@ -962,7 +1063,7 @@ async function boot(): Promise<void> {
     return null;
   });
 
-  if (!loadedFromSave) {
+  if (!loadedFromSave && !dreamDef) {
     const car = createStartingCar(world, road, terrain);
     world.apply({ t: 'car_add', car });
     // The world does not exist behind s = 0, so a new game must start at the
@@ -970,6 +1071,10 @@ async function boot(): Promise<void> {
     const spawn = storySite(world.seed, road, terrain).spawn;
     player.teleport(spawn.x, spawn.y, spawn.z);
     initialYaw = spawn.yaw;
+  } else if (dreamDef) {
+    const { x, y, z, yaw } = world.state.player;
+    player.teleport(x, y, z, world.state.player.s);
+    initialYaw = yaw;
   }
 
   // A save may leave the player capsule behind the car they were driving. Establish
@@ -1001,7 +1106,7 @@ async function boot(): Promise<void> {
         selected: Math.max(0, inventory.selectedIndex),
       });
     }
-  } else {
+  } else if (!dreamDef) {
     spawnStartingItems(world, loose, road, terrain);
     // The player starts holding the postcard from home and a few coins.
     inventory.add({ type: 'postcard', id: world.generatedPartId('story_item', 0, 0) });
@@ -1158,6 +1263,60 @@ async function boot(): Promise<void> {
     }
   };
 
+  /**
+   * The dream's parcel terminals (dreams/terminal.ts): the start one with the parcel in
+   * its window, the goal one that takes it back. Built before the boot warm-up, so their
+   * kit programs are linked with the rest.
+   */
+  const dreamTerminals: ParcelTerminal[] = [];
+  if (dream && dreamDef?.cargoName) {
+    const run = dream;
+    const pin = dreamPin(dreamDef);
+    const hooks: TerminalHooks = {
+      held: () => inventory.held,
+      take: (item) => inventory.add(item),
+      give: (itemId) => inventory.remove(itemId),
+      deliver: () => run.deliver(),
+      parked: () => run.parked,
+      // The dial holds the game still, as the pause does; deferred out of the fixed step
+      // the [F] arrived in, so the loop is stopped between steps, never inside one.
+      dial: (code, opened) => {
+        queueMicrotask(() => {
+          if (paused || dreamEnded) return;
+          paused = true;
+          loop.stop();
+          pads.stopRumble();
+          if (document.pointerLockElement !== null) document.exitPointerLock();
+          void dialPin(uiRoot, code).then((result) => {
+            input.resyncPad();
+            paused = false;
+            // Delivered first, so the very next step sees the dream arrived.
+            if (result === 'opened') opened();
+            loop.start();
+            if (result === 'opened') return;
+            void canvas.requestPointerLock().catch(() => undefined);
+          });
+        });
+      },
+    };
+    // The label says where it goes and carries the PIN: the screen at the start shows it
+    // once, the label carries it to the goal.
+    const goalName = run.route.goalName;
+    const parcel = dreamCargo(dreamDef, `${dreamDef.cargoName} for ${goalName} · PIN ${pin}`);
+    for (const [role, pocket, held] of [
+      ['pickup', run.route.start, parcel],
+      ['dropoff', run.route.finish, null],
+    ] as const) {
+      dreamTerminals.push(
+        new ParcelTerminal(role, pocket, dreamDef.cargoName, goalName, pin, held, hooks, road, terrain, origin, renderer.scene, physics),
+      );
+    }
+  }
+  /** The dream car's road pose, reused every step; its `s` is the next projection's hint. */
+  const dreamCarPose = { s: dreamRouteValue?.start.s ?? 0, lateral: 0, speedMps: 0 };
+  /** The run's record (dreams/dream.ts `TripRecord`) and the velocity it is fed, reused. */
+  const dreamTrip = new TripRecord(dreamDef?.fragility ?? 1);
+  const dreamCarVelocity = { x: 0, y: 0, z: 0 };
   const interaction = new Interaction(
     physics,
     world,
@@ -1226,6 +1385,7 @@ async function boot(): Promise<void> {
     boardable,
     (itemId) => race.winCoins(itemId),
     market,
+    dreamTerminals,
   );
   interaction.attachPlayer(player);
 
@@ -1245,7 +1405,8 @@ async function boot(): Promise<void> {
     vitals.flush();
     return world.state;
   };
-  installVehicleAutosave(
+  // A dream is never written: it ends by arriving or waking, both back on the title.
+  if (!dream) installVehicleAutosave(
     saves,
     world,
     stateForSave,
@@ -1367,6 +1528,31 @@ async function boot(): Promise<void> {
   let recenterAccum = false;
   let recordTimer = 0;
   let paused = false;
+  /** The dream's line and veil (dreams/view.ts); null in a free drive. */
+  const dreamView = dream ? new DreamView(uiRoot, canvas) : null;
+  // The painted bays at the start and the goal; in the scene before the boot warm-up compiles them.
+  if (dreamRouteValue) new DreamMarkers(dreamRouteValue, road, terrain, origin, renderer.scene);
+  let dreamEnded = false;
+  /**
+   * Arrived or woken: the world stops behind the closing card, as it does behind the
+   * pause, and Wake up lands on the title. Nothing is saved; there is no slot to resume.
+   */
+  const endDream = (run: DreamRun): void => {
+    dreamEnded = true;
+    paused = true;
+    autopilot.setEngaged(false);
+    loop.stop();
+    audio.setPaused(true);
+    pads.stopRumble();
+    if (document.pointerLockElement !== null) document.exitPointerLock();
+    const trip = dreamTrip.summary(run.driveSeconds, run.route.lengthM);
+    // An arrival goes on the player's record, which opens the next dream (dreams/progress.ts).
+    if (run.phase === 'arrived') recordDream(run.def.id, trip);
+    dreamView?.finish(run, trip, () => {
+      clearResumeSlot();
+      window.location.reload();
+    });
+  };
   let prompt: string | null = null;
   /** The crosshair is on something a car works that no prompt names; see `InteractionResult.actionable`. */
   let actionable = false;
@@ -1405,7 +1591,7 @@ async function boot(): Promise<void> {
   // hides this page, and the autosave that ran during the drive has already marked it
   // otherwise. A death is never written: the slot keeps the drive from before it.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'hidden' || dying || story !== null || endingStarted) return;
+    if (dream || document.visibilityState !== 'hidden' || dying || story !== null || endingStarted) return;
     if (world.state.player.drivingCarId) return;
     autosaveNow(saves, stateForSave, saveName, (error) => {
       console.error('autosave failed', error);
@@ -1534,6 +1720,12 @@ async function boot(): Promise<void> {
   // Contract walk: keeps each contract's world objects, the race and the delivery
   // target in step with where its cargo is. Nothing on the way is scored.
   const contracts = new ContractRuntime(world);
+  /** The push on what lies on the seats of the car he drives; see vehicle/cabin.ts. */
+  const cabinRide = new CabinRide();
+  let cabinRideCarId: string | null = null;
+  const cabinSlips: CabinSlip[] = [];
+  const cabinVelocity = new THREE.Vector3();
+  const cabinTurn = new THREE.Quaternion();
 
   /**
    * The world objects the live contracts are about — a loaded trailer spawned at its
@@ -1552,7 +1744,11 @@ async function boot(): Promise<void> {
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
-    if (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
+    // A dream's parcel goes to the dream's gate, not to a courier.
+    if (
+      item.sourceCourierIndex !== NO_COURIER &&
+      (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId))
+    ) {
       deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
     }
   };
@@ -2148,6 +2344,59 @@ async function boot(): Promise<void> {
       projectedZ = desertZ;
     }
     activeLateral = desertLateral;
+    // Things on the seats of the car he drives come off them under a hard push
+    // (vehicle/cabin.ts `CabinRide`): onto the floor, or knocked about where they lie.
+    const riddenCar = drivingId ? s.cars[drivingId] : undefined;
+    if (driving && riddenCar && riddenCar.cabin.some((item) => item !== null)) {
+      if (cabinRideCarId !== drivingId) {
+        cabinRide.reset();
+        cabinRideCarId = drivingId;
+      }
+      const v = driving.chassis.linvel();
+      const q = driving.chassis.rotation();
+      cabinVelocity.set(v.x, v.y, v.z).applyQuaternion(cabinTurn.set(-q.x, -q.y, -q.z, q.w));
+      cabinRide.step(dt, cabinVelocity.x, cabinVelocity.z, riddenCar.cabin, driving.cabinRooms, cabinItemBounds, cabinSlips);
+      for (const slip of cabinSlips) {
+        if (slip.to !== null) {
+          world.apply({ t: 'car_cabin', carId: drivingId!, place: cabinIndex(slip.from), item: null });
+          world.apply({ t: 'car_cabin', carId: drivingId!, place: cabinIndex(slip.to), item: slip.item });
+        }
+        if (slip.item.type === 'contract_cargo') contracts.fell(slip.item);
+        if (slip.item.id === DREAM_CARGO_ID) dreamTrip.fell();
+        const label = itemLabel(slip.item);
+        hud.setToast(slip.to === null ? `the ${label} is knocked about on the seat` : slip.to.startsWith('floor') ? `the ${label} slid off the seat` : `the ${label} slid across the seat`);
+      }
+    } else {
+      cabinRideCarId = null;
+    }
+    if (dream && !dreamEnded) {
+      // The dream car's own pose: the checkpoint and the goal bay are about the car,
+      // wherever the player stands.
+      const dreamCar = vehicles.get(DREAM_CAR_ID);
+      let carPose: DreamCarPose | null = null;
+      if (dreamCar) {
+        const at = dreamCar.absoluteTranslation(originAnchor);
+        const projection = road.project(at.x, at.z, dreamCarPose.s);
+        dreamCarPose.s = projection.s;
+        dreamCarPose.lateral = projection.lateral;
+        dreamCarPose.speedMps = dreamCar.speedKmh / 3.6;
+        carPose = dreamCarPose;
+      }
+      const dreamCarState = s.cars[DREAM_CAR_ID];
+      const aboard =
+        (dreamCarState?.storage.some((item) => item?.id === DREAM_CARGO_ID) ?? false) ||
+        (dreamCarState?.cabin.some((item) => item?.id === DREAM_CARGO_ID) ?? false) ||
+        inventory.all.some((item) => item.id === DREAM_CARGO_ID);
+      const cargo: CargoPlace = dreamTerminals[0]?.holdsParcel ? 'window' : aboard ? 'aboard' : 'away';
+      dream.update(dt, activeS, desertLateral, carPose, drivingId === DREAM_CAR_ID, cargo);
+      // The run measured from the start bay on: the ride, the knocks, the tank.
+      if (dream.phase === 'driving' && dreamCar && dreamCarState) {
+        dreamCar.chassis.linvel(dreamCarVelocity);
+        dreamTrip.step(dt, dreamCarVelocity.x, dreamCarVelocity.z, dreamCarState.scratches, dreamCarState.fuelLitres, aboard);
+      }
+      dreamView?.update(dream);
+      if (dream.phase !== 'prepare' && dream.phase !== 'driving') endDream(dream);
+    }
     // Fairly alternate first access to the one-job frame budget. Road remains first
     // on one frame and desert on the next; an idle subsystem consumes nothing, so
     // the other still proceeds without delay.
@@ -3064,6 +3313,12 @@ async function boot(): Promise<void> {
       ) {
         if (!profileReloading) {
           profileReloading = true;
+          // A dream is never saved: the reload dreams it again from its start bay.
+          if (dream) {
+            markResumeTarget(dreamResumeTarget(dream.def.id));
+            window.location.reload();
+            return;
+          }
           const state = stateForSave();
           const slot = `slot-${state.seed}`;
           void saves.save(slot, saveName(state), state)
@@ -3111,7 +3366,8 @@ async function boot(): Promise<void> {
     applyTimePreset: (preset) => {
       world.apply({ t: 'time_of_day', timeOfDay: TIME_OF_DAY_PRESETS[preset] * DAY_LENGTH });
     },
-    saveDrive: async () => {
+    // A dream is never saved (dreams/dream.ts): its pause sheet has no save row.
+    saveDrive: dream ? null : async () => {
       const state = stateForSave();
       await saves.save(`slot-${state.seed}`, saveName(state), state);
     },

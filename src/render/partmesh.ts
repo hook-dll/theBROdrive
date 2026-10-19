@@ -2011,6 +2011,19 @@ function buildContractRadioInto(b: MeshBuilder): void {
   b.box('contract_radio_handle', 0.16, 0.02, 0.02, metal, [0, 0.15, 0]);
 }
 
+/**
+ * A rug rolled up and tied: a red roll across x, its rolled ends darker, two string ties.
+ * Flat materials only, so it draws with the parcel's programs.
+ */
+function buildContractCarpetInto(b: MeshBuilder): void {
+  const pile = flat(0x8c2b24, 0.95);
+  const end = flat(0x5a1d19, 0.95);
+  const string = flat(0xd9c8a5, 0.9);
+  b.cylinder('contract_carpet_roll', 0.1, 0.1, 0.84, 14, pile, [0, 0, 0], AXIS_X);
+  b.cylinder('contract_carpet_end', 0.094, 0.094, 0.844, 14, end, [0, 0, 0], AXIS_X);
+  for (const x of [-0.26, 0.26]) b.cylinder('contract_carpet_tie', 0.104, 0.104, 0.018, 14, string, [x, 0, 0], AXIS_X);
+}
+
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -2228,6 +2241,9 @@ export function createItemMesh(item: Item): THREE.Object3D {
         case 'fragile_radio':
           return buildGroup(itemBlueprint('contract_radio', buildContractRadioInto).instructions);
         default:
+          if (item.shape === 'carpet') {
+            return buildGroup(itemBlueprint('contract_carpet', buildContractCarpetInto).instructions);
+          }
           return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
       }
     }

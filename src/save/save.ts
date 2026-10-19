@@ -36,6 +36,7 @@ import {
 import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
+import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -155,6 +156,7 @@ export function installVehicleAutosave(
       case 'exit_car':
         break;
       case 'car_storage':
+      case 'car_cabin':
       case 'car_bonnet':
       case 'car_lights':
       case 'wreck_storage':
@@ -861,6 +863,8 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
     engineTempC: Math.min(400, Math.max(-60, numOr(raw.engineTempC, COLD_SOAK_C))),
     storage,
     bonnet,
+    // Absent on saves written before things could lie in the cabin: an empty one.
+    cabin: migrateStorage(raw.cabin, CABIN_PLACE_COUNT, `car "${raw.id}" cabin`),
     // Absent on every save written before the body had a condition. A car loaded
     // from one of those arrives clean rather than randomly weathered: the player
     // parked it, the game just was not looking.
@@ -1197,6 +1201,7 @@ function migrateItem(raw: unknown, where: string): Item {
         item.massKg = obj.massKg;
       }
       if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
+      if (obj.shape === 'carpet') item.shape = 'carpet';
       return item;
     }
     case 'sticker_envelope':

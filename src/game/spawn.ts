@@ -13,6 +13,7 @@ import type { Item } from '../items/items';
 import type { CarState, GameWorld } from './state';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
+import { emptyCabin } from '../vehicle/cabin';
 
 /** What the pause menu chose to spawn: a complete model catalogue id. */
 export interface SpawnRequest {
@@ -59,6 +60,7 @@ export function createServiceableCarState(
     engineTempC: COLD_SOAK_C,
     storage: new Array<Item | null>(def.storageCells).fill(null),
     bonnet,
+    cabin: emptyCabin(),
     odometer: 0,
     x,
     y,
