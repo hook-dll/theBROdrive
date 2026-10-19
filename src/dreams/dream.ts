@@ -22,7 +22,7 @@
 
 import { hash } from '../core/rng';
 import { defaultProgress, NO_COURIER } from '../contracts/types';
-import type { ContractCargoItem } from '../items/items';
+import type { CargoShape, ContractCargoItem } from '../items/items';
 import { stickerKindForSeed } from '../items/stickercatalog';
 import { laybyCourierLateral, laybysBetween, type Layby } from '../world/layby';
 import { placeNameAt } from '../world/placenames';
@@ -52,9 +52,9 @@ export interface DreamDef {
   readonly cargoName: string | null;
   /**
    * The cargo's look when it is not a parcel (items.ts `ContractCargoItem.shape`): a
-   * `carpet` goes only across the rear bench. Absent: a parcel.
+   * `carpet` goes only across the rear bench; a `teddy`; a `lamp`. Absent: a parcel.
    */
-  readonly cargoShape?: 'carpet';
+  readonly cargoShape?: CargoShape;
   /**
    * How easily the cargo is hurt: 1 an ordinary parcel, 3 glass. Knocks to the car wear
    * it this many times harder, and a harsh moment with it aboard wears it too.
@@ -133,6 +133,7 @@ export const DREAMS: readonly DreamDef[] = [
     dayFraction: 17 / 24,
     modelId: 'kit_vaz2121',
     cargoName: 'glass lamp',
+    cargoShape: 'lamp',
     fragility: 3,
     weather: 'heat',
     police: false,
@@ -190,6 +191,24 @@ export const DREAMS: readonly DreamDef[] = [
     police: false,
     traffic: 0.3,
     mirages: 2,
+    deadline: null,
+  },
+  {
+    id: 'birthday-bear',
+    title: 'A bear for a birthday',
+    brief: 'A teddy bear for a girl\'s birthday, in a light wind. A short, easy drive: he likes the front seat.',
+    seed: 0x0d4ea301,
+    startNearS: 110_000,
+    lengthM: 7_000,
+    dayFraction: 15 / 24,
+    modelId: 'kit_azlk2141',
+    cargoName: 'teddy bear',
+    cargoShape: 'teddy',
+    fragility: 1,
+    weather: 'wind',
+    police: false,
+    traffic: 0.4,
+    mirages: 1,
     deadline: null,
   },
 ];

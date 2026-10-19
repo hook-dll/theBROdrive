@@ -21,6 +21,7 @@ import {
   SPONGE_CAPACITY_MIN,
   type ContractCargoItem,
   type Item,
+  CARGO_SHAPES,
 } from '../items/items';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
@@ -1201,7 +1202,8 @@ function migrateItem(raw: unknown, where: string): Item {
         item.massKg = obj.massKg;
       }
       if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
-      if (obj.shape === 'carpet') item.shape = 'carpet';
+      const shape = CARGO_SHAPES.find((known) => known === obj.shape);
+      if (shape) item.shape = shape;
       return item;
     }
     case 'sticker_envelope':

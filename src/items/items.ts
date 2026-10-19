@@ -203,6 +203,10 @@ export interface CoinItem {
 
 export type { StickerKind } from './stickercatalog';
 
+/** A contract cargo's own look when it is not its kind's box; see `ContractCargoItem.shape`. */
+export type CargoShape = 'carpet' | 'teddy' | 'lamp';
+export const CARGO_SHAPES: readonly CargoShape[] = ['carpet', 'teddy', 'lamp'];
+
 /** A physical task object. Its source index is the complete delivery contract. */
 export interface ContractCargoItem {
   readonly type: 'contract_cargo';
@@ -226,11 +230,13 @@ export interface ContractCargoItem {
    */
   raceLegs?: 1 | 2;
   /**
-   * How it looks when it is not a box of its kind: `carpet`, a rug rolled up and tied,
-   * longer than a front seat, a half of the bench or the boot is wide (vehicle/cabin.ts):
-   * it goes across the whole rear bench. Absent: the kind's own shape.
+   * How it looks when it is not a box of its kind (a dream's cargo, dreams/dream.ts):
+   * `carpet`, a rug rolled up and tied, longer than a front seat, a half of the bench or
+   * the boot is wide (vehicle/cabin.ts), so it goes across the whole rear bench;
+   * `teddy`, a stuffed bear; `lamp`, a table lamp with a milk-glass shade. Absent: the
+   * kind's own shape.
    */
-  shape?: 'carpet';
+  shape?: CargoShape;
   /**
    * Contract state, saved on the item so it travels with every physical move.
    * The contract runtime (`contracts/runtime.ts`) is its only writer.

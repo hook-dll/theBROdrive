@@ -69,6 +69,10 @@
   fragility and a courier's radio a drop. A rolled carpet is too long for the boot and
   for the front seat: it goes across the whole rear bench. Fifth dream, «Grandma's
   carpet», carries one at night in a 2107, Forsook to Ashcan.
+- A dream's cargo has a look of its own (`ContractCargoItem.shape`: carpet, teddy, lamp):
+  «Handle with care» now carries a real table lamp with a milk-glass shade, and a sixth
+  dream, «A bear for a birthday», a teddy bear in a Moskvich-2141 in a light wind,
+  Clatter to Dimwell. Flat materials only: no new shader programs.
 
 - Door mirrors on short arms (owner): an arm now runs from the foot on the door's skin
   (2 cm under the belt) into the head's centre, so no head hangs in the air; the UAZ-2206's

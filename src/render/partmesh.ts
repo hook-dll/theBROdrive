@@ -2024,6 +2024,39 @@ function buildContractCarpetInto(b: MeshBuilder): void {
   for (const x of [-0.26, 0.26]) b.cylinder('contract_carpet_tie', 0.104, 0.104, 0.018, 14, string, [x, 0, 0], AXIS_X);
 }
 
+/**
+ * A stuffed bear sitting up: a round body and head, a pale belly and muzzle, round ears,
+ * paws and a red bow at the neck. Flat materials only, like the parcel.
+ */
+function buildContractTeddyInto(b: MeshBuilder): void {
+  const fur = flat(0x8a5a32, 0.97);
+  const pale = flat(0xc9a27a, 0.97);
+  const dark = flat(0x1c1410, 0.5);
+  const bow = flat(0xb3262a, 0.8);
+  b.sphere('contract_teddy_body', 0.1, 16, 12, fur, [0, 0, 0], [1, 1.15, 0.9]);
+  b.sphere('contract_teddy_belly', 0.06, 12, 8, pale, [0, -0.01, 0.058], [1, 1.2, 0.5]);
+  b.sphere('contract_teddy_head', 0.075, 16, 12, fur, [0, 0.17, 0.01]);
+  b.sphere('contract_teddy_muzzle', 0.032, 12, 8, pale, [0, 0.155, 0.075]);
+  b.sphere('contract_teddy_nose', 0.011, 8, 6, dark, [0, 0.165, 0.105]);
+  for (const sx of [-1, 1]) {
+    b.sphere('contract_teddy_eye', 0.01, 8, 6, dark, [sx * 0.028, 0.19, 0.068]);
+    b.sphere('contract_teddy_ear', 0.028, 10, 8, fur, [sx * 0.055, 0.235, 0], [1, 1, 0.6]);
+    b.sphere('contract_teddy_arm', 0.035, 10, 8, fur, [sx * 0.1, 0.03, 0.03], [0.8, 1.6, 0.8]);
+    b.sphere('contract_teddy_leg', 0.042, 10, 8, fur, [sx * 0.055, -0.1, 0.07], [0.9, 0.9, 1.4]);
+  }
+  b.box('contract_teddy_bow', 0.06, 0.03, 0.02, bow, [0, 0.105, 0.075]);
+}
+
+/** A table lamp: a brass foot and stem under a milk-glass shade, drawn opaque. */
+function buildContractLampInto(b: MeshBuilder): void {
+  const brass = flat(0xa8843f, 0.5);
+  const glass = flat(0xf1e8d4, 0.35);
+  b.cylinder('contract_lamp_foot', 0.08, 0.09, 0.03, 20, brass, [0, -0.17, 0]);
+  b.cylinder('contract_lamp_stem', 0.012, 0.012, 0.22, 10, brass, [0, -0.05, 0]);
+  b.cylinder('contract_lamp_shade', 0.07, 0.13, 0.15, 20, glass, [0, 0.12, 0]);
+  b.sphere('contract_lamp_finial', 0.016, 10, 8, brass, [0, 0.205, 0]);
+}
+
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -2243,6 +2276,12 @@ export function createItemMesh(item: Item): THREE.Object3D {
         default:
           if (item.shape === 'carpet') {
             return buildGroup(itemBlueprint('contract_carpet', buildContractCarpetInto).instructions);
+          }
+          if (item.shape === 'teddy') {
+            return buildGroup(itemBlueprint('contract_teddy', buildContractTeddyInto).instructions);
+          }
+          if (item.shape === 'lamp') {
+            return buildGroup(itemBlueprint('contract_lamp', buildContractLampInto).instructions);
           }
           return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
       }
