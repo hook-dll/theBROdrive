@@ -4,7 +4,9 @@ What the owner wants, what is done, what is left. How to work: [`README.md`](REA
 Why things are the way they are: [`HISTORY.md`](HISTORY.md). Keep this file current with
 every change (update the car's row and the gaps).
 
-Last updated: 2026-10-16, the owner's first review of the three new kit cars worked in (Volga greenhouses, roofs, bonnet/boot, bumper wraps; the 2111's tail; the tens' roof arch; the Samaras' front wing), drafts again awaiting his review (z-fight gate passed, 14 WebGL programs unchanged).
+Last updated: 2026-10-19, owner's second review: the 2104/2105/2107 black wedge is removed,
+mirror feet now enter the shell, and both UAZ front overhangs are raised above their bumpers.
+Existing dashboards remain accepted; future cars must supply a sourced dashboard photo.
 
 ## The owner's goal
 
@@ -307,6 +309,20 @@ Mirrors (kit-check
   because every door's window frame stood as deep as its card (7.5 cm); the frame above the
   belt is now `DOOR_FRAME_DEPTH` 3 cm (body.ts, every car; the card's top closes the step).
   measurements-volga.md §1.4.
+
+Owner review update (2026-10-19; supersedes the older mirror-sail note above):
+- **2104/2105/2107:** the returned black wedge ahead of the door glass is removed. The
+  shared `BODY_05` columns stay in place, but their finish is body colour; targeted
+  drawing checks remain 12/12, 16/16 and 15/15.
+- **Door mirrors:** short arms and upright stalk brackets are placed from `skinX` at their
+  mounting height and sunk into the panel. `kit-mirrors` now fails a mirror whose housing
+  has no shell overlap; all 27 cars pass, with visibility unchanged.
+- **UAZ-469 and UAZ-2206:** the front sill before the front wheel is raised above the
+  bumper's lower edge; the old hanging triangular skirt is gone. The UAZ-2206's unrelated
+  screen/glass drawing mismatches remain open.
+- **Dashboards:** finished cars are explicitly accepted in the dashboard gate. A future car
+  is not added to `OWNER_ACCEPTED_EXISTING_DASH`; without a real interior photo and `dash`
+  block it fails as `DASH UNVERIFIED`.
 
 Sliver-heavy meshes (10–31 %, listed by kit-surface) are mostly exterior trim strips and
 moulded bumpers.

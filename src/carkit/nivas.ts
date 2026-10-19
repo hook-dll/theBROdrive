@@ -50,8 +50,8 @@ export const BODY_2121: KitBody = {
     { s: 0.6, sill: 0.4, crease: 0.87, belt: 0.993, deck: 1.033, wSill: 0.795, wCrease: 0.815, wBelt: 0.805 },
     // Cowl. Flank 0.808–0.815 from 0.6 to 1.0 high [D front, top views], the crease the
     // upper of two pressed lines (0.879 / 0.839) [D side]; sill 0.258 [D side y 451].
-    { s: 1.152, sill: 0.26, crease: 0.87, belt: 1.005, deck: 1.05, wSill: 0.795, wCrease: 0.815, wBelt: 0.805 },
-    { s: 2.3, sill: 0.258, crease: 0.87, belt: 1.01, deck: 1.05, wSill: 0.795, wCrease: 0.815, wBelt: 0.805 },
+    { s: 1.152, sill: 0.26, crease: 0.87, belt: 1.005, deck: 1.05, wSill: 0.795, wCrease: 0.815, wBelt: 0.828 },
+    { s: 2.3, sill: 0.258, crease: 0.87, belt: 1.01, deck: 1.05, wSill: 0.795, wCrease: 0.815, wBelt: 0.828 },
     // Over and behind the rear arch: the body's bottom 0.44–0.46 behind it [D side].
     { s: 3.2, sill: 0.4, crease: 0.87, belt: 1.005, deck: 1.05, wSill: 0.795, wCrease: 0.815, wBelt: 0.805 },
     { s: 3.45, sill: 0.44, crease: 0.865, belt: 1.0, deck: 1.05, wSill: 0.785, wCrease: 0.805, wBelt: 0.795 },
@@ -108,6 +108,7 @@ export const BODY_2121: KitBody = {
     screenBottom: 0.035, // screen's foot 1.06 [D side, front]
     screenHeader: 0.045, // [E as the classics; the front view reads 0.01–0.03 high]
     wiperBlade: 0.33, // drawn 0.318 / 0.336 [D front]
+    screenFoot: -0.05,
     rearBottom: 0.025, // unused with a knee
     rearHeader: 0.06, // tailgate glass top 1.434 [D rear]
     // The tailgate's glass ends at 1.044 [D rear y 760], on the raked line at s 3.555 [D side];
@@ -151,6 +152,16 @@ export const LOOK_2121: KitLook = {
   dash: 0x1b1b1b, // black [P 1983 car's dash]
   headrests: true, // [P 1982 car's front seat]
   brightwork: 'chrome', // [P handle, mirror]
+  // A chrome head on a rod from a bracket on the skin under the belt, up and back to over
+  // the belt (`mirrorStalk` 0: the rod's bracket at `mirrorS` − 0.03, the head's centre at
+  // `mirrorS` + 0.035). s from a projective fit to the door's front shut line 1.322, the
+  // vent's rear post 1.685 and the rear shut line 2.295 at the belt, on three photos: the
+  // rod's foot on the skin at 1.47 (`p00`, the 1983 car, left), 1.49 (`p13`, the 1982
+  // car, right) and 1.48 (`p15`, a 1990 car, right); the heads read 1.44–1.74, too far
+  // back as they stand out towards the camera ahead (measurements-niva.md §1.5). Its
+  // bracket at 1.47.
+  mirrorStalk: 0,
+  mirrorS: 1.5,
   sill: null, // painted [P]
   waist: null, // none on the early car [P]
   // Amber, below the crease over the arch's front: x 775–807, y 280–293 [D side; P].

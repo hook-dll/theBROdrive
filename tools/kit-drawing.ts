@@ -94,6 +94,18 @@ interface RefFile {
   readonly overlay?: { readonly side?: Registration; readonly front?: Registration };
 }
 
+/**
+ * Existing cars are accepted as-is in the dashboard check. Their dashboards were already
+ * accepted by the owner; this prevents a reference hunt from changing finished cars. A new
+ * car is deliberately absent: it must provide a real interior photo and a `dash` block.
+ */
+const OWNER_ACCEPTED_EXISTING_DASH: Record<string, true> = {
+  vaz2101: true, vaz2102: true, vaz2103: true, vaz2104: true, vaz2105: true, vaz2106: true, vaz2107: true,
+  vaz2108: true, vaz2109: true, vaz21099: true, vaz2110: true, vaz2111: true, vaz2112: true, vaz2115: true,
+  vaz2121: true, vaz2131: true, vaz1111: true, gaz24: true, gaz31029: true, azlk2141: true,
+  uaz469: true, uaz469_police: true, uaz2206: true, nexia: true, espero: true, astraf: true, vectraa: true,
+};
+
 function isRef(r: unknown): r is Ref {
   return typeof r === 'object' && r !== null && 'v' in r && 'src' in r;
 }
@@ -165,9 +177,11 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
   // level, the edge at that very height would be anywhere along it. With no reference, at
   // the glass's lowest and highest point. Wipers and mirrors are skipped.
   const fitting = (t: number): boolean => /wiper|mirror/.test(info(t).path);
+  // A forward-control van's cowl (the UAZ-2206's 0.40) stands less than 0.6 behind the
+  // tip: the front scan then starts at the tip, not ahead of it.
   const edge = (y: number, front: boolean): number | undefined => {
     for (let k = 0; k < 2000; k++) {
-      const ss = front ? car.frame.cowl - 0.6 + k * 0.003 : s1 + 0.01 - k * 0.003;
+      const ss = front ? Math.max(0, car.frame.cowl - 0.6) + k * 0.003 : s1 + 0.01 - k * 0.003;
       if (ss < 0 || ss > s1 + 0.02) return undefined;
       if (grid.nearest([3, y, car.z(ss)], [-1, 0, 0], 6, fitting)) return ss;
     }
@@ -457,7 +471,7 @@ async function cabinSheet(car: KitCar, s: Soup, grid: RayGrid, refs: RefFile): P
 export interface DrawingResult {
   id: string;
   body: 'VERIFIED' | 'MISMATCH' | 'UNVERIFIED';
-  dash: 'OK' | 'MISMATCH' | 'DASH UNVERIFIED';
+  dash: 'OK' | 'MISMATCH' | 'DASH UNVERIFIED' | 'ACCEPTED EXISTING';
   rows: Row[];
   dashRows: Row[];
   measured: Measured;
@@ -474,11 +488,14 @@ export async function checkDrawing(id: string, images: boolean): Promise<Drawing
   const rows: Row[] = [];
   const dashRows: Row[] = [];
   for (const [key, ref] of Object.entries(refs?.body ?? {})) rows.push(compare(key, ref, measured.body[key], measured.body[`${key}Slope`]));
+  const acceptedExistingDash = OWNER_ACCEPTED_EXISTING_DASH[id] === true;
   const hasPhoto = !!refs?.dash?.photo;
-  for (const [key, ref] of Object.entries(refs?.dash ?? {})) if (key !== 'photo' && isRef(ref)) dashRows.push(compare(key, ref, measured.dash[key]));
+  if (!acceptedExistingDash) {
+    for (const [key, ref] of Object.entries(refs?.dash ?? {})) if (key !== 'photo' && isRef(ref)) dashRows.push(compare(key, ref, measured.dash[key]));
+  }
   const judged = rows.filter((r) => !r.info);
   const body = judged.length === 0 ? 'UNVERIFIED' : judged.every((r) => r.ok) ? 'VERIFIED' : 'MISMATCH';
-  const dash = !hasPhoto || dashRows.length === 0 ? 'DASH UNVERIFIED' : dashRows.every((r) => r.ok) ? 'OK' : 'MISMATCH';
+  const dash = acceptedExistingDash ? 'ACCEPTED EXISTING' : !hasPhoto || dashRows.length === 0 ? 'DASH UNVERIFIED' : dashRows.every((r) => r.ok) ? 'OK' : 'MISMATCH';
   const saved: string[] = [];
   if (images) {
     const dir = await outDir(id);
@@ -522,7 +539,7 @@ if (import.meta.main) {
     console.log(`${r.id.padEnd(15)} ${r.body.padEnd(12)} ${`${judged.filter((x) => x.ok).length}/${judged.length}`.padStart(6)}   ${r.dash.padEnd(16)} ${`${r.dashRows.filter((x) => x.ok).length}/${r.dashRows.length}`.padStart(6)}`);
   }
   if (jsonPath) await Bun.write(jsonPath, JSON.stringify(results, null, 1));
-  const bad = results.filter((r) => r.body === 'MISMATCH' || r.dash === 'MISMATCH');
+  const bad = results.filter((r) => r.body === 'MISMATCH' || r.dash === 'MISMATCH' || r.dash === 'DASH UNVERIFIED');
   if (bad.length > 0) {
     console.log(`\nFAIL: ${bad.length} car(s) off their drawing or photos`);
     process.exit(1);

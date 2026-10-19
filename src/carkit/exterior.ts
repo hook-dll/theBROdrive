@@ -1177,20 +1177,30 @@ function buildDoorHardware(ctx: KitContext): void {
     // up to the head's centre, an arm out and back from its top into the head's ball.
     const ms = spec.look.mirrorS ?? spec.cabin.columns[1]!.s + 0.08;
     const belt = frame.station(ms).belt;
-    const my = belt + 0.06;
+    const my = belt + 0.06 + (spec.look.mirrorHeightOffset ?? 0);
     const mx = frame.sideX(ms, belt);
     const stalk = spec.look.mirrorStalk;
-    const hx = side * (mx + 0.1);
+    const hx = side * (mx + (spec.look.mirrorReach ?? 0.1));
     const hy = my + 0.02 + (stalk ?? 0);
     const hz = frame.z(stalk === undefined ? ms : ms + 0.035);
     const m = new PartBuilder().color(finish.color);
     if (stalk === undefined) {
-      m.boxFrom(finish.slot, [side > 0 ? mx - 0.01 : -mx - 0.07, my - 0.04, hz - 0.03], [side > 0 ? mx + 0.07 : -mx + 0.01, my - 0.02, hz + 0.03]);
+      // The short arm must start on the actual body surface. `frame.sideX(ms, belt)` is
+      // the belt edge, but the shoulder turns in above it; using that point left some
+      // mirrors visibly floating on tapered doors. Probe the skin where the foot is
+      // mounted, then let the base enter the body by 12.5 mm.
+      const mountY = belt + 0.02;
+      const mountX = skinX(frame, ms, mountY);
+      m.box(finish.slot, [side * (mountX + 0.0125), mountY, hz], [0.025, 0.014, 0.018]);
     } else {
-      const rx = side * (mx + 0.023);
+      // The upright bracket likewise begins on the side skin, not on the belt's
+      // extrapolated edge. It is sunk into the panel so the stalk cannot float.
+      const mountY = belt - 0.02;
+      const mountX = skinX(frame, ms, mountY);
+      const rx = side * (mountX + 0.023);
       const rz = frame.z(ms - 0.03);
-      m.box(finish.slot, [side * (mx + 0.015), belt - 0.035, rz], [0.025, 0.025, 0.015]);
-      m.box(finish.slot, [rx, (belt - 0.05 + hy) / 2, rz], [0.007, (hy - belt + 0.05) / 2, 0.007]);
+      m.box(finish.slot, [side * (mountX + 0.015), mountY, rz], [0.025, 0.025, 0.015]);
+      m.box(finish.slot, [rx, (mountY + hy) / 2, rz], [0.007, (hy - mountY) / 2, 0.007]);
       const run = new THREE.Vector3(hx - rx, 0, hz - rz);
       const length = run.length();
       const up = new THREE.Vector3(0, 1, 0);

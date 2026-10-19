@@ -4,18 +4,19 @@
  * Every check a kit car must pass, in one run, with one pass/fail table per car. The
  * checks run one after another (never in parallel: each builds every car, and reality
  * drives each on the physics bench), each as its own process, under `nice -n 15`:
- *
  *   zfight       tools/kit-zfight.ts       no visible z-fight in any band, no shell slit
  *   proportions  tools/kit-proportions.ts  fit row and hub moves within the hard gates
  *   reality      tools/reality.ts          engine, geometry, top speed, 0-100, turn, brakes
  *   mirrors      tools/kit-mirrors.ts      both door mirrors ≥ 60 % seen from the driver's eye
  *   surface      tools/kit-surface.ts      no dents or kinks; triangles and slivers in budget
  *   drawing      tools/kit-drawing.ts      the built car against src/carkit/refs/<car>.json
- *   dash         (kit-drawing)             the built cabin against the refs' dash photos
+ *   dash         (kit-drawing)             future cars require a sourced dash photo and `dash` block;
+ *                                         owner-accepted existing cars are explicitly exempt
  *
- * A car with no refs file is UNVERIFIED and one with no referenced dash DASH UNVERIFIED:
- * reported in the table, not failures. Evidence (renders, crops, overlays, each tool's
- * JSON) lands in build/kitcheck/ (gitignored); each tool's own log in
+ * A car with no refs file is UNVERIFIED and a future car with no referenced dash is
+ * DASH UNVERIFIED (both fail the acceptance gate). Existing cars named in
+ * `tools/kit-drawing.ts` are accepted as-is for their dashboards. Evidence (renders, crops,
+ * overlays, each tool's JSON) lands in build/kitcheck/ (gitignored); each tool's own log in
  * build/kitcheck/<tool>.log. Exits 1 if any car fails any check.
  *
  *   nice -n 15 bun tools/kit-check.ts [--no-images] [id ...]   (default: every kit car)
@@ -107,7 +108,7 @@ for (const id of ids) {
     dents === 0,
     cBad === 0,
     !!d && d.body !== 'MISMATCH',
-    !!d && d.dash !== 'MISMATCH',
+    !!d && (d.dash === 'OK' || d.dash === 'ACCEPTED EXISTING'),
   ];
   if (checks.some((c) => !c)) failing++;
   rows.push([

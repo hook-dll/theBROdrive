@@ -43,18 +43,21 @@ export const BODY_1111: KitBody = {
     // slivers (owner, 2026-10-16); its centre line stays within 3 cm of the drawing's.
     { s: 0.055, sill: 0.3, crease: 0.53, belt: 0.71, deck: 0.78, wSill: 0.62, wCrease: 0.64, wBelt: 0.63 },
     // The corners round out to ±0.675 by s 0.16 and ±0.70 by s 0.27 [D top]; the wings' top
-    // climbs 0.145 per m and the bonnet's centre from 0.755 to 0.864 at s 0.54 [D side].
+    // climbs 0.145 per m and the bonnet's centre from 0.755 to 0.864 at s 0.54 [D side]. The
+    // wings' top under the clamshell's edge ±0.653–0.668 at 0.72–0.81 [D front: the line
+    // inside the flank's ±0.69–0.705], on into the glass's foot ±0.669: `wBelt` 0.667 from s
+    // 0.27 back, in line with the cabin's (was 0.69 to 0.54: out and back in, an s-bend).
     { s: 0.16, sill: 0.3, crease: 0.53, belt: 0.72, deck: 0.79, wSill: 0.66, wCrease: 0.675, wBelt: 0.665 },
-    { s: 0.27, sill: 0.3, crease: 0.53, belt: 0.73, deck: 0.8, wSill: 0.685, wCrease: 0.7, wBelt: 0.69 },
-    { s: 0.54, sill: 0.3, crease: 0.53, belt: 0.765, deck: 0.835, wSill: 0.69, wCrease: 0.705, wBelt: 0.69 },
+    { s: 0.27, sill: 0.3, crease: 0.53, belt: 0.73, deck: 0.8, wSill: 0.685, wCrease: 0.7, wBelt: 0.667 },
+    { s: 0.54, sill: 0.3, crease: 0.53, belt: 0.765, deck: 0.835, wSill: 0.69, wCrease: 0.705, wBelt: 0.667 },
     // The screen's foot on the bonnet (0.891, 0.890) [D side (1230, 288); front view 0.871
     // on the centre line]; the wings' top 0.803 at the cowl [D side (1200, 320)]. Flank
     // ±0.704–0.718 from here to s 2.97 [D top]; the glass's foot ±0.669 [D front].
-    { s: 0.89, sill: 0.25, crease: 0.53, belt: 0.805, deck: 0.875, wSill: 0.69, wCrease: 0.71, wBelt: 0.69 },
+    { s: 0.89, sill: 0.25, crease: 0.53, belt: 0.805, deck: 0.875, wSill: 0.69, wCrease: 0.71, wBelt: 0.667 },
     // Sill 0.164–0.205 between the arches [D side y 542–557: the black rocker] → 0.17.
-    { s: 0.95, sill: 0.17, crease: 0.53, belt: 0.81, deck: 0.83, wSill: 0.69, wCrease: 0.71, wBelt: 0.69 },
+    { s: 0.95, sill: 0.17, crease: 0.53, belt: 0.81, deck: 0.83, wSill: 0.69, wCrease: 0.71, wBelt: 0.667 },
     // The window sill 0.824 at s 1.08, 0.833 at 1.35, 0.846 at 2.1 [D side], 12 mm over the belt.
-    { s: 2.4, sill: 0.17, crease: 0.53, belt: 0.845, deck: 0.865, wSill: 0.69, wCrease: 0.71, wBelt: 0.69 },
+    { s: 2.4, sill: 0.17, crease: 0.53, belt: 0.845, deck: 0.865, wSill: 0.69, wCrease: 0.71, wBelt: 0.667 },
     // Behind the rear wheel the body's bottom meets the bumper's foot (0.30) [D side].
     { s: 2.95, sill: 0.3, crease: 0.53, belt: 0.855, deck: 0.875, wSill: 0.69, wCrease: 0.71, wBelt: 0.69 },
     // The real belt runs on at 0.857 to the tailgate's line (3.11); here it is kept under the

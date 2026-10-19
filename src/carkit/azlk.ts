@@ -91,7 +91,7 @@ export const BODY_2141: KitBody = {
       // behind the mirror's black sail, 1.917 at its top [P]); the kit has no black sail, so
       // the glass runs down the pillar instead.
       { s: 1.387, top: 1.9, upper: 'door1' },
-      { s: 1.417, top: 1.93, upper: 'door1', glass: 'drop' },
+      { s: 1.575, top: 1.93, upper: 'door1', glass: 'drop' },
       // The B pillar [D: the front glass ends x 438.6 (2.385), the doors meet at x 443 (2.41)
       // below the belt, the rear glass starts at x 458.6 (2.499); 0.04 further back at the
       // rail]. The front frame ends 1 cm before the door's lower shut line (HISTORY Oka).
@@ -110,7 +110,7 @@ export const BODY_2141: KitBody = {
       // corner raked to the black triangle's point [D: (666, 151), (686, 167): 3.684 / 1.03,
       // 3.80 / 0.937]: one raked edge from 3.30 at the rail to 3.80 at the belt.
       { s: 3.245, top: 3.245, upper: 'body', glass: 'fixed' },
-      { s: 3.8, top: 3.3, upper: 'body' },
+      { s: 3.86, top: 3.3, upper: 'body' },
       // The belt turns down to the tailgate's foot from here (station 4.12).
       { s: 4.12, top: 3.355, upper: 'body' },
       // rearBase; the tailgate's top at the rail [D side: the roof's line crosses 1.335 at s
@@ -178,6 +178,8 @@ export const LOOK_2141: KitLook = {
   headrests: true, // [P "Moskwitsch 2141 (rear) (1)": through the tailgate glass]
   brightwork: 'black', // [P handles, mirrors]
   sill: 'black', // [P "Moskwitsch 2141 (front)", D side: dark between the arches]
+  mirrorS: 1.675,
+  mirrorHeightOffset: 0.016,
   waist: null,
   // Amber, on the wing ahead of the door [D side x 235.7–250, y 214.3–220; P green front].
   repeater: { s0: 1.225, s1: 1.305, y0: 0.634, y1: 0.667 },

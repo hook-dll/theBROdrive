@@ -28,6 +28,16 @@ reads correctly (a flat piece bent once round a corner, a straight chop, a strai
 over new generator features or curves; if something half-built is more complex than
 needed, drop it for the simple version.
 
+**What matters and what does not.** The cars are a stylised take, in the spirit of the
+Soviet scale models: clean, plainly cut panels, never dented, creased or chewed.
+- *Must be right:* the silhouette; door shapes and shut lines; glazing lines; pillars in
+  their real places and never thickened; lamps; the cabin.
+- *Not worth chasing:* millimetre agreement with the drawing. A drawing check that is a
+  few centimetres off on a value that does not change how the car reads is acceptable;
+  don't spend passes on it, don't add geometry to win it.
+- Work on the defects the owner names. Don't widen the task into drawing-tolerance
+  polishing.
+
 **Workflow: screenshots first, docs at acceptance.** As soon as a shape is visible in the
 lab, send the owner (through the main agent) draft screenshots from his angles, before
 hash proofs and docs. Iterate on his feedback. Only when he accepts the model: run the
@@ -273,7 +283,7 @@ author.
 | `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
 | `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). A tailgate does the same when the last station carries a `notch` (the Oka's, down between its corner lamps; `BodyFrame.lidOwner`). |
 | `rearLean` | `{ base, lean, blend }`: above height `base`, every point behind the rear base moves forward `lean` m per m of height, faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. |
-| `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). |
+| `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15, full 0.17; the 2115 without `full`) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`). |
 
 **`TubStation`** — one half-section; values interpolate linearly between stations.
@@ -359,7 +369,11 @@ front edge at the belt, and the A pillar looks far too wide (HISTORY.md).
 `rearArch?` (the rear arch's own factor where it is tighter than the front's: the 2110's
 1.0 is as wide as the tyre; absent, the rear takes `arch`), `rearArchRise?` (the rear
 arch's top over the hub, over the tyre radius, where it is lower than a circle: its skin
-and liner become a half ellipse; the 2110's 0.81 covers the tyre's top).
+and liner become a half ellipse; the 2110's 0.81 covers the tyre's top), `archToSill?`
+(the arch's edge in the skin and the well's inner wall never run below the sill there
+(`BodyFrame.archEdgeY`): on a body whose sill stands over the hub, the UAZes', the arch's
+ends stop at the sill instead of hanging to the hub's height as a skirt beside the tyre;
+absent, every other car's arches as before).
 
 ### Families and `onBody`
 
@@ -474,11 +488,12 @@ the `dash` and `fascia` sections, `dashLoft` (sections across the width where on
 serve it: the 2110's driver's half up to the knee panel and shallow end caps at the
 doors), `wood` band, `binnacle` and `cluster`, `gauges` (round or
 ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear`,
-`handbrake`, `glovebox`, `radio`, `ashtray`, `hazard`, `frontDoor` (the front cards' inner
+`handbrake`, `glovebox` (`lid: false`: an open shelf, the Oka's), `radio`, `ashtray`, `hazard`, `frontDoor` (the front cards' inner
 handle and crank), `lights` switch, `vents` (each with
 an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales: a grid
 `cols` wide of the functions in `show`, each lit on its `tell_*` channel), `rockers`,
-`stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `carpet`,
+`stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `clock?` (on the
+cluster face, or `on: 'fascia'` on the fascia's line and the stack below it: the 2110's), `carpet`,
 `headliner`, `bench.clear` (the bench base's air to the rear wheel-house covers, default
 0.022: a bench standing between them, the Nivas' and the Oka's, takes 0.04, since 2 mm
 there fights at a distance), `lenses` (a second telltale grid) and `transfer` (static
@@ -486,7 +501,7 @@ transfer-box levers on the tunnel, `LAYOUTS.niva`). In `Layout`, `ds` is metres 
 at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (five dials on
 wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
 face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
-stack), `CABIN_1111` (ribbon speedometer in a small hood), `CABIN_2131` (the 2121's with
+stack, a clock under the heater panel), `CABIN_1111` (ribbon speedometer in a small hood, an open shelf for a glovebox), `CABIN_2131` (the 2121's with
 the bench further back), `CABIN_NEXIA` (a rounded hood over a central speedometer, the
 tachometer left and two small dials right, end vents, two centre vents over three heater
 knobs), `CABIN_ESPERO` (an angular hood over three dials of one size, the tachometer,
@@ -497,8 +512,10 @@ hood over the tachometer, a big speedometer and two small dials, end vents, a ce
 pair with the hazard switch between, the radio over three heater knobs, a four-spoke wheel),
 `CABIN_VECTRA_A` (an angular hood over the tachometer, a big speedometer and two small dials,
 the driver's end vent over a rotary light switch, a centre vent pair with the hazard switch
-between, a three-spoke wheel); the Samaras and the AZLK-2141 use the `samara` platform's layout as is, the 2121
-the `niva` platform's.
+between, a three-spoke wheel), `CABIN_2141` (the Samara's dash with the tachometer left, two
+quarter dials stacked right of the speedometer, a two-spoke wheel, a centre vent pair over the
+heater sliders and a stack, the glovebox high); the Samaras use the `samara` platform's layout
+as is, the 2121 the `niva` platform's.
 
 ## Scene contract
 
@@ -811,15 +828,19 @@ are all in place. Neither is optional and neither is judged by eye. `kit-check`
 | zfight | `kit-zfight.ts` | any visible z-fight cluster in any band, any shell slit |
 | proportions | `kit-proportions.ts` | the fit row against the fresh measure and the factory; a hub moved over 10 mm in its arch |
 | reality | `reality.ts` | the running gear against the factory targets (cars with a `TARGETS` entry) |
-| mirrors | `kit-mirrors.ts` | from the cabin camera's eye (`kit_driver_eye`, what `cabinEye` and vehicle/cabincamera.ts use; not the lab's `look()`), rays to 160 points on each door mirror's glass past every opaque face: under 60 % seen; the driver's mirror over 55° off the axis (outside the straight-ahead 85° view), the far one over 70°; either outside −30°..+10° of the eye's level |
+| mirrors | `kit-mirrors.ts` | from the cabin camera's eye (`kit_driver_eye`, what `cabinEye` and vehicle/cabincamera.ts use; not the lab's `look()`), rays to 160 points on each door mirror's glass past every opaque face: under 60 % seen; the driver's mirror over 55° off the axis (outside the straight-ahead 85° view), the far one over 70°; either outside −30°..+10° of the eye's level. The mirror's support is generated from `skinX` at its mounting height and sunk into the body; a new car must not leave a floating foot. |
 | surface: dents | `kit-surface.ts` | the loft's rows turning much harder at one station than at its neighbours (`uneven`), in and out at two stations under 0.5 m apart (`s-bend`), the side's lean in and out (`lean`), the same on the deck's centre line; folds of over 5° inward on the up-facing skin of a lid or the roof. The rows themselves, shut lines, arch lips and the ends' turns are the intended lines and never flagged; a corner drawn on the real car is marked `corner: true` on its station with the source |
 | surface: complexity | `kit-surface.ts` | over 15 000 triangles; a mesh over 30 % slivers; a part of over 200 triangles at over 4 per cm² of its size. Listed (not failing): over 13 000, panels over 10 % slivers or tiny triangles, stations on the line through their neighbours, denser small parts, up-facing skin wound inward |
 | drawing | `kit-drawing.ts` | a body value measured on the BUILT car outside its tolerance of `refs/<car>.json`; no refs file is UNVERIFIED (reported) |
-| dash | `kit-drawing.ts` | the built cabin (gauges and rows, cluster place, clock, vents, stack, console, glovebox, wheel spokes and size) against the refs' dash block from interior photos; none is DASH UNVERIFIED (reported) |
+| dash | `kit-drawing.ts` | a new car MUST provide a photo of its real dashboard and a `dash` block (gauges and rows, cluster place, clock, vents, stack, console, glovebox, wheel spokes and size); existing cars already accepted by the owner are explicitly exempt and are listed in `tools/kit-drawing.ts` |
 
 It prints one pass/fail row per car; every finding names where (owner, s, height) and
-what to simplify or fix. Evidence goes to `build/kitcheck/` (gitignored): each tool's log
-and JSON, and per car `mirror-left.png` / `mirror-right.png` / `mirrors-ahead.png` (the
+what to simplify or fix. The dashboard exemption is intentionally narrow: it does not ask
+for replacement photos or geometry changes on finished cars. When a new car is added, do
+not add it to the exemption list; add a sourced interior photo and its measured `dash`
+block instead. `DASH UNVERIFIED` then fails `kit-check`. Evidence goes to `build/kitcheck/`
+(gitignored): each tool's log and JSON, and per car `mirror-left.png` / `mirror-right.png` /
+`mirrors-ahead.png` (the
 mirrors from the seat, glass magenta), `surface-<n>.png` (a crop at each dent, ringed),
 `drawing-side.png` / `drawing-front.png` (the drawing, the model traced at the drawing's
 own scale, the drawing with the model's outline in red) and `cabin-vs-photo.png` (the
@@ -874,10 +895,11 @@ stretch, not judged), `wheelbase`, `overhangFront/Rear`, `screenFoot`, `screenTo
 `beltY`, `railY` (the visible side glass's foot and top at the front door), `sideGlassBelt`,
 `sideGlassRail` (every pane's run along the car), `doorFront`, `doorRear` (shut lines 10 cm
 under the belt), `doorBottomY`, `mirror` `[s, y]`, `roofHalfWidth`, `beltHalfWidth`,
-`moulding` `[y0, y1]`, `bonnet`, `bootLid`. Dash keys (from a photo of THIS car's dash,
-`photo: { src, view }`): `gauges`, `dialRows`, `clusterAt`, `clock`, `wheelSpokes`,
-`wheelDiameter`, `glovebox`, `stack`, `console`, `vents`; a dash borrowed or written without
-a photo gets `dashNote` instead and reports DASH UNVERIFIED.
+`moulding` `[y0, y1]`, `bonnet`, `bootLid`. A future car's dash keys come from a photo of
+THIS car's dash (`photo: { src, view }`): `gauges`, `dialRows`, `clusterAt`, `clock`,
+`wheelSpokes`, `wheelDiameter`, `glovebox`, `stack`, `console`, `vents`. Existing cars
+remain accepted without new dashboard evidence; a new car without the photo and `dash`
+block is `DASH UNVERIFIED` and fails `kit-check`.
 
 ### Writing a spec without z-fighting
 

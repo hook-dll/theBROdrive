@@ -42,7 +42,7 @@ The Oka shares no stampings with any other kit car, so it is its own family: `BO
 | 1994 VAZ 1111 red rear.jpg | CC BY 4.0 | Right rear 3/4: **the round filler cap on the right rear quarter**, half way down the panel just ahead of the arch; a red fog lamp at the left end of the rear bumper. |
 | 2000 VAZ 1111 (11113021) rear.jpg | CC0 | Left rear 3/4: the red fog lamp in the bumper's left end, the bumper wrapping to the arch, the tail lamps. |
 | ВАЗ-1111 «Ока», Molėtų technikos muziejus 3.jpg | CC BY-SA 4.0 | Right side of an early car: the amber repeater on the wing, the long door, the fixed quarter glass. |
-| Oka-Innenraum.jpg | CC BY 4.0 | Black dash, black door card (upholstery and dash colours). |
+| Oka-Innenraum.jpg | CC BY 4.0 | Black dash, black door card (upholstery and dash colours); the dash (`CABIN_1111`): no glovebox lid, an open shelf before the passenger (`glovebox.lid` false since kit-check 2026-10-19: the lid the kit drew there is not on the car). |
 
 ---
 
@@ -93,8 +93,8 @@ The real belt runs at 0.857 along the D pillar to the tailgate's line at s 3.11 
 |---|---|---|
 | 0.055 | 0.640 (bumper corner); the lamp panel's ends ±0.614 [D front] | 0.62 / 0.64 / 0.63 |
 | 0.163 | 0.675 | 0.66 / 0.675 / 0.665 |
-| 0.271 | 0.697 | 0.685 / 0.70 / 0.69 |
-| 0.54–2.97 | 0.704–0.720; front view flank ±0.70–0.709, glass foot ±0.669 at 0.877 | 0.69 / 0.71 / 0.69, `shoulder` 0.02 / 0.012 |
+| 0.271 | 0.697; the wings' top under the clamshell's edge ±0.653–0.668 at 0.72–0.81 [D front: the line inside the flank] | 0.685 / 0.70 / **0.667** |
+| 0.54–2.97 | 0.704–0.720; front view flank ±0.70–0.709, glass foot ±0.669 at 0.877 | 0.69 / 0.705–0.71 / **0.667** to 2.4 (the wings' top and the glass's foot one line, no s-bend at 0.54 / 0.89), 0.69 at 2.95; `shoulder` 0.02 / 0.012 |
 | 3.075 | 0.681 | 0.675 / 0.695 / 0.68 at 3.04 |
 | 3.129 | 0.659 | 0.65 / 0.67 / 0.66 at 3.125 |
 | 3.16 | 0.577 at 3.156 (rounding); lamps' outer edge ±0.661 [D rear] | 0.63 / 0.655 / 0.645 |

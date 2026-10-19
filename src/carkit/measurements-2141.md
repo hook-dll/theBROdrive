@@ -7,7 +7,7 @@ Frame and tags as in `measurements-classics.md`:
 - **Faces:** `x` is a half width from the centre line.
 - **Tags:** **[D]** drawing, **[P]** photo, **[F]** factory figure, **[E]** estimate (reason given).
 
-The 2141 shares no stampings with any other kit car, so it is its own family: `BODY_2141` / `LOOK_2141` in `azlk.ts`, `platform: 'samara'` (transverse engine in front, front drive). The car measured is the base 2141 (1986–1998): black plastic bumpers, the plain slatted grille, no spoiler. It has no dash override: the `samara` platform's layout (a moulded dash, a hooded binnacle over round dials, a centre stack, a low tunnel, five seats) is the 2141's arrangement too [P "Салон Москвич-2141"]; its cowl-to-B-pillar run (1.07 m) is within 7 cm of the 2109's (1.0 m), and its rear bench (`hip` + 0.78) stands ahead of the rear wheel-houses (arch front 3.118, bench 3.07).
+The 2141 shares no stampings with any other kit car, so it is its own family: `BODY_2141` / `LOOK_2141` in `azlk.ts`, `platform: 'samara'` (transverse engine in front, front drive). The car measured is the base 2141 (1986–1998): black plastic bumpers, the plain slatted grille, no spoiler. Its cabin is the `samara` platform's (a moulded dash, a hooded binnacle, a centre stack, a low tunnel, five seats: the 2141's arrangement too [P "Салон Москвич-2141"]) with the fittings rearranged after that photo in `CABIN_2141` (§6); its cowl-to-B-pillar run (1.07 m) is within 7 cm of the 2109's (1.0 m), and its rear bench (`hip` + 0.78) stands ahead of the rear wheel-houses (arch front 3.118, bench 3.07).
 
 ## 0. Sources and scales
 
@@ -46,7 +46,7 @@ The-blueprints.com's watermarked preview of its "Moskvich 2141 (1986-2001)" vect
 | Moskwitsch 2141 (side).jpg | CC BY-SA 4.0 | Left side: door lines (B pillar 2.37–2.42, rear door's rear edge 3.25 by the hubs), belt 0.907, door bottom 0.30, the shoulder line under the windows, the black sill; no filler on the left. |
 | Moskwitsch 2141 (front).jpg, (rear) (1).jpg | CC BY-SA 4.0 | Black handles and mirrors, head restraints, the black sill strip. |
 | Moscow car meet 2025-07-12 M-2141 01/02/03.jpg, Образцовый экземпляр АЗЛК-2141 в Москве – вид сзади, 12 июля 2025 г.jpg | CC0 | Front and rear of a base car: the face and tail as above. |
-| Салон Москвич-2141.jpg | CC BY-SA 4.0 | Dark grey dash, round dials in a hood, grey cloth (`upholstery`, `dash`). |
+| Салон Москвич-2141.jpg | CC BY-SA 4.0 | Dark grey dash, round dials in a hood, grey cloth (`upholstery`, `dash`); the dash's fittings (§6). |
 | Moskvich 2141 in Magdeburg.jpg, Moskvich 2141.jpg, Москвич-2141.jpg | CC BY 2.0 / CC BY 4.0 / CC BY-SA 4.0 | Cross-checks of the face (every one shows the left side). |
 
 ---
@@ -151,3 +151,19 @@ Review 1 (2026-10-16): before / after the slim A pillar and the lowered bumpers,
 - **The A pillar** (review 1): the glass's front edge runs parallel to the pillar 0.08 of s behind its line down to the belt; on the car it is more upright and its foot (1.634) stands behind the mirror's black sail. The pillar's line itself is the screen's (the drawn outer line, 1.336 / 1.85).
 - **Wipers** 0.45 [E]; `screenBottom`, `screenHeader`, `pillar` as the Samaras [E].
 - Not modelled: number plates and their recesses, the bumpers' intake slots, the rubbing strip line along the doors at 0.45, the badge, the quarter glass's black triangle (glass there).
+
+## 6. Dash (`CABIN_2141`, interior.ts; kit-check 2026-10-19)
+
+Read off "Салон Москвич-2141.jpg" (1920 × 1079, from the driver's door). Scale: the radio's 1-DIN face (182 mm, x 1071–1267) gives 0.93 mm/px at the stack, its centre line x 1176. The dials keep the Samara's 0.044 radius; the cluster's spacings are ratios to it (it stands nearer the camera than the stack). Heights hang from the Samara's fascia top (the vents' and the glovebox lid's tops, y 306–349).
+
+| Item | Reading (px) | Spec |
+|---|---|---|
+| Tachometer, speedometer | centres x 557 / 747, y 282 / 276: tachometer left | `rpm` / `speed` at right ∓0.052 (bezels clear), up 0.015 |
+| Quarter dials | x 851 / 876, y 220 / 321, r 43; the fuel pump symbol at the lower | `temp` over `fuel` at right 0.128, up 0.035 / −0.011, r 0.019 (inside the binnacle's face) |
+| Warning lamps | a row at the window's lower left, x 380–440, y 361 | a block two wide at right −0.125 [E which] |
+| Wheel | two wide spokes from a pad, left and right, dipping a little | `spokes` [−15, 195] (was the Samara's three) |
+| Face vents | slatted at each end (x 50–300, 1660–1765); the centre pair x 1041–1322, y 349–441 | the end pair at dy −0.1; the centre pair x ±0.065, dy −0.11, 0.11 × 0.08 each |
+| Heater | sliders in a panel under the vents, x 1110–1270, y 504 | `heater` dy −0.19, two small knobs |
+| Hazard | x 1298, y 471, right of the heater | [−0.11, −0.19] |
+| Stack, radio | the stack down to the tunnel; the radio y 624–710 | `stack` half 0.1, `radio` dy −0.30, ashtray −0.37 [E] |
+| Glovebox | lid x 1365–1647, y 306–422, its top at the fascia's | x −0.31, dy −0.11, half 0.13 × 0.045 |

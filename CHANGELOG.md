@@ -4,6 +4,57 @@
 
 ### Added
 
+- Samaras, Oka and Nexia to their drawings without `corner` exemptions (`src/carkit/samaras.ts`,
+  `oka.ts`, `daewoo.ts`). 2108/2109/21099: the bonnet starts at the face (`bonnetFront` 0.11,
+  `frontLean.full` 0.17) so its lip is at 0.173 (drawn 0.164) with no level strip and dent
+  at s 0.17; head lamp to ±0.618 (its wall 5 mm off the indicator's fought under the open
+  bonnet). Oka: the wings' top under the clamshell at the front view's ±0.667 from s 0.27,
+  in line with the glass's foot (the s-bend at 0.54 / 0.89). Nexia: the belt runs in from the
+  cabin's ±0.765 to the tail (0.765 / 0.755 / 0.745 at 3.96 / 4.15 / 4.30), not out and back.
+
+- VAZ classics owner fixes (`src/carkit/specs.ts`, `estates.ts`, `body.ts`): 2105/2107 boot
+  and tail back on the drawn deck (0.854 / 0.795, not 0.90 / 0.87) with the rear wing's
+  edge low to the bumper (sill 0.31 at s 3.9); no black A-pillar insert on 2102/2104/2105/2107
+  (the strips ahead of the door's drawn front are body-owned, so no frame rubber edge or
+  belt slot shows); 2102/2104 tailgate glass foot at 0.91 over a painted band (knee at the
+  glass's foot); 2104 tailgate cut between the lamps (`notch` 0.50), the painted stopgap
+  panel removed, and the estates' D-pillar knee bands folded outward (`flat`-tail hatches only).
+- VAZ 2102/2104 tail corners and 2105/2107 tail (owner): leaning tails are cut at the lean's
+  base before the warp, so no slit opens down the estates' tail corners (`kit.ts` `leanEnd`);
+  the estates' D-pillar bands under the knee fold outward unlined and the load space's side
+  wall ends at the knee, so no beige sliver shows over the 2104's lamps (`body.ts`, `bay.ts`;
+  2111/2112 share the code); the 2105/2107 boot turns down in its last 4 cm to an upright,
+  taller tail face instead of a 45° chamfer (`specs.ts` `BODY_05`).
+
+- KIT CAR OWNER REVIEW 2: removed the rejected black A-pillar wedge from the shared
+  2104/2105/2107 body, made every mirror support enter the body skin (with a shell-overlap
+  gate in `tools/kit-mirrors.ts`), and raised the UAZ-469/UAZ-2206 front overhang above the
+  bumper. Existing dashboards stay accepted; future kit cars require a sourced dashboard
+  photo and `dash` reference block.
+
+- UAZ-2206 to its drawing (`src/carkit/uaz.ts`): the windscreen curved in plan at its top
+  too (`screenTop` 0.223: 0.466 on the centre line, 0.689 at the pillar), the roof's front
+  panel rounding up from it (`roofDrop`), `screenFoot` 0.17, the A pillar's columns to the
+  drawn 0.689 / 0.725 / 0.76. `tools/kit-drawing.ts` scans the screen's front edge from
+  the tip when the cowl stands under 0.6 (the van's 0.40: it measured nothing). Refs
+  `screenTop` → the centre line's (0.466, 1.856) and `doorBottomY` → the front door's 0.588:
+  the silhouette and the front door the checker measures, not the pillar's top and the
+  side door's bottom.
+
+- UAZ-469 and UAZ-2206: no skirt under the front bumper (owner's review, 2026-10-19). New
+  `WheelSpec.archToSill` (body.ts `archEdgeY`): the arches' ends and the wells' walls stop
+  at the sill instead of hanging to the hub's height beside the tyre; absent on every
+  other car. The 2206's body bottom ahead of the front wheel at the bumper's 0.58 (nose,
+  step to the arch's corner), its front bumper down to the drawn 0.58–0.70 (the face's
+  lamps and grille with it, to their drawn heights); `doorBottomY` accepted at 0.621.
+
+- Volgas to their drawings (`src/carkit/volgas.ts`). GAZ-24: the quarter light's foot now
+  rounds up into the front edge, as in the drawing and the side photo, so the drop glass
+  is read at the rail (railY 1.26 → 1.364); side glass tops back to 1.365 (`glassTop` 0.03).
+  GAZ-31029: the sedan tail is back (no fastback C pillar to 4.42, the tail station at 4.805
+  again), and below the belt the doors meet at the drawn B shut line 2.50. The boot lid's
+  drawn extent [3.92, 4.805] is recorded as `accepted` in `refs/gaz31029.json`.
+
 - THE POLICE: POSTS, RADAR, CHASE, STOP, FINES (`src/world/police.ts`, `RoadTraffic`
   `spawnPolice`…`releasePolice`, `src/audio/sirenvoice.ts`).
   - The speed limit is 90 km/h everywhere. Police stand at posts placed from the seed: on
@@ -1847,6 +1898,17 @@
     handed in, placed 2nd and 3rd.
 
 ### Fixed
+
+- TENS (2110 / 2111 / 2112): THE FRONT DOOR GLASS STANDS TO 1.32 AT THE DOOR'S MIDDLE AGAIN
+  (carkit tens.ts). The glass's front edge had been raked to tops 2.0 / 2.06 (and `glassTop`
+  −0.03, the pane above the rail), so at the door's middle the frame met the glass at 1.28;
+  the columns are back near the pillar (1.805 / 1.85 / 1.9 / 2.0, a 0.01 chamfer, `glassTop`
+  0.035). The `corner` flags at s 0.6 / 1.31 / 2.4 are gone (D10 shows no crease there):
+  the side's lean rises evenly to the front view's 16° (wCrease 0.82 at 1.31, wBelt 0.718 /
+  0.752 / 0.73 / 0.735 at 0.34 / 0.6 / 1.31 / 2.4). The roof profile's points sit on the
+  column tops (2.324, 2.44): 14 689 / 14 571 / 14 709 triangles (were 15 075 / 14 963 /
+  15 078). sideGlassRail accepted in refs/vaz2110.json and vaz2111.json (the drawn window
+  top against the check's band under it).
 
 - ESPERO: THE TAIL-LAMP BAND ON THE BOOT LID LIES FLUSH, LIKE THE CORNER LAMPS (carkit
   daewoo.ts `LOOK_ESPERO.rear.lid`). Owner: it read as a bulge beside the flush lamps on the

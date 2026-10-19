@@ -21,7 +21,7 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A } from './interior';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_ASTRA_F, BODY_VECTRA_A, LOOK_ASTRA_F, LOOK_VECTRA_A } from './opel';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
@@ -157,8 +157,20 @@ const BODY_05: KitBody = {
     // under the belt went 16.5° → 14.1° → 15.7° (in and out, kit-surface); now 16.5° →
     // 15.7° → 15.7°. 4 mm is under the top view's reading (1.637 mm/px).
     { s: 3.33, sill: 0.262, crease: 0.735, belt: 0.874, deck: 0.935, wSill: 0.77, wCrease: 0.81, wBelt: 0.771 },
-    { s: 3.9, sill: 0.37, crease: 0.708, belt: 0.815, deck: 0.854, wSill: 0.77, wCrease: 0.805, wBelt: 0.775 },
-    { s: 4.075, sill: 0.4, crease: 0.7, belt: 0.76, deck: 0.795, wSill: 0.75, wCrease: 0.785, wBelt: 0.76 },
+    // Boot and tail as drawn (§1.1 deck 854 at s 3900, 789–799 at 4060–4080; rear-wing
+    // shoulder 872 → 760) [D]: a raised deck (0.90 / 0.87) stood the tail 5–8 cm over the
+    // drawing's rounded boot. The rear wing's painted edge stays at 296–304 from the arch
+    // to the bumper's end cap at s 3870 [D, re-read]; sill 0.37 here ran it up to 0.35 at
+    // the cap and left a 5 cm wedge of daylight under the overhang. Widths are §1's estimate
+    // 0.805 / 0.775 (the top view's outline lies on its dimension line); the crease–belt
+    // lean runs 15.7° → 15.7° → 22.6°.
+    { s: 3.9, sill: 0.31, crease: 0.708, belt: 0.815, deck: 0.854, wSill: 0.77, wCrease: 0.805, wBelt: 0.775 },
+    // The tail upright with a small top corner (owner, 2026-10-19: "too slanted"): the drawn
+    // boot rolls down only in its last 5–8 cm (828 at s 4000, 799 at 4060 [D]) to a near-
+    // upright face. With the rounding spread from 3.9, the corner was one long 45° chamfer
+    // over a short face; it now turns in over the last 4 cm, the face standing to 0.80.
+    { s: 4.035, sill: 0.34, crease: 0.704, belt: 0.79, deck: 0.825, wSill: 0.768, wCrease: 0.802, wBelt: 0.773 },
+    { s: 4.075, sill: 0.4, crease: 0.7, belt: 0.765, deck: 0.8, wSill: 0.75, wCrease: 0.785, wBelt: 0.76 },
   ],
   // The shoulder turns in to the greenhouse's foot over 3.5 cm: front view ±0.773 at 0.90,
   // ±0.731–0.736 at 0.925–0.95 [D] (a 2 cm rise put its edge at 0.905, ±0.745 there); the
@@ -166,16 +178,17 @@ const BODY_05: KitBody = {
   shoulder: { inset: 0.03, rise: 0.035 },
   cabin: {
     columns: [
-      // A slim A pillar, as on the 124: the door's frame runs up it; below the belt the
-      // wing reaches back to the door's drawn front at 1.17. Behind the frame the black
-      // mirror sail [D][P: "black triangular mirror sail", measurements-classics.md §3],
-      // then the glass from its drawn front edge, 1.225 at 1.0, 1.30 at 1.1, 1.46 at 1.3
-      // [D]: the line (1.19, belt) → (1.50, rail). Painted, that wedge was the wide pillar
-      // the owner saw (c86627d); glass from the frame put the pane 0.12 ahead of the drawn.
+      // A slim painted A pillar, as on the 124; below the belt the wing reaches back to the
+      // door's drawn front at 1.17. No black sail or insert (owner, 2026-10-19): the strips
+      // from the pillar's line to 1.17 are the body's, so the door starts at its drawn front
+      // above the belt too. As the door's frame they showed its 3 cm rubber edge up the
+      // pillar and a shut slot along the belt into the black cabin (a black wedge at the
+      // pillar's foot). Same paint, same lines: the pillar is not wider. The glass starts at
+      // its drawn front edge, 1.225 at 1.0, 1.30 at 1.1 and 1.46 at 1.3 [D].
       { s: 1.0, top: 1.41, upper: 'body' },
-      { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
-      { s: 1.06, top: 1.47, upper: 'door1', finish: 'black', lower: 'body' },
-      { s: 1.17, top: 1.495, upper: 'door1', finish: 'black' },
+      { s: 1.035, top: 1.445, upper: 'body' },
+      { s: 1.06, top: 1.47, upper: 'body' },
+      { s: 1.17, top: 1.495, upper: 'door1' },
       { s: 1.19, top: 1.5, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
@@ -296,7 +309,7 @@ const LOOK_2103: KitLook = {
   headrests: false,
   brightwork: 'chrome',
   sill: 'chrome',
-  waist: { y: 0.719, height: 0.025, finish: 'chrome' },
+  waist: { y: 0.753, height: 0.025, finish: 'chrome' },
   repeater: { s0: 0.14, s1: 0.22, y0: 0.706, y1: 0.737 },
   front: {
     bumper: {
@@ -354,7 +367,7 @@ const LOOK_2106: KitLook = {
   headrests: true,
   brightwork: 'chrome',
   sill: 'chrome',
-  waist: { y: 0.739, height: 0.025, finish: 'black' },
+  waist: { y: 0.773, height: 0.025, finish: 'black' },
   repeater: { s0: 0.153, s1: 0.243, y0: 0.686, y1: 0.721 },
   front: {
     bumper: {
@@ -543,7 +556,7 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz1111: { id: 'vaz1111', ...BODY_1111, look: LOOK_1111, cabinLayout: CABIN_1111 },
   gaz24: { id: 'gaz24', ...BODY_GAZ24, look: LOOK_GAZ24, cabinLayout: CABIN_GAZ24 },
   gaz31029: { id: 'gaz31029', ...BODY_GAZ31029, look: LOOK_GAZ31029, cabinLayout: CABIN_GAZ31029 },
-  azlk2141: { id: 'azlk2141', ...BODY_2141, look: LOOK_2141 },
+  azlk2141: { id: 'azlk2141', ...BODY_2141, look: LOOK_2141, cabinLayout: CABIN_2141 },
   uaz469: { id: 'uaz469', ...BODY_UAZ469, look: LOOK_UAZ469, cabinLayout: CABIN_UAZ469 },
   // The 469 in the militia's livery (police.ts): no catalogue list draws it (vehicle/carmodels.ts).
   uaz469_police: { id: 'uaz469_police', ...BODY_UAZ469, look: LOOK_UAZ469_POLICE, cabinLayout: CABIN_UAZ469 },

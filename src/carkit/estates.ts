@@ -29,7 +29,11 @@ export const BODY_2102: KitBody = {
   cabin: {
     columns: [
       { s: 1.2, top: 1.445, upper: 'body' }, // BODY_124 from here to 2.19
-      { s: 1.235, top: 1.475, upper: 'door1' },
+      // No black insert up the A pillar (owner, 2026-10-19): the strip ahead of the vent is
+      // the body's above the belt, so the door's frame (and its 3 cm rubber edge, which
+      // showed black where the pillar turns in) starts at the vent's front; below the belt
+      // the door is unchanged. Same paint and lines: the pillar is not wider.
+      { s: 1.235, top: 1.475, upper: 'body', lower: 'door1' },
       { s: 1.26, top: 1.5, upper: 'door1', glass: 'vent' },
       { s: 1.55, top: 1.6, upper: 'door1', glass: 'drop' },
       { s: 2.095, top: 2.095, upper: 'door1' },
@@ -64,11 +68,13 @@ export const BODY_2102: KitBody = {
     rearBottom: 0.025, // unused with a knee
     // tailgate glass top 1.233 raw (rear view) → 1.218; centre top rail + crown 1.315 [D]
     rearHeader: 0.1,
-    // fold at the belt strip, glass base on the outline 3.833–3.84 / 0.845–0.85 raw [D];
-    // the glass ends ~0.05 higher [P]; the lower panel's top stands 85 mm further back [D]
+    // The glass's foot 0.91 on the centre line, ~0.05 over the fold at the belt strip (3.84 /
+    // 0.86 [D]) [P: the chrome belt strip and a painted band under the glass]: the knee is put
+    // at the glass's foot on the drawn raked line (3.947 here, before `rearLean`), so the
+    // band under it is painted tailgate. At the fold itself the glass ran 5 cm too low.
     // Kept upright over the sill so the tailgate lies flush with the lamp corners beside
     // it (the drawn panel leans ~12° under a ledge; flush corners read truer at this scale).
-    rearKnee: { s: 4.0, y: 0.86 },
+    rearKnee: { s: 3.947, y: 0.91 },
     pillar: 0.07, // BODY_124
   },
   wheels: { front: 0.648, rear: 3.072, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.13 }, // BODY_124; tracks 1365/1321 [D]
@@ -125,16 +131,20 @@ export const BODY_2104: KitBody = {
     // outline runs down the glass to the knee (3.80, 0.85) with nothing behind it there
     // [D] (§2.1); at belt 0.87 the corners stood 0.06 over the knee, 0.07 behind it.
     { s: 3.995, sill: 0.33, crease: 0.705, belt: 0.81, deck: 0.52, wSill: 0.76, wCrease: 0.795, wBelt: 0.765, flat: 1 },
-    // tail face [D 3.993–3.997 at the lower panel]
-    { s: 4.005, sill: 0.33, crease: 0.7, belt: 0.81, deck: 0.52, wSill: 0.755, wCrease: 0.79, wBelt: 0.76, flat: 1 },
+    // tail face [D 3.993–3.997 at the lower panel]. The tailgate's lower panel comes down
+    // between the corner lamps, cut at ±0.50 beside their inner edges (±0.507) [P p04_rear,
+    // D rear]: `notch`. Cut at the pillar row (±0.665) its edge and jamb ran down under the
+    // lenses, a black wedge under each lamp and a slot beside it into the load space.
+    { s: 4.005, sill: 0.33, crease: 0.7, belt: 0.81, deck: 0.52, notch: 0.5, wSill: 0.755, wCrease: 0.79, wBelt: 0.76, flat: 1 },
   ],
   shoulder: { inset: 0.03, rise: 0.035 }, // BODY_05
   cabin: {
     columns: [
       { s: 1.0, top: 1.41, upper: 'body' }, // BODY_05 from here to 2.975
-      { s: 1.035, top: 1.445, upper: 'door1', lower: 'body' },
-      { s: 1.06, top: 1.47, upper: 'door1', finish: 'black', lower: 'body' },
-      { s: 1.17, top: 1.495, upper: 'door1', finish: 'black' },
+      // No black insert at the A pillar: as BODY_05 (specs.ts), the strips to 1.17 are the body's.
+      { s: 1.035, top: 1.445, upper: 'body' },
+      { s: 1.06, top: 1.47, upper: 'body' },
+      { s: 1.17, top: 1.495, upper: 'door1' },
       { s: 1.19, top: 1.5, upper: 'door1', glass: 'drop' },
       { s: 2.055, top: 2.062, upper: 'door1' },
       { s: 2.075, top: 2.08, upper: 'body', lower: 'door1' },
@@ -165,11 +175,12 @@ export const BODY_2104: KitBody = {
     rearBottom: 0.025, // unused with a knee
     // tailgate glass top 1.30–1.33 (rear view) against rail + crown 1.423 [D]
     rearHeader: 0.11,
-    // The fold at the lip under the glass, drawn at (3.80–3.835, 0.84–0.86) [D] (§2.1): the
-    // knee at 3.912 before the lean below (0.31 × 0.36 = 0.112 forward at 0.85); the glass
-    // itself ends at 0.89–0.93 [D rear][P]. The lower panel and the lamp corners stand
-    // back from it, as the drawn lip does (3.91 at 0.783).
-    rearKnee: { s: 3.912, y: 0.85 },
+    // The fold at the lip under the glass, drawn at (3.80–3.835, 0.84–0.86) [D] (§2.1); the
+    // glass itself ends at 0.89–0.93 [D rear 0.89–0.91, P 0.928], over the lip and the wiper
+    // motor. The knee is the glass's foot, 0.91, on the drawn raked line (3.858 before the
+    // lean below, which carries it to ~3.76 [D: 3.749 at 0.91]); the painted band under it runs
+    // to the lower panel. With the knee at the fold (3.912, 0.85) the glass reached 6–8 cm low.
+    rearKnee: { s: 3.858, y: 0.91 },
     pillar: 0.07, // BODY_05
   },
   wheels: { front: 0.635, rear: 3.048, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.15 }, // BODY_05

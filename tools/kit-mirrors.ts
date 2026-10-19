@@ -90,6 +90,16 @@ function facePoints(s: Soup, tris: number[]): V3[] {
   return out;
 }
 
+type Box = readonly [number, number, number, number, number, number];
+
+function triBox(s: Soup, t: number): Box {
+  const p = t * 9;
+  const x = [s.v[p]!, s.v[p + 3]!, s.v[p + 6]!];
+  const y = [s.v[p + 1]!, s.v[p + 4]!, s.v[p + 7]!];
+  const z = [s.v[p + 2]!, s.v[p + 5]!, s.v[p + 8]!];
+  return [Math.min(...x), Math.min(...y), Math.min(...z), Math.max(...x), Math.max(...y), Math.max(...z)];
+}
+
 export async function checkMirrors(id: string, images: boolean): Promise<{ eye: V3; mirrors: MirrorResult[]; findings: Finding[] }> {
   const car = buildCar(id);
   const s = soupOf(car.root);
@@ -116,12 +126,30 @@ export async function checkMirrors(id: string, images: boolean): Promise<{ eye: 
   }
   // The spec says which door mirrors the car has (`KitLook.mirrors`: the base Oka's driver's only).
   const expected = car.spec.look.mirrors === 'left' ? (['left'] as const) : (['left', 'right'] as const);
+  const shellBoxes: Box[] = [];
+  const housingBoxes: Record<'left' | 'right', Box[]> = { left: [], right: [] };
+  for (let t = 0; t < s.n; t++) {
+    const m = s.meshes[s.mesh[t]!]!;
+    const box = triBox(s, t);
+    if (m.zone === 'exterior' && !m.hidden && !m.glass && !m.path.includes('_mirror/')) shellBoxes.push(box);
+    for (const side of ['left', 'right'] as const) {
+      const owner = side === 'left' ? 'door_fl' : 'door_fr';
+      if (m.path.startsWith(`${owner}/${owner}_mirror/`) && !m.mirror) housingBoxes[side]!.push(box);
+    }
+  }
+  // A support that merely floats near the panel can still leave every mirror visible. Require
+  // at least one housing triangle's bounds to enter the shell, which catches that separate
+  // failure without confusing the mirror-view occlusion test.
+  const touchesBody = (side: 'left' | 'right'): boolean =>
+    housingBoxes[side]!.some((h) => shellBoxes.some((b) =>
+      h[0] <= b[3] && h[3] >= b[0] && h[1] <= b[4] && h[4] >= b[1] && h[2] <= b[5] && h[5] >= b[2]));
   for (const side of expected) {
     const tris = faces.get(side);
     if (!tris) {
       findings.push({ car: id, level: 'fail', what: `${side} door mirror: no live mirror face (userData.kitMirror) found` });
       continue;
     }
+    if (!touchesBody(side)) findings.push({ car: id, level: 'fail', what: `${side} door mirror: housing/support does not enter the body shell` });
     const pts = facePoints(s, tris);
     const own = new Set(tris);
     let seen = 0;

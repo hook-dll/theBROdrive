@@ -47,11 +47,9 @@ export const BODY_UAZ469: KitBody = {
     // rear edge, level across to the pillar line and rolling down to its skirts there [P]:
     // the deck at 0.26 on the straight line from 1.15 to 1.25.
     { s: 0.148, sill: 0.58, crease: 0.85, belt: 1.04, deck: 1.15, wSill: 0.8, wCrease: 0.83, wBelt: 0.8, flat: 1 },
-    // The sill tucked to the cabin's ±0.86 (below) from the wing's front corner on: tucking
-    // it between the bonnet's rear edge and the cowl turned the sill's plan in and out by
-    // 6.6° (kit-surface); the side's lean under the crease now grows evenly from the nose
-    // (7.3° → 6.1° → 4.6° → 4.3°).
-    { s: 0.26, sill: 0.55, crease: 0.86, belt: 1.04, deck: 1.1622, wSill: 0.86, wCrease: 0.893, wBelt: 0.885, flat: 1 },
+    // Raise the short front overhang ahead of the wheel: the real wing stays above the
+    // bumper's lower edge, rather than leaving a triangular skirt hanging beside it.
+    { s: 0.26, sill: 0.6, crease: 0.86, belt: 1.04, deck: 1.1622, wSill: 0.86, wCrease: 0.886, wBelt: 0.875, flat: 1 },
     // The bonnet's rear edge [D side x 280], its centre 1.25 [D side y 188].
     { s: 1.064, sill: 0.45, crease: 0.86, belt: 1.04, deck: 1.25, wSill: 0.86, wCrease: 0.893, wBelt: 0.885, flat: 1 },
     // Cowl: the windscreen's foot (1.28, 1.27) [D side x 330, y 184]; the body's side 1785
@@ -143,6 +141,10 @@ export const BODY_UAZ469: KitBody = {
     // Square-cut arches round the tyre: top 0.50 over the hub front and rear [D side y 270
     // / 280]. One circle: 1.35 R.
     arch: 1.35,
+    // The body stands high over the hubs: the arches end at the sill [D side; P], none of
+    // the wing or the well's wall hangs to the hub's height ahead of the tyre (owner,
+    // 2026-10-19: "a skirt under the bumper").
+    archToSill: true,
   },
   doorBottom: 0.44, // [D side y 374]
   bonnetFront: 0.148,
@@ -262,16 +264,20 @@ export const BODY_UAZ2206: KitBody = {
   platform: 'van',
   stations: [
     // The face [D side 0.04-0.06 from 0.81 to 1.16]; round in plan to the full width by
-    // ~0.25 [D plan; E the station widths].
-    { s: 0.05, sill: 0.57, crease: 0.95, belt: 1.16, deck: 1.22, wSill: 0.7, wCrease: 0.76, wBelt: 0.7 },
+    // ~0.25 [D plan; E the station widths]. The body's bottom ahead of the front wheel at
+    // the bumper's bottom edge, 0.58 [D 0.582], so nothing hangs under the bumper (owner,
+    // 2026-10-19).
+    { s: 0.05, sill: 0.58, crease: 0.95, belt: 1.16, deck: 1.22, wSill: 0.7, wCrease: 0.76, wBelt: 0.7 },
     // The nose's top curving back: (0.154, 1.331), (0.223, 1.369) [D side].
-    { s: 0.15, sill: 0.56, crease: 1.0, belt: 1.3, deck: 1.34, wSill: 0.86, wCrease: 0.92, wBelt: 0.87 },
+    { s: 0.15, sill: 0.58, crease: 1.0, belt: 1.3, deck: 1.34, wSill: 0.86, wCrease: 0.92, wBelt: 0.87 },
     // wBelt 0.922 (was 0.93): the face's lean over the crease eases from the nose to the
     // flank, 9.5° → 7.4° → 7.2°; at 0.93 it went 9.5° → 5.7° → 7.2°, in and out (kit-surface).
     // The belt's half width here is not read off the drawing [E].
-    { s: 0.3, sill: 0.55, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.957, wBelt: 0.922 },
-    // Ahead of the front arch: the front door's bottom on the 0.55 band, its step 0.588 [D].
-    { s: 0.62, sill: 0.55, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.964, wBelt: 0.93 },
+    { s: 0.3, sill: 0.6, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.957, wBelt: 0.922 },
+    // The step under the front door, level to the front arch's corner: the body's bottom
+    // 0.58, the drawn step 0.588 [D 588, §3.2] and the bumper's bottom 0.582 [D]. The
+    // door's own bottom edge stands the sill's bevel over it (0.621, accepted in the refs).
+    { s: 0.68, sill: 0.58, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.92, wCrease: 0.96, wBelt: 0.925 },
     // Behind the arch, the body's side down to 0.42 [P]; widest ±0.964 [D front].
     { s: 1.36, sill: 0.42, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.905, wCrease: 0.964, wBelt: 0.93 },
     { s: 3.62, sill: 0.42, crease: 1.05, belt: 1.32, deck: 1.38, wSill: 0.905, wCrease: 0.957, wBelt: 0.93 },
@@ -284,32 +290,37 @@ export const BODY_UAZ2206: KitBody = {
     { s: 4.264, sill: 0.52, crease: 1.05, belt: 1.32, deck: 0.7, notch: 0.72, wSill: 0.84, wCrease: 0.9, wBelt: 0.88 },
   ],
   // The deck's edge ±0.89 at 1.36 [D front].
-  shoulder: { inset: 0.04, rise: 0.04 },
+  shoulder: { inset: 0.04, rise: 0 },
   cabin: {
     columns: [
-      // The cowl and the A pillar: drawn (0.456, 1.33) → (0.689, 1.88); the door's front
-      // edge below the belt at the cowl (drawn 0.36-0.39: the kit has no door ahead of the
-      // first column).
-      { s: 0.4, top: 0.6, upper: 'body', lower: 'door1' },
+      // The cowl and the A pillar: the door's front edge up the pillar drawn (0.419, 1.28)
+      // → (0.689, 1.89), the pillar's outer line (0.456, 1.33) → (0.689, 1.88) [D §3.4-3.5];
+      // the door's front edge below the belt at the cowl (drawn 0.36-0.39: the kit has no
+      // door ahead of the first column).
+      { s: 0.4, top: 0.689, upper: 'body', lower: 'door1' },
       // The A pillar 5 cm along the car at the belt: narrower, its lining folds into the jamb.
-      { s: 0.45, top: 0.65, upper: 'door1' },
-      // The glass's front edge parallel to the pillar [D (0.526, 1.33) → (0.735, 1.83)],
-      // its rear edge 1.21 [P]; a two-pane slider on the car.
-      { s: 0.49, top: 0.69, upper: 'door1', glass: 'drop' },
+      { s: 0.45, top: 0.725, upper: 'door1' },
+      // The glass's front edge parallel to the pillar [D (0.526, 1.33) → (0.735, 1.83): 0.756
+      // at the rail], its rear edge 1.21 [P]; a two-pane slider on the car.
+      { s: 0.49, top: 0.76, upper: 'door1', glass: 'drop' },
       { s: 1.21, top: 1.21, upper: 'door1' },
       // The front door's rear edge 1.29 [P 1.290; D 1.30-1.32]; the B post to the panel's
       // window (glazed on the 2206) 1.364-1.807 [P].
       { s: 1.29, top: 1.29, upper: 'body' },
       { s: 1.364, top: 1.364, upper: 'body', glass: 'fixed' },
       { s: 1.807, top: 1.807, upper: 'body' },
-      // The side door on the right only, 1.874-2.805, hinged at its front edge; its window
-      // 1.935-2.736 [P]. On the left a body pane in the same place [P "Aŭto UAZ-3962 04"].
+      // The side door's window is split at 2.439 [P]; keep a narrow upright frame in the
+      // door instead of one uninterrupted pane.
       { s: 1.874, top: 1.874, upper: 'door2', only: 'right' },
       { s: 1.935, top: 1.935, upper: 'door2', glass: 'fixed', only: 'right' },
+      { s: 2.439, top: 2.439, upper: 'door2', only: 'right' },
+      { s: 2.459, top: 2.459, upper: 'door2', glass: 'fixed', only: 'right' },
       { s: 2.736, top: 2.736, upper: 'door2', only: 'right' },
-      // The saloon's window 2.877-3.757 [P].
+      // The saloon pane is split at 3.474 [P].
       { s: 2.805, top: 2.805, upper: 'body' },
       { s: 2.877, top: 2.877, upper: 'body', glass: 'fixed' },
+      { s: 3.474, top: 3.474, upper: 'body' },
+      { s: 3.494, top: 3.494, upper: 'body', glass: 'fixed' },
       { s: 3.757, top: 3.757, upper: 'body' },
       // The rear corner 3.81 to the tail, blank: a pressed panel on the 1995 2206, the 3962,
       // "UAZ-452 back" and the owner's rear view [P] (glazed on the drawing [D]).
@@ -328,11 +339,22 @@ export const BODY_UAZ2206: KitBody = {
     railInset: 0.07,
     railRise: 0.07,
     railBend: [0.3, 0.6],
-    glassBottom: 0.04, // [P 1.40]
+    // The roof's front panel rounds up from the screen's header to the crown [D side, the
+    // centre line: 1.90 at 0.456, 1.96 at 0.535, 2.00 at 0.582, 2.04 at 0.652, 2.06 at
+    // 0.71]: on the centre line the screen's top stands at the rail (front view: frame to
+    // 1.85, glass to 1.81), straight across in front view, the roof level from the pillar's
+    // top behind.
+    roofDrop: [[0.466, 0.13], [0.55, 0.09], [0.689, 0]],
+    glassBottom: 0, // [D/P 1.32 belt line]
     glassTop: 0.04, // [P 1.835]
     screenBottom: 0.04, // [D front: glass 1.42-1.81]
     screenHeader: 0.07,
-    screenFoot: 0.14, // the foot 0.256 on the centre line [D]
+    // The foot on the centre line [D (0.256, 1.436) on the drawn screen line, which meets
+    // the nose's top (1.37) at ~0.23]: 0.17 ahead of the cowl.
+    screenFoot: 0.17,
+    // The screen curved in plan at its top too: the centre line's top (0.466, 1.856) [D
+    // side] 0.223 ahead of the pillar's (0.689, 1.88).
+    screenTop: 0.223,
     wiperBlade: 0.33, // [E the classics'; unmeasured]
     // The rear doors' bands (their glass is `rearPanes`).
     rearBottom: 0.085,
@@ -357,8 +379,11 @@ export const BODY_UAZ2206: KitBody = {
     arch: 1.0,
     rearArch: 1.0,
     rearArchRise: 0.76,
+    // The arches end at the sill (0.42-0.60 over the 0.364 hub): no skirt of wing or well
+    // ahead of the front tyre [D side; owner, 2026-10-19].
+    archToSill: true,
   },
-  doorBottom: 0.45, // [P 0.449]; ahead of the front arch it clamps to the 0.55 band
+  doorBottom: 0.45, // [P 0.449]; ahead of the front arch it clamps to the step (0.621 over the 0.58 sill)
   // At the cowl: no deck lies ahead of the screen to make a bonnet.
   bonnetFront: 0.4,
   // The filler's recess on the right panel [P]; one each side on the car.
@@ -399,9 +424,11 @@ export const LOOK_UAZ2206: KitLook = {
   // post just under the belt [E].
   repeater: { s0: 1.305, s1: 1.355, y0: 1.24, y1: 1.29 },
   front: {
-    // ±0.883, 0.580-0.699, black channel [D; P]; wrapping round the nose's corners [D]; its
-    // brackets 1 cm long from the face (at s 0.05) to the bar's back.
-    bumper: { kind: 'blade', finish: 'black', lift: 0.07, height: 0.12, depth: 0.04, strip: null, overriders: null, wrap: 0.2 },
+    // ±0.883, 0.580-0.699, black channel [D; P]: 0.025 over the face's bevel (0.615) puts
+    // it at 0.58-0.70, the face items' `bumperTop` 0.70 (it stood 0.615-0.735 at 0.07);
+    // wrapping round the nose's corners [D]; its brackets 1 cm long from the face (at s
+    // 0.05) to the bar's back.
+    bumper: { kind: 'blade', finish: 'black', lift: 0.025, height: 0.12, depth: 0.04, strip: null, overriders: null, wrap: 0.2 },
     items: [
       // The grille: a trapezoid ±0.453 at 0.699 to ±0.32 at 0.937 [D], here its mean
       // width; a diamond mesh in a raised frame [P] as bars.

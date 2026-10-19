@@ -818,8 +818,13 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const shelf = Math.max(w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP, floor + 0.05);
   b.color(COLOURS.bootTrim);
   b.quad('trim', at(frame, -inner, floor, s0), at(frame, inner, floor, s0), at(frame, inner, floor, s1), at(frame, -inner, floor, s1));
+  // An estate's (a `flat` tail under a knee) D pillar comes down behind the knee to the
+  // tailgate's foot at the pillar row: a side wall carried on to the rear base stood out
+  // through it over the lamps (owner, 2026-10-19: the 2104's beige sliver). It ends at the knee.
+  const flatKnee = spec.cabin.rearKnee !== undefined && (st[st.length - 1]!.flat ?? 0) > 0;
+  const sideEnd = flatKnee ? Math.min(s1, spec.cabin.rearKnee!.s - 0.01) : s1;
   for (const side of [1, -1]) {
-    loft(b, 'trim', frame, stationsBetween(frame, s0, s1), side, (s) => {
+    loft(b, 'trim', frame, stationsBetween(frame, s0, sideEnd), side, (s) => {
       const belt = frame.station(s).belt - 0.02;
       const [edgeX, edgeY] = frame.section(s).r4;
       return [[inner, floor], [inner, shelf], [frame.sideX(s, shelf) - 0.08, shelf], [frame.sideX(s, belt) - 0.08, belt], [edgeX - LINING_DEPTH, edgeY]];

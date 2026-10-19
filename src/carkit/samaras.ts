@@ -114,10 +114,11 @@ export const BODY_2108: KitBody = {
     arch: 1.28,
   },
   doorBottom: 0.302,
-  bonnetFront: 0.17,
+  bonnetFront: 0.11,
   // The face rakes back from the bumper's top (s 0.10, 0.625) to the bonnet's lip (s 0.164,
-  // 0.803) [D]: 0.36 m per m above the bumper, faded out over 0.15 behind the lip.
-  frontLean: { base: 0.625, lean: 0.36, blend: 0.15 },
+  // 0.803) [D]: 0.36 m per m above the bumper, in full to the wing's corner (s 0.17), faded
+  // out over 0.15 behind it.
+  frontLean: { base: 0.625, lean: 0.36, blend: 0.15, full: 0.17 },
   flap: { s0: 3.62, s1: 3.73, y0: 0.73, y1: 0.83 },
 };
 
@@ -139,8 +140,10 @@ export const LOOK_2108: KitLook = {
     bumper: SAMARA_FRONT_BUMPER,
     items: [
       // Front view (4.63 mm/px from the 1750 width): the slotted panel runs to ±0.34, the unit
-      // to ±0.69 with the indicator its outer 70 mm; the outer edge leans in at the top.
-      { kind: 'lens', role: 'head', x: { from: { centre: 0.36 }, to: { centre: 0.62 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.035, inner: 0 } },
+      // to ±0.69 with the indicator its outer 70 mm; the outer edge leans in at the top. The
+      // head lamp stops 7 mm short of the indicator: their facing walls stand behind the face
+      // under the open bonnet, and 5 mm apart they fought at range (kit-zfight).
+      { kind: 'lens', role: 'head', x: { from: { centre: 0.36 }, to: { centre: 0.618 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.035, inner: 0 } },
       { kind: 'lens', role: 'blinker', x: { from: { centre: 0.625 }, to: { centre: 0.69 } }, y: { from: ['bumperTop', 0.015], to: ['deck', -0.025] }, depth: 0.01, proud: 0.012, slant: { outer: 0.04, inner: 0.035 } },
       // Dark slots with a body-colour bar across their middle...
       {
@@ -199,12 +202,16 @@ const B_PILLAR: readonly CabinColumn[] = [
  * drawing's door lines), and a smaller fixed quarter light behind it, whose rear edge
  * and the tailgate are the 2108's.
  */
+const FRONT_COLUMNS_2109: readonly CabinColumn[] = FRONT_COLUMNS.map((column, index) =>
+  index === 1 ? { ...column, s: 1.239 } : index === 2 ? { ...column, s: 1.264 } : column,
+);
+
 export const BODY_2109: KitBody = {
   ...BODY_2108,
   cabin: {
     ...BODY_2108.cabin,
     columns: [
-      ...FRONT_COLUMNS,
+      ...FRONT_COLUMNS_2109,
       ...B_PILLAR,
       { s: 3.016, top: 2.838, upper: 'door2' },
       { s: 3.125, top: 2.875, upper: 'body', lower: 'body' },
@@ -322,8 +329,9 @@ export const BODY_2115: KitBody = {
     { s: 4.15, sill: 0.3, crease: 0.62, belt: 0.75, deck: 0.61, notch: 0.575, wSill: 0.76, wCrease: 0.785, wBelt: 0.77 },
   ],
   // The bonnet's lip 0.1 behind the face; the face and lamps lean back from 0.625 as on
-  // the 2108, in full ahead of it.
+  // the 2108, in full ahead of it (not to the 2108's wing corner).
   bonnetFront: 0.1,
+  frontLean: { base: 0.625, lean: 0.36, blend: 0.15 },
   bootEnd: 4.15,
 };
 

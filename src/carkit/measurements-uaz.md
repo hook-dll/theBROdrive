@@ -181,6 +181,13 @@ the dash, its instrument plate and the glovebox lid in the paint slot (the 2206 
 Proof: geometry hashes of the 20 other kit cars and the 2206 identical against HEAD
 cdcdd0e (the dash moves slot, not geometry); `tools/kit-zfight.ts` PASS on both UAZes.
 
+The front overhang (2026-10-19, the owner's low front-three-quarter screenshots: a
+skirt hangs under the bumper ahead of the front wheel). The 1.35 R arch's ends came down
+to the hub's 0.37 beside the tyre, 0.21 under the 0.58 sill and the bumper's bottom:
+`WheelSpec.archToSill` stops the arch's edge and the well's wall at the sill
+(`BodyFrame.archEdgeY`); the wing ahead of the wheel ends at 0.58–0.60. Every other car
+builds as before (the field is absent); kit-drawing and kit-surface on all 27 cars unchanged.
+
 ### 1.8 Gaps
 
 - Heights: built roof 1.93, fitted to the 2015 passport: the car grows 4 % in height; the
@@ -386,8 +393,8 @@ half width. Front hub s **0.993**, rear hub s **3.293**.
 
 | Item | Value | Tag |
 |---|---|---|
-| Body side's bottom between the arches | 0.42 (dark lower flange to 0.415, door bottoms 0.449) | [P]; drawing 0.44–0.46 (the 477 dimension is under the floor) |
-| Front door's bottom ahead of the arch (the step) | **0.588** | [D 588] |
+| Body side's bottom between the arches | 0.42 (dark lower flange to 0.415, door bottoms 0.449: the side door's and panels') | [P]; drawing 0.44–0.46 (the 477 dimension is under the floor) |
+| Front door's bottom ahead of the arch (the step) | **0.588** | [D 588]; P1 ~0.52–0.53. The front door's lowest point (behind the step it ends on the arch): the `doorBottomY` ref since 2026-10-19 (it was P1's 0.449, which no front door over the wheel reaches; kit-drawing measures the front door). Built: the body's bottom there at the bumper's 0.58 (owner, 2026-10-19: nothing under the bumper), the door's edge a bevel over it at 0.621, `accepted` in the refs |
 | Tail sill | 0.48–0.52 | [P]; [D 534] |
 | Widest line (crease) | ~1.0–1.1; ±0.957–0.964 at 0.6–1.25 m | [D front and rear views] |
 | Belt (pressed line at the windows' foot) | **1.32** | [P 1.319]; [D 1.313] |
@@ -425,8 +432,8 @@ r 0.2 [D plan, ×4.656].
 | Bumper | s 0–0.25 (it wraps round the corners), y 0.582–0.701 | [D; 598 / 712 dimensions] |
 | Face | s 0.04–0.06 from 0.81 to 1.16 | [D] |
 | Nose top curving back | (0.084, 1.259), (0.154, 1.331), (0.223, 1.369) | [D] |
-| Screen's foot on the centre line | (0.256, 1.436) | [D] |
-| Screen's top on the centre line | (0.466, 1.856) | [D]. Front view: glass 1.42–1.81, ±0.78; frame 1.39–1.85, ±0.80 |
+| Screen's foot on the centre line | (0.256, 1.436) | [D]. The side silhouette's front edge (pixel scan): 0.279 at 1.44, 0.307 at 1.50, 0.363 at 1.62, 0.428 at 1.76, 0.456 at 1.82, 0.475 at 1.86 (0.47 m of s per m) |
+| Screen's top on the centre line | (0.466, 1.856) | [D]. Front view: glass 1.42–1.81, ±0.78; frame 1.39–1.85, ±0.80. The `screenTop` ref since 2026-10-19: kit-drawing reads the side silhouette, which on this screen curved in plan is the centre line; the ref was the pillar's top (0.689, 1.88), which the drawing's own silhouette misses by 0.2 |
 | A pillar outer line | (0.456, 1.33) → (0.689, 1.88) | [D]; [P] the door's front edge 0.415 at the belt, 0.68 at the roof |
 | Roof's front | the gutter visor's tip at (0.456, 1.90); the roof rounds up to 2.05–2.08 by s 0.71 | [D] |
 
@@ -477,10 +484,10 @@ r 0.2 [D plan, ×4.656].
 |---|---|---|
 | Saloon floor | ~0.72 | [E] the roof lining ~2.03 minus the 1315 inside height [D] |
 | Driver's seat centre line | x 0.515 | [D] the wheel's centre |
-| Wheel | large and thin, the column close to vertical | [P `dash-steering`] |
+| Wheel | large and thin, the column close to vertical; three spokes 120° apart, two up and one down, round a round boss (`spokes` [30, 150, 270]; was two, kit-check 2026-10-19) | [P `dash-steering`] |
 | Dash | a flat painted steel panel; round dials before the driver; toggle switches | [P] |
 | Dash face | 0.22 tall, shelf lip +0.04 to foot −0.18 over the belt (was −0.20) | [E] about 1.9 panel heights in `dash-steering` |
-| Instrument panel | 0.23 × 0.094 inside the chrome frame (was 0.31 × 0.12), centre 0.035 outboard of the column (was 0.06), up −0.096; plate `binnacleHalf` 0.125 | [P] a strip ~2.5:1 under the lamps' row, inner end at the column; size [E] |
+| Instrument panel | 0.23 × 0.094 inside the chrome frame (was 0.31 × 0.12), up −0.096; plate `binnacleHalf` 0.125. On the car its inner end is at the column and it runs outboard; in the kit it stands 0.47 right of the column, towards the dash's middle (owner's review, 2026-10-17, aa21cb2: there every needle and lamp clears the rim from the driver's eye), `refs/uaz2206.json` `clusterAt` accepted | [P] a strip ~2.5:1 under the lamps' row, inner end at the column; size [E] |
 | Dials | speedometer r 0.029, oil / fuel / temperature r 0.02, bezels nearly touching; lamps at pitch 0.025 over them | [P] ratio ~1.45; sizes [E] |
 | Radio (none on the car, kept for the game) | hung under the face's foot, x 0.29, its top tucked into the face | [E] |
 | Engine | under a padded cover between the front seats, from the dash back about 0.9 m | [E] the general layout; no measured figure |
@@ -518,10 +525,10 @@ The family goes in its own file, `src/carkit/uazvans.ts`, with `BODY_UAZ2206` an
 
 | s | sill | crease | belt | deck | wSill | wCrease | wBelt | Note |
 |---|---|---|---|---|---|---|---|---|
-| 0.05 | 0.57 | 0.95 | 1.16 | 1.22 | 0.70 | 0.76 | 0.70 | face [D]; plan rounding [E] |
-| 0.15 | 0.56 | 1.00 | 1.30 | 1.34 | 0.86 | 0.92 | 0.87 | nose curve [D] |
-| 0.30 | 0.55 | 1.05 | 1.32 | 1.38 | 0.92 | 0.957 | 0.93 | nose top 1.37–1.39 [D] |
-| 0.62 | 0.55 | 1.05 | 1.32 | 1.38 | 0.92 | 0.964 | 0.93 | ahead of the front arch: front door bottom = sill + bevel 0.585 [D 588] |
+| 0.05 | 0.58 | 0.95 | 1.16 | 1.22 | 0.70 | 0.76 | 0.70 | face [D]; plan rounding [E]; the bottom at the bumper's 0.58 [D 0.582] |
+| 0.15 | 0.58 | 1.00 | 1.30 | 1.34 | 0.86 | 0.92 | 0.87 | nose curve [D] |
+| 0.30 | 0.60 | 1.05 | 1.32 | 1.38 | 0.92 | 0.957 | 0.93 | nose top 1.37–1.39 [D] |
+| 0.68 | 0.58 | 1.05 | 1.32 | 1.38 | 0.92 | 0.96 | 0.925 | the step, level to the front arch's corner: body's bottom 0.58 [D step 588, bumper 582]; the door's edge 0.621 |
 | 1.36 | 0.42 | 1.05 | 1.32 | 1.38 | 0.905 | 0.964 | 0.93 | behind the arch [P] |
 | 3.62 | 0.42 | 1.05 | 1.32 | 1.38 | 0.905 | 0.957 | 0.93 | |
 | 4.04 | 0.50 | 1.05 | 1.32 | 1.38 | 0.90 | 0.955 | 0.93 | the tail's rounding starts [D plan] |
@@ -531,22 +538,29 @@ The family goes in its own file, `src/carkit/uazvans.ts`, with `BODY_UAZ2206` an
 **Other body fields**
 
 - `shoulder: { inset: 0.04, rise: 0.04 }`: the deck's edge ±0.89 at 1.36 [D].
-- `doorBottom: 0.45` [P]. Ahead of the front arch it clamps to the 0.55 sill band
-  (body.ts `sideColumn`), which gives the 0.585 step.
+- `doorBottom: 0.45` [P]. Ahead of the front arch it clamps to the sill band (body.ts
+  `sideColumn`): 0.621 over the 0.58 step.
+- Front bumper `lift: 0.025`: 0.58–0.70 [D 0.582–0.701] over the face's 0.615 bevel row,
+  so the face items' `bumperTop` is the drawn 0.70 (head lamps 1.021, indicators 0.806,
+  grille from 0.71); at 0.07 it stood 0.615–0.735 and everything on the face 3.5 cm high.
 - **`bonnetFront: 0.40`, equal to the cowl**. No deck strip lies between it and
   `bonnetRear`, so no bonnet is cut (§6.1).
 - `flap: { s0: 1.44, s1: 1.56, y0: 0.72, y1: 0.90 }` on the right [P].
-- `wheels: { front: 0.993, rear: 3.293, radius: 0.364, width: 0.215, frontHalfTrack: 0.7225, rearHalfTrack: 0.7225, arch: 1.0, rearArch: 1.0, rearArchRise: 0.76 }`.
+- `wheels: { front: 0.993, rear: 3.293, radius: 0.364, width: 0.215, frontHalfTrack: 0.7225, rearHalfTrack: 0.7225, arch: 1.0, rearArch: 1.0, rearArchRise: 0.76, archToSill: true }`.
   The rear arch's top at 0.639 is (0.639 − 0.364) / 0.364 = 0.76 r [P]. The front's
-  circle tops at 0.728 against a measured 0.714.
+  circle tops at 0.728 against a measured 0.714. `archToSill`: the arches' ends stop at
+  the sill (0.58 ahead of the front wheel, 0.42 behind it), not at the hub's 0.364: the
+  front arch's corner hung 0.20 under the bumper beside the tyre (owner, 2026-10-19,
+  "a skirt"); the same on the 469 (§1).
 
 **Cabin**
 
 - `rail: 1.88`, `railHalf: 0.88`, `railInset: 0.07`, `railRise: 0.07`,
   `railBend: [0.3, 0.6]`, `crown: 0.13` (roof centre 2.08) [D §3.3].
 - `glassBottom: 0.04`, `glassTop: 0.04` [P 1.40 / 1.835].
-- `screenBottom: 0.04`, `screenHeader: 0.07`, `screenFoot: 0.14` [D: the foot 0.256 on
-  the centre line].
+- `screenBottom: 0.04`, `screenHeader: 0.07`, `screenFoot: 0.17` [D: the drawn screen line
+  meets the nose's top (1.37) at ~0.23; the foot 0.256 at 1.436], `screenTop: 0.223` [D:
+  the centre line's top 0.466 against the pillar's 0.689].
 - `rearBottom: 0.085`, `rearHeader: 0.10` [D rear 1.446 / 1.777].
 - `pillar: 0.12`: the windscreen glass's edge ±0.77 (drawn 0.78); the rear doors' cut at
   rearBase ±0.74 (drawn 0.72).
@@ -556,9 +570,9 @@ The family goes in its own file, `src/carkit/uazvans.ts`, with `BODY_UAZ2206` an
 
 | s | top | upper | lower | glass | Note |
 |---|---|---|---|---|---|
-| 0.40 | 0.60 | body | door1 | – | cowl; A pillar strip. Drawn: the door's edge 0.36–0.39 below, the pillar 0.456→0.689; the screen's top 0.466 on the centre line |
-| 0.43 | 0.63 | door1 | | – | door frame |
-| 0.47 | 0.67 | door1 | | drop | glass parallel to the pillar [D 0.526→0.735] |
+| 0.40 | 0.689 | body | door1 | – | cowl; A pillar strip. Drawn: the door's edge 0.36–0.39 below, (0.419, 1.28) → (0.689, 1.89) up the pillar, the pillar 0.456→0.689; the screen's top 0.466 on the centre line (`screenTop`) |
+| 0.45 | 0.725 | door1 | | – | door frame |
+| 0.49 | 0.76 | door1 | | drop | glass parallel to the pillar [D 0.526→0.735 at 1.83, 0.756 at the rail] |
 | 1.21 | 1.21 | door1 | | – | frame strip [P] |
 | 1.29 | 1.29 | body | | – | B post [P] |
 | 1.364 | 1.364 | body | | fixed | [P] |
@@ -573,8 +587,11 @@ The family goes in its own file, `src/carkit/uazvans.ts`, with `BODY_UAZ2206` an
 | 4.18 | 4.12 | body | | – | the rear face's lean [P] |
 | 4.24 | 4.14 | | | | rearBase [P: the gutter's end 4.14] |
 
-The roof's front edge (`top + railInset`) lands at s 0.67. The drawn roof is level from
-0.71, so no `roofDrop` is needed.
+The roof's front edge follows the screen's top (`screenTop`), 0.466 on the centre line to
+0.689 at the pillar. The roof's front panel rounds up from there [D centre line: 1.90 at
+0.456, 1.96 at 0.535, 2.00 at 0.582, 2.04 at 0.652, 2.06 at 0.71]: `roofDrop` [[0.466,
+0.13], [0.55, 0.09], [0.689, 0]], so the screen's top stands level at ~1.89 across the
+front view and the roof is level from the pillar's top.
 
 **Look**
 
@@ -770,9 +787,8 @@ Each is cosmetic; leave them until the owner asks.
 
 - The front door's lower front edge is put at the cowl, 0.40. Drawn it is 0.36–0.39 and
   the pillar line 0.456 → 0.689: the kit cannot put a door below the belt ahead of the
-  first column. The windscreen's top is straight across in plan at the column's top
-  (0.60), where the drawing has 0.466 on the centre line and 0.689 at the pillar: the
-  kit has no plan curve at the screen's top.
+  first column. The windscreen's top is curved in plan (`screenTop`, 2026-10-19): 0.466
+  on the centre line, 0.689 at the pillar, as drawn; before, straight across at 0.60.
 - The front door glass is a horizontal two-pane slider on the car; `drop` keeps the
   kit's pane and crank. The side windows are sliders too (`fixed`).
 - The rear corner window is glazed on the drawing and blank on four photographed cars

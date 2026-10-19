@@ -165,6 +165,7 @@ Commons was searched through the API and every file in the VAZ-2110/2111/2112, L
 | Centre vents | openings x 1057–1195 / 1197–1312, y 267–355 | two vents ±0.056, half [0.05, 0.038]; end vents half [0.04, 0.04] |
 | Heater panel and knobs | x 1015–1265, y 418–520; knobs (1092, 472), (1175, 472), r ≈ 30 px | new `heater` field: dy −0.215, half [0.105, 0.046], knobs ±0.035, radius 0.025; hazard [−0.085, −0.2] |
 | Stack | x 1000–1275 | half 0.115; radio −0.35 (lower bay), ashtray −0.42 |
+| Clock (the 2005 photo, 1200 × 900) | round face centre (965, 655), r ≈ 47 px, in the stack's upper bay right of a blank panel, 110 px right of the heater panel's centre and 80 px under its foot (0.68 mm/px across the panel) | `clock` on the fascia (`on: 'fascia'`): x −0.075, dy −0.295, r 0.024 (bezel 0.029, clear of the radio's bay); kit-check 2026-10-19 |
 | Glovebox lid | left edge x 1400, y 440–690 | x −0.24..−0.58, dy −0.185..−0.335 |
 | Fascia | the face leans back 13.5° | [0.378, −0.02] → [0.455, −0.34] |
 | Wheel | pad frame meets the rim 41.5° over / 59° under the driver's left | two spokes at −40° / 220°, rim 0.011; size and position the Samara's |
@@ -237,7 +238,7 @@ Owner's review round with the 2112 (`/tmp/vaz2112/draft2/` … `draft4/`):
 - **Lamps:** where the nose's skin twists between the face station and the next (the lamp top's corner leans in from 0.648 to 0.585), the lens follows a small twist. The smoked rear cells are drawn amber (indicators); the rear fog lamp is not modelled. The lid's side edge on the tail face is the generator's 25 mm wall, not the drawing's 82 mm slant.
 - **Bonnet:** the cut follows the deck's edge 10 mm in, but the model's shoulder (40 mm) stays on the body, so a narrow strip of wing top shows beside the bonnet that the car does not have; the nose's sides are straight.
 - **Rear door:** the trim behind the raked edge is a flat lining, no pocket or speaker.
-- **Dash:** heights hung from the Samara's cluster (no side view of the dash), the left of the cluster placed by symmetry, the wheel's size unmeasured; the end caps' depth is an estimate (the handle must show past it), and the passenger's lower half keeps the -0.34 face (the glovebox lid's foot is lower, -0.41); not drawn: the vent pod's frame and slider, the clock panel, the ignition-lock boss, the armrest grip around the inner handle.
+- **Dash:** heights hung from the Samara's cluster (no side view of the dash), the left of the cluster placed by symmetry, the wheel's size unmeasured; the end caps' depth is an estimate (the handle must show past it), and the passenger's lower half keeps the -0.34 face (the glovebox lid's foot is lower, -0.41); not drawn: the vent pod's frame and slider, the clock panel's frame and the blank panel beside it (the clock itself is drawn), the ignition-lock boss, the armrest grip around the inner handle.
 - **Triangles:** 13 723 (14 775 at first build), above the 8–13k of the other cars (set aside by the owner).
 - Licences of the photos are as listed; the CC BY-SA ones were used for reading only.
 

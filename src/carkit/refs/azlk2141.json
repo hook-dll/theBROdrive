@@ -34,11 +34,12 @@
     "clusterAt": { "v": "wheel", "src": "P2 hooded binnacle behind the wheel" },
     "wheelSpokes": { "v": 2, "src": "P2 two spokes across the pad" },
     "glovebox": { "v": "passenger", "src": "P2 lid on the passenger's side of the fascia" },
-    "stack": { "v": true, "src": "P2 heater controls and radio down to the tunnel; measurements-2141.md §0 (centre stack)" }
+    "stack": { "v": true, "src": "P2 heater controls and radio down to the tunnel; measurements-2141.md §0 (centre stack)" },
+    "vents": { "v": 4, "src": "P2 (read here, 1920 px): a slatted face vent at each end of the fascia (x 50-300, 1660-1765) and the centre pair over the heater (x 1041-1322); the strip on the dash top at the left end is the side demister, not a face vent" }
   },
   "gaps": [
-    "The kit's dash is the samara platform's (no CABIN_ override); these dash values are read off P2 for the real car",
-    "dialRows, clock, console, vents, wheelDiameter: not read (vent count ambiguous between face vents and side demisters on P2)",
+    "The kit's dash is CABIN_2141 (interior.ts): the samara platform's moulded dash and binnacle with the fittings rearranged after P2",
+    "dialRows, clock, console, wheelDiameter: not read",
     "sideGlassRail: the quarter glass's top end is not read",
     "bonnet, bootLid, moulding: not read",
     "the drawn tips are 64 mm short of 4350; the s registration hangs on the hubs with drom.ru's 910 front overhang"

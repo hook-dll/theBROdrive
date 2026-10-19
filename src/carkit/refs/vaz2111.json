@@ -117,7 +117,11 @@
           3.779
         ]
       ],
-      "src": "D10 front glass 1.89–2.324, rear glass front 2.439 (shared doors); D11 rear glass 3.097, quarter 3.151–3.779 at the rail (measurements-2110.md §9)"
+      "src": "D10 front glass 1.89–2.324, rear glass front 2.439 (shared doors); D11 rear glass 3.097, quarter 3.151–3.779 at the rail (measurements-2110.md §9)",
+      "accepted": {
+        "v": [[1.784, 2.316], [2.432, 3.112], [3.172, 3.812]],
+        "why": "the front door is the 2110's (refs/vaz2110.json sideGlassRail): 1.89 is the D10 window-top line's start, while the check reads a band 4 cm under the glass's height at the door's middle, where the raked front edge stands forward (D10 rows y 96–100: 1.915 at 1.27, 1.846 at 1.23); the edge is held 0.1 forward of the drawn one so the 2110's railY holds. The rear door and quarter glass are within 0.04 of D11. Main's decision 2026-10-19"
+      }
     },
     "backLightTop": {
       "v": [

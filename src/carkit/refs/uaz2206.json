@@ -15,19 +15,27 @@
     "overhangFront": { "v": 0.993, "src": "D 993* dimension" },
     "overhangRear": { "v": 1.087, "src": "D 1087* dimension (P1 1.061), measurements-uaz.md §3.1" },
     "screenFoot": { "v": [0.256, 1.436], "src": "D side screen's foot on the centre line, measurements-uaz.md §3.4" },
-    "screenTop": { "v": [0.689, 1.88], "tol": 0.04, "src": "D side A pillar outer line's top (0.689, 1.88) [P door edge 0.68 at the roof]; centre-line top (0.466, 1.856), measurements-uaz.md §3.4" },
+    "screenTop": { "v": [0.466, 1.856], "tol": 0.04, "src": "D side screen's top on the centre line (0.466, 1.856): the side silhouette, which kit-drawing measures; the screen is curved in plan, so the A pillar's outer line tops out behind it at (0.689, 1.88) [P door edge 0.68 at the roof] (was the ref until 2026-10-19: the drawing's own silhouette reads 0.484 there), measurements-uaz.md §3.4" },
     "sideGlassBelt": { "v": [[0.526, 1.21], [1.364, 1.807], [1.935, 2.439], [2.439, 2.736], [2.877, 3.474], [3.474, 3.757]], "src": "D/P right side: front door glass front edge 0.526 at the belt [D], rear 1.21 [P]; panel window; side door slider split 2.439; saloon slider split 3.474 [P]; rear corner blank on the photographed 2206s, measurements-uaz.md §3.5" },
     "beltY": { "v": 1.32, "src": "P1 1.319, D 1.313, measurements-uaz.md §3.2" },
     "railY": { "v": 1.835, "src": "P1 side glass top 1.83-1.84, measurements-uaz.md §3.2" },
     "doorFront": { "v": [0.415, 1.29], "src": "P door's front edge 0.415 at the belt, rear edge 1.29 [P 1.290; D 1.30-1.32], measurements-uaz.md §3.4-3.5" },
-    "doorBottomY": { "v": 0.449, "src": "P1 door bottoms 0.449, measurements-uaz.md §3.2" },
+    "doorBottomY": {
+      "v": 0.588,
+      "src": "D 588: the front door's bottom on the step ahead of the front arch (behind it the door ends on the arch), the front door's lowest point, which kit-drawing measures; P1's door bottoms 0.449 (the ref until 2026-10-19) are the side door's and panels' between the arches, measurements-uaz.md §3.2",
+      "accepted": { "v": 0.621, "why": "owner's review (2026-10-19, through the main agent: the silhouette over mm): nothing may hang under the front bumper (its bottom 0.582 [D]), so the body's bottom ahead of the front wheel is the bumper's 0.58 (the drawn step 0.588), and the kit's door edge stands the sill's 35 mm bevel and its gap over the body's bottom: 0.621" }
+    },
     "beltHalfWidth": { "v": 0.918, "src": "D front view ±0.913-0.923 at 1.31-1.38, measurements-uaz.md §3.3" }
   },
   "dash": {
     "photo": { "src": "P2", "view": "driver" },
     "gauges": { "v": 4, "src": "P2 speedometer and oil, fuel, temperature dials, measurements-uaz.md §3.8" },
-    "clusterAt": { "v": "wheel", "src": "P2 dials before the driver, the panel's inner end at the column, measurements-uaz.md §3.8" },
-    "wheelSpokes": { "v": 3, "src": "P2 (read here): three spokes" }
+    "clusterAt": {
+      "v": "wheel",
+      "src": "P2 dials before the driver, the panel's inner end at the column (it runs outboard towards the door), measurements-uaz.md §3.8",
+      "accepted": { "v": "centre", "why": "owner's review (2026-10-17, commit aa21cb2, interior.ts CABIN_UAZ2206): the panel moved towards the dash's middle, 0.47 right of the column, so from the driver's eye every needle and lamp clears the big wheel's rim; at the real place the rim hid them" }
+    },
+    "wheelSpokes": { "v": 3, "src": "P2 (read here): three spokes, two up (left and right) and one down, round a round boss (1568 px rendition: to x 250 / 70, 1070 / 230, 1030 / 800)" }
   },
   "gaps": [
     "The drawing's rear end is 100 mm short (measurements-uaz.md §2): aft of the rear axle the side overlay does not hold; the photo P1 is the reference there",

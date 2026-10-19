@@ -299,9 +299,10 @@ interface Layout {
   readonly handbrake: { readonly rear: number; readonly length: number };
   /**
    * Fascia fittings at [x, dy]; the light switch is placed off the column, to the driver's
-   * right by `right`. The glovebox lid in `colour` (default the dash's, a shade lighter).
+   * right by `right`. The glovebox lid in `colour` (default the dash's, a shade lighter);
+   * `lid: false`, an open shelf: the dark opening alone (the Oka's).
    */
-  readonly glovebox: { readonly x: number; readonly dy: number; readonly half: P2; readonly colour?: number };
+  readonly glovebox: { readonly x: number; readonly dy: number; readonly half: P2; readonly colour?: number; readonly lid?: false };
   readonly radio: P2;
   readonly ashtray: P2;
   readonly hazard: P2;
@@ -323,10 +324,13 @@ interface Layout {
   /** A framed panel on the cluster face behind the gauges: centre (right, up), half size, colour and frame. */
   readonly clusterFace?: { readonly right: number; readonly up: number; readonly half: P2; readonly colour: number; readonly frame: 'chrome' | 'black' };
   /**
-   * A clock on the cluster face (right, up as a gauge's), its hands standing at ten past
-   * ten: it has no channel. Bezel, face, hour marks and hands are coarse.
+   * A clock, its hands standing at ten past ten: it has no channel. Bezel, face, hour
+   * marks and hands are coarse. On the cluster face (default) `right`, `up` are a gauge's;
+   * `on: 'fascia'`, `right` is the car's x (+ the driver's side, as the rockers' x) and
+   * `up` a height off the belt on the fascia's line, which the stack continues below the
+   * fascia's foot (the 2110's clock under its heater panel).
    */
-  readonly clock?: { readonly right: number; readonly up: number; readonly radius: number };
+  readonly clock?: { readonly right: number; readonly up: number; readonly radius: number; readonly on?: 'cluster' | 'fascia' };
   /**
    * Warning lamps on the cluster face: `show` laid row by row into a grid `cols` wide at
    * `pitch`, centred at (right, up).
@@ -843,6 +847,11 @@ export const CABIN_2110: CabinLayoutOverride = {
   // their rings 30 px in radius; the hazard button at its top right (x 1243, y 457).
   heater: { dy: -0.215, half: [0.105, 0.046], knobs: [0.035, -0.035], radius: 0.025 },
   hazard: [-0.085, -0.2],
+  // The clock in the stack's upper bay under the heater panel, right of a blank panel (the
+  // 2005 photo: face centre x 965, y 655, 110 px right of the heater panel's centre, 80 px
+  // under its foot, 47 px in radius, at the panel's 0.68 mm/px): x -0.075, 0.035 under the
+  // panel's foot, a 0.024 face (its bezel to 0.029) to stay clear of the radio's bay.
+  clock: { right: -0.075, up: -0.295, radius: 0.024, on: 'fascia' },
   // Stack 275 px wide (x 1000-1275); the radio in the lower of its two bays (y 620, the
   // 2005 photo); a pocket at its foot (y 700) is taken as the ashtray.
   stack: { half: 0.115 },
@@ -1167,13 +1176,59 @@ export const CABIN_1111: CabinLayoutOverride = {
   // in the early car: its slot stays under the heater [E].
   ashtray: [-0.11, -0.19],
   radio: [0, -0.215],
-  // An open shelf, not a lid: its face where the lid would be [E].
-  glovebox: { x: -0.38, dy: -0.15, half: [0.13, 0.045] },
+  // An open shelf before the passenger, no lid [P: under the dash's right half, past the
+  // heater panel]: the dark opening alone, its size and place [E].
+  glovebox: { x: -0.38, dy: -0.15, half: [0.13, 0.045], lid: false },
   // Rim 0.36 across with a thick tube (22 px on 458 in the photo's thumbnail) [P/E].
   wheel: { ...LAYOUTS.samara.wheel, ds: 0.56, radius: 0.18, rim: 0.016, spokes: [34, 270] },
   gear: { ds: 0.62, height: 0.24, lean: 0.04 },
   // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 2.5 cm below it, 2026-10-18).
   visor: { half: 0.16, depth: 0.119 },
+};
+
+/**
+ * AZLK-2141 on the Samara's moulded dash and binnacle (no drawing of the dash), its
+ * fittings rearranged after Commons "Салон Москвич-2141.jpg" (CC BY-SA 4.0, 1920 x 1079,
+ * from the driver's door; pixels below on it): a wide window with the tachometer left and
+ * the speedometer right, two quarter dials stacked at its right end; a two-spoke wheel
+ * round a wide pad; a stack under the centre vents (heater sliders, the hazard switch,
+ * the radio) down to the tunnel; the glovebox lid high before the passenger, level with
+ * the centre vents. Scale: the radio's 1-DIN face (182 mm, x 1071-1267) gives 0.93 mm/px
+ * at the stack, its centre line x 1176; the dials keep the Samara's 0.044 radius and the
+ * cluster's spacings are ratios to it (the cluster stands nearer the camera); heights
+ * hang from the Samara's fascia top (the vents' and the lid's tops, y 306-349).
+ */
+export const CABIN_2141: CabinLayoutOverride = {
+  gauges: [
+    // Tachometer and speedometer centres x 557 / 747, y 282 / 276 (190 px: 2.1 bezel
+    // radii), here 0.104 apart so the bezels clear.
+    { channel: 'rpm', right: -0.052, up: 0.015, radius: 0.044, full: 8000, ...BIG },
+    { channel: 'speed', right: 0.052, up: 0.015, radius: 0.044, full: 180, ...BIG },
+    // Quarter dials at x 851 / 876, y 220 / 321, 43 px in radius: temperature over fuel
+    // (its pump symbol at the lower one); set clear of the speedometer's bezel and of each
+    // other's, within the Samara binnacle's face (-0.035 to 0.062).
+    { channel: 'temp', right: 0.128, up: 0.035, radius: 0.019, ...SMALL },
+    { channel: 'fuel', right: 0.128, up: -0.011, radius: 0.019, ...SMALL },
+  ],
+  // Lamps at the window's lower left, outboard of the tachometer (x 380-440, y 361) [P]:
+  // a block two wide on the cluster's face; which ones [E].
+  lamps: { right: -0.125, up: -0.012, cols: 2, pitch: 0.012, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // Two wide spokes from the pad to the rim, left and right, dipping a little [P].
+  wheel: { ...LAYOUTS.samara.wheel, spokes: [-15, 195] },
+  // End vents (the driver's big slatted one, x 50-300) and the centre pair (x 1041-1322,
+  // y 349-441: each 0.12 x 0.085).
+  vents: [{ dy: -0.1 }, { x: 0.065, dy: -0.11, half: [0.055, 0.04] }, { x: -0.065, dy: -0.11, half: [0.055, 0.04] }],
+  // Heater sliders in a panel under the vents (y 504, x 1110-1270): two small knobs.
+  heater: { dy: -0.19, half: [0.07, 0.018], knobs: [0.03, -0.03], radius: 0.008 },
+  // The hazard switch right of the heater panel (x 1298, y 471).
+  hazard: [-0.11, -0.19],
+  stack: { half: 0.1 },
+  // The radio in the stack, y 624-710.
+  radio: [0, -0.3],
+  ashtray: [0, -0.37],
+  // Lid x 1365-1647, y 306-422: from 0.18 to 0.44 right of the centre line, its top at
+  // the fascia's.
+  glovebox: { x: -0.31, dy: -0.11, half: [0.13, 0.045] },
 };
 
 // The Volgas on the classic's furniture, read off Wikimedia Commons photos (readings in
@@ -1421,7 +1476,7 @@ export const CABIN_UAZ469: CabinLayoutOverride = {
  * face upright; low on the face right of the column (towards the middle, clear of the
  * wheel's rim), a grey-blue panel of four chrome-ringed dials (the speedometer 0-120 the
  * largest, oil, fuel, temperature) with a row of round warning lamps over them, a knob
- * under them; a large thin two-spoke wheel on a steep column down to the floor; the gear
+ * under them; a large thin three-spoke wheel on a steep column down to the floor; the gear
  * lever and the transfer box's levers out of the floor behind the engine's cover.
  */
 export const CABIN_UAZ2206: CabinLayoutOverride = {
@@ -1472,11 +1527,14 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
   radio: [0.29, -0.205],
   ashtray: [0.24, -0.11],
   glovebox: { x: -0.45, dy: -0.08, half: [0.14, 0.06] },
-  // Rim 0.40 across, a thin grip; two spokes, up-left and down-right, and a round boss
-  // [P]; the column steep, down into the dash's face and on under it to the floor [P].
+  // Rim 0.40 across, a thin grip; three spokes 120 degrees apart, two up (to the left and
+  // to the right) and one down, round a round boss [P: the photo looks at the wheel's
+  // plane from the door, its left spoke rising to x 250, y 70, the right one to x 1070, y
+  // 230, the lower one to x 1030, y 800 (1568 px rendition)]; the column steep, down into
+  // the dash's face and on under it to the floor [P].
   // Rake 52: the hub's axis meets the face (ds 0.32) at dy -0.08, mid face; at 65 it ran
   // 3 cm under the face's foot, so the column hung clear of the dash with nothing round it.
-  wheel: { ds: 0.53, dy: 0.19, rake: 52 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [40, 220], hub: 'round', toFloor: true },
+  wheel: { ds: 0.53, dy: 0.19, rake: 52 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [30, 150, 270], hub: 'round', toFloor: true },
   pedals: { pivot: [0.15, -0.22], pad: [0.3, 0.13] },
 };
 
@@ -2410,8 +2468,9 @@ class Cabin {
     }
     if (L.clock) {
       // A round dial's bezel and face; the hour marks and the hands laid into the face.
-      const { right, up, radius: r } = L.clock;
-      const c = this.fixed.push(this.clusterAt(right, up).matrix).color(COLOURS.black);
+      const { right, up, radius: r, on } = L.clock;
+      const at = on === 'fascia' ? this.fascia(right, belt + up) : this.clusterAt(right, up);
+      const c = this.fixed.push(at.matrix).color(COLOURS.black);
       c.cylinderZ('chrome', [0, 0, 0.006], r + 0.005, 0.006, 12, false);
       const ray = (a: number, k0: number, k1: number, w: number): Vec3[] => {
         const d: P2 = [Math.cos(a), Math.sin(a)];
@@ -2430,7 +2489,7 @@ class Cabin {
       inlay(c, 'trim', ray((150 * Math.PI) / 180, -0.1, 0.5, 0.0015));
       inlay(c, 'trim', ray((30 * Math.PI) / 180, -0.1, 0.8, 0.0012));
       c.pop();
-      this.dashItems.push({ kind: 'clock', at: this.clusterAt(right, up).at(0, 0, 0) });
+      this.dashItems.push({ kind: 'clock', at: at.at(0, 0, 0) });
     }
     this.glovebox();
     this.radio();
@@ -2600,9 +2659,9 @@ class Cabin {
     });
   }
 
-  /** Lid hinged at its foot, falling open towards the passenger, over a dark opening. */
+  /** Lid hinged at its foot, falling open towards the passenger, over a dark opening; or an open shelf (`lid: false`). */
   private glovebox(): void {
-    const { x, dy, half } = this.lay.glovebox;
+    const { x, dy, half, lid } = this.lay.glovebox;
     const m = this.fascia(x, this.belt + dy);
     const [hx, hy] = half;
     // The dark opening behind the lid: the fascia is cut under it and it stands 5 mm in,
@@ -2612,6 +2671,7 @@ class Cabin {
     cutLocal(this.fixed, rectCorners(0, 0, ox, oy, 0), 0.002);
     this.fixed.color(COLOURS.black).poly('trim', rectCorners(0, 0, ox, oy, -0.005));
     this.fixed.pop();
+    if (lid === false) return;
     const at = m.at(0, -hy, 0.007);
     fineDetail(this.hinge(this.group, ORIGIN, 'glovebox', at, { channel: 'glovebox', kind: 'rot', axis: [1, 0, 0], amount: -1.2 }, { id: 'glovebox', label: 'Бардачок' }, (b) => {
       b.push(m.matrix);

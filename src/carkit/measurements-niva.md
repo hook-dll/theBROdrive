@@ -40,7 +40,8 @@ The existing `FACTORY_GEOMETRY.sv_niva` row (3.720 × 1.680 × 1.640, clearance 
 |---|---|---|---|
 | `p13` | Moscow car meet 2025-07-12 VAZ-2121 02.jpg | CC0 | A 1982 car, front right 3/4: the face (black grille panel with ten bars in a thin chrome outline, round lamps in it, corner units amber outer / clear inner in black surrounds), the bonnet's edge between the corner units, the bumpers (bare aluminium over black, black end caps), the vent wing post in the door, the amber repeater on the wing, chrome handle and mirror, head restraints, the tan rear seat. |
 | `p14` | Moscow car meet 2025-07-12 VAZ-2121 July 2025 01.jpg | CC0 | The same car, rear right 3/4: **the fuel flap on the right rear wing just behind the door**, the tailgate ending at the lamps' top, the tail lamp cells (amber outer; red over white over red; red; a black inner block), the rear bumper. |
-| `p00` | 1983 Lada Niva in Orange, front left (Brooklyn).jpg | CC BY-SA 3.0 | Corner unit (clear inner, amber outer), repeater, black dash; a neighbouring Niva's cream head restraint. |
+| `p00` | 1983 Lada Niva in Orange, front left (Brooklyn).jpg | CC BY-SA 3.0 | Corner unit (clear inner, amber outer), repeater, black dash; a neighbouring Niva's cream head restraint; the left door mirror on its rod (§1.5). |
+| `p15` | 1990 Lada Niva 1.6.jpg | CC BY-SA 4.0 (User:Vauxford) | A 1990 car, front right 3/4: the right door mirror on its rod (§1.5). 1280 px renditions of `p00`, `p13`, `p15` in `build/carshape/_refs/photos/niva/web/`. |
 | `p10` | 2025 LADA 4Х4 side.jpg | CC0 | A near-side shot of the current car (same body): door 0.99 m (335 px over 742 px for the wheelbase), the arch taller than it is wide (opening ±0.40 at the hub, top ~0.48 over it), the flank crease, the repeater at the front corner. |
 
 ---
@@ -113,6 +114,18 @@ Spec: last column **3.655 / 3.29** (the roof's end at the rail; the drawn line g
 ### 1.4 Door [D, P p13, p10]
 
 One door per side, **1.322 to 2.317** below the belt (0.995 m; `p10` gives 0.99 m), its frame up the A pillar and a vent wing in front of a post at 1.685–1.705 (the 1982 car `p13` shows the post); the drop glass 1.705 to 2.255, frame to 2.295. The B pillar 2.295–2.35, the fixed side glass 2.35–3.175 in the body, the D pillar 0.48 wide at the belt.
+
+### 1.5 Door mirrors [P p00, p13, p15]
+
+Both doors carry a chrome mirror from the start of series production (5koleso.ru, "Как создавалась легенда: история «Нивы»": "Появилось второе наружное зеркало заднего вида" before the first batch; https://5koleso.ru/articles/obzory/kak-sozdavalas-legenda-istoriya-nivy/). The head is on a rod from a small bracket on the door's skin under the belt, rising and leaning back to the head over the belt, the head across the vent wing's rear post. Readings by a projective fit along the belt (door front shut line 1.322, vent post 1.685, rear shut line 2.295):
+
+| Photo | Side | Rod's foot (px → s) | Head (px → s) |
+|---|---|---|---|
+| `p00` (1983, 1280 px) | left | x 798 → **1.47** | 802–853 → 1.49–1.74 |
+| `p13` (1982, 1280 px) | right | x 436 → **1.49** | 390–445 → 1.44–1.71 |
+| `p15` (1990, 1280 px) | right | x 477 → **1.48** | 422–475 → 1.48–1.71 |
+
+The rod's foot lies on the skin, so it reads true; the head stands 0.1–0.15 out towards the camera ahead of the car and reads too far back. Spec: `mirrorStalk` **0** (the rod), `mirrorS` **1.50** (bracket 1.47, head centre 1.535). kit-mirrors (2026-10-19): left 84 %, right 85 % seen; the sweep 1.47–1.52 passes both, the earlier 1.585 hid the right one's front half behind the right vent post (44 %), the short arm at the default 1.316 the left one behind the left post (17 %).
 
 ## 2. Face (drawing front view; photos `p13`, `p00`)
 

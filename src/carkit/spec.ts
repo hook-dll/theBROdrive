@@ -103,6 +103,13 @@ export interface CabinColumn {
    */
   readonly glassDrop?: number;
   /**
+   * The glass's foot on this column stands this far higher over the belt, the frame
+   * under it filling: with the next column's foot at the belt, the glass's foot slopes
+   * down behind it and the frame below is the mirror's sail at the pane's front corner
+   * (the Opels' and the Espero's). Absent: the belt's `glassBottom`.
+   */
+  readonly glassRise?: number;
+  /**
    * The strip's door owner (`upper` / `lower`) on this side only; on the other side the
    * strip is the body's, with the same glass (the UAZ-2206's side door, on its right
    * alone). Absent: both sides.
@@ -240,6 +247,13 @@ export interface WheelSpec {
    * reaching further ahead of the wheel than behind it. Absent: on the hubs.
    */
   readonly archShift?: readonly [number, number];
+  /**
+   * The arches' ends stop at the sill: where the sill stands above the hub (the UAZes'
+   * high bodies), the skin's arch edge and the wheel well's wall never run below the sill
+   * line, instead of down to the hub's height as a skirt beside the tyre. Absent: the arch
+   * edge as `archY` gives it, the well's wall fanned down to the sill or the hub.
+   */
+  readonly archToSill?: boolean;
 }
 
 /** Everything the builder needs for one car. */
@@ -345,6 +359,16 @@ export interface KitLook {
    * Absent: 8 cm behind the front door frame's first column.
    */
   readonly mirrorS?: number;
+  /**
+   * Vertical correction for a measured mirror head whose centre is below the generic
+   * belt-relative placement. Positive is up; absent is zero.
+   */
+  readonly mirrorHeightOffset?: number;
+  /**
+   * How far the door mirror's head centre stands out from the door's skin at the belt,
+   * when measured (the GAZ-24's drawn 0.04). Absent: 0.1.
+   */
+  readonly mirrorReach?: number;
   /**
    * Where the outside door handles stand, when measured: the centre s of the front doors'
    * and of the rear (side) doors' handle, their height and half length along the car.

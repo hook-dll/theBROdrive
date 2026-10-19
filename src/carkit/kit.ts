@@ -139,6 +139,12 @@ const _inv = new THREE.Matrix4();
  * then lies in one raked plane, while the bumper below stays upright. Moving parts are
  * warped in their built (closed) pose, so they still close flush; wheels are added
  * afterwards and never touched. `end` is +1 at the front, −1 at the tail.
+ *
+ * The warp bends at `base`, so a triangle reaching across it is first cut there: left
+ * whole, it stayed a straight chord through the bend while its neighbour, cut finer
+ * (round a lamp's hole), followed the bend, and a slit opened between them down the
+ * estates' tail corners (owner, 2026-10-19). Behind `zFull` the warp is then one linear
+ * map on each side of the base, so every shared edge stays shared.
  */
 function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 | -1, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
   const zStart = zFull - end * lean.blend;
@@ -154,6 +160,9 @@ function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 |
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (!mesh.isMesh) return;
+    // The tail only: a leaning nose is cut along its base in the shell already (body.ts),
+    // and its bumpers and lamps are laid to it.
+    if (end === -1) splitAtBase(mesh, (z) => end * (z - zStart) > 0, lean.base);
     const position = mesh.geometry.getAttribute('position');
     _inv.copy(mesh.matrixWorld).invert();
     let moved = false;
@@ -177,5 +186,76 @@ function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 |
     });
     holes[i] = { ...hole, outline: { ...hole.outline, poly } };
   });
+}
+
+/**
+ * Cuts every triangle of a non-indexed mesh that reaches across the car-frame height `base`
+ * inside the warped zone (`inZone` of a vertex's car-frame z) into pieces on either side
+ * of it, every attribute interpolated along the cut edges. Indexed meshes are left alone.
+ */
+function splitAtBase(mesh: THREE.Mesh, inZone: (z: number) => boolean, base: number): void {
+  const geometry = mesh.geometry;
+  if (geometry.index || geometry.groups.length > 0) return;
+  const position = geometry.getAttribute('position');
+  const count = position.count;
+  const ys = new Float64Array(count);
+  const zone = new Uint8Array(count);
+  for (let i = 0; i < count; i++) {
+    _p.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld);
+    ys[i] = _p.y - base;
+    zone[i] = inZone(_p.z) ? 1 : 0;
+  }
+  const crosses = (t: number): boolean => {
+    const [a, b, c] = [ys[t * 3]!, ys[t * 3 + 1]!, ys[t * 3 + 2]!];
+    const reach = zone[t * 3]! | zone[t * 3 + 1]! | zone[t * 3 + 2]!;
+    return reach === 1 && Math.min(a, b, c) < -1e-6 && Math.max(a, b, c) > 1e-6;
+  };
+  let cut = false;
+  for (let t = 0; t < count / 3 && !cut; t++) cut = crosses(t);
+  if (!cut) return;
+  const names = Object.keys(geometry.attributes);
+  const src = names.map((n) => geometry.getAttribute(n) as THREE.BufferAttribute);
+  const out = names.map(() => [] as number[]);
+  /** Pushes vertex i of the source, or the point a fraction f of the way from i to j. */
+  const emit = (i: number, j = i, f = 0): void => {
+    src.forEach((attr, k) => {
+      for (let c = 0; c < attr.itemSize; c++) {
+        const a = attr.getComponent(i, c);
+        out[k]!.push(a + (attr.getComponent(j, c) - a) * f);
+      }
+    });
+  };
+  type Corner = [number, number, number];
+  for (let t = 0; t < count / 3; t++) {
+    const v = [t * 3, t * 3 + 1, t * 3 + 2];
+    if (!crosses(t)) {
+      for (const i of v) emit(i);
+      continue;
+    }
+    // Walk the outline, splitting each edge that crosses the base; then fan each side's
+    // polygon (convex: a triangle cut by a line) in the original winding.
+    const below: Corner[] = [];
+    const above: Corner[] = [];
+    for (let e = 0; e < 3; e++) {
+      const i = v[e]!;
+      const j = v[(e + 1) % 3]!;
+      const yi = ys[i]!;
+      const yj = ys[j]!;
+      if (yi <= 0) below.push([i, i, 0]);
+      if (yi >= 0) above.push([i, i, 0]);
+      if ((yi < 0 && yj > 0) || (yi > 0 && yj < 0)) {
+        const f = yi / (yi - yj);
+        below.push([i, j, f]);
+        above.push([i, j, f]);
+      }
+    }
+    for (const poly of [below, above]) {
+      for (let k = 1; k + 1 < poly.length; k++) for (const p of [poly[0]!, poly[k]!, poly[k + 1]!]) emit(...p);
+    }
+  }
+  const next = new THREE.BufferGeometry();
+  names.forEach((n, k) => next.setAttribute(n, new THREE.Float32BufferAttribute(out[k]!, src[k]!.itemSize, src[k]!.normalized)));
+  next.userData = geometry.userData;
+  mesh.geometry = next;
 }
 

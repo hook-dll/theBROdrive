@@ -17,7 +17,7 @@
     "beltY": { "v": 1.036, "src": "D side glass's front edge foot (310, 155), measurements-volga.md §3.1" },
     "railY": { "v": 1.37, "src": "D side window tops 1.36-1.38, measurements-volga.md §3.1" },
     "doorFront": { "v": [1.59, 2.5], "src": "D side front door front edge x 282, B pillar x 440, measurements-volga.md §2.1" },
-    "bootLid": { "v": [4.42, 4.728], "tol": 0.05, "src": "D side boot (773, 166.7) to the lid's trailing edge (826.7, 173.3), measurements-volga.md §2.3 (front edge is the deck point, not a shut line)" }
+    "bootLid": { "v": [4.42, 4.728], "tol": 0.05, "src": "D side boot (773, 166.7) to the lid's trailing edge (826.7, 173.3), measurements-volga.md §2.3 (front edge is the deck point, not a shut line)", "accepted": { "v": [3.92, 4.805], "why": "the lid as drawn and photographed, not the two side-view points (owner-approved 2026-10-19): its front shut line just behind the back light (D plan view x ~700, s ~4.0; P photo-31029-rear: the shut line under the glass's foot; the kit's lid runs from the back light's foot 3.92), and it comes down the tail face to 0.778 at the tail's s 4.805 (D rear view foot y 622.5, measurements-volga.md §2.3); 4.728 is the crease over the tail face. Holding both ends to the side-view points built the C pillar as a fastback to 4.42 (backLightFoot 4.385)" } }
   },
   "dash": {
     "photo": { "src": "P1", "view": "driver" },

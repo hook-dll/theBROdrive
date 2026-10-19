@@ -1016,6 +1016,47 @@ each measurements file's "Review 2".
 - **Astra: the rear door's shut line ran 7 cm into the rear arch.** → `foot.knee`: the
   line bends in front of the arch's lip (3.02, 0.54) as drawn. *body.ts `shutLine`*.
 
+## Owner review 2, direct fixes (2026-10-19)
+
+- **2104/2105/2107: the returned black wedge ahead of the door glass (owner).** → The
+  shared `BODY_05` cabin columns had `finish: 'black'` on the 1.06–1.17 m strips, making
+  a 13 cm black sail that the owner rejected. → Keep the measured columns and glass, but
+  remove the black finish so the A-pillar/frame is body colour. *specs.ts `BODY_05`*.
+- **Door mirror feet could float above tapered panels (owner).** → The generic short arm used
+  the belt edge for its base even where the shoulder turned inward; stalk brackets used the
+  same extrapolated point. → Probe `skinX` at the mounting height, sink the short base and
+  upright bracket into the skin, and add a `kit-mirrors` shell-overlap gate. *exterior.ts
+  `buildDoorHardware`, tools/kit-mirrors.ts*.
+- **2102/2104: a thin slit down the tail corner's outer edge, and a beige sliver over the
+  2104's lamps (owner).** → `rearLean` bends every point above its base, but a triangle
+  reaching across the base stayed a straight chord through the bend while its neighbour,
+  cut finer round a lamp's hole, followed it: a slit along the corner. Under an estate's
+  knee the D pillar's foot strip and its end band down to the tailgate's foot were fanned
+  on the inward diagonal, and the lining offset from them (28 mm along mean normals) and the
+  load space's side wall, carried on to the rear base, came out through the skin. → Tail
+  triangles are cut at the lean's base before the warp (`leanEnd`, `splitAtBase`); the
+  knee bands of a `flat`-tail hatch are cut on the outward diagonal and carry no lining
+  (`Face.knee`); the hatch's side wall ends at the knee. The 2104's tailgate is cut between
+  the lamps (`notch` 0.50) and the painted stopgap panel behind them is gone. Hash-proved:
+  only 2102, 2104 and the two tens hatches 2111/2112 (same code paths) change. *kit.ts,
+  body.ts, bay.ts, estates.ts*.
+- **2105/2107: the rear overhang "too slanted" (owner).** → The boot's rounding ran over
+  0.175 m from s 3.9, one long 45° chamfer over a short tail face. → A station at 4.035:
+  the drawn boot rolls down only in its last 5–8 cm, so the corner turns in over 4 cm and
+  the face stands upright to 0.80. *specs.ts `BODY_05`*.
+- **2102/2104/2105/2107: black inserts at the A pillar (owner).** → The door's frame from
+  the pillar's line showed its 3 cm rubber edge up the pillar and a shut slot at its foot.
+  → Those strips are the body's; the door starts at its drawn front. *specs.ts, estates.ts*.
+- **UAZ-469 and UAZ-2206 front overhangs hung below the bumper (owner).** → Their front
+  sill stations were below the bumper's lower edge before the wheel arch. → Raise only the
+  front sill stations to 0.60 m, leaving the post-arch body and wheels unchanged.
+  *uaz.ts `BODY_UAZ469`, `BODY_UAZ2206`*.
+- **Dashboard references for future cars (owner).** → Finished cars must not be reworked just
+  to fill missing or imperfect dashboard photo references. → Explicitly accept the current
+  car list in the dashboard gate; every future car needs a real interior photo and `dash`
+  block or `DASH UNVERIFIED` fails `kit-check`. *tools/kit-drawing.ts, tools/kit-check.ts,
+  src/carkit/README.md*.
+
 ## Police UAZ-469 (2026-10-18)
 
 - **The police car: the UAZ-469 black with white doors, «МИЛИЦИЯ» on them and a light bar

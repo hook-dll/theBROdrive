@@ -58,28 +58,35 @@ export const BODY_NEXIA: KitBody = {
     { s: 0.3, sill: 0.3, crease: 0.6, belt: 0.768, deck: 0.8, wSill: 0.715, wCrease: 0.738, wBelt: 0.72 },
     { s: 0.45, sill: 0.29, crease: 0.6, belt: 0.806, deck: 0.843, wSill: 0.745, wCrease: 0.768, wBelt: 0.75 },
     { s: 0.6, sill: 0.27, crease: 0.6, belt: 0.832, deck: 0.872, wSill: 0.77, wCrease: 0.79, wBelt: 0.772 },
-    { s: 0.915, sill: 0.25, crease: 0.6, belt: 0.857, deck: 0.905, wSill: 0.8, wCrease: 0.825, wBelt: 0.795 },
+    { s: 0.915, sill: 0.25, crease: 0.6, belt: 0.857, deck: 0.905, wSill: 0.8, wCrease: 0.825, wBelt: 0.765 },
     // The cowl: the screen's outer line meets the bonnet here [D side (800, 190)]. The flank
     // ±0.834 at 0.59, ±0.809 at 0.78, ±0.796 at 0.82, ±0.766 at 0.87 [D front].
-    { s: 1.315, sill: 0.235, crease: 0.6, belt: 0.868, deck: 0.93, wSill: 0.805, wCrease: 0.832, wBelt: 0.795 },
+    { s: 1.315, sill: 0.235, crease: 0.6, belt: 0.868, deck: 0.93, wSill: 0.805, wCrease: 0.832, wBelt: 0.765 },
     // The belt under the side glass [D side: the glass's foot 0.875 at s 1.8, 0.88 at 2.28,
     // 0.894 at 2.77, 0.899 at 3.16, less the shoulder]; sill 0.235 between the arches [D
     // side y 336].
-    { s: 2.44, sill: 0.235, crease: 0.6, belt: 0.872, deck: 0.89, wSill: 0.805, wCrease: 0.832, wBelt: 0.795 },
-    { s: 3.36, sill: 0.235, crease: 0.6, belt: 0.878, deck: 0.9, wSill: 0.805, wCrease: 0.832, wBelt: 0.795 },
+    { s: 2.44, sill: 0.235, crease: 0.6, belt: 0.872, deck: 0.89, wSill: 0.805, wCrease: 0.832, wBelt: 0.765 },
+    { s: 3.36, sill: 0.235, crease: 0.6, belt: 0.878, deck: 0.9, wSill: 0.805, wCrease: 0.832, wBelt: 0.765 },
     // The quarter glass's rear corner; behind it the C pillar's foot rises to the deck's edge.
-    { s: 3.69, sill: 0.27, crease: 0.6, belt: 0.895, deck: 0.92, wSill: 0.805, wCrease: 0.83, wBelt: 0.795 },
+    { s: 3.69, sill: 0.27, crease: 0.6, belt: 0.895, deck: 0.92, wSill: 0.805, wCrease: 0.83, wBelt: 0.765 },
     // rearBase: the back light's foot, 1.03 on the centre line [D side 3.95–4.0]; the boot's
     // edge 0.99 at s 4.03, 0.982 at 4.18, 0.958 at 4.32, its centre 1.025 / 1.016 / 0.996 [D
     // side]; the tail rounding in, ±0.81 at 3.91, ±0.791 at 4.10, ±0.783 at 4.20, ±0.769 at
     // 4.30 [D plan]. Not 3.95: the rear bench's riser would end in the silencer's rear face's
     // plane (both at 3.935, interior.ts `bench`, bay.ts `samaraChassis`).
-    { s: 3.96, sill: 0.32, crease: 0.61, belt: 0.975, deck: 1.03, wSill: 0.785, wCrease: 0.808, wBelt: 0.78 },
-    { s: 4.15, sill: 0.33, crease: 0.62, belt: 0.967, deck: 1.018, wSill: 0.77, wCrease: 0.79, wBelt: 0.77 },
+    // The belt from the C pillar's foot back: ±0.748 at 0.93–0.954, ±0.743 at 0.978 [D rear,
+    // the pillar's outer line onto the shoulder], so it runs in from the cabin's ±0.765,
+    // never out: 0.765 / 0.755 / 0.745 at 3.96 / 4.15 / 4.30 (was 0.78 / 0.77 / 0.755: out
+    // past the cabin's belt and back, an s-bend at 3.69–3.96). Held at the cabin's 0.765 at
+    // rearBase, 2 cm over the rear view: narrower, the rear shelf's trim (sized to the side
+    // there) leaves a sight line from the driver's eye into the boot and the tail lamps' rims
+    // (kit-zfight).
+    { s: 3.96, sill: 0.32, crease: 0.61, belt: 0.975, deck: 1.03, wSill: 0.785, wCrease: 0.808, wBelt: 0.765 },
+    { s: 4.15, sill: 0.33, crease: 0.62, belt: 0.967, deck: 1.018, wSill: 0.77, wCrease: 0.79, wBelt: 0.755 },
     // The lid's trailing edge, then the tail face [D side x 1428]: the lid comes down between
     // the corner lamps (topped at 0.905) to the bumper's top, cut at ±0.39 (the lamps' inner
     // edges lean from ±0.367 at their foot to ±0.475 at their top [D rear]).
-    { s: 4.3, sill: 0.33, crease: 0.62, belt: 0.945, deck: 0.998, wSill: 0.75, wCrease: 0.77, wBelt: 0.755 },
+    { s: 4.3, sill: 0.33, crease: 0.62, belt: 0.945, deck: 0.998, wSill: 0.75, wCrease: 0.77, wBelt: 0.745 },
     { s: 4.36, sill: 0.33, crease: 0.62, belt: 0.905, deck: 0.645, notch: 0.39, wSill: 0.735, wCrease: 0.755, wBelt: 0.74 },
   ],
   // Side glass foot ±0.765 at the belt: the A pillar's outer line in the front view, ±0.731
@@ -381,33 +388,41 @@ export const BODY_ESPERO: KitBody = {
       // The screen's outer line from the cowl (1.267, 0.914) to the rail at 2.03 [D side
       // (246, 167) to (377, 91)].
       { s: 1.267, top: 2.03, upper: 'body' },
-      // A slim A pillar with the door's frame and glass close behind it, parallel [P
-      // "Daewoo Espero beige front": the mirror in the glass's front corner].
-      { s: 1.3, top: 2.063, upper: 'door1', lower: 'body', finish: 'black' },
-      // The front door's shut line below the belt [D side x 277]; the door's frame forms a
-      // black sail under the mirror [P "1999 Daewoo Espero dark green front": the mirror on
-      // a black triangle at the glass's front foot]. Owner's review 2 (2026-10-18): the
-      // mirrors stood at s 1.39, ahead of the glass, and the driver's line to them (eye s
-      // 2.33, 1.18 high) met the sail 4 cm ahead of the glass's edge: hidden. On the drawing
-      // the sail runs along the belt to s 1.79 (x 337) and its apex is at (1.84, 1.11), the
-      // mirror's head s 1.78–1.90 [D side, apillar crop]: the glass's edge is kinked, steep
-      // up the sail, then along the pillar. One straight edge here, from 1.62 at the belt
-      // (1.74 at 1.0, 1.85 at 1.11) to the frame, the mirror (`mirrorS` 1.74) at its front
-      // foot: the lines to both heads cross the side glass (the left 21 cm behind its edge,
-      // the right, further off, 9 cm; in-game cabin view).
-      { s: 1.447, top: 2.09, upper: 'door1', finish: 'black' },
-      { s: 1.62, top: 2.11, upper: 'door1', glass: 'drop', finish: 'black' },
-      // The B pillar, upright [D side x 466–482 at the belt and the rail: s 2.546–2.64].
-      // Kit-check (2026-10-19): the front door's shut line under the belt is drawn at x 458,
-      // s 2.50, ahead of the pillar (Review 2: front door 1.447–2.50, rear 2.50–3.36); it
-      // stood at 2.545–2.56. The rear door now reaches forward under the front door's frame
-      // to 2.50: the shut line steps at the belt, as drawn.
-      { s: 2.5, top: 2.51, upper: 'door1', lower: 'door2', glass: 'drop', finish: 'black' },
-      { s: 2.51, top: 2.52, upper: 'door1', lower: 'door2', finish: 'black' },
-      { s: 2.545, top: 2.555, upper: 'body', lower: 'door2', finish: 'black' },
-      { s: 2.56, top: 2.57, upper: 'body', lower: 'door2', finish: 'black' },
-      { s: 2.6, top: 2.61, upper: 'door2', finish: 'black' },
-      { s: 2.635, top: 2.645, upper: 'door2', glass: 'drop', finish: 'black' },
+      // Owner's review 3 (2026-10-19): the A pillar too thick, and the open door's frame a
+      // huge dark wedge from the pillar's foot. The door's black frame and sail ran from
+      // 1.30 to the glass's edge at 1.62 at the belt and 2.06–2.11 at the rail: a band 0.03
+      // wide at the top and 0.35 at the belt. On the drawing [D side, dark runs by pixel row,
+      // y 104–136] the pillar and the door's frame are one band of even width, 16 px = 0.093
+      // of s (the frame's line 2/3 of the way back: paint 0.055, frame 0.04), parallel to
+      // the screen's line from the roof down to 1.064 high; under it the black sail, a
+      // triangle from the band's rear edge along the belt to s 1.78, its rear edge upright
+      // up to the band (apex (1.79, 1.064)), the mirror on it. Now as the Nexia's: the
+      // painted pillar 0.058, the door's black frame 0.042 and the glass behind them, all
+      // three parallel to the screen's line; the glass's foot raised on its first column
+      // (`glassRise` 0.14, 1.046 high) so the frame under it is the sail, 0.29 along the
+      // belt and 0.14 high as drawn. The door's hinge line at its front edge (the frame's
+      // foot, 1.325), as on the Nexia; below the belt the wing reaches back to the door's
+      // shut line at 1.447 [D side x 277].
+      { s: 1.325, top: 2.088, upper: 'door1', lower: 'body', finish: 'black' },
+      { s: 1.367, top: 2.13, upper: 'door1', glass: 'drop', lower: 'body', finish: 'black', glassRise: 0.14 },
+      // The shut line's column: its glass foot on the sail's edge.
+      { s: 1.447, top: 2.21, upper: 'door1', glass: 'drop', finish: 'black', glassRise: 0.102 },
+      // The sail's rear end at the belt [D: 1.78 on the car, whose pillar foot stands 0.13
+      // further back over the wing].
+      { s: 1.66, top: 2.25, upper: 'door1', glass: 'drop', finish: 'black' },
+      // The B pillar [D side, dark runs y 100–160: the front glass's rear edge 2.449 at the
+      // belt leaning to 2.561 at the rail, the rear glass's front edge 2.597 to 2.65; the
+      // shut line below the belt x 458, s 2.50]. Review 3: the front door's frame stepped
+      // back over the rear door at the belt (f3d0135: the front frame to 2.545, the rear door
+      // forward under it to 2.50), which no door opens past. Now the Nexia's arrangement:
+      // the front door's frame ends at the glass, the black pillar (body) stands over both
+      // doors' edges, the front door below it to the shut line 2.50, the rear door from
+      // there, its frame and glass starting behind the pillar.
+      { s: 2.45, top: 2.56, upper: 'door1', finish: 'black' },
+      { s: 2.47, top: 2.58, upper: 'body', lower: 'door1', finish: 'black' },
+      { s: 2.5, top: 2.605, upper: 'body', lower: 'door2', finish: 'black' },
+      { s: 2.565, top: 2.625, upper: 'door2', finish: 'black' },
+      { s: 2.597, top: 2.65, upper: 'door2', glass: 'drop', finish: 'black' },
       // The rear glass's rear edge leaning forward to the top [D side: 3.354 at the belt,
       // 3.295 at the rail]; the frame behind it, the door's shut line running down and
       // forward round the rear arch to the doors' bottom [D side x 587 at the arch].

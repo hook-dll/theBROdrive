@@ -126,7 +126,11 @@
           3.041
         ]
       ],
-      "src": "D10 side: front glass top 1.89 at the A pillar's chamfer (§6), rear 2.324; rear glass 2.439–2.959; quarter glass 3.015–3.041 (§1.3, from P r2)"
+      "src": "D10 side: front glass top 1.89 at the A pillar's chamfer (§6), rear 2.324; rear glass 2.439–2.959; quarter glass 3.015–3.041 (§1.3, from P r2)",
+      "accepted": {
+        "v": [[1.8, 2.316], [2.432, 3.008], [3.048, 3.12]],
+        "why": "the reference ends are the window-top line (y 79, 1.346) and the panes' tops at the rail; the check reads a band 4 cm under the glass's height at the front door's middle (railY 1.32), where every raked edge stands further out. Measured the same way on D10 itself (rows y 96–100, 1.26–1.28): the front glass's edge rakes 1.846 at 1.23 → 1.915 at 1.27 → 1.99 at 1.305 and the rear door glass's rear edge reaches 3.004–3.008; the quarter glass on §1.3's lines (3.27 / 3.015 front, 3.456 / 3.041 rear) is 3.05–3.12 wide there. No convex pane meets railY 1.346 at the door's middle and a front edge at 1.89 4 cm lower (sideGlassBelt 1.385 at the foot): the front edge is held 0.1 forward of the drawn one so railY holds (tens.ts BODY_2110 columns). Main's decision 2026-10-19"
+      }
     },
     "backLightFoot": {
       "v": [

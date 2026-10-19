@@ -26,8 +26,10 @@ import type { KitBody } from './specs';
  * drawings within 5 mm]: the roof rounding up from the screen over 0.6 m. The screen's top
  * on the centre line comes down only 0.02 (1.389, against the outline's 1.345): lower, the
  * tens' 500 mm blades no longer sweep 90° on the glass (`buildWipers`, from 0.03). From
- * there the roof rises ever less steeply (0.09, 0.08, 0.06, 0.02 m per m), so the header,
- * the A pillar's top and the door frames' tops round into it with no fold.
+ * there the roof rises ever less steeply (0.09, 0.08, 0.06, 0.017, 0.004 m per m), so the
+ * header, the A pillar's top and the door frames' tops round into it with no fold. Its
+ * points stand on the columns' tops (the frames' 1.85 … 2.0, the B pillar's 2.324, the rear
+ * glass's 2.44): a point between two tops adds a ring row to the whole greenhouse.
  */
 const ROOF_FRONT_TENS: readonly (readonly [number, number])[] = [
   [1.77, 0.02],
@@ -35,8 +37,8 @@ const ROOF_FRONT_TENS: readonly (readonly [number, number])[] = [
   [1.85, 0.016],
   [1.9, 0.012],
   [2.0, 0.006],
-  [2.2, 0.0015],
-  [2.4, 0],
+  [2.324, 0.0005],
+  [2.44, 0],
 ];
 
 /**
@@ -63,15 +65,20 @@ export const BODY_2110: KitBody = {
     // The lamp's wrap ends; the wing's top (the bonnet's shut line) rises to the cowl. The
     // floor under the engine (hidden by the bumper and the arch) stands 0.275 high, so the
     // sump clears the ground by the factory clearance.
-    { s: 0.34, sill: 0.28, crease: 0.6, belt: 0.79, deck: 0.83, wSill: 0.735, wCrease: 0.76, wBelt: 0.715 },
+    { s: 0.34, sill: 0.28, crease: 0.6, belt: 0.79, deck: 0.83, wSill: 0.735, wCrease: 0.76, wBelt: 0.718 },
     // The bonnet and the wings' top one straight slope from here to the cowl (the drawn
     // 0.89 / 0.85 at s 0.6 lie 15–20 mm over that line; straight reads cleaner).
-    { s: 0.6, sill: 0.275, crease: 0.62, belt: 0.83, deck: 0.873, wSill: 0.775, wCrease: 0.8, wBelt: 0.755 },
-    { s: 1.31, sill: 0.258, crease: 0.63, belt: 0.94, deck: 0.99, wSill: 0.795, wCrease: 0.82, wBelt: 0.775 },
-    { s: 2.4, sill: 0.258, crease: 0.64, belt: 0.955, deck: 0.99, wSill: 0.8, wCrease: 0.825, wBelt: 0.78 },
+    // The side between the crease and the belt leans ever more from the nose to the cabin
+    // (12.5° at s 0.34, 12.9° at 0.6, 16° along the doors): no station is a crease [D top
+    // view: one smooth outline; front view: the side from ±0.831 at the crease (0.63) to
+    // ±0.741 at the belt (0.94), 16°, so the doors' belt ±0.73–0.735 under the side glass's
+    // foot ±0.73].
+    { s: 0.6, sill: 0.275, crease: 0.62, belt: 0.83, deck: 0.873, wSill: 0.775, wCrease: 0.8, wBelt: 0.752 },
+    { s: 1.31, sill: 0.258, crease: 0.63, belt: 0.94, deck: 0.99, wSill: 0.795, wCrease: 0.82, wBelt: 0.73 },
+    { s: 2.4, sill: 0.258, crease: 0.64, belt: 0.955, deck: 0.99, wSill: 0.8, wCrease: 0.825, wBelt: 0.735 },
     { s: 3.249, sill: 0.262, crease: 0.645, belt: 1.0, deck: 1.02, wSill: 0.788, wCrease: 0.81, wBelt: 0.765 },
     // Back light's foot 1.025 at the side; the boot 1.03 on the centre line.
-    { s: 3.556, sill: 0.27, crease: 0.65, belt: 1.01, deck: 1.03, wSill: 0.77, wCrease: 0.792, wBelt: 0.75 },
+    { s: 3.7, sill: 0.27, crease: 0.65, belt: 1.01, deck: 1.03, wSill: 0.77, wCrease: 0.792, wBelt: 0.75 },
     { s: 3.95, sill: 0.3, crease: 0.66, belt: 1.0, deck: 1.02, wSill: 0.725, wCrease: 0.745, wBelt: 0.705 },
     // The lid's trailing edge, then the tail face: the lid's foot 0.655 between corner
     // lamps topped at 0.83, cut at ±0.52.
@@ -82,15 +89,22 @@ export const BODY_2110: KitBody = {
   cabin: {
     columns: [
       // The A pillar [D: 1.32 at the belt to 1.338 high at 1.768]. Its top rounds into the
-      // roof with the roof's profile alone (`roofDrop`, 1.359 at 1.77): the step drop of the
-      // corner (`cornerDrop` 0.037, 1.342) left a fold along the screen's header behind it.
-      { s: 1.31, top: 1.77, upper: 'body' },
+      // roof with the roof's profile alone (`roofDrop`): the step drop of the corner
+      // (`cornerDrop` 0.037, 1.342) left a fold along the screen's header behind it. Its top
+      // at the rail 1.805, so the screen's side edge, raked by the foot ahead of the cowl
+      // (`screenFoot`), passes the drawn corner (1.768, 1.338). The columns' tops in front of
+      // the B pillar stand on `ROOF_FRONT_TENS` points (1.805, 1.85, 1.9, 2.0): a point
+      // between two tops adds a ring row to the whole greenhouse (`buildShell`).
+      { s: 1.31, top: 1.805, upper: 'body' },
       { s: 1.325, top: 1.85, upper: 'door1' },
-      // The drop glass's front edge, its top front corner cut by one chamfer inside the
-      // frame as the photos' rounded corner: the edge's top 0.05 lower (`glassDrop`), the
-      // glass's top back to the frame's width at the next column. The rail is untouched.
-      { s: 1.385, top: 1.89, upper: 'door1', glass: 'drop', glassDrop: 0.05 },
-      { s: 1.45, top: 1.95, upper: 'door1', glass: 'drop' },
+      // The drop glass's front edge [D: 1.385 at the belt], its top front corner cut by a
+      // small chamfer inside the frame as the photos' rounded corner (`glassDrop` 0.01), the
+      // glass's top back to the frame's width at the next column. The drawn edge rakes back
+      // to 1.99 at 1.305 [D, the glass's outline]; the glass is held 0.1 forward of that so
+      // at the door's middle it stands to 1.32, near the window's 1.346 top: tops at 2.0 /
+      // 2.06, or the 0.05 chamfer, left 1.28–1.30 there.
+      { s: 1.385, top: 1.9, upper: 'door1', glass: 'drop', glassDrop: 0.01 },
+      { s: 1.45, top: 2.0, upper: 'door1', glass: 'drop' },
       // The B pillar: the two doors' frames meet on it; the doors share one shut line
       // below the belt at 2.33.
       { s: 2.269, top: 2.324, upper: 'door1' },
@@ -109,7 +123,7 @@ export const BODY_2110: KitBody = {
       { s: 3.27, top: 3.015, upper: 'body', glass: 'fixed' },
       // The C pillar, 0.10 wide, parallel to the back light.
       { s: 3.456, top: 3.041, upper: 'body' },
-      { s: 3.556, top: 3.141 },
+      { s: 3.7, top: 3.141 },
     ],
     rail: 1.379,
     railHalf: 0.53,
@@ -129,7 +143,7 @@ export const BODY_2110: KitBody = {
     // Both blades 500 mm (factory part 2110-5205070; parts catalogues list 500 / 500).
     wiperBlade: 0.5,
     // The screen's foot on the centre line at s 1.154 on the bonnet [D side view].
-    screenFoot: 0.156,
+    screenFoot: 0.222,
     rearBottom: 0.025,
     rearHeader: 0.05,
     pillar: 0.07,
@@ -181,6 +195,8 @@ export const LOOK_2110: KitLook = {
   dash: 0x1f2123,
   headrests: true,
   brightwork: 'black',
+  mirrorS: 1.488,
+  mirrorHeightOffset: -0.04,
   sill: null,
   waist: null,
   repeater: { s0: 1.14, s1: 1.215, y0: 0.696, y1: 0.728 },
@@ -429,7 +445,8 @@ export const BODY_2111: KitBody = {
   cabin: {
     ...BODY_2110.cabin,
     columns: [
-      ...BODY_2110.cabin.columns.slice(0, 9),
+      ...BODY_2110.cabin.columns.slice(0, 9).map((column, index) =>
+        index === 1 ? { ...column, s: 1.273 } : index === 2 ? { ...column, s: 1.333 } : column),
       // The rear door's frame: its glass's rear edge [D: x 1363 at the belt, 1340 high] and
       // the shut line [D: x 1378 at the belt, 1350 at the rail]; below the belt the 2110's
       // raked foot [D: upright to y 215, 0.84, then forward to the sill].

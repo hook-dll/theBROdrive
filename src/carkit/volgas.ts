@@ -71,14 +71,20 @@ export const BODY_GAZ24: KitBody = {
       // behind that, parallel to it. Below the belt the wing still reaches back to the door's
       // shut line at 1.459 [D: x 795].
       { s: 1.4, top: 1.79, upper: 'door1', lower: 'body' },
-      // The quarter light from here to its post [D: x 884–890, upright, 1.913–1.944].
-      { s: 1.435, top: 1.825, upper: 'door1', glass: 'vent', lower: 'body' },
-      { s: 1.46, top: 1.85, upper: 'door1', glass: 'vent' },
+      // The quarter light from here to its post [D: x 884–890, upright, 1.913–1.944]. Its
+      // foot rounded up into the front edge [P "GAZ-24 (1st generation) Volga (side view)":
+      // the foot at the sill from x 416, s 1.651; D: the front edge 1.62 at the belt, 1.68 at
+      // 1.05], the door's frame under the corner: the glass's foot 0.10 / 0.07 over the
+      // belt's on the two front columns, at the belt from 1.65. Square to the belt, the pane
+      // ran 1.52 → 1.92 at 1.05, longer than the drop glass behind it.
+      { s: 1.435, top: 1.825, upper: 'door1', glass: 'vent', lower: 'body', glassRise: 0.1 },
+      { s: 1.46, top: 1.85, upper: 'door1', glass: 'vent', glassRise: 0.07 },
+      { s: 1.65, top: 1.88, upper: 'door1', glass: 'vent' },
       { s: 1.92, top: 1.92, upper: 'door1' },
       { s: 1.94, top: 1.94, upper: 'door1', glass: 'drop' },
       // The B pillar [D: x 965 / 972 / 980 / 985], upright.
-      { s: 2.326, top: 2.326, upper: 'door1' },
-      { s: 2.362, top: 2.362, upper: 'body', lower: 'door1' },
+      { s: 2.326, top: 2.326, upper: 'door1', lower: 'body' },
+      { s: 2.362, top: 2.362, upper: 'body' },
       { s: 2.4, top: 2.4, upper: 'body', lower: 'door2' },
       { s: 2.428, top: 2.428, upper: 'door2' },
       // The rear door's glass: level to 2.80, then its top-rear corner turns down to the
@@ -114,7 +120,7 @@ export const BODY_GAZ24: KitBody = {
     // 1.918, 1.52 from 2.12 to 2.38, 1.505 at 2.734, 1.494 at 2.887, 1.479 at 3.04, 1.454
     // at 3.193, 1.403 at 3.295; the back light's top 1.387 at 3.336].
     roofDrop: [[1.75, 0.02], [1.81, 0.02], [1.9, 0.01], [2.05, 0], [2.65, 0], [2.85, 0.02], [3.05, 0.035], [3.2, 0.065], [3.32, 0.09]],
-    // Window sill 1.0, tops 1.346–1.38 [D side view].
+    // Window sill 1.0, tops 1.346–1.38 [D side view]: 1.36–1.37 under the arched roof.
     glassBottom: 0.045,
     glassTop: 0.03,
     screenBottom: 0.03,
@@ -122,7 +128,7 @@ export const BODY_GAZ24: KitBody = {
     // [E] No catalogue length was found: the 2101's 0.33 scaled by the screens' widths.
     wiperBlade: 0.38,
     // The screen's foot on the centre line 0.13 ahead of its corners [D top view].
-    screenFoot: 0.12,
+    screenFoot: 0.06,
     rearBottom: 0.03,
     rearHeader: 0.05,
     pillar: 0.08,
@@ -164,6 +170,15 @@ export const LOOK_GAZ24: KitLook = {
   dash: 0x1d1c1b,
   headrests: false,
   brightwork: 'chrome',
+  // One door mirror, the driver's: serial sedans had no right one [D gaz_24.jpg front and
+  // rear views; drive2.ru/l/7972565; gaz-24.com forum t=70821, t=70826]. On a stalk from
+  // the door's top: its hole 175.5 mm behind the door's front edge (s 1.635) [gaz-24.com
+  // t=70821], the head s 1.61–1.72 [D plan], 0.84–1.0 out and 1.01–1.14 high [D front],
+  // so the head 0.04 off the skin and 0.12 over the belt (measurements-volga.md §1.4).
+  mirrors: 'left',
+  mirrorS: 1.635,
+  mirrorStalk: 0.04,
+  mirrorReach: 0.04,
   sill: 'chrome',
   waist: null,
   repeater: null,
@@ -286,8 +301,10 @@ export const BODY_GAZ31029: KitBody = {
       { s: 1.54, top: 1.93, upper: 'door1', lower: 'body' },
       { s: 1.575, top: 1.965, upper: 'door1', glass: 'drop', lower: 'body' },
       { s: 1.6, top: 1.99, upper: 'door1', glass: 'drop' },
+      // The B pillar: above the belt the 24's, 0.14 further back; below it the doors meet
+      // at one shut line [D: x 441 from the belt to the sill, 2.50].
       { s: 2.466, top: 2.466, upper: 'door1' },
-      { s: 2.502, top: 2.502, upper: 'body', lower: 'door1' },
+      { s: 2.502, top: 2.502, upper: 'body', lower: 'door2' },
       { s: 2.54, top: 2.54, upper: 'body', lower: 'door2' },
       { s: 2.568, top: 2.568, upper: 'door2' },
       // The rear glass: level to 2.94, its top-rear corner turning down [D: 1.38 at x 500,

@@ -111,10 +111,10 @@ The boot lid comes down the tail face between the corner lamps to the bumper's t
 | 0.30 | 0.730 at 0.27, 0.754 at 0.37 | 0.715 / 0.738 / 0.72 |
 | 0.45 | 0.771 at 0.47 | 0.745 / 0.768 / 0.75 |
 | 0.60 | 0.788 at 0.56, 0.80 at 0.66 | 0.77 / 0.79 / 0.772 |
-| 0.915–3.69 | 0.815–0.832 (0.822 at 0.86); front view ±0.834 at 0.59, ±0.809 at 0.78, ±0.796 at 0.82, ±0.766 at 0.87 | 0.80–0.805 / 0.825–0.832 / 0.795 |
-| 3.96 | 0.81 at 3.91 | 0.785 / 0.808 / 0.78 |
-| 4.15 | 0.791 at 4.10 | 0.77 / 0.79 / 0.77 |
-| 4.30 | 0.769 | 0.75 / 0.77 / 0.755 |
+| 0.915–3.69 | 0.815–0.832 (0.822 at 0.86); front view ±0.834 at 0.59, ±0.809 at 0.78, ±0.796 at 0.82, ±0.766 at 0.87 | 0.80–0.805 / 0.825–0.832 / **0.765** (the front view's belt) |
+| 3.96 | 0.81 at 3.91; the C pillar's foot onto the shoulder ±0.748 at 0.93–0.954, ±0.743 at 0.978 [D rear] | 0.785 / 0.808 / **0.765** (the cabin's: narrower, the shelf's trim leaves a sight line into the boot, kit-zfight) |
+| 4.15 | 0.791 at 4.10 | 0.77 / 0.79 / **0.755** |
+| 4.30 | 0.769 | 0.75 / 0.77 / **0.745** (the belt runs in from the cabin's, never out: was 0.78 / 0.77 / 0.755, an s-bend at 3.69–3.96) |
 | 4.36 | 0.754 at 4.35; the lamps' outer edge ±0.761 seen from behind [D rear] | 0.735 / 0.755 / 0.74 |
 
 `crease` **0.60** along the car (the flank widest between 0.54 and 0.63 [D front]). Side glass: the A pillar's outer line runs from ±0.731 at 0.967 to ±0.59 at 1.301 [D front], 0.42 m in per m up: its foot ±0.765 at the belt (`shoulder` inset **0.03**, rise 0.015) and ±0.56 at the rail (`railHalf` **0.56**); the roof's edge ±0.52 at 1.396 (`railInset` 0.04).

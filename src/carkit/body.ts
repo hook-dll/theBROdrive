@@ -31,6 +31,16 @@ const ROW_SNAP = 0.005;
 const JAMB_DEPTH = 0.045;
 /** Thickness of a door (its card stands this far in from the skin); lids are thinner. */
 export const DOOR_THICKNESS = 0.075;
+/**
+ * Depth of a door's window frame above the belt (its inner skin, the returns round its
+ * panes and its shut edges): a pressed channel round the glass, about 3 cm on the
+ * Soviet doors [P GAZ-24 "GAZ 24 Volga interior.jpg", the open door's frame], not the
+ * card's full thickness; a deep frame widened every post's and pillar's shadow from the
+ * seat (the GAZ-24's quarter-light post hid the left mirror at its factory place).
+ */
+const DOOR_FRAME_DEPTH = 0.03;
+/** A door face counts as frame when all its corners stand this close to the belt or over it. */
+const FRAME_BELT_SNAP = 0.003;
 const LID_THICKNESS = 0.035;
 /** How far a pane sits behind its frame. */
 const GLASS_INSET = 0.012;
@@ -53,6 +63,13 @@ const CORNER_STEPS = 4;
  * and stands a triangle up out of the deck.
  */
 const DECK_FOLD = 0.01;
+/**
+ * A deck quad whose fourth corner stands this far off the other three's plane is split on
+ * a diagonal chosen here (`DECK_FOLD`, else the higher one: an outward fold). Narrow
+ * strips (a flat bonnet's roll-down to its skirt, 7 cm wide) fold by degrees at a few
+ * millimetres of twist.
+ */
+const DECK_TWIST = 0.0005;
 
 export const SHELL_COLOURS = {
   dark: 0x18191a,
@@ -63,13 +80,6 @@ export const SHELL_COLOURS = {
 /** `canvas`: a soft top's (`CabinSpec.softTop`), unpainted trim in its colour. */
 type Mat = 'paint' | 'glass' | 'dark' | 'canvas';
 
-/**
- * A deck quad whose fourth corner stands this far off the other three's plane is split on
- * a diagonal chosen here (`DECK_FOLD`, else the higher one: an outward fold). Narrow
- * strips (a flat bonnet's roll-down to its skirt, 7 cm wide) fold by degrees at a few
- * millimetres of twist.
- */
-const DECK_TWIST = 0.0005;
 interface Face {
   v: number[];
   owner: string;
@@ -78,6 +88,13 @@ interface Face {
   fixed?: boolean;
   /** The body's greenhouse or roof: lined inside (`ShellResult.lining`). */
   lined?: boolean;
+  /**
+   * An estate's D-pillar band under its knee (`flatKnee`): sealed as the greenhouse is, but
+   * with no lining behind it. The foot strip and the band folded down to the tailgate's
+   * foot meet in a sharp re-entrant edge, and any lining offset from them crossed the other
+   * face and showed outside over the lamps (owner, 2026-10-19: the 2104's beige sliver).
+   */
+  knee?: boolean;
 }
 
 /** A moving part of the shell, ready to be hung at its pivot. */
@@ -364,6 +381,15 @@ export class BodyFrame {
     return best;
   }
 
+  /**
+   * The arch's edge in the side at s: `archY`, or with `WheelSpec.archToSill` never under
+   * the sill there, so an arch's ends stop at a sill standing above the hub.
+   */
+  archEdgeY(s: number): number {
+    const arch = this.archY(s);
+    return this.spec.wheels.archToSill && arch > -Infinity ? Math.max(arch, this.section(s).r0[1]) : arch;
+  }
+
   /** Inner face of the wheel wells. */
   wellX(s: number): number {
     const w = this.spec.wheels;
@@ -442,7 +468,7 @@ class Shell {
     return index;
   }
 
-  face(points: readonly Vec3[], owner: string, mat: Mat, fixed = false, lined = false): void {
+  face(points: readonly Vec3[], owner: string, mat: Mat, fixed = false, lined = false, knee = false): void {
     const v: number[] = [];
     for (const p of points) {
       const i = this.vertex(p);
@@ -450,7 +476,7 @@ class Shell {
     }
     if (v.length < 3) return;
     if (polygonArea(v.map((i) => this.positions[i]!)) < 1e-7) return;
-    this.faces.push({ v, owner, mat, fixed, lined });
+    this.faces.push({ v, owner, mat, fixed, lined, knee });
   }
 }
 
@@ -474,16 +500,6 @@ function norm(a: Vec3): Vec3 {
   return l > 1e-12 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
 }
 
-function centroid(points: readonly Vec3[]): Vec3 {
-  let c: Vec3 = [0, 0, 0];
-  for (const p of points) c = add(c, p);
-  return scale(c, 1 / points.length);
-}
-
-/**
- * The corner at `corner` of the path prev → corner → next, rounded with radius r: points
- * along the arc from the first straight to the second; just the corner when r is 0.
- */
 /**
  * A quad's corners reordered so the builder's fan (from the first corner) folds it outward
  * (on the side its winding faces): a face bent out of its plane, by a shut line's gap
@@ -498,6 +514,16 @@ function outwardQuad(p: Vec3[]): Vec3[] {
   return dot(n, sub(p[3]!, p[0]!)) <= 0 ? p : [p[1]!, p[2]!, p[3]!, p[0]!];
 }
 
+function centroid(points: readonly Vec3[]): Vec3 {
+  let c: Vec3 = [0, 0, 0];
+  for (const p of points) c = add(c, p);
+  return scale(c, 1 / points.length);
+}
+
+/**
+ * The corner at `corner` of the path prev → corner → next, rounded with radius r: points
+ * along the arc from the first straight to the second; just the corner when r is 0.
+ */
 function fillet(prev: readonly [number, number], corner: readonly [number, number], next: readonly [number, number], r: number): [number, number][] {
   if (r <= 0) return [[corner[0], corner[1]]];
   const unit = (a: readonly [number, number], b: readonly [number, number]): [number, number] => {
@@ -585,7 +611,7 @@ function sideColumn(frame: BodyFrame, s: number): [number, number][] {
     ...above.map((y) => at(y, sec.r2[1], sec.r3[1])),
     [...sec.r3],
   ];
-  const arch = frame.archY(s);
+  const arch = frame.archEdgeY(s);
   if (arch > -Infinity) {
     const lip = Math.min(arch + ARCH_LIP, sec.r3[1] - 0.02);
     const lipX = frame.sideX(s, lip);
@@ -680,6 +706,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
   const P = (x: number, y: number, s: number): Vec3 => [x, y, frame.z(s)];
   const cols = tubColumns(frame);
   const hatch = spec.bootEnd === undefined;
+  const flatKnee = cabin.rearKnee !== undefined && (spec.stations[spec.stations.length - 1]!.flat ?? 0) > 0;
   // Raked shut lines (`CabinColumn.foot`): s along the line at height y (clamped: the
   // column above it, the foot's end below it), down from where its upper turn begins.
   const rakes = cabin.columns.flatMap((c, index) => {
@@ -808,7 +835,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const archCols = cols.filter((s) => Math.abs(s - axle) <= r);
       const inner = (s: number): number => side * frame.wellX(s);
       const edge = archCols.map((s) => {
-        const y = frame.archY(s);
+        const y = frame.archEdgeY(s);
         return { s, y, x: side * frame.sideX(s, y) };
       });
       for (let i = 0; i + 1 < edge.length; i++) {
@@ -821,6 +848,22 @@ export function buildShell(frame: BodyFrame): ShellResult {
         // opening let the light through to the road, and the shadow had an arch-shaped
         // hole with the wheel's own shadow in it (owner, 2026-10-16).
         shell.face(side > 0 ? [...quad].reverse() : quad, 'body', 'dark', true);
+      }
+      if (w.archToSill) {
+        // The wall from the arch's edge down to the sill line along it, so none of it hangs
+        // below the body beside the tyre; nothing where the edge lies on the sill.
+        for (let i = 0; i + 1 < edge.length; i++) {
+          const e0 = edge[i]!;
+          const e1 = edge[i + 1]!;
+          const f0 = frame.section(e0.s).r0[1];
+          const f1 = frame.section(e1.s).r0[1];
+          const poly: Vec3[] = [P(inner(e0.s), f0, e0.s), P(inner(e0.s), e0.y, e0.s), P(inner(e1.s), e1.y, e1.s), P(inner(e1.s), f1, e1.s)];
+          const wall = poly.filter((p, k) => k === 0 || Math.hypot(p[1] - poly[k - 1]![1], p[2] - poly[k - 1]![2]) > 1e-6);
+          if (wall.length >= 3 && Math.hypot(wall[0]![1] - wall[wall.length - 1]![1], wall[0]![2] - wall[wall.length - 1]![2]) <= 1e-6) wall.pop();
+          if (wall.length < 3) continue;
+          shell.face(side > 0 ? [...wall].reverse() : wall, 'body', 'dark', true);
+        }
+        continue;
       }
       const sill = frame.station(axle).sill;
       const centre = P(inner(axle), Math.min(sill, w.radius), axle);
@@ -911,14 +954,15 @@ export function buildShell(frame: BodyFrame): ShellResult {
   /**
    * A painted greenhouse or roof quad. On a rounded roof (`railBend`) a twisted one is cut
    * on the diagonal that folds it outward: the other diagonal sinks it into a dent where the
-   * roof's rows drop by different amounts (`cornerDrop`, `roofDrop`). Else one face, fanned
-   * by the builder as before.
+   * roof's rows drop by different amounts (`cornerDrop`, `roofDrop`). An estate's D-pillar
+   * band under its knee (`knee`, `Face.knee`) is cut the same way on any roof. Else one
+   * face, fanned by the builder as before.
    */
-  const quad = (q: Vec3[], owner: string, mat: Mat, lined: boolean): void => {
+  const quad = (q: Vec3[], owner: string, mat: Mat, lined: boolean, knee = false): void => {
     const n = newell([q[0]!, q[1]!, q[2]!]);
     const twist = dot(sub(q[3]!, q[0]!), norm(n));
-    if (!cabin.railBend || Math.hypot(n[0], n[1], n[2]) < 1e-12 || Math.abs(twist) < 1e-6) {
-      shell.face(q, owner, mat, false, lined);
+    if ((!cabin.railBend && !knee) || Math.hypot(n[0], n[1], n[2]) < 1e-12 || Math.abs(twist) < 1e-6) {
+      shell.face(q, owner, mat, false, lined, knee);
       return;
     }
     // Outward as `cutShell` takes it: away from a line along the car at mid height. With
@@ -928,7 +972,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
     const out: Vec3 = Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1]) ? [0, 0, c[2]] : [c[0], c[1] - 0.62, 0];
     const lastOut = twist * Math.sign(dot(n, out)) > 0;
     const halves = lastOut ? [[q[0]!, q[1]!, q[3]!], [q[1]!, q[2]!, q[3]!]] : [[q[0]!, q[1]!, q[2]!], [q[0]!, q[2]!, q[3]!]];
-    for (const h of halves) shell.face(h, owner, mat, false, lined);
+    for (const h of halves) shell.face(h, owner, mat, false, lined, knee);
   };
   for (const side of [1, -1]) {
     const ring: Ring[] = [];
@@ -1127,7 +1171,13 @@ export function buildShell(frame: BodyFrame): ShellResult {
         } else if (band === 1 && glass !== null) {
           shell.face([p0, p1, p2, p3], glass, 'glass');
         } else {
-          quad([p0, p1, p2, p3], upper, strip, upper === 'body');
+          // An estate's knee (a hatch with a `flat` tail): the D pillar's foot strip and its
+          // end band under the knee run from the corner's top up to the knee forward of the
+          // rear base, and down to the tailgate's foot at the pillar row. Fanned on the other
+          // diagonal they folded inward; cut outward, and unlined (`Face.knee`).
+          const lastStrip = a.kind === 'side' && b.kind === 'side' && a.column === cabin.columns[cabin.columns.length - 2];
+          const knee = band === 0 && flatKnee && ((a.kind === 'rear') !== (b.kind === 'rear') || lastStrip);
+          quad([p0, p1, p2, p3], upper, strip, upper === 'body', knee);
         }
       }
     }
@@ -1281,12 +1331,23 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     for (const v of f.v) liningNormals.set(v, add(liningNormals.get(v) ?? [0, 0, 0], n));
   }
   const lined = (v: number): Vec3 => add(placed('body', v, false), scale(norm(liningNormals.get(v)!), -LINING_DEPTH));
+  /**
+   * A moving part's depth at face f: a door's card below the belt `DOOR_THICKNESS`, its
+   * window frame above the belt `DOOR_FRAME_DEPTH`, a lid's `LID_THICKNESS`.
+   */
+  const depthOf = (f: Face): number => {
+    if (!f.owner.startsWith('door')) return LID_THICKNESS;
+    const above = f.v.every((v) => {
+      const p = positions[v]!;
+      return p[1] >= frame.station(frame.zNose - p[2]).belt - FRAME_BELT_SNAP;
+    });
+    return above ? DOOR_FRAME_DEPTH : DOOR_THICKNESS;
+  };
   /** Where a frame's inner side is at vertex v: the lining, or a moving part's inner skin. */
   const innerOf = (f: Face, v: number): Vec3 | undefined => {
     if (f.lined) return lined(v);
     if (!MOVING.test(f.owner)) return undefined;
-    const depth = f.owner.startsWith('door') ? DOOR_THICKNESS : LID_THICKNESS;
-    return add(placed(f.owner, v, false), scale(norm(normals.get(key(f.owner, v))!), -depth));
+    return add(placed(f.owner, v, false), scale(norm(normals.get(key(f.owner, v))!), -depthOf(f)));
   };
 
   for (const { a, b, faces: pair } of edges.values()) {
@@ -1311,7 +1372,13 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
       if (ia && ib) rubber.poly('trim', [ga, gb, ib, ia]);
       continue;
     }
-    if (f0.owner === f1.owner) continue;
+    if (f0.owner === f1.owner) {
+      // A door's card and its frame meet at the belt at two depths: the card's top closes
+      // the step between their inner skins (the window sill).
+      if (!f0.owner.startsWith('door') || depthOf(f0) === depthOf(f1)) continue;
+      builderOf(f0.owner).color(frame.spec.look.upholstery).poly('trim', [innerOf(f0, a)!, innerOf(f0, b)!, innerOf(f1, b)!, innerOf(f1, a)!]);
+      continue;
+    }
     if (!MOVING.test(f0.owner) && !MOVING.test(f1.owner)) continue;
     // Round the greenhouse the jamb and the part's edge are the seal's: rubber.
     const seal = f0.lined || f1.lined;
@@ -1321,7 +1388,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
       const na = norm(normals.get(key(f.owner, a))!);
       const nb = norm(normals.get(key(f.owner, b))!);
       const moving = MOVING.test(f.owner);
-      const depth = moving ? (f.owner.startsWith('door') ? DOOR_THICKNESS : LID_THICKNESS) : JAMB_DEPTH;
+      const depth = moving ? depthOf(f) : JAMB_DEPTH;
       const edge = [pa, pb, add(pb, scale(nb, -depth)), add(pa, scale(na, -depth))];
       if (seal) builderOf(f.owner).color(SHELL_COLOURS.rubber).poly('trim', edge);
       else builderOf(f.owner).poly('paint', edge);
@@ -1340,7 +1407,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
   }
 
   const lining: Vec3[][] = [];
-  for (const f of faces) if (f.lined) lining.push(f.v.map(lined).reverse());
+  for (const f of faces) if (f.lined && !f.knee) lining.push(f.v.map(lined).reverse());
 
   // Pivots: hinges at the leading edge (doors, flap), rear edge (bonnet), front edge
   // (boot) and top edge (tailgate, or its side edge: `tailgateHinge`); panes slide or
