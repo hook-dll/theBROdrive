@@ -2,6 +2,120 @@
 
 ## Unreleased
 
+- Roadside settlements; wreck fields and the fallen tower are gone (game-design2.md §6;
+  `src/world/settlement.ts`, `src/world/poi.ts`, `src/world/layby.ts`, `src/world/poislots.ts`).
+  - Every courier/post stop is a SETTLEMENT: 4–7 houses of ONE dwelling type (the slot's
+    roll; a mast or a ruin re-rolls among the lived-in dwellings), on both sides of the
+    road, each facing it with its own setback (10–22 m verge) and a 5–10 m gap to the next,
+    within 75 m of the stop. On the lay-by's side the houses stand at both ends of a
+    service strip; the far side gets one row, dropping houses from its end until it fits,
+    so big buildings make smaller settlements. Every other roadside slot is one house as
+    before; desert stops are one house and nothing else.
+  - `settlementLayout(seed, poi)` (pure, memoised) gives the houses and the service spots
+    in the road frame (`{ s, lateral, yaw }`, yaw relative to the road heading;
+    `spotPose` makes them absolute): `post` and `shop` at every settlement, `barrels` at
+    half of them and a fifth of lone houses, `lot` (car for sale) at 30%, `trailer` at
+    10%. Houses are packed by their MEASURED size, written down in
+    `src/world/dwellings/bounds.ts` so the layout stays worker-safe.
+  - A settlement's lay-by is longer (60 m pad, always 8.5 m wide; slips unchanged) and its
+    levelled site covers the strip and the houses on its side; the far side's houses sit
+    on their own fitted plane like a desert house. Traffic, the courier and the signpost
+    use it unchanged. Scatter, ground cover, poles and delineators keep out of every
+    stop's houses and out of the service strip (`laybyKeepsClear`).
+  - Built: the houses (`standingHouses` drops one on a landform, mesa, lake basin, another
+    pass of the road, or curved into an earlier one), the vending machine at `shop`, the
+    lot car (`lot-car` id) with its price board at `lot`, a trailer at `trailer`. The
+    post, barrels and the lot's key box are left to their own builders at those spots.
+    No vending machine at lone or desert houses any more.
+  - Removed: wreck fields and buried shells (`buildWrecks`, `layOutWreckField`,
+    `salvageKeepOut`, `WreckKeepOut`, `poiAt`, tools/wreck-spacing.ts), the per-stop
+    `PoiStock` roll (nothing read it any more), `courierParkingLateral`,
+    `DANCER_ALONG_M`/`DANCER_OUT_M`, and `fallen-tower` from `MAST_IDS` (it stays in the
+    POI gallery). The `WreckTrunkField` registry and wreck storage state remain but
+    nothing registers into them.
+  - tools/poi-placement.ts checks seeds 1–20 × 300 km: no house in a house, on any pass
+    of the road, on the lay-by's asphalt or on a service spot; no service on the asphalt
+    or in another; the bounds table against the built houses.
+- One МАГАЗИН machine, barrels, empty cans (game-design2.md §8, §9; `src/world/vending.ts`,
+  `src/world/barrels.ts`, `src/items/items.ts`, `src/economy/economy.ts`).
+  - The FUEL/PARTS/GOODS assortments and their colours are gone: every machine is the same
+    blue cabinet under a «МАГАЗИН» board. Its 12 slots hold, by the stop's seed, 1–2 spray
+    cans (their paint in the window), sun shades (lens tint in the window), an air filter,
+    a turbine, 1–3 empty cans of 5/10/20 L, 1–2 packs of gum and 4–5 sticker envelopes of
+    random kinds, each kind present by its own roll; slots past the last ware stay empty.
+    Oil and water bottles, medicine, radiators, engines and sponges are no longer sold.
+    Machines still never restock; a slot sold in an older save stays sold.
+  - The FUEL machine's nozzle, hose and PETROL price board are removed, with `PUMP_SLOT`,
+    `pumpFuel`, `pumpPrompt`, `VendingMachine.pump`/`title`, `vendingAssortment` and
+    `fuelPricePerLitre`. `PRICE_TABLE` drops fluids by the litre, sponge, medicine and ammo;
+    an empty can is 1 coin + 0.1 per litre of capacity, sun shades 4 (× km index as before).
+  - A can holds no fluid until one is poured in: `FluidCanItem.fluid` is `FluidKind | null`,
+    null exactly when it is empty (`fillCan`/`drainCan`/`canTakes`). Pouring out the last
+    of it empties it for any fluid; an empty can lying on the ground takes whatever is
+    poured into it (`loose_item_fluid` carries the fluid). Labels read `empty 10 L can`.
+    Every can is one khaki jerrycan, since its colour can no longer say what is in it.
+    Saves: a can saved with 0 L forgets its fluid on load.
+  - `buildBarrelStand(ctx, poi, x, z, yaw, group, bodies, colliders, fixtures, registered)`:
+    three immovable drums on a timber rack, red PETROL, amber OIL, blue WATER, stencilled,
+    static colliders, kit/sign materials only. Each drum is a world fixture with two parts:
+    its tap (hold F with a can in hand: the handle turns open a quarter round, a stream
+    runs and the can fills at up to 0.25 L/s until it is full or the drum is dry; a can of
+    another fluid is refused) and its body (F knocks: "sounds hollow" / "something sloshes
+    inside"). The tap prompt shows the can's litres and only "barrel low" (< 1 L) or
+    "barrel empty". Contents are drawn from the world seed and the barrel: ~25% dry,
+    ~20% 0.3–1.2 L, else 1.5–3.5 L. What the taps leave is saved in
+    `WorldState.barrelLitres` (`barrel_litres` delta; absent in older saves = untouched).
+    The stand places nothing by itself: the settlement builder calls it at its `barrels` spot.
+- The title room is a Carcyclopedia, not a hub (game-design2.md §3). Its list is
+  Continue (the window; only with a save, loads the latest), New game (the desk), Drives
+  (the keys), Carcyclopedia (the wall case) and Settings (the toolbox). Daydream, the
+  Adventures map, the Shelf of dream toys and its price cards are gone, and with them
+  `adventuresMap`, the dive into the mat and every dreams import in `ui/`. A wall case of
+  four tiers over the desk holds a 1:43 die-cast of every car in `CAR_MODELS` in its
+  factory colour; the Carcyclopedia panel lists them and turns the camera to the model
+  chosen, beside a card of what the catalogue knows (engine power and torque, gearbox,
+  driven wheels, kerb mass, tank, dimensions, clearance). The room hints instead of
+  telling: textbooks, an exercise book open on ballpoint cars drawn over the sums, a
+  printed textbook, pencils, a pen, erasers, a ruler and a pencil cup on the desk, and
+  four crayon drawings of cars and roads pinned to the walls; the calendar moved over the
+  bed. The toy car on the play mat stays as decoration. `PauseHooks.saveDrive` is no
+  longer nullable.
+- One world: the dream layer is gone. `src/dreams/` (dream definitions, the run, its
+  view and closing card, progress, parcel terminals, bay markers) is deleted, and with it
+  `NO_COURIER`, the dream resume target (`dreamResumeTarget`/`resumedDreamId`),
+  `PoiProvider`'s courier-free stops, `MirageSchedule`'s stretch, `PolicePatrol.postsEnabled`,
+  `RoadTraffic.share` and the old `InteractionFixture` list in `Interaction` (world
+  fixtures stay). The title's choice is `load | new`: Continue loads the last drive, New
+  game starts a fresh saved world on the Oka; every drive autosaves and the pause sheet
+  always has «Save drive». The rotary dial moved to `src/ui/dial.ts` for the post machine.
+- Nothing falls off a seat any more: `CabinRide`, `slipAt`, `FALLS_TO`, the cabin's fall
+  animation, `ContractRuntime.fell` and the «slid off the seat» / «knocked about» toasts
+  are removed. A thing stays where it was laid however hard the car is driven.
+- Ride quality (`src/trip/ride.ts`, `RideMeter`): each fixed step of the car the player
+  drives, its world velocity is differenced and turned into the car's frame, smoothed
+  over 0.25 s: `longitudinal`, `lateral`, `magnitude` (m/s²). Comfort drains above
+  2.5 m/s² and a harsh moment begins above 3.5 (the old trip record's thresholds).
+  Contracts can `track(key)` / `comfort(key)` / `harsh(key)` / `forget(key)`; records grow
+  only while the player drives. `rideSensitive(item)` names what minds the ride (the
+  fragile radio, a lamp, a teddy bear).
+- G-force widget on the HUD (`Hud.setRide`): a small round instrument in the bottom-right
+  corner (top-right on touch), up while the player drives a car carrying something
+  ride-sensitive, cabin view included. The dot is the push on the load (up the face when
+  braking, right in a left bend) over calm / uncomfortable / harsh rings; it turns amber
+  and red with them, and the outer ring flashes on each harsh moment.
+
+- Car lots: a car for sale is bought by hand at a key box on a post beside its price board
+  (`src/world/keybox.ts`, `buildKeyBox`). Hold F at the coin slot to feed coins one by one
+  (a clink per coin, faster as the hold goes on; a window on the box fills as they stack);
+  the prompt shows paid/price and the coins left in the pack. F on the lever pulls it: short
+  of the price it jams and springs back and the prompt says how many coins are missing;
+  paid, it goes down, a key on its tag drops inside and the drawer slides out with it. F on
+  the drawer takes the key: the car is bought (`car_buy`), its board comes down and the
+  drawer slides shut. Coins already fed are kept in `CarState.lotPaid` (new `lot_pay` delta,
+  read by the save), so a reload never eats them. F on the lot car itself no longer pays: it
+  refuses, and its prompt points to the key box. `lotOffer` is now `lotModel`: whether a stop
+  has a lot is its settlement layout's call. New foley event `coin`.
+
 - Dreams, the first mission layer (`src/dreams/dream.ts`, `view.ts`): the title screen leads
   with «First delivery»; it starts at km 12 of its own seed with a VAZ-2106 on the verge and
   ends 8 km on, when the car stops at the goal. The road between is free to drive both ways;

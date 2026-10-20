@@ -72,13 +72,44 @@ export interface PartItem {
   readonly part: PartInstance;
 }
 
+/**
+ * A can of any size. A bought can is empty and holds no fluid yet: the first fluid
+ * poured in (at a barrel, from another can) decides what it is, and pouring out the
+ * last of it leaves it empty and free for any fluid again. `fluid` is null exactly when
+ * `litres` is 0; `fillCan` and `drainCan` keep the two together.
+ */
 export interface FluidCanItem {
   readonly type: 'fluid_can';
   readonly id: string;
-  readonly fluid: FluidKind;
+  /** What is inside, or null for an empty can. */
+  fluid: FluidKind | null;
   readonly capacity: number;
   /** Litres currently inside. */
   litres: number;
+}
+
+/** Below this a can counts as empty: the last film in it is not a fluid. */
+const CAN_EMPTY_LITRES = 1e-3;
+
+/** Whether this fluid may go into the can: an empty can takes any, a filled one its own. */
+export function canTakes(can: FluidCanItem, fluid: FluidKind): boolean {
+  return can.fluid === null || can.fluid === fluid;
+}
+
+/** Pours `litres` of `fluid` into the can, up to its capacity; the caller checks `canTakes`. */
+export function fillCan(can: FluidCanItem, fluid: FluidKind, litres: number): void {
+  if (litres <= 0) return;
+  can.fluid = fluid;
+  can.litres = Math.min(can.capacity, can.litres + litres);
+}
+
+/** Takes `litres` out of the can; the last of it leaves the can empty of any fluid. */
+export function drainCan(can: FluidCanItem, litres: number): void {
+  can.litres = Math.max(0, can.litres - litres);
+  if (can.litres <= CAN_EMPTY_LITRES) {
+    can.litres = 0;
+    can.fluid = null;
+  }
 }
 
 /**
@@ -230,7 +261,7 @@ export interface ContractCargoItem {
    */
   raceLegs?: 1 | 2;
   /**
-   * How it looks when it is not a box of its kind (a dream's cargo, dreams/dream.ts):
+   * How it looks when it is not a box of its kind (a special parcel or a passenger):
    * `carpet`, a rug rolled up and tied, longer than a front seat, a half of the bench or
    * the boot is wide (vehicle/cabin.ts), so it goes across the whole rear bench;
    * `teddy`, a stuffed bear; `lamp`, a table lamp with a milk-glass shade. Absent: the
@@ -342,7 +373,9 @@ export function itemLabel(item: Item): string {
       return `${named} (${litreText(litres)})`;
     }
     case 'fluid_can':
-      return `${item.fluid} can (${litreText(item.litres)})`;
+      return item.fluid === null
+        ? `empty ${item.capacity} L can`
+        : `${item.fluid} can (${litreText(item.litres)})`;
     case 'spray_can': {
       const name = carPaintSwatch(item.paint)?.name ?? 'paint';
       return item.charge > 0
@@ -404,7 +437,7 @@ export function itemMass(item: Item): number {
     }
     case 'fluid_can':
       // Empty can plus the fluid's own weight.
-      return 2.5 + item.litres * FLUID_DENSITY[item.fluid];
+      return 2.5 + (item.fluid === null ? 0 : item.litres * FLUID_DENSITY[item.fluid]);
     case 'spray_can':
       // A 400 ml aerosol: the tin, plus the paint and propellant still in it.
       return 0.12 + item.charge * 0.36;

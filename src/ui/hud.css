@@ -845,12 +845,93 @@ body.is-cinematic #ui {
   display: none;
 }
 
+/*
+ * The G-force widget (hud.ts `setRide`): a small round instrument in the bottom-right
+ * corner, out of the dashboard's way and still there in the cabin view, where the
+ * on-screen cluster stands down. Up only while a ride-sensitive thing is aboard.
+ * The dot is the push on the load; the rings are calm / uncomfortable / harsh.
+ */
+.hud-ride {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 84px;
+  height: 84px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.hud-ride-face {
+  fill: #1b1915;
+  stroke: rgba(232, 221, 196, 0.22);
+  stroke-width: 0.8;
+}
+
+.hud-ride-zone {
+  stroke: none;
+}
+
+.hud-ride-zone.is-harsh {
+  fill: rgba(212, 85, 47, 0.2);
+}
+
+.hud-ride-zone.is-uncomfortable {
+  fill: rgba(201, 162, 39, 0.2);
+}
+
+.hud-ride-zone.is-calm {
+  fill: #1b1915;
+  stroke: rgba(232, 221, 196, 0.3);
+  stroke-width: 0.6;
+}
+
+.hud-ride-cross {
+  stroke: rgba(232, 221, 196, 0.16);
+  stroke-width: 0.6;
+}
+
+.hud-ride-nose {
+  fill: var(--hud-fg-dim);
+}
+
+.hud-ride-dot {
+  fill: var(--hud-fg);
+  stroke: #1b1915;
+  stroke-width: 0.8;
+}
+
+.hud-ride.is-uncomfortable .hud-ride-dot {
+  fill: var(--hud-amber);
+}
+
+.hud-ride.is-harsh .hud-ride-dot {
+  fill: var(--hud-alarm-strong);
+}
+
+/* Flashed once per harsh moment (Web Animations), invisible otherwise. */
+.hud-ride-pulse {
+  fill: none;
+  stroke: var(--hud-alarm-strong);
+  stroke-width: 2.5;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @media (pointer: coarse) {
   /* Mobile retains its old compact footprint; the requested increase is desktop-only. */
   .hud-driving {
     transform: translateX(-50%) scale(calc(0.375 * var(--hud-dash-scale, 1)));
   }
 
+  /* Clear of the touch pedals in the bottom-right corner. */
+  .hud-ride {
+    bottom: auto;
+    top: calc(12px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    width: 64px;
+    height: 64px;
+  }
 }
 
 .hud-inv-items {

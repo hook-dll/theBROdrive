@@ -54,13 +54,11 @@ import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import { prefersMobilePresentation, renderPixelRatio } from '../core/renderer';
 import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
-import { CAR_MODELS } from '../vehicle/carmodels';
+import { CAR_MODELS, modelEngine, modelGearbox, type CarModelDef } from '../vehicle/carmodels';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
-import { DREAMS } from '../dreams/dream';
-import { dreamOpen, loadDreamProgress, type DreamProgress } from '../dreams/progress';
 import { TitleRoom, type RoomItem, type RoomSpot } from './titleroom';
 
 /** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
@@ -289,11 +287,6 @@ function clockIcon(dayFraction: number): string {
  */
 function formatKm(km: number): string {
   return km < 100 ? km.toFixed(1) : String(Math.floor(km));
-}
-
-/** A dream's best time, m:ss. */
-function formatDreamTime(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 }
 
 const SAVED_DATE = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' });
@@ -756,13 +749,12 @@ export interface PauseHooks {
   /** Apply a time-of-day preset immediately; not part of persisted settings. */
   applyTimePreset: (preset: TimeOfDayPreset) => void;
   /**
-   * Write the drive in progress to its slot; resolves once the write has landed. Null
-   * where there is nothing to save (a dream): the pause sheet then has no save row.
+   * Write the drive in progress to its slot; resolves once the write has landed.
    *
    * A hook rather than a pause action: saving does not close the pause sheet — the
    * player paused to save, not to leave — so the menu has to know when it finished.
    */
-  saveDrive: (() => Promise<void>) | null;
+  saveDrive: () => Promise<void>;
   /**
    * The canvas CSS size the resolution policy is resolved against.
    *
@@ -2183,11 +2175,45 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
   };
 }
 
-/** What the title screen starts: a stored drive, a fresh free drive, or a dream. */
-export type TitleChoice =
-  | { readonly kind: 'load'; readonly state: WorldState }
-  | { readonly kind: 'new' }
-  | { readonly kind: 'dream'; readonly dreamId: string };
+/** What the title screen starts: a stored drive, or a new game. */
+export type TitleChoice = { readonly kind: 'load'; readonly state: WorldState } | { readonly kind: 'new' };
+
+/** Metric horsepower (PS) in a kilowatt: the figure Soviet and European catalogues printed. */
+const PS_PER_KW = 1 / 0.73549875;
+
+/**
+ * A Carcyclopedia card: what the catalogue (vehicle/carmodels.ts) knows of a car, in
+ * plain rows. Nothing it does not know: no years, no maker's prose.
+ */
+function carSpecCard(def: CarModelDef): HTMLElement {
+  const engine = modelEngine(def);
+  const gearbox = modelGearbox(def);
+  const f = def.factory;
+  const drive = def.rearDriveBias >= 0.99 ? 'Rear wheels' : def.rearDriveBias <= 0.01 ? 'Front wheels' : 'All four wheels';
+  const rows: [string, string][] = [
+    ['Engine', `${engine.cylinders} cylinders · ${Math.round(engine.peakPowerKw * PS_PER_KW)} hp (${Math.round(engine.peakPowerKw)} kW) at ${engine.powerPeakRpm} rpm`],
+    ['Torque', `${Math.round(engine.peakTorqueNm)} Nm at ${engine.torquePeakRpm} rpm`],
+    ['Gearbox', `${gearbox.automatic ? 'Automatic' : 'Manual'}, ${gearbox.ratios.length} speeds`],
+    ['Drive', drive],
+    ['Kerb mass', `${Math.round(def.mass)} kg`],
+    ['Fuel tank', `${Math.round(def.tankLitres)} l`],
+    ['Length × width × height', `${f.length.toFixed(2)} × ${f.width.toFixed(2)} × ${f.height.toFixed(2)} m`],
+    ['Wheelbase', `${f.wheelbase.toFixed(2)} m`],
+    ['Ground clearance', `${Math.round(f.clearance * 1000)} mm`],
+  ];
+  const card = el('div', 'menu-carcard');
+  card.appendChild(text(def.label, 'menu-carcard-name'));
+  const table = el('dl', 'menu-carcard-rows');
+  for (const [term, value] of rows) {
+    const dt = el('dt');
+    dt.textContent = term;
+    const dd = el('dd');
+    dd.textContent = value;
+    table.append(dt, dd);
+  }
+  card.appendChild(table);
+  return card;
+}
 
 export class MainMenu {
   private pauseOverlay: HTMLElement | null = null;
@@ -2199,11 +2225,11 @@ export class MainMenu {
   ) {}
 
   /**
-   * The title screen. Resolves with what to start: a save to load, a new free drive,
-   * or a dream (dreams/dream.ts).
+   * The title screen: the boy's room (ui/titleroom.ts). Resolves with what to start: a
+   * save to load or a new game.
    *
-   * The front is at most three rows, and a first launch sees one: New drive. Continue
-   * is the latest save, and says which drive it is. Saved drives is the one place drives
+   * Continue is the latest save and is not in the list when there is none. Saved drives
+   * (the keys) is the one place drives
    * are told apart, so every card there leads with what differs between them: how far
    * down the road, in which car, at what hour of which day, and when it was saved.
    * Delete asks once, inside the card, because nothing brings a drive back.
@@ -2223,7 +2249,9 @@ export class MainMenu {
 
     let listings: SaveListing[] = [];
     let listFailed = false;
-    let view: 'front' | 'dreams' | 'shelf' | 'saves' | 'settings' = 'front';
+    let view: 'front' | 'cars' | 'saves' | 'settings' = 'front';
+    /** The model the Carcyclopedia has open; the camera is on it while `view` is `cars`. */
+    let carId = CAR_MODELS[0]!.id;
     /** The settings screen while `view` is `settings`; see `openSettings`. */
     let settingsScreen: SettingsScreen | null = null;
     let errorLine: HTMLElement | null = null;
@@ -2231,9 +2259,9 @@ export class MainMenu {
     let detachPad: (() => void) | null = null;
 
     /** The thing in the room each panel opens from, which back lands on. */
-    const SPOT_OF_VIEW = { dreams: 'map', shelf: 'shelf', saves: 'keys', settings: 'toolbox' } as const;
+    const SPOT_OF_VIEW = { cars: 'shelf', saves: 'keys', settings: 'toolbox' } as const;
     /** Back from a panel lands on the thing in the room that opened it. */
-    const backToFront = (from: 'dreams' | 'shelf' | 'saves' | 'settings'): void => {
+    const backToFront = (from: 'cars' | 'saves' | 'settings'): void => {
       view = 'front';
       render();
       room?.focus(SPOT_OF_VIEW[from]);
@@ -2340,32 +2368,21 @@ export class MainMenu {
       return card;
     };
 
-    /** The first open dream not dreamt yet, else the last open one: what the boy daydreams next. */
-    const nextDream = (progress: DreamProgress): (typeof DREAMS)[number] | null => {
-      const open = DREAMS.filter((dream) => dreamOpen(dream.id, progress));
-      return open.find((dream) => progress[dream.id] === undefined) ?? open[open.length - 1] ?? null;
-    };
-
-    /** The room: Daydream, Dreams, Shelf, Drives, Free drive, Settings (ui/titleroom.ts). */
+    /** The room: Continue, New game, Drives, Carcyclopedia, Settings (ui/titleroom.ts). */
     const renderRoom = (): void => {
-      const progress = loadDreamProgress();
       const latest = listings[0];
-      const next = nextDream(progress);
-      const dreamt = DREAMS.filter((dream) => progress[dream.id] !== undefined).length;
+      const latestLine = latest
+        ? `${latest.drive?.carLabel ?? latest.meta.name} · ${formatKm(latest.drive?.km ?? latest.meta.km)} km · saved ${formatSavedDay(latest.meta.savedAt).toLowerCase()}`
+        : '';
       const items: Record<RoomSpot, RoomItem> = {
-        toy: next
-          ? { label: 'Daydream', detail: `«${next.title}» — ${next.brief}`, disabled: false }
-          : { label: 'Daydream', detail: 'Nothing to daydream of tonight', disabled: true },
-        map: { label: 'Adventures', detail: `${dreamt} of ${DREAMS.length} had — pick one`, disabled: false },
-        shelf: { label: 'Shelf', detail: dreamt === 1 ? 'One toy car: one adventure had' : `${dreamt} toy cars: one for every adventure had`, disabled: false },
+        window: latest
+          ? { label: 'Continue', detail: latestLine, disabled: false }
+          : { label: 'Continue', detail: '', disabled: true, hidden: true },
+        desk: { label: 'New game', detail: 'A new road, in an old car', disabled: false },
         keys: latest
-          ? {
-              label: 'Drives',
-              detail: `${latest.drive?.carLabel ?? latest.meta.name} · ${formatKm(latest.drive?.km ?? latest.meta.km)} km · saved ${formatSavedDay(latest.meta.savedAt).toLowerCase()}`,
-              disabled: false,
-            }
+          ? { label: 'Drives', detail: listings.length === 1 ? 'One drive saved' : `${listings.length} drives saved`, disabled: false }
           : { label: 'Drives', detail: 'No drive saved yet', disabled: true },
-        window: { label: 'Free drive', detail: 'The endless road: how far can you get?', disabled: false },
+        shelf: { label: 'Carcyclopedia', detail: `${CAR_MODELS.length} models on the shelf`, disabled: false },
         toolbox: { label: 'Settings', detail: 'Graphics, controls and sound', disabled: false },
       };
       if (room) {
@@ -2374,16 +2391,14 @@ export class MainMenu {
       }
       const graphics = loadStoredSettings(prefersMobilePresentation())?.graphicsQuality;
       room = new TitleRoom(
-        progress,
-        next,
         items,
         (spot) => {
-          if (spot === 'toy') {
-            const dream = nextDream(loadDreamProgress());
-            if (dream) finish({ kind: 'dream', dreamId: dream.id });
-          } else if (spot === 'window') finish({ kind: 'new' });
+          if (spot === 'window') {
+            const row = room?.element.querySelector<HTMLButtonElement>('[data-key="window"]');
+            if (listings[0] && row) load(listings[0], row);
+          } else if (spot === 'desk') finish({ kind: 'new' });
           else {
-            view = spot === 'map' ? 'dreams' : spot === 'keys' ? 'saves' : spot === 'shelf' ? 'shelf' : 'settings';
+            view = spot === 'keys' ? 'saves' : spot === 'shelf' ? 'cars' : 'settings';
             render();
           }
         },
@@ -2392,50 +2407,37 @@ export class MainMenu {
       overlay.insertBefore(room.element, hero);
     };
 
-    /** Every dream, in order: each opens once the one before it is done; a done one carries its best night. */
-    const renderDreams = (): void => {
-      const { head } = screenHead('Adventures', () => backToFront('dreams'));
-      const nav = el('nav', 'menu-actions');
-      const progress = loadDreamProgress();
-      const next = nextDream(progress);
-      for (const [index, dream] of DREAMS.entries()) {
-        const best = progress[dream.id];
-        const open = dreamOpen(dream.id, progress);
-        const detail = !open
-          ? `Adventure «${DREAMS[index - 1]!.title}» first`
-          : best
-            ? `✓ best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
-              (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
-            : dream.brief;
-        const row = actionButton(open ? dream.title : `${dream.title} — locked`, detail, dream === next);
-        row.disabled = !open;
-        row.addEventListener('click', () => finish({ kind: 'dream', dreamId: dream.id }));
-        nav.appendChild(row);
-      }
-      sheet.append(head, nav);
-    };
-
-    /** The shelf: a toy car for every dream dreamt, with that dream's best night. */
-    const renderShelf = (): void => {
-      const { head } = screenHead('Shelf', () => backToFront('shelf'));
-      const list = el('div', 'menu-shelf');
-      const progress = loadDreamProgress();
-      for (const dream of DREAMS) {
-        const best = progress[dream.id];
-        const row = el('div', best ? 'menu-shelf-row is-done' : 'menu-shelf-row');
-        row.append(
-          text(best ? dream.title : 'An empty place', 'menu-shelf-title'),
-          text(
-            best
-              ? `${best.times === 1 ? 'Had once' : `Had ${best.times} times`} · best ${formatDreamTime(best.seconds)} · ride ${Math.round(best.comfort * 100)}%` +
-                  (dream.cargoName !== null ? ` · ${dream.cargoName} ${Math.round(best.parcel * 100)}%` : '')
-              : 'for an adventure not had yet',
-            'menu-shelf-detail',
-          ),
-        );
+    /**
+     * The Carcyclopedia: every car of the game in a list beside its card; the camera goes
+     * to the car's model on the wall case as it is chosen, the room at full light.
+     */
+    const renderCars = (): void => {
+      const { head } = screenHead('Carcyclopedia', () => backToFront('cars'));
+      const cardSlot = el('div', 'menu-carcard-slot');
+      const list = el('nav', 'menu-carlist');
+      let current: HTMLButtonElement | null = null;
+      const pick = (def: CarModelDef, row: HTMLButtonElement): void => {
+        carId = def.id;
+        current?.classList.remove('is-current');
+        current = row;
+        row.classList.add('is-current');
+        cardSlot.replaceChildren(carSpecCard(def));
+        room?.showModel(def.id);
+      };
+      let opened: HTMLButtonElement | null = null;
+      for (const def of CAR_MODELS) {
+        const row = button('menu-carlist-row', def.label);
+        row.dataset.nav = '';
+        row.addEventListener('focus', () => pick(def, row));
+        row.addEventListener('click', () => pick(def, row));
         list.appendChild(row);
+        if (def.id === carId) {
+          pick(def, row);
+          opened = row;
+        }
       }
-      sheet.append(head, list);
+      sheet.append(head, cardSlot, list);
+      opened?.focus();
     };
 
     /**
@@ -2476,13 +2478,14 @@ export class MainMenu {
     const render = (): void => {
       sheet.textContent = '';
       settingsScreen = null;
-      sheet.classList.toggle('is-list', view === 'saves' || view === 'dreams' || view === 'shelf');
+      sheet.classList.toggle('is-list', view === 'saves');
+      sheet.classList.toggle('is-cars', view === 'cars');
       sheet.classList.toggle('is-settings', view === 'settings');
       sheet.hidden = view === 'front';
       overlay.classList.toggle('is-settings', view === 'settings');
       overlay.classList.toggle('is-away', view !== 'front');
       renderRoom();
-      room?.setAway(view !== 'front');
+      room?.setAway(view !== 'front', view !== 'cars');
       if (view === 'front') {
         room?.focusFirst();
         return;
@@ -2491,9 +2494,11 @@ export class MainMenu {
         renderSettings();
         return;
       }
-      if (view === 'dreams') renderDreams();
-      else if (view === 'shelf') renderShelf();
-      else renderSaves();
+      if (view === 'cars') {
+        renderCars();
+        return;
+      }
+      renderSaves();
       errorLine = el('div', 'menu-error');
       errorLine.setAttribute('role', 'alert');
       if (listFailed) errorLine.textContent = 'Saved drives are unavailable right now.';
@@ -2710,36 +2715,33 @@ export class MainMenu {
         const settingsBtn = actionButton('Settings', null, false);
         const quitBtn = actionButton('Quit to title', null, false);
         nav.append(resumeBtn);
-        const saveDrive = hooks.saveDrive;
-        if (saveDrive) {
-          const saveBtn = actionButton('Save drive', null, false);
-          nav.append(saveBtn);
-          // The row answers for itself, green `Saved` for a moment, and the sheet stays
-          // up: a save is something done in passing, and the player may still want to
-          // change a setting or quit. A second press while the row speaks is ignored.
-          const saveLabel = saveBtn.querySelector('.menu-action-label');
-          let saving = false;
-          const answer = (text: string, cls: string): void => {
-            if (saveLabel) saveLabel.textContent = text;
-            saveBtn.classList.add(cls);
-            window.setTimeout(() => {
-              if (saveLabel) saveLabel.textContent = 'Save drive';
-              saveBtn.classList.remove(cls);
-              saving = false;
-            }, SAVE_ANSWER_MS);
-          };
-          saveBtn.addEventListener('click', () => {
-            if (saving) return;
-            saving = true;
-            saveDrive().then(
-              () => answer('Saved', 'is-saved'),
-              (error: unknown) => {
-                console.error('save failed', error);
-                answer('Save failed', 'is-failed');
-              },
-            );
-          });
-        }
+        const saveBtn = actionButton('Save drive', null, false);
+        nav.append(saveBtn);
+        // The row answers for itself, green `Saved` for a moment, and the sheet stays
+        // up: a save is something done in passing, and the player may still want to
+        // change a setting or quit. A second press while the row speaks is ignored.
+        const saveLabel = saveBtn.querySelector('.menu-action-label');
+        let saving = false;
+        const answer = (text: string, cls: string): void => {
+          if (saveLabel) saveLabel.textContent = text;
+          saveBtn.classList.add(cls);
+          window.setTimeout(() => {
+            if (saveLabel) saveLabel.textContent = 'Save drive';
+            saveBtn.classList.remove(cls);
+            saving = false;
+          }, SAVE_ANSWER_MS);
+        };
+        saveBtn.addEventListener('click', () => {
+          if (saving) return;
+          saving = true;
+          hooks.saveDrive().then(
+            () => answer('Saved', 'is-saved'),
+            (error: unknown) => {
+              console.error('save failed', error);
+              answer('Save failed', 'is-failed');
+            },
+          );
+        });
         nav.append(settingsBtn, quitBtn);
         panel.appendChild(nav);
 

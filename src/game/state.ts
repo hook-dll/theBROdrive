@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import type { Item, StickerKind, SunShadesItem } from '../items/items';
+import type { FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
 import type { PartInstance } from '../parts/registry';
 import type { ContractKind } from '../contracts/types';
 import { AIR_FILTER_CELL, bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
@@ -173,6 +173,11 @@ export interface CarState {
    * only while it is for sale: nobody drives it off before `car_buy` clears it.
    */
   lotPrice?: number;
+  /**
+   * Coins already fed into this lot car's key box (world/keybox.ts), toward `lotPrice`.
+   * Kept so a reload never eats them; `car_buy` clears it with the price.
+   */
+  lotPaid?: number;
 }
 
 /** A kit car's four seats; the driver sits on the car's left (+X in the kit frame). */
@@ -359,6 +364,12 @@ export interface WorldState {
    * given out, so an emptied slot stays empty. Machines never restock.
    */
   vendingSold: Record<string, number[]>;
+  /**
+   * Litres left in each fluid barrel the player has drawn from, by barrel id
+   * (world/barrels.ts). A barrel's first contents are a pure function of the seed and
+   * its id; an entry here is what the taps have left of them. Barrels never refill.
+   */
+  barrelLitres: Record<string, number>;
 }
 
 export type WorldDelta =
@@ -386,7 +397,7 @@ export type WorldDelta =
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
-  /** One place in a car's cabin (vehicle/cabin.ts) laid on, cleared, or slid onto. */
+  /** One place in a car's cabin (vehicle/cabin.ts) laid on or cleared. */
   | { t: 'car_cabin'; carId: string; place: number; item: Item | null }
   | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
   | { t: 'wreck_bonnet'; wreckId: string; cell: number; item: Item | null }
@@ -424,8 +435,11 @@ export type WorldDelta =
    * and comes back out through the `car_bonnet` transfer when it is installed.
    */
   | { t: 'loose_part_fluid'; partId: string; litres: number }
-  /** Fluid poured into a can lying in the world. */
-  | { t: 'loose_item_fluid'; itemId: string; litres: number }
+  /**
+   * Fluid poured into a can lying in the world; an empty can takes on the fluid poured
+   * into it (items/items.ts `fillCan`).
+   */
+  | { t: 'loose_item_fluid'; itemId: string; fluid: FluidKind; litres: number }
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
   | { t: 'poi_looted'; poiIndex: number }
@@ -436,8 +450,12 @@ export type WorldDelta =
   | { t: 'record'; s: number }
   /** A vending machine slot paid for and dispensed (world/vending.ts). */
   | { t: 'vend_sold'; machineId: string; slot: number }
+  /** A barrel's tap ran into a can (world/barrels.ts): what is left in the barrel. */
+  | { t: 'barrel_litres'; barrelId: string; litres: number }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
+  /** Coins fed into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `coins`. */
+  | { t: 'lot_pay'; carId: string; coins: number }
   /** The police's escalation level and when it cools (world/police.ts); not a save trigger. */
   | { t: 'police_heat'; heat: number; heatUntil: number };
 
@@ -488,6 +506,7 @@ export function newWorldState(seed: number): WorldState {
     lootedPois: [],
     flattenedProps: [],
     vendingSold: {},
+    barrelLitres: {},
   };
 }
 
@@ -861,7 +880,10 @@ export class GameWorld {
       }
       case 'loose_item_fluid': {
         const loose = s.looseItems[delta.itemId];
-        if (loose?.item.type === 'fluid_can') loose.item.litres = delta.litres;
+        if (loose?.item.type === 'fluid_can') {
+          loose.item.fluid = delta.litres > 0 ? delta.fluid : null;
+          loose.item.litres = Math.max(0, delta.litres);
+        }
         break;
       }
       case 'item_drop':
@@ -881,12 +903,21 @@ export class GameWorld {
         if (!sold.includes(delta.slot)) sold.push(delta.slot);
         break;
       }
+      case 'barrel_litres':
+        s.barrelLitres[delta.barrelId] = Math.max(0, delta.litres);
+        break;
       case 'car_buy': {
         const car = s.cars[delta.carId];
         if (car) {
           delete car.lotPrice;
+          delete car.lotPaid;
           car.papers = true;
         }
+        break;
+      }
+      case 'lot_pay': {
+        const car = s.cars[delta.carId];
+        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.coins);
         break;
       }
       case 'police_heat':

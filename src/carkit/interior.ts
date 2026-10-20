@@ -3069,8 +3069,8 @@ class Cabin {
   }
 
   /**
-   * The floor in front of the passenger's seat and of the bench, where a thing that
-   * comes off a seat lands (vehicle/cabin.ts `FALLS_TO`). Laid out generously — in front
+   * The floor in front of the passenger's seat and of the bench: a place things are taken
+   * from (older saves left things there when they could slide off a seat). Laid out generously — in front
    * from the toe board's foot to under the seat's frame, behind from the seat's rails to
    * the bench's base, between the tunnel and the door — and cut clear of the seats, the
    * dash and the sills by places.ts. Behind: a half either side of the tunnel, or the

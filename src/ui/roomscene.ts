@@ -3,23 +3,26 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildKitCar } from '../carkit/kit';
 import { CAR_SURFACE_ATTRIBUTE } from '../render/materials';
+import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../vehicle/carmodels';
 import { factoryPaintHex } from '../vehicle/carpaint';
-import { DREAM_CAR_ID, DREAMS, type DreamDef } from '../dreams/dream';
-import type { DreamProgress } from '../dreams/progress';
 import {
-  adventuresMap,
   calendarPage,
   clockFace,
+  crayonDrawing,
   dustSprite,
+  exerciseSpread,
   floorboards,
   MAT_LOOP,
   moonDisc,
   nightSky,
   playMat,
+  printedSpread,
   quilt,
   rng,
   roadSurface,
+  rulerFace,
   sandGround,
+  textbookCover,
   wallCarpet,
   wallpaper,
 } from './roomart';
@@ -27,14 +30,16 @@ import {
 /**
  * THE BOY'S ROOM, IN 3D: the title screen's set (ui/titleroom.ts points the camera).
  *
- * A small room at night, every thing in it a thing the menu is about, built from
- * primitives and painted canvases (ui/roomart.ts): the play mat painted as the desert
- * the drive opens on, with the next adventure's car on its road; the desk with the
- * adventures' map under the lamp; a shelf of die-cast toys — one for every adventure
- * done, each the car that adventure lends, in its colour — beside a Lada 1600 calendar
- * whose photograph is the kit's own 2106; the keys on their board by the door; a deep
- * double-glazed window onto the desert at night, the road passing the house; the bed
- * under a wall carpet, the bedside table and its alarm clock; a toolbox; a clock.
+ * A small room at night, built from primitives and painted canvases (ui/roomart.ts),
+ * that says nothing in words about the boy who lives in it: the play mat painted as the
+ * desert the drive opens on, a toy car on its road; the desk under the lamp, its
+ * textbooks and an exercise book open on cars drawn over the lesson, pencils, pens,
+ * erasers and a ruler; crayon drawings of cars and roads pinned to the walls; a glass-less
+ * wall case of 1:43 die-cast models, one of every car in the game in its factory colour
+ * (the Carcyclopedia); a Lada 1600 calendar whose photograph is the kit's own 2106; the
+ * keys on their board by the door; a deep double-glazed window onto the desert at night,
+ * the road passing the house; the bed under a wall carpet, the bedside table and its
+ * alarm clock; a toolbox; a clock.
  *
  * NO SURFACE LIES IN ANOTHER: pieces that meet only touch along their edges, decals sit
  * clear of what they are laid on and draw with a polygon offset, so nothing z-fights.
@@ -64,28 +69,23 @@ const DESK_LAMP_CD = 7;
 /** The calendar's year: the 2106's own heyday. */
 const CALENDAR_YEAR = 1986;
 
-/** What each menu thing focuses on, for the camera (titleroom.ts). */
-export interface RoomAnchors {
-  /** The next adventure's toy car on the play mat. */
-  readonly toy: THREE.Vector3;
-  readonly map: THREE.Vector3;
-  readonly shelf: THREE.Vector3;
-  readonly keys: THREE.Vector3;
-  readonly window: THREE.Vector3;
-  readonly toolbox: THREE.Vector3;
-}
+/** The key the room's cars take their factory colour under (`factoryPaintHex`). */
+const ROOM_CAR_KEY = 'car:room';
 
 export interface RoomScene {
   readonly scene: THREE.Scene;
-  readonly anchors: RoomAnchors;
+  /** Where each model of the Carcyclopedia stands on the wall case, by model id. */
+  readonly models: ReadonlyMap<string, THREE.Vector3>;
   /** Animate the clock, the lamp, the dust and the curtains; `t` seconds. */
   tick(t: number, dt: number): void;
   /**
-   * The next piece of slow work — a die-cast toy, the calendar's photograph — if any is
-   * left: one kit car per call, so the work is spread over idle moments. False when all
-   * is done.
+   * The next piece of slow work — a die-cast model, the calendar's photograph — if any
+   * is left: one kit car per call, so the work is spread over idle moments. False when
+   * all is done.
    */
   buildNext(renderer: THREE.WebGLRenderer): boolean;
+  /** Build the model of `modelId` on the case now if it is not there yet: it is being looked at. */
+  buildModel(modelId: string): void;
   dispose(): void;
 }
 
@@ -248,16 +248,11 @@ function dieCast(k: Kit, modelId: string, color: number, scale: number, material
   return k.mesh(merged, material);
 }
 
-/** The adventure a toy stands for: its car and that car's colour. */
-function toyOf(dream: DreamDef): { modelId: string; color: number } {
-  return { modelId: dream.modelId, color: factoryPaintHex(dream.modelId, DREAM_CAR_ID) };
-}
-
 /* ------------------------------------------------------------------ *
  *  The room                                                          *
  * ------------------------------------------------------------------ */
 
-export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | null, lowDetail: boolean): RoomScene {
+export function buildRoomScene(lowDetail: boolean): RoomScene {
   const k = new Kit();
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050608);
@@ -607,7 +602,7 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     scene.add(alarm);
   }
 
-  /* --- The play mat and the next adventure's car on it ----------------- */
+  /* --- The play mat and the toy car on it ------------------------------ */
 
   const MAT = { x: 0.15, z: 0.15, w: 1.6, d: 1.1 };
   const matMesh = k.mesh(new THREE.PlaneGeometry(MAT.w, MAT.d), k.decal({ map: playMat(), roughness: 1 }), MAT.x, 0.003, MAT.z, false);
@@ -633,21 +628,143 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     scene.add(k.span(dx - 0.346, y - 0.09, dz - 0.6, dx - 0.341, y + 0.09, dz - 0.24, woodPale, 0.002));
     scene.add(k.box(0.025, 0.018, 0.08, brass, dx - 0.36, y, dz - 0.42, 0.005));
   }
-  const mapAt = new THREE.Vector3(dx - 0.05, deskTop + 0.0015, dz + 0.14);
-  const mapMesh = k.mesh(new THREE.PlaneGeometry(0.62, 0.44), k.decal({ map: adventuresMap(progress), roughness: 0.85 }), mapAt.x, mapAt.y, mapAt.z, false);
-  mapMesh.rotation.set(-Math.PI / 2, 0, -Math.PI / 2 + 0.08);
-  scene.add(mapMesh);
-  const pencil = k.rod(new THREE.Vector3(dx - 0.24, deskTop + 0.005, dz + 0.42), new THREE.Vector3(dx - 0.1, deskTop + 0.005, dz + 0.5), 0.004, k.mat({ color: 0xd8a830, roughness: 0.5 }), 6);
-  scene.add(pencil);
-  scene.add(k.mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.09, 20), k.mat({ color: 0xe8e0cc, roughness: 0.3 }), dx + 0.24, deskTop + 0.045, dz - 0.15));
+  // Homework left as it was: things on the desk read towards the chair (+x is the top of
+  // a page), so each lies in a group turned a quarter round from the room's axes.
+  const paper = k.mat({ color: 0xece4d0, roughness: 0.85 });
+  /** A group on the desk at (x, z), page-up towards the wall, turned `turn` more. */
+  const onDesk = (x: number, z: number, turn: number): THREE.Group => {
+    const g = new THREE.Group();
+    g.position.set(x, deskTop, z);
+    g.rotation.y = -Math.PI / 2 + turn;
+    scene.add(g);
+    return g;
+  };
+  /**
+   * A book lying open, `w` across the spread, `d` top to bottom: a cover board a little
+   * wider than the pages, the block of pages on it, the spread printed on its top, its
+   * paper toned by `shade` (the one under the lamp's hot spot darker, or it burns white).
+   */
+  const openBook = (g: THREE.Group, w: number, d: number, cover: number, spread: THREE.Texture, shade: number): void => {
+    const board = 0.003;
+    const block = 0.006;
+    g.add(
+      k.box(w + 0.012, board, d + 0.012, k.mat({ color: cover, roughness: 0.7 }), 0, board / 2, 0),
+      k.box(w, block, d, paper, 0, board + block / 2, 0),
+    );
+    const page = k.mesh(new THREE.PlaneGeometry(w, d), k.decal({ map: spread, color: shade, roughness: 0.85 }), 0, board + block + 0.0004, 0, false);
+    page.rotation.x = -Math.PI / 2;
+    g.add(page);
+  };
+  /**
+   * A closed book `w` wide, `d` tall, `h` thick: two boards, the spine, and the pages
+   * between them, each piece touching the next; its cover drawn on the top board.
+   */
+  const closedBook = (g: THREE.Group, y: number, w: number, d: number, h: number, cloth: number, cover: THREE.Texture | null): void => {
+    const board = 0.002;
+    const clothMat = k.mat({ color: cloth, roughness: 0.75 });
+    g.add(
+      k.span(-w / 2, y, -d / 2, w / 2, y + board, d / 2, clothMat),
+      k.span(-w / 2, y + h - board, -d / 2, w / 2, y + h, d / 2, clothMat),
+      k.span(-w / 2, y + board, -d / 2, -w / 2 + board, y + h - board, d / 2, clothMat),
+      k.span(-w / 2 + board, y + board, -d / 2 + 0.003, w / 2 - 0.003, y + h - board, d / 2 - 0.003, paper),
+    );
+    if (cover) {
+      const face = k.mesh(new THREE.PlaneGeometry(w, d), k.decal({ map: cover, roughness: 0.7 }), 0, y + h + 0.0004, 0, false);
+      face.rotation.x = -Math.PI / 2;
+      g.add(face);
+    }
+  };
+  /** A pencil lying from `a` to `b` on the desk: a hexagonal painted body, the sharpened wood and the lead. */
+  const pencil = (ax: number, az: number, bx2: number, bz: number, paint: number): void => {
+    const r = 0.0035;
+    const a = new THREE.Vector3(ax, deskTop + r, az);
+    const b = new THREE.Vector3(bx2, deskTop + r, bz);
+    const dir = b.clone().sub(a).normalize();
+    const woodEnd = b.clone().addScaledVector(dir, -0.016);
+    scene.add(k.rod(a, woodEnd, r, k.mat({ color: paint, roughness: 0.45 }), 6));
+    // The sharpened wood a frustum, the lead the cone that finishes it: they meet at one
+    // circle rather than one cone lying in the other.
+    const cone = k.mesh(new THREE.CylinderGeometry(r * 0.35, r, 0.0104, 6), k.mat({ color: 0xd9b48a, roughness: 0.8 }));
+    cone.position.copy(woodEnd).addScaledVector(dir, 0.0052);
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    scene.add(cone);
+    const lead = k.mesh(new THREE.ConeGeometry(r * 0.35, 0.0056, 6), k.mat({ color: 0x2a2a2c, roughness: 0.5 }));
+    lead.position.copy(b).addScaledVector(dir, -0.0028);
+    lead.quaternion.copy(cone.quaternion);
+    scene.add(lead);
+  };
+  /** A ballpoint pen lying from `a` to `b`: a clear-ish body, its cap and the cap's clip. */
+  const pen = (ax: number, az: number, bx2: number, bz: number, ink: number): void => {
+    const r = 0.0042;
+    const a = new THREE.Vector3(ax, deskTop + r, az);
+    const b = new THREE.Vector3(bx2, deskTop + r, bz);
+    const cut = a.clone().lerp(b, 0.36);
+    scene.add(
+      k.rod(cut, b, r, k.mat({ color: 0xd8d6cc, roughness: 0.25 }), 10),
+      k.rod(a, cut, r * 1.08, k.mat({ color: ink, roughness: 0.3 }), 10),
+    );
+  };
+  /** An eraser on the desk: a pink end and, on the two-tone kind, a blue one, touching. */
+  const eraser = (x: number, z: number, turn: number, twoTone: boolean): void => {
+    const g = onDesk(x, z, turn);
+    const h = 0.011;
+    g.add(k.span(-0.022, 0, -0.012, twoTone ? 0.004 : 0.022, h, 0.012, k.mat({ color: 0xe89a9a, roughness: 0.9 }), 0.002));
+    if (twoTone) g.add(k.span(0.004, 0, -0.012, 0.022, h, 0.012, k.mat({ color: 0x4f6fb8, roughness: 0.9 }), 0.002));
+  };
+
+  // The exercise book under the lamp, open on cars drawn over the lesson.
+  const bookAt = new THREE.Vector3(dx - 0.1, deskTop, dz + 0.02);
+  openBook(onDesk(bookAt.x, bookAt.z, 0.12), 0.3, 0.205, 0x3f6a8a, exerciseSpread(), 0x8c8882);
+  // A textbook open beside it, towards the back.
+  openBook(onDesk(dx - 0.16, dz - 0.42, -0.3), 0.26, 0.17, 0x7a3a2a, printedSpread(), 0xffffff);
+  // Three closed textbooks stacked by the wall, each a little askew on the one below.
+  {
+    const stack = onDesk(dx + 0.23, dz + 0.12, 0.06);
+    const books: [number, number, number, number, THREE.Texture | null][] = [
+      [0.17, 0.24, 0.014, 0x2f5a3a, null],
+      [0.165, 0.235, 0.012, 0x6a2a3a, null],
+      [0.17, 0.24, 0.016, 0x2a4a7a, textbookCover('ГЕОМЕТРИЯ', '#2a4a7a', 'triangle')],
+    ];
+    let y = 0;
+    books.forEach(([w, d, h, cloth, cover], i) => {
+      const g = new THREE.Group();
+      g.rotation.y = [0, 0.09, -0.05][i]!;
+      closedBook(g, y, w, d, h, cloth, cover);
+      stack.add(g);
+      y += h;
+    });
+  }
+  // The ruler along the desk's front edge.
+  {
+    const g = onDesk(dx - 0.29, dz - 0.05, 0.05);
+    g.add(k.box(0.3, 0.0025, 0.03, k.mat({ color: 0xc9a868, roughness: 0.6 }), 0, 0.00125, 0));
+    const face = k.mesh(new THREE.PlaneGeometry(0.3, 0.03), k.decal({ map: rulerFace(), roughness: 0.6 }), 0, 0.0029, 0, false);
+    face.rotation.x = -Math.PI / 2;
+    g.add(face);
+  }
+  pencil(dx - 0.25, dz + 0.25, dx - 0.14, dz + 0.34, 0xd8a830);
+  pencil(dx + 0.03, dz - 0.22, dx + 0.06, dz - 0.37, 0x3a6a3a);
+  pen(dx - 0.3, dz + 0.2, dx - 0.24, dz + 0.34, 0x2a3a9a);
+  eraser(dx + 0.06, dz + 0.16, 0.4, true);
+  eraser(dx + 0.0, dz - 0.36, -0.2, false);
+  // The pencil cup by the lamp, pencils and a pen standing in it.
+  {
+    const cupAt = new THREE.Vector3(dx + 0.24, deskTop, dz - 0.15);
+    scene.add(k.mesh(new THREE.CylinderGeometry(0.04, 0.036, 0.09, 20), k.mat({ color: 0xe8e0cc, roughness: 0.3 }), cupAt.x, deskTop + 0.045, cupAt.z));
+    for (const [ox, oz, h, color] of [[-0.012, 0.01, 0.17, 0xd8a830], [0.014, -0.006, 0.16, 0xa8302a], [0.002, 0.016, 0.15, 0x2a3a9a], [-0.006, -0.016, 0.175, 0x3a6a3a]] as const) {
+      const foot = cupAt.clone().add(new THREE.Vector3(ox * 0.5, 0.03, oz * 0.5));
+      const top = cupAt.clone().add(new THREE.Vector3(ox * 3, h, oz * 3));
+      scene.add(k.rod(foot, top, 0.0035, k.mat({ color, roughness: 0.45 }), 6));
+    }
+  }
   // The desk lamp, a Soviet articulated one: foot at the back corner, an arm up and an
-  // arm out, the shade over the map and pointing at it. None of it casts a shadow: its
+  // arm out, the shade over the exercise book and pointing at it. None of it casts a shadow: its
   // own light is inside it.
   const lampMat = k.mat({ color: 0x2f4a3a, roughness: 0.35, metalness: 0.5 });
   const footAt = new THREE.Vector3(dx + 0.2, deskTop, dz - 0.5);
   const elbow = new THREE.Vector3(dx + 0.17, deskTop + 0.42, dz - 0.32);
   const shadeAt = new THREE.Vector3(dx + 0.02, deskTop + 0.36, dz - 0.02);
-  const aimAt = mapAt.clone().setY(deskTop);
+  const aimAt = bookAt.clone();
   const lampParts: THREE.Mesh[] = [
     k.mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.025, 28), lampMat, footAt.x, footAt.y + 0.0125, footAt.z),
     k.rod(footAt.clone().setY(deskTop + 0.02), elbow, 0.009, metalDark),
@@ -704,21 +821,41 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     scene.add(chair);
   }
 
-  /* --- The shelf and the calendar --------------------------------------- */
+  /* --- The wall case of die-cast models, the calendar ------------------- */
 
-  const sx0 = 1.02;
-  const sx1 = X1 - 0.1;
-  const sy = 1.52;
-  scene.add(k.box(sx1 - sx0, 0.03, 0.2, woodPale, (sx0 + sx1) / 2, sy, Z0 + 0.1, 0.005));
-  for (const x of [sx0 + 0.1, sx1 - 0.1]) {
-    scene.add(k.span(x - 0.012, sy - 0.015 - 0.14, Z0, x + 0.012, sy - 0.015, Z0 + 0.018, metalDark));
-    // Its arm a millimetre under the board: two faces in one plane would fight.
-    scene.add(k.span(x - 0.012, sy - 0.016 - 0.014, Z0 + 0.018, x + 0.012, sy - 0.016, Z0 + 0.16, metalDark));
+  // An open case on the wall over the desk, tiers of shelves between two sides, a back
+  // panel against the wallpaper: every piece touches the next, none lies in another.
+  const CASE = { x0: 1.02, x1: 2.0, side: 0.02, depth: 0.19, board: 0.022 } as const;
+  /** The tiers' tops, top first: the models stand on these. */
+  const TIERS = [1.92, 1.72, 1.52, 1.32] as const;
+  const caseTop = TIERS[0] + 0.18;
+  const caseBottom = TIERS[TIERS.length - 1] - CASE.board;
+  const caseBack = Z0 + 0.006;
+  const caseFront = Z0 + CASE.depth;
+  scene.add(
+    k.span(CASE.x0, caseBottom, Z0, CASE.x0 + CASE.side, caseTop, caseFront, woodMid),
+    k.span(CASE.x1 - CASE.side, caseBottom, Z0, CASE.x1, caseTop, caseFront, woodMid),
+    k.span(CASE.x0, caseTop, Z0, CASE.x1, caseTop + CASE.board, caseFront + 0.01, woodMid),
+    k.span(CASE.x0 + CASE.side, caseBottom, Z0, CASE.x1 - CASE.side, caseTop, caseBack, woodDark),
+  );
+  for (const top of TIERS) scene.add(k.span(CASE.x0 + CASE.side, top - CASE.board, caseBack, CASE.x1 - CASE.side, top, caseFront, woodPale));
+  /** Each model's place on the case, in the catalogue's order, left to right and down. */
+  const models = new Map<string, THREE.Vector3>();
+  {
+    const perTier = Math.ceil(CAR_MODELS.length / TIERS.length);
+    const slot = (CASE.x1 - CASE.x0 - 2 * CASE.side) / perTier;
+    CAR_MODELS.forEach((model, i) => {
+      const tier = Math.floor(i / perTier);
+      const inTier = Math.min(perTier, CAR_MODELS.length - tier * perTier);
+      const x = (CASE.x0 + CASE.x1) / 2 + (i - tier * perTier - (inTier - 1) / 2) * slot;
+      models.set(model.id, new THREE.Vector3(x, TIERS[tier]! + 0.0002, (caseBack + caseFront) / 2 + 0.01));
+    });
   }
-  // The calendar: a paper page, the photograph laid on it, a red binding strip, on a nail.
+  // The calendar: a paper page, the photograph laid on it, a red binding strip, on a nail;
+  // over the bed's head, left of the window.
   const calW = 0.36;
   const calH = 0.54;
-  const calAt = new THREE.Vector3((sx0 + sx1) / 2, 2.07, Z0 + 0.006);
+  const calAt = new THREE.Vector3(-1.7, 1.78, Z0 + 0.006);
   const calPage = k.mesh(new THREE.PlaneGeometry(calW, calH), k.decal({ map: calendarPage(CALENDAR_YEAR), roughness: 0.8 }), calAt.x, calAt.y, calAt.z, false);
   scene.add(calPage);
   scene.add(k.box(calW + 0.01, 0.022, 0.008, k.mat({ color: 0x8a1e1a, roughness: 0.5 }), calAt.x, calAt.y + calH / 2 + 0.011, calAt.z + 0.004, 0.003));
@@ -754,6 +891,30 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
   wallClock.position.set(X1 - 0.021, 1.98, dz);
   wallClock.rotation.y = -Math.PI / 2;
   scene.add(wallClock);
+
+  /* --- Crayon drawings pinned to the walls ---------------------------------- */
+
+  {
+    const pinMat = k.mat({ color: 0xc8302a, roughness: 0.35, metalness: 0.2 });
+    /** A sheet `w` wide (4:3) on the wall at (x, y, z), facing `ry`, hung askew by `tilt`, a pin at its top. */
+    const drawing = (which: number, x: number, y: number, z: number, ry: number, w: number, tilt: number): void => {
+      const h = w * 0.75;
+      const sheet = new THREE.Group();
+      sheet.position.set(x, y, z);
+      sheet.rotation.set(0, ry, 0);
+      const page = k.mesh(new THREE.PlaneGeometry(w, h), k.decal({ map: crayonDrawing(which), roughness: 0.95 }), 0, 0, 0.004, false);
+      page.rotation.z = tilt;
+      const pin = k.mesh(new THREE.SphereGeometry(0.007, 10, 8), pinMat, -Math.sin(tilt) * h * 0.42, Math.cos(tilt) * h * 0.42, 0.011, false);
+      sheet.add(page, pin);
+      scene.add(sheet);
+    };
+    // Over the desk, beside the keys.
+    drawing(0, X1, 1.42, -0.55, -Math.PI / 2, 0.32, 0.05);
+    drawing(3, X1, 1.3, -0.08, -Math.PI / 2, 0.28, -0.06);
+    // By the night-light, low, at a child's height.
+    drawing(1, X0, 1.25, 0.5, Math.PI / 2, 0.3, -0.04);
+    drawing(2, X0, 1.5, 1.02, Math.PI / 2, 0.26, 0.07);
+  }
 
   /* --- The door, its architrave, the key board ----------------------------- */
 
@@ -932,16 +1093,13 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
   /* --- The slow work: toys and the calendar's photograph ------------------ */
 
   const work: ((renderer: THREE.WebGLRenderer) => void)[] = [];
-  if (nextDream) {
-    work.push(() => {
-      const { modelId, color } = toyOf(nextDream);
-      const toy = dieCast(k, modelId, color, 1 / 24, toyMat);
-      // On the mat's road, its left side, driving away towards the window.
-      toy.position.copy(toyAt);
-      toy.rotation.y = 0.04;
-      scene.add(toy);
-    });
-  }
+  work.push(() => {
+    const toy = dieCast(k, DEFAULT_CAR_MODEL_ID, factoryPaintHex(DEFAULT_CAR_MODEL_ID, ROOM_CAR_KEY), 1 / 24, toyMat);
+    // On the mat's road, its left side, driving away towards the window.
+    toy.position.copy(toyAt);
+    toy.rotation.y = 0.04;
+    scene.add(toy);
+  });
   // The calendar's photograph: the kit's own 2106 in the sun, photographed once into a
   // texture, as a Soviet export calendar showed it.
   let photoTarget: THREE.WebGLRenderTarget | null = null;
@@ -990,38 +1148,26 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
     studio.remove(car);
     car.geometry.dispose();
   });
-  // The shelf: a die-cast per adventure done; an adventure not yet had leaves a price card.
-  const slot = (sx1 - sx0 - 0.16) / Math.max(1, DREAMS.length);
-  DREAMS.forEach((dream, i) => {
-    const x = sx0 + 0.08 + slot * (i + 0.5);
-    if (progress[dream.id] === undefined) {
-      const card = k.box(0.05, 0.035, 0.004, k.mat({ color: 0xe6dcc0, roughness: 0.8 }), x, sy + 0.034, Z0 + 0.15);
-      card.rotation.x = -0.3;
-      scene.add(card);
-      return;
-    }
-    work.push(() => {
-      const { modelId, color } = toyOf(dream);
-      const toy = dieCast(k, modelId, color, 1 / 43, toyMat);
-      toy.position.set(x, sy + 0.0152, Z0 + 0.11);
-      toy.rotation.y = Math.PI / 2 - 0.35;
-      scene.add(toy);
-    });
-  });
-
-  const anchors: RoomAnchors = {
-    toy: toyAt.clone().setY(0.05),
-    map: mapAt.clone(),
-    shelf: new THREE.Vector3((sx0 + sx1) / 2, sy + 0.05, Z0 + 0.1),
-    keys: keysAt.clone(),
-    window: new THREE.Vector3(wx, (WIN.y0 + WIN.y1) / 2, Z0),
-    toolbox: toolboxAt.clone().setY(0.2),
-  };
+  // The case: a 1:43 model of every car in the game, in its factory colour, turned a
+  // little to the room.
+  // A model asked for before its turn (`buildModel`) is built at once and leaves the queue.
+  const pendingModels = new Map<string, () => void>();
+  for (const [modelId, at] of models) {
+    const build = (): void => {
+      if (!pendingModels.delete(modelId)) return;
+      const model = dieCast(k, modelId, factoryPaintHex(modelId, ROOM_CAR_KEY), 1 / 43, toyMat);
+      model.position.copy(at);
+      model.rotation.y = Math.PI / 2 - 0.35;
+      scene.add(model);
+    };
+    pendingModels.set(modelId, build);
+    work.push(build);
+  }
 
   const now = new Date();
   return {
     scene,
-    anchors,
+    models,
     tick(t: number, dt: number): void {
       // The wall clock keeps the real time; its second hand steps.
       const seconds = now.getSeconds() + Math.floor(t);
@@ -1041,6 +1187,9 @@ export function buildRoomScene(progress: DreamProgress, nextDream: DreamDef | nu
         p.setXYZ(i, p.getX(i) + Math.sin(t * 0.4 + s) * dt * 0.01, y, p.getZ(i) + Math.cos(t * 0.35 + s) * dt * 0.01);
       }
       p.needsUpdate = true;
+    },
+    buildModel(modelId: string): void {
+      pendingModels.get(modelId)?.();
     },
     buildNext(renderer: THREE.WebGLRenderer): boolean {
       const next = work.shift();

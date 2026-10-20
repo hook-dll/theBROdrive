@@ -3858,7 +3858,7 @@ export class Vehicle implements Rebasable {
         (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
     if (this.kitRig) this.driveKit(this.kitRig);
-    this.cabinView?.sync(this.car.cabin, performance.now());
+    this.cabinView?.sync(this.car.cabin);
   }
 
   /**

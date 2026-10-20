@@ -62,13 +62,6 @@ export function defaultProgress(): ContractProgress {
 }
 
 /**
- * `sourceCourierIndex` of cargo that no courier issued: a dream's parcel
- * (dreams/dream.ts). No courier signs it — it is delivered at the dream's goal — and
- * it never points the HUD at a courier. Never saved: dreams are not.
- */
-export const NO_COURIER = -1;
-
-/**
  * A read-only look at the physical world at the courier that would accept the
  * cargo, built by the delivery code and handed to BOTH the prompt and the commit.
  * That is what keeps a prompt honest: the sentence the player reads while aiming is

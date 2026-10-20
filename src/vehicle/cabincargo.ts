@@ -10,8 +10,8 @@ import { CABIN_PLACES, layFit, type CabinRooms, type ItemBounds, type PlaceRoom 
  * place's node in the car (carkit/interior.ts `KIT_PLACE_NODE`), so it rides the car,
  * and the front seat's rides that seat. It stands on the place's surface, laid against
  * the back of the room, turned the way `layFit` fits it; a thing on a place the car
- * has none of is not drawn. Moved from one place to another — off a seat onto the
- * floor — it falls there over `FALL_S` rather than jumping.
+ * has none of is not drawn. A thing stays where it was laid however the car is driven
+ * (vehicle/cabin.ts).
  *
  * The item meshes are the loose items' own (render/partmesh.ts), whose programs the boot
  * anchor links (`itemProgramAnchor`); in the cabin they cast no shadow, as the cabin
@@ -20,8 +20,6 @@ import { CABIN_PLACES, layFit, type CabinRooms, type ItemBounds, type PlaceRoom 
 
 /** A thing stands this far over its place's surface, clear of the cushion's own top. */
 const STAND_LIFT = 0.004;
-/** How long a thing takes to fall from a seat to the floor, seconds. */
-const FALL_S = 0.35;
 
 /** Each look's drawn bounds about its mesh's origin, measured once. */
 const boundsCache = new Map<string, THREE.Box3>();
@@ -65,11 +63,7 @@ export function cabinItemBounds(item: Item): ItemBounds {
 interface Shown {
   readonly item: Item;
   readonly mesh: THREE.Object3D;
-  place: number;
-  /** Where it lies at rest on its place, in its holder's frame. */
-  readonly rest: { position: THREE.Vector3; quaternion: THREE.Quaternion };
-  /** The fall in progress: the pose it left, in its new holder's frame, and when (ms). */
-  fall: { readonly position: THREE.Vector3; readonly quaternion: THREE.Quaternion; readonly started: number } | null;
+  readonly place: number;
 }
 
 export class CabinCargoView {
@@ -78,8 +72,6 @@ export class CabinCargoView {
   private shown: (Shown | null)[];
   /** Each place's room in metres, for laying things (vehicle/cabin.ts). */
   readonly rooms: CabinRooms;
-  private readonly matrix = new THREE.Matrix4();
-  private readonly scale = new THREE.Vector3();
 
   constructor(body: THREE.Object3D) {
     body.updateMatrixWorld(true);
@@ -106,13 +98,13 @@ export class CabinCargoView {
   }
 
   /** Each frame the car is drawn near: what lies where, against what is drawn. */
-  sync(cabin: readonly (Item | null)[], now: number): void {
-    let changed = false;
+  sync(cabin: readonly (Item | null)[]): void {
     for (let place = 0; place < this.shown.length; place++) {
-      if ((this.shown[place]?.item ?? null) !== (cabin[place] ?? null)) changed = true;
+      if ((this.shown[place]?.item ?? null) !== (cabin[place] ?? null)) {
+        this.relay(cabin);
+        return;
+      }
     }
-    if (changed) this.relay(cabin, now);
-    for (const shown of this.shown) if (shown?.fall) this.animate(shown, now);
   }
 
   /** The place a drawn thing lies on, from any of its parts, or -1. */
@@ -130,8 +122,8 @@ export class CabinCargoView {
     for (const holder of this.holders) holder?.removeFromParent();
   }
 
-  /** Draws `cabin` afresh, carrying each thing that moved over to its new place. */
-  private relay(cabin: readonly (Item | null)[], now: number): void {
+  /** Draws `cabin` afresh, keeping the mesh of each thing still in it. */
+  private relay(cabin: readonly (Item | null)[]): void {
     const pool = new Map<Item, Shown>();
     for (const shown of this.shown) if (shown) pool.set(shown.item, shown);
     const next: (Shown | null)[] = CABIN_PLACES.map(() => null);
@@ -150,20 +142,8 @@ export class CabinCargoView {
         next[place] = old;
         continue;
       }
-      let mesh: THREE.Object3D;
-      let fall: Shown['fall'] = null;
-      if (old) {
-        mesh = old.mesh;
-        // Where it was, seen from its new place: it falls from there.
-        mesh.updateWorldMatrix(true, false);
-        holder.updateWorldMatrix(true, false);
-        this.matrix.copy(holder.matrixWorld).invert().multiply(mesh.matrixWorld);
-        const position = new THREE.Vector3();
-        const quaternion = new THREE.Quaternion();
-        this.matrix.decompose(position, quaternion, this.scale);
-        fall = { position, quaternion, started: now };
-      } else {
-        mesh = createItemMesh(item);
+      const mesh = old ? old.mesh : createItemMesh(item);
+      if (!old) {
         if (item.type === 'part') setPartCondition(mesh, item.part);
         mesh.traverse((node) => {
           node.castShadow = false;
@@ -172,9 +152,9 @@ export class CabinCargoView {
       mesh.userData.cabinPlace = place;
       holder.add(mesh);
       const rest = restPose(item, room);
-      mesh.position.copy(fall ? fall.position : rest.position);
-      mesh.quaternion.copy(fall ? fall.quaternion : rest.quaternion);
-      next[place] = { item, mesh, place, rest, fall };
+      mesh.position.copy(rest.position);
+      mesh.quaternion.copy(rest.quaternion);
+      next[place] = { item, mesh, place };
     }
     for (const shown of pool.values()) this.release(shown);
     this.shown = next;
@@ -183,15 +163,6 @@ export class CabinCargoView {
   private release(shown: Shown): void {
     shown.mesh.removeFromParent();
     disposeItemMeshResources(shown.mesh);
-  }
-
-  private animate(shown: Shown, now: number): void {
-    const fall = shown.fall!;
-    const t = Math.min(1, (now - fall.started) / (FALL_S * 1000));
-    // Falling: slow off the edge, fast onto the floor; turning as it goes.
-    shown.mesh.position.lerpVectors(fall.position, shown.rest.position, t * t);
-    shown.mesh.quaternion.slerpQuaternions(fall.quaternion, shown.rest.quaternion, Math.min(1, t * 1.4));
-    if (t >= 1) shown.fall = null;
   }
 }
 

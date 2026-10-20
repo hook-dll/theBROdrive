@@ -631,6 +631,7 @@ export function migrateState(raw: unknown): WorldState {
     lootedPois: migrateNumberArray(obj.lootedPois),
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
+    barrelLitres: migrateBarrelLitres(obj.barrelLitres),
   };
 }
 
@@ -644,6 +645,20 @@ function migrateVendingSold(value: unknown): Record<string, number[]> {
   for (const [id, slots] of Object.entries(value as Record<string, unknown>)) {
     const sold = migrateNumberArray(slots).filter((slot) => Number.isInteger(slot) && slot >= 0);
     if (sold.length > 0) out[id] = sold;
+  }
+  return out;
+}
+
+/**
+ * Litres left in the barrels drawn from, by barrel id. Absent on every save from before
+ * the barrels: none touched. A malformed entry drops that barrel's record, which only
+ * gives it back its first contents.
+ */
+function migrateBarrelLitres(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [id, litres] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof litres === 'number' && Number.isFinite(litres)) out[id] = Math.max(0, litres);
   }
   return out;
 }
@@ -891,6 +906,10 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   if (raw.papers === true) car.papers = true;
   if (typeof raw.lotPrice === 'number' && Number.isFinite(raw.lotPrice) && raw.lotPrice > 0) {
     car.lotPrice = Math.round(raw.lotPrice);
+    // Coins already in its key box; a save from before the key boxes has none.
+    if (typeof raw.lotPaid === 'number' && Number.isFinite(raw.lotPaid) && raw.lotPaid > 0) {
+      car.lotPaid = Math.min(car.lotPrice, Math.round(raw.lotPaid));
+    }
   }
   // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
   // built aim.
@@ -1077,15 +1096,19 @@ function migrateItem(raw: unknown, where: string): Item {
       const saved = obj.type === 'fuel_can' ? obj.fuel : obj.fluid;
       // `coolant` is the pre-rename tag for the same green can, now water.
       const fluid = saved === 'coolant' ? 'water' : saved;
-      if (fluid !== 'petrol' && fluid !== 'water' && fluid !== 'oil') {
+      if (fluid !== null && fluid !== 'petrol' && fluid !== 'water' && fluid !== 'oil') {
         throw new Error(`Save data is malformed: item at ${where} has an invalid fluid`);
       }
+      const capacity = numOr(obj.capacity, 0);
+      const litres = fluid === null ? 0 : Math.min(capacity, Math.max(0, numOr(obj.litres, 0)));
+      // An empty can holds no fluid (items/items.ts): one saved empty before cans took
+      // any fluid still names the fluid it was sold for, and forgets it here.
       return {
         type: 'fluid_can',
         id: obj.id,
-        fluid,
-        capacity: numOr(obj.capacity, 0),
-        litres: numOr(obj.litres, 0),
+        fluid: litres > 0 ? fluid : null,
+        capacity,
+        litres,
       };
     }
     case 'spray_can': {

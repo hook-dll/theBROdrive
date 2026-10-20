@@ -40,10 +40,7 @@ export const RESUME_ATTEMPT_LIMIT = 2;
 export const RESUME_HEALTHY_SECONDS = 20;
 
 interface ResumeMarker {
-  /**
-   * Save slot to resume, as `IndexedDbSaves` names it (`slot-<seed>`), or a dream to
-   * dream again (`dreamResumeTarget`).
-   */
+  /** Save slot to resume, as `IndexedDbSaves` names it (`slot-<seed>`). */
   readonly slotId: string;
   /** Resumes spent since the last healthy session, against `RESUME_ATTEMPT_LIMIT`. */
   readonly attempts: number;
@@ -105,21 +102,6 @@ function write(marker: ResumeMarker | null): void {
 export function markResumeTarget(slotId: string): void {
   const existing = read();
   write({ slotId, attempts: existing?.attempts ?? 0 });
-}
-
-const DREAM_PREFIX = 'dream:';
-
-/**
- * The resume target for a dream: a dream is never saved, so a reload inside one
- * (a graphics profile change) brings back the same dream from its start bay.
- */
-export function dreamResumeTarget(dreamId: string): string {
-  return DREAM_PREFIX + dreamId;
-}
-
-/** The dream a claimed target names, or null for a save slot. */
-export function resumedDreamId(target: string): string | null {
-  return target.startsWith(DREAM_PREFIX) ? target.slice(DREAM_PREFIX.length) : null;
 }
 
 /**

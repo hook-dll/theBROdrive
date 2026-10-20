@@ -23,8 +23,6 @@ export const VENDING_SLOTS = VENDING_ROWS * VENDING_COLUMNS;
 export interface VendingMachine {
   /** `vend:<poi index>`, the key in `WorldState.vendingSold`. */
   readonly id: string;
-  /** What it was stocked as; names the sign and the prompt. */
-  readonly title: string;
   /** Kilometres from home where it stands: the price multiplier's argument. */
   readonly km: number;
   /** Base centre on the sand, ABSOLUTE world metres. */
@@ -33,8 +31,6 @@ export interface VendingMachine {
   readonly z: number;
   /** Yaw of its local frame; the front faces local -Z. */
   readonly yaw: number;
-  /** A FUEL machine: it has a nozzle that fills a held petrol can by the litre. */
-  readonly pump: boolean;
   /**
    * The goods it was stocked with, by slot (`row * VENDING_COLUMNS + column`); null is a
    * slot never filled. A sold slot still holds its item here: `vendingSold` decides.

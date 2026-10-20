@@ -13,9 +13,10 @@ import type { PlayerSeat } from '../game/state';
  * the cabin (tools/cabin-places.ts). An item lies on a place only if its bounds fit that
  * room, so nothing laid in the cabin ever stands in a seat.
  *
- * A thing on a seat can come off it: braking hard pushes it forward off the cushion
- * onto the floor in front, a hard turn pushes it off the front seat sideways or across
- * the bench (`CabinRide`). The floor is where it stays.
+ * A thing on a seat stays where it was laid, however the car is driven: hard driving
+ * costs ride quality (trip/ride.ts), never the thing's place. The floor places hold
+ * only what older saves left there when things could still slide off a seat; they are
+ * taken from like any other place.
  *
  * Pure: no three.js. The view is vehicle/cabincargo.ts.
  */
@@ -48,16 +49,8 @@ const SPANS: Partial<Record<CabinPlace, readonly CabinPlace[]>> = {
   floor_rear: ['floor_rear_l', 'floor_rear_r'],
 };
 
-/** Where a thing goes when it comes off a seat: the floor in front of it. */
-export const FALLS_TO: Partial<Record<CabinPlace, CabinPlace>> = {
-  seat: 'floor_front',
-  bench_l: 'floor_rear_l',
-  bench_r: 'floor_rear_r',
-  bench: 'floor_rear',
-};
-
-/** The places with a seat under them, which a push can empty. */
-export const SEAT_PLACES: readonly CabinPlace[] = ['seat', 'bench_l', 'bench_r', 'bench'];
+/** The places with a seat under them: something on one bars sitting there. */
+const SEAT_PLACES: readonly CabinPlace[] = ['seat', 'bench_l', 'bench_r', 'bench'];
 
 /**
  * The places reached through a seat's door, in the order something is laid on them:
@@ -174,128 +167,4 @@ export function layPlace(
 /** The place something is taken from through `seat`'s door, or null. */
 export function takePlace(cabin: readonly (Item | null)[], seat: PlayerSeat): CabinPlace | null {
   return TAKE_FROM[seat].find((place) => cabin[cabinIndex(place)] !== null) ?? null;
-}
-
-/**
- * How hard the car must push before a thing on a seat comes off, m/s², from how it
- * sits: a box slides on the cloth at `SLIDE_GRIP` g, and a tall one tips first, once the
- * push turns its weight over its edge (half its base over half its height, in g).
- */
-const SLIDE_GRIP = 0.4;
-const G = 9.81;
-export function slipAt(bounds: ItemBounds, along: boolean): number {
-  const base = along ? bounds.z : bounds.x;
-  return G * Math.min(SLIDE_GRIP, base / Math.max(1e-3, bounds.y));
-}
-
-/** Smoothing of the push, seconds: a pothole's jolt is no shove. */
-const PUSH_SMOOTH_S = 0.3;
-/** After a thing has come off or knocked about, the push must ease below this share of the limit before it can again. */
-const SLIP_RESET = 0.6;
-
-/** One thing coming off its place: where it went (null: wedged where it was, knocked). */
-export interface CabinSlip {
-  readonly from: CabinPlace;
-  readonly to: CabinPlace | null;
-  readonly item: Item;
-}
-
-/**
- * The push on the things on the seats of the car the player drives, fed each fixed
- * step with the car's horizontal velocity in its own frame (x to the car's left, z
- * forward), and the moves it makes. Pure; the composition root applies the moves.
- */
-export class CabinRide {
-  private lastX = 0;
-  private lastZ = 0;
-  private primed = false;
-  /** Smoothed acceleration in the car's frame. */
-  private ax = 0;
-  private az = 0;
-  /** Places whose thing is waiting for the push to ease (`SLIP_RESET`). */
-  private readonly spent = new Set<CabinPlace>();
-
-  /** Forget the last velocity: the car changed, or it was moved by hand. */
-  reset(): void {
-    this.primed = false;
-    this.ax = 0;
-    this.az = 0;
-    this.spent.clear();
-  }
-
-  /**
-   * One step. `bounds(item)` is a thing's drawn size, `rooms` the car's places. Returns
-   * the slips this step, with the cabin left for the caller to change.
-   */
-  step(
-    dt: number,
-    vx: number,
-    vz: number,
-    cabin: readonly (Item | null)[],
-    rooms: CabinRooms,
-    bounds: (item: Item) => ItemBounds,
-    out: CabinSlip[],
-  ): void {
-    out.length = 0;
-    if (dt <= 0) return;
-    if (this.primed) {
-      const k = Math.min(1, dt / PUSH_SMOOTH_S);
-      this.ax += ((vx - this.lastX) / dt - this.ax) * k;
-      this.az += ((vz - this.lastZ) / dt - this.az) * k;
-    }
-    this.primed = true;
-    this.lastX = vx;
-    this.lastZ = vz;
-    // What the car does to the things in it is the opposite of its own acceleration:
-    // braking (az < 0) throws them forward.
-    const forward = -this.az;
-    const sideways = -this.ax;
-    const taken = cabin.slice();
-    for (const from of SEAT_PLACES) {
-      const item = taken[cabinIndex(from)];
-      if (!item) {
-        this.spent.delete(from);
-        continue;
-      }
-      const room = rooms[cabinIndex(from)];
-      const size = bounds(item);
-      const turned = room ? layFit(size, room)?.turned ?? false : false;
-      const footprint: ItemBounds = turned ? { x: size.z, y: size.y, z: size.x } : size;
-      const ahead = forward / slipAt(footprint, true);
-      // Sideways only matters where there is an edge to go over: the front seat's, or
-      // across to the other half of the bench. The whole bench is held by both doors.
-      const across = from === 'bench' ? 0 : Math.abs(sideways) / slipAt(footprint, false);
-      const push = Math.max(ahead, across);
-      if (this.spent.has(from)) {
-        if (push < SLIP_RESET) this.spent.delete(from);
-        continue;
-      }
-      if (push < 1) continue;
-      this.spent.add(from);
-      let to: CabinPlace | null = null;
-      if (ahead >= across) {
-        to = FALLS_TO[from] ?? null;
-      } else if (from === 'seat') {
-        to = 'floor_front';
-      } else {
-        // +x is the car's left: a push to the left carries the right half's thing over.
-        const other: CabinPlace = from === 'bench_l' ? 'bench_r' : 'bench_l';
-        const towards = sideways > 0 ? 'bench_l' : 'bench_r';
-        to = towards === other ? other : null;
-      }
-      if (to !== null) {
-        const room = rooms[cabinIndex(to)];
-        taken[cabinIndex(from)] = null;
-        if (!room || !layFit(size, room) || !placeFree(taken, to)) {
-          taken[cabinIndex(from)] = item;
-          to = null;
-        } else {
-          taken[cabinIndex(to)] = item;
-          // Moved to another seat: it may slip again from there once the push eases.
-          if (SEAT_PLACES.includes(to)) this.spent.add(to);
-        }
-      }
-      out.push({ from, to, item });
-    }
-  }
 }

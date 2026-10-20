@@ -1,21 +1,18 @@
 import * as THREE from 'three';
-import type { DreamDef } from '../dreams/dream';
-import type { DreamProgress } from '../dreams/progress';
 import { buildRoomScene, type RoomScene } from './roomscene';
 
 /**
  * THE TITLE ROOM: the boy's bedroom at night as the title screen, after the first
  * Mafia's (2002): a small, detailed 3D room behind a plain list; highlighting an item
  * sweeps the camera, low, across the room to the thing that item is about, and choosing
- * it acts (GAME_DESIGN.md §14.1).
+ * it acts (game-design2.md §3). The room explains nothing in words; its things do.
  *
- *   Daydream   — the play mat on the floor and the next adventure's toy car on its
- *                road: the boy does not go to bed for it, he plays and drifts off
- *   Adventures — the map of the adventures on the desk
- *   Shelf      — the die-cast toys, one for every adventure had
- *   Drives     — the car keys on their hook by the door: the saved drives
- *   Free drive — the window, the desert road under the moon
- *   Settings   — the toolbox
+ *   Continue      — the window, the desert road under the moon: the latest drive
+ *   New game      — the desk, the exercise book open under the lamp
+ *   Drives        — the car keys on their hook by the door: the saved drives
+ *   Carcyclopedia — the wall case of 1:43 models, one of every car; a model chosen in
+ *                   the panel brings the camera to it (`showModel`)
+ *   Settings      — the toolbox
  *
  * Its own canvas and WebGL context, made for the title and released (`dispose`, the
  * context lost on purpose) before the drive builds its renderer, so nothing of the room
@@ -23,23 +20,24 @@ import { buildRoomScene, type RoomScene } from './roomscene';
  * menu's keyboard and pad navigation walks it as any other.
  */
 
-export type RoomSpot = 'toy' | 'map' | 'shelf' | 'keys' | 'window' | 'toolbox';
+export type RoomSpot = 'window' | 'desk' | 'keys' | 'shelf' | 'toolbox';
 
 export interface RoomItem {
   readonly label: string;
   readonly detail: string;
   readonly disabled: boolean;
+  /** Not in the list at all: Continue with nothing saved. */
+  readonly hidden?: boolean;
 }
 
 /** The list, top to bottom, and the thing in the room each item looks at. */
-const ITEMS: readonly RoomSpot[] = ['toy', 'map', 'shelf', 'keys', 'window', 'toolbox'];
+const ITEMS: readonly RoomSpot[] = ['window', 'desk', 'keys', 'shelf', 'toolbox'];
 
 /** Where the camera stands and what it looks at, for each item and before any. */
 const POSES: Readonly<Record<RoomSpot | 'wide', { readonly at: THREE.Vector3; readonly look: THREE.Vector3; readonly fov: number }>> = {
   wide: { at: new THREE.Vector3(1.35, 1.55, 1.55), look: new THREE.Vector3(-0.7, 0.85, -1.0), fov: 52 },
-  toy: { at: new THREE.Vector3(-0.2, 0.26, 0.85), look: new THREE.Vector3(-0.47, 0.05, 0.22), fov: 38 },
-  map: { at: new THREE.Vector3(1.3, 1.5, -0.45), look: new THREE.Vector3(1.68, 0.77, -0.9), fov: 42 },
-  shelf: { at: new THREE.Vector3(1.1, 1.72, -0.3), look: new THREE.Vector3(1.5, 1.82, -1.75), fov: 42 },
+  desk: { at: new THREE.Vector3(1.12, 1.3, -0.5), look: new THREE.Vector3(1.75, 0.78, -1.02), fov: 46 },
+  shelf: { at: new THREE.Vector3(1.05, 1.62, -0.05), look: new THREE.Vector3(1.51, 1.66, -1.7), fov: 44 },
   keys: { at: new THREE.Vector3(1.5, 1.45, 0.6), look: new THREE.Vector3(2.08, 1.36, 0.3), fov: 30 },
   window: { at: new THREE.Vector3(-0.1, 1.3, 0.85), look: new THREE.Vector3(-0.2, 1.45, -3.5), fov: 50 },
   toolbox: { at: new THREE.Vector3(0.65, 0.85, 1.35), look: new THREE.Vector3(1.35, 0.2, 0.55), fov: 40 },
@@ -50,11 +48,17 @@ const MOVE_S = 1.5;
 /** How low the camera dips mid-move, metres: it sweeps across the room, not over it. */
 const MOVE_DIP = 0.18;
 /**
- * Daydreaming: the camera goes down to the toy car on the mat, to its level, close
- * enough that the mat is a road, while the room goes dark; then the adventure loads.
+ * A model on the case seen close: the camera this far in front of it and above, metres,
+ * looking `right` past it so it stands left of the Carcyclopedia's panel.
  */
-const DIVE = { at: new THREE.Vector3(-0.43, 0.045, 0.52), look: new THREE.Vector3(-0.47, 0.035, 0.18), fov: 36 };
-const DIVE_S = 1.3;
+const MODEL_VIEW = { back: 0.5, up: 0.08, right: 0.09, fov: 30 };
+/**
+ * The exposure the room is seen at, and at a model on the case: the case hangs in the
+ * back wall's shadow, out of the lamp's cone, and the eye opens up to it rather than the
+ * room gaining a light.
+ */
+const EXPOSURE = 1.15;
+const EXPOSURE_MODEL = 2.6;
 
 export class TitleRoom {
   readonly element: HTMLElement;
@@ -65,16 +69,17 @@ export class TitleRoom {
   /** Far enough for the sky and the mesas outside the window. */
   private readonly camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.03, 400);
   private readonly room: RoomScene | null;
-  private diving = false;
   private frame = 0;
   private lastMs = 0;
   private startMs = 0;
-  private toyTimer = 0;
+  private workTimer = 0;
   private disposed = false;
   /** The move in progress: from, to, when it began (s). */
   private readonly from = { at: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private readonly to = { at: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private moveStart = -Infinity;
+  /** The exposure the camera is opening or closing towards. */
+  private exposure = EXPOSURE;
   private readonly look = new THREE.Vector3();
   private readonly pointer = new THREE.Vector2();
   private readonly onResize = (): void => this.resize();
@@ -83,8 +88,6 @@ export class TitleRoom {
   };
 
   constructor(
-    progress: DreamProgress,
-    nextDream: DreamDef | null,
     items: Readonly<Record<RoomSpot, RoomItem>>,
     private readonly act: (spot: RoomSpot) => void,
     lowDetail: boolean,
@@ -105,12 +108,12 @@ export class TitleRoom {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, lowDetail ? 1 : 1.5));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.15;
+      renderer.toneMappingExposure = EXPOSURE;
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       this.element.appendChild(canvas);
     }
-    this.room = renderer ? buildRoomScene(progress, nextDream, lowDetail) : null;
+    this.room = renderer ? buildRoomScene(lowDetail) : null;
 
     const vignette = document.createElement('div');
     vignette.className = 'menu-room3d-vignette';
@@ -127,7 +130,7 @@ export class TitleRoom {
       const detail = document.createElement('span');
       detail.className = 'menu-room3d-detail';
       row.append(label, detail);
-      row.addEventListener('click', () => (spot === 'toy' ? this.dive(() => this.act(spot)) : this.act(spot)));
+      row.addEventListener('click', () => this.act(spot));
       row.addEventListener('focus', () => this.aim(spot));
       row.addEventListener('pointerenter', () => {
         if (!row.disabled) row.focus();
@@ -166,23 +169,42 @@ export class TitleRoom {
       row.querySelector('.menu-room3d-label')!.textContent = item.label;
       this.details.get(spot)!.textContent = item.detail;
       row.disabled = item.disabled;
+      row.hidden = item.hidden === true;
       row.setAttribute('aria-label', `${item.label}: ${item.detail}`);
     }
   }
 
-  /** A panel is open over the room: the list rests and the camera stays where it is. */
-  setAway(away: boolean): void {
+  /**
+   * A panel is open over the room: the list rests and the camera stays where it is.
+   * `dim` false keeps the room at full light: the panel is about what is in the room.
+   */
+  setAway(away: boolean, dim = true): void {
     this.element.classList.toggle('is-away', away);
+    this.element.classList.toggle('is-dim', away && dim);
   }
 
   focus(spot: RoomSpot): void {
     this.rows.get(spot)?.focus();
   }
 
+  /** Bring the camera to the model of `modelId` on the case, and have it built if it is not yet. */
+  showModel(modelId: string): void {
+    const at = this.room?.models.get(modelId);
+    if (!at) return;
+    this.room!.buildModel(modelId);
+    this.moveTo(new THREE.Vector3(at.x - 0.04, at.y + MODEL_VIEW.up, at.z + MODEL_VIEW.back), new THREE.Vector3(at.x + MODEL_VIEW.right, at.y + 0.02, at.z), MODEL_VIEW.fov);
+    this.exposure = EXPOSURE_MODEL;
+  }
+
+  /** Back to the whole case. */
+  showShelf(): void {
+    this.aim('shelf');
+  }
+
   focusFirst(): void {
     for (const spot of ITEMS) {
       const row = this.rows.get(spot)!;
-      if (!row.disabled) {
+      if (!row.disabled && !row.hidden) {
         row.focus();
         return;
       }
@@ -193,7 +215,7 @@ export class TitleRoom {
     if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.frame);
-    window.clearTimeout(this.toyTimer);
+    window.clearTimeout(this.workTimer);
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('pointermove', this.onPointer);
     this.room?.dispose();
@@ -206,30 +228,20 @@ export class TitleRoom {
     this.element.remove();
   }
 
-  /** Down to the toy car, the room fading out, then `then`. */
-  private dive(then: () => void): void {
-    if (this.diving) return;
-    this.diving = true;
-    this.from.at.copy(this.camera.position);
-    this.from.look.copy(this.look);
-    this.from.fov = this.camera.fov;
-    this.to.at.copy(DIVE.at);
-    this.to.look.copy(DIVE.look);
-    this.to.fov = DIVE.fov;
-    this.moveStart = (performance.now() - this.startMs) / 1000;
-    this.element.classList.add('is-diving');
-    window.setTimeout(then, DIVE_S * 1000);
-  }
-
   /** Sweep the camera to `spot`'s thing. */
   private aim(spot: RoomSpot): void {
     const pose = POSES[spot];
+    this.exposure = EXPOSURE;
+    this.moveTo(pose.at, pose.look, pose.fov);
+  }
+
+  private moveTo(at: THREE.Vector3, look: THREE.Vector3, fov: number): void {
     this.from.at.copy(this.camera.position);
     this.from.look.copy(this.look);
     this.from.fov = this.camera.fov;
-    this.to.at.copy(pose.at);
-    this.to.look.copy(pose.look);
-    this.to.fov = pose.fov;
+    this.to.at.copy(at);
+    this.to.look.copy(look);
+    this.to.fov = fov;
     this.moveStart = (performance.now() - this.startMs) / 1000;
   }
 
@@ -251,33 +263,40 @@ export class TitleRoom {
     if (!this.renderer || !this.room) return;
 
     // The move: smootherstep along the way, a dip in the middle.
-    const k = Math.min(1, Math.max(0, (t - this.moveStart) / (this.diving ? DIVE_S : MOVE_S)));
+    const k = Math.min(1, Math.max(0, (t - this.moveStart) / MOVE_S));
     const e = k * k * k * (k * (k * 6 - 15) + 10);
     this.camera.position.lerpVectors(this.from.at, this.to.at, e);
-    if (!this.diving) this.camera.position.y -= Math.sin(Math.PI * e) * MOVE_DIP;
+    this.camera.position.y -= Math.sin(Math.PI * e) * MOVE_DIP * this.dipScale();
     this.look.lerpVectors(this.from.look, this.to.look, e);
     this.camera.fov = this.from.fov + (this.to.fov - this.from.fov) * e;
-    // Held still, the camera breathes, and leans a touch after the pointer.
-    const lean = this.diving ? 0.1 : 1;
+    // Held still, the camera breathes, and leans a touch after the pointer: less when it
+    // is close to something small.
+    const lean = Math.min(1, this.to.at.distanceTo(this.to.look) / 1.2);
     this.camera.position.x += (Math.sin(t * 0.23) * 0.02 + this.pointer.x * 0.04) * lean;
     this.camera.position.y += (Math.sin(t * 0.31) * 0.012 - this.pointer.y * 0.025) * lean;
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.look);
+    this.renderer.toneMappingExposure += (this.exposure - this.renderer.toneMappingExposure) * Math.min(1, dt * 2.5);
 
     this.room.tick(t, dt);
     this.renderer.render(this.room.scene, this.camera);
 
-    // The slow work (toys, the calendar's photograph) after the room is on screen, one
+    // The slow work (the die-cast models, the calendar's photograph) after the room is on screen, one
     // piece at a time between frames.
-    if (this.toyTimer === 0 && t > 0.3) this.scheduleWork();
+    if (this.workTimer === 0 && t > 0.3) this.scheduleWork();
   };
 
+  /** No dip between two neighbours on the case: the camera slides along it instead. */
+  private dipScale(): number {
+    return Math.min(1, this.from.at.distanceTo(this.to.at) / 1.5);
+  }
+
   private scheduleWork(): void {
-    this.toyTimer = window.setTimeout(() => {
+    this.workTimer = window.setTimeout(() => {
       if (this.disposed || !this.room || !this.renderer) return;
       const more = this.room.buildNext(this.renderer);
       if (more) this.scheduleWork();
-      else this.toyTimer = -1;
+      else this.workTimer = -1;
     }, 60);
   }
 }

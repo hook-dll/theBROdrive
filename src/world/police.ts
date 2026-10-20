@@ -312,11 +312,6 @@ export class PolicePatrol {
   private devKey = 0;
   /** What the HUD's prompt line says while the police are after him; null otherwise. */
   prompt: string | null = null;
-  /**
-   * Whether posts stand on the road at all. A dream can ask for none (dreams/dream.ts
-   * `police`); set before the first step, so no post is ever read.
-   */
-  postsEnabled = true;
 
   constructor(
     private readonly world: GameWorld,
@@ -499,7 +494,6 @@ export class PolicePatrol {
    * is placed).
    */
   private refreshPosts(): void {
-    if (!this.postsEnabled) return;
     const s = this.playerS;
     if (s - POST_READ_LEAD_M >= this.postsFrom && s + POST_READ_LEAD_M <= this.postsTo) return;
     for (const [key, post] of this.posts) {

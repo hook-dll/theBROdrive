@@ -52,6 +52,7 @@ export type FoleyEvent =
   | 'mount'
   | 'detach'
   | 'drop'
+  | 'coin'
   | 'refused';
 
 export type FoleyContinuous = 'scrub' | 'pour' | 'spray' | null;
@@ -295,6 +296,11 @@ export class Foley {
         break;
       case 'drop':
         this.mixer.burst(this.out, { gain: 0.24, frequency: 220, q: 0.9, decay: 0.14, type: 'lowpass' });
+        break;
+      case 'coin':
+        // One coin down a slot: a bright clink and the little ring of it landing.
+        this.mixer.blip(this.out, { gain: 0.06, frequency: 3300, endFrequency: 2900, decay: 0.05 });
+        this.mixer.burst(this.out, { gain: 0.09, frequency: 2400, q: 4, decay: 0.04 });
         break;
       case 'refused':
         // Too heavy / wrong fuel: a dull, deliberately unsatisfying knock.

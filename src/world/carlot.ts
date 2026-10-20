@@ -8,34 +8,26 @@ import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { ChunkContext } from './chunks';
 import type { Poi } from './poi';
-import type { PoiStock } from './poislots';
 import { box, C } from './poi/kit';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
 import { emptyCabin } from '../vehicle/cabin';
 
 /**
- * The car lots: one car for sale, with its price on a board beside it, at some of the
- * stops that have a car field. Cars are bought, never found.
+ * The car lots: one car for sale, with its price on a board beside it and a key box
+ * (world/keybox.ts) on a post by the board, at the settlements whose layout has a lot.
+ * Cars are bought, never found.
  *
- * Which stops have a lot, and which model stands on it, are pure functions of the seed,
- * the stop and its km band. The car itself is a real car in world state from the moment
- * its chunk enters the physics band (`car_add`), carrying `lotPrice` until it is bought
- * (`car_buy`): nobody sits in it before that. Car prices are flat (`carPrice`); what
- * changes down the road is which models stand on the lots: dearer ones further on, the
- * foreign cars only past `FOREIGN_FROM_KM`.
+ * Which settlements have a lot is their layout's (world/settlement.ts); which model
+ * stands on it is a pure function of the seed, the stop and its km band. The car itself
+ * is a real car in world state from the moment its chunk enters the physics band
+ * (`car_add`), carrying `lotPrice` until it is bought: coins fed into the key box add up
+ * in `lotPaid` (`lot_pay`), and taking the key from its drawer is `car_buy`. Nobody sits
+ * in it before that. Car prices are flat (`carPrice`); what changes down the road is
+ * which models stand on the lots: dearer ones further on, the foreign cars only past
+ * `FOREIGN_FROM_KM`.
  */
 
 const LOT_DOMAIN = 0x4c4f5431; // 'LOT1'
-
-/** Chance a stop's car field has a car for sale, by what the stop is. */
-const LOT_CHANCE: Readonly<Record<PoiStock, number>> = {
-  salvage: 0.55,
-  scrap: 0.4,
-  fuel: 0.3,
-  store: 0.25,
-  home: 0.15,
-  mast: 0.1,
-};
 
 /** Kilometres per lot band: the model on a lot is drawn per band. */
 const LOT_BAND_KM = 50;
@@ -49,12 +41,11 @@ const FOREIGN: Readonly<Record<string, true>> = { kit_nexia: true, kit_espero: t
 const START_MODEL_ID = 'kit_vaz1111';
 
 /**
- * The car for sale in a field of `slotCount` places, or null when this stop has none: the
- * slot it takes and the model standing there.
+ * The model standing on a stop's lot, or null when nothing on the road's pool is cheap
+ * enough here. Whether a stop has a lot at all is its settlement layout's call
+ * (world/settlement.ts).
  */
-export function lotOffer(seed: number, poi: Poi, slotCount: number): { slot: number; def: CarModelDef } | null {
-  if (slotCount === 0) return null;
-  if (hash01(poi.variantSeed, LOT_DOMAIN, 0) >= LOT_CHANCE[poi.stock]) return null;
+export function lotModel(seed: number, poi: Poi): CarModelDef | null {
   const band = Math.floor(poi.s / 1000 / LOT_BAND_KM);
   const bandKm = band * LOT_BAND_KM;
   const ceiling = LOT_PRICE_BASE + bandKm * LOT_PRICE_PER_KM;
@@ -65,10 +56,7 @@ export function lotOffer(seed: number, poi: Poi, slotCount: number): { slot: num
       && (bandKm >= FOREIGN_FROM_KM || !FOREIGN[def.id]),
   );
   if (pool.length === 0) return null;
-  return {
-    slot: Math.floor(hash01(poi.variantSeed, LOT_DOMAIN, 1) * slotCount),
-    def: pool[Math.floor(hash01(seed, LOT_DOMAIN, band, poi.index) * pool.length)]!,
-  };
+  return pool[Math.floor(hash01(seed, LOT_DOMAIN, band, poi.index) * pool.length)]!;
 }
 
 /**

@@ -17,7 +17,7 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
 import { CABIN_PLACES, cabinIndex, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
 import type { CarStats, PartInstance } from '../parts/registry';
@@ -67,9 +67,9 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
-import { coinsHeld, fuelPricePerLitre, itemPrice, spendCoins } from '../economy/economy';
-import type { MarketField, VendingMachine } from '../world/market';
-import { aimVending, PUMP_SLOT, vendingTrayPoint, type VendingAim } from '../world/vending';
+import { coinsHeld, itemPrice, spendCoins } from '../economy/economy';
+import type { MarketField } from '../world/market';
+import { aimVending, vendingTrayPoint, type VendingAim } from '../world/vending';
 import type { FixtureContext, FixtureField } from '../world/fixturefield';
 
 /** How far the eye ray reaches for picking. */
@@ -122,8 +122,6 @@ const BODY_SPONGE_DIRT_RATE = 0.7;
 const BODY_SPONGE_SCRATCH_RATE = 0.12;
 /** Fuel poured per second from a held can. */
 const FUEL_POUR_RATE = 1.2;
-/** Litres a FUEL machine's nozzle pours per second into a held can. */
-const PUMP_RATE = 1.5;
 /**
  * Seconds of held spray for one full coat. Long enough to read as work, short
  * enough that a colour change is one sitting rather than a chore.
@@ -166,27 +164,8 @@ type Target =
   | { kind: 'loose-part'; partId: string }
   /** A vending machine's front; `slot` is the window slot aimed at, or -1 off the window. */
   | { kind: 'vending'; machineId: string; slot: number }
-  /** An `InteractionFixture`, by its index in the list the composition root gave. */
-  | { kind: 'fixture'; index: number }
   /** A streamed `WorldFixture` (world/fixturefield.ts), by id. */
   | { kind: 'world-fixture'; id: string };
-
-/**
- * A fixed thing put in reach from outside the world catalogue — a dream's parcel
- * terminal (dreams/terminal.ts) — that aims, prompts and acts through itself, so the
- * interaction knows nothing about what it is.
- */
-export interface InteractionFixture {
-  /**
-   * Distance along the eye ray to its face, metres, or Infinity for a miss. The eye is
-   * in the physics frame (relative to the floating origin); `dx..dz` a unit direction.
-   */
-  aim(eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number, range: number): number;
-  /** The prompt while it is aimed at, or null for none. */
-  prompt(): string | null;
-  /** [F] on it; the sound it makes, or null. */
-  act(): FoleyEvent | null;
-}
 
 /**
  * What one tick of interaction produced: the prompt to draw, at most one
@@ -280,12 +259,12 @@ interface Reservoir {
   readonly label: string;
   readonly level: number;
   readonly capacity: number;
-  /** The one fluid this reservoir takes. */
-  readonly wants: FluidKind;
+  /** The one fluid this reservoir takes; null for an empty can, which takes any. */
+  readonly wants: FluidKind | null;
 }
 
 function reservoirAccepts(reservoir: Reservoir, fluid: FluidKind): boolean {
-  return fluid === reservoir.wants;
+  return reservoir.wants === null || fluid === reservoir.wants;
 }
 
 /** `oil 3.2/4.0 L`, or `oil full — 4.0 L` once topping up would do nothing. */
@@ -701,14 +680,6 @@ export class Interaction {
   private readonly towEyeD = { x: 0, y: 0, z: 0 };
   /** Where the eye ray met a vending machine's front, reused in place; see `aimVending`. */
   private readonly vendAim: VendingAim = { distance: 0, slot: -1 };
-  /**
-   * The FUEL nozzle's running sale. `credit` is litres already paid for and not yet
-   * poured at `machineId` (a coin buys `1 / price` litres, so the last coin of a fill
-   * leaves change in the machine for the next one); `litres` and `coins` count up over
-   * the current hold for the prompt; `dry` is set once a hold has run out of coins.
-   * In memory only: a reload forgets the change, never more than one coin's worth.
-   */
-  private readonly pump = { machineId: '', credit: 0, litres: 0, coins: 0, dry: false };
   /** What a world fixture may do to the player (world/fixturefield.ts); one object, read live. */
   private readonly fixtureContext: FixtureContext = (() => {
     const self = this;
@@ -777,8 +748,6 @@ export class Interaction {
     private readonly raceCoins: (itemId: string) => number,
     /** The vending machines and lot cars in the physics band (world/market.ts). */
     private readonly market: MarketField,
-    /** Fixed things in reach that are not world catalogue items; see `InteractionFixture`. */
-    private readonly fixtures: readonly InteractionFixture[],
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,
   ) {
@@ -949,11 +918,7 @@ export class Interaction {
     }
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
-    // F or LMB held at a FUEL machine's nozzle fills the can in hand.
     const aimedAt = resolved.target;
-    if (aimedAt.kind === 'vending' && aimedAt.slot === PUMP_SLOT && (input.mountDown || input.usePrimary)) {
-      this.pumpFuel(dt, aimedAt.machineId, mountPressed || primaryPressed);
-    }
     // F held on a world fixture (a barrel's tap, a wheel being turned).
     if (aimedAt.kind === 'world-fixture' && input.mountDown) {
       const fixture = this.worldFixtures.get(aimedAt.id);
@@ -1718,10 +1683,6 @@ export class Interaction {
       }
     }
 
-    for (let index = 0; index < this.fixtures.length; index++) {
-      const distance = this.fixtures[index]!.aim(eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
-      if (distance <= RAY_RANGE) keep(distance, { kind: 'fixture', index });
-    }
     for (const fixture of this.worldFixtures.values()) {
       const distance = fixture.aim(this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
       if (distance <= RAY_RANGE) keep(distance, { kind: 'world-fixture', id: fixture.id });
@@ -2318,15 +2279,12 @@ export class Interaction {
     if (t.kind === 'aircraft') return '[F] board the plane';
 
     if (t.kind === 'vending') return this.vendingPrompt(t.machineId, t.slot);
-    if (t.kind === 'fixture') return this.fixtures[t.index]?.prompt() ?? null;
     if (t.kind === 'world-fixture') return this.worldFixtures.get(t.id)?.prompt(this.fixtureContext) ?? null;
     const lot = this.lotCarAimed(resolved);
     if (lot) {
-      const coins = coinsHeld(this.world.state);
-      const label = carModel(lot.modelId).label;
-      return coins >= (lot.lotPrice ?? 0)
-        ? `[F] buy ${label} — ${lot.lotPrice} coins`
-        : `${label} for sale — ${lot.lotPrice} coins · you have ${coins}`;
+      const paid = lot.lotPaid ?? 0;
+      const owing = paid > 0 ? ` · ${paid} paid` : '';
+      return `${carModel(lot.modelId).label} for sale — ${lot.lotPrice} coins${owing} · pay at the key box`;
     }
 
 
@@ -2506,10 +2464,10 @@ export class Interaction {
       const item = this.world.state.looseItems[t.itemId]?.item;
       if (item?.type !== 'fluid_can') return null;
       return {
-        label: `${item.fluid} can`,
+        label: item.fluid === null ? 'empty can' : `${item.fluid} can`,
         level: item.litres,
         capacity: item.capacity,
-        // A can holds one fluid and mixes nothing.
+        // A can holds one fluid and mixes nothing; an empty one takes any.
         wants: item.fluid,
         sink: 'loose-can',
         itemId: t.itemId,
@@ -2533,20 +2491,19 @@ export class Interaction {
 
   /**
    * What pouring this can into the aimed reservoir would do, or why it would not.
-   * Each reservoir takes exactly one fluid.
    * An empty can drops to the bare level readout rather than announcing itself. The
    * can's own litres are already on the inventory slot, and the tank is not the
    * place to report them: what the bonnet is for is how much is in the CAR.
    */
   private pourPrompt(can: FluidCanItem, reservoir: Reservoir): string {
-    if (!reservoirAccepts(reservoir, can.fluid)) {
-      return `${fillReadout(reservoir)} — ${can.fluid} does not go in there`;
-    }
+    const fluid = can.fluid;
     // Nothing to pour, or nowhere to put it: the level is the whole answer.
-    if (can.litres <= 0 || reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) {
-      return fillReadout(reservoir);
+    if (fluid === null || can.litres <= 0) return fillReadout(reservoir);
+    if (!reservoirAccepts(reservoir, fluid)) {
+      return `${fillReadout(reservoir)} — ${fluid} does not go in there`;
     }
-    return `[LMB] pour ${can.fluid} — ${fillReadout(reservoir)}`;
+    if (reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) return fillReadout(reservoir);
+    return `[LMB] pour ${fluid} — ${fillReadout(reservoir)}`;
   }
 
   private toolPrompt(held: Item | null, part: PartInstance): string | null {
@@ -2703,10 +2660,11 @@ export class Interaction {
    * One code path for all three fluids. The kind decides only which number goes up.
    */
   private pourFluid(dt: number, can: FluidCanItem, resolved: Resolved): void {
-    if (can.litres <= 0) return;
+    const fluid = can.fluid;
+    if (fluid === null || can.litres <= 0) return;
 
     const reservoir = this.aimedReservoir(resolved);
-    if (!reservoir || !reservoirAccepts(reservoir, can.fluid)) return;
+    if (!reservoir || !reservoirAccepts(reservoir, fluid)) return;
 
     const room = reservoir.capacity - reservoir.level;
     if (room <= FLUID_FULL_EPSILON) return;
@@ -2718,14 +2676,14 @@ export class Interaction {
     switch (reservoir.sink) {
       case 'car': {
         if (!this.world.state.cars[reservoir.carId]) return;
-        if (can.fluid === 'petrol') {
+        if (fluid === 'petrol') {
           this.world.apply({ t: 'car_fuel', carId: reservoir.carId, litres: level });
         } else {
           // Oil and water accept nothing but themselves, so the can names the channel.
           this.world.apply({
             t: 'car_fluid',
             carId: reservoir.carId,
-            fluid: can.fluid,
+            fluid,
             litres: level,
           });
         }
@@ -2737,11 +2695,11 @@ export class Interaction {
         break;
       }
       case 'loose-can': {
-        this.world.apply({ t: 'loose_item_fluid', itemId: reservoir.itemId, litres: level });
+        this.world.apply({ t: 'loose_item_fluid', itemId: reservoir.itemId, fluid, litres: level });
         break;
       }
     }
-    can.litres -= poured;
+    drainCan(can, poured);
     this.continuous = 'pour';
   }
 
@@ -2760,10 +2718,6 @@ export class Interaction {
       return;
     }
 
-    if (t.kind === 'fixture') {
-      this.sound = this.fixtures[t.index]?.act() ?? null;
-      return;
-    }
     if (t.kind === 'world-fixture') {
       this.sound = this.worldFixtures.get(t.id)?.press(this.fixtureContext) ?? null;
       return;
@@ -3019,87 +2973,16 @@ export class Interaction {
     const machine = this.market.machine(machineId);
     if (!machine) return null;
     const coins = coinsHeld(this.world.state);
-    if (slot === PUMP_SLOT) return this.pumpPrompt(machine, coins);
-    if (slot < 0) return `${machine.title} vending machine — you have ${coins} coin${coins === 1 ? '' : 's'}`;
+    if (slot < 0) return `МАГАЗИН — you have ${coins} coin${coins === 1 ? '' : 's'}`;
     const item = machine.stock[slot];
     if (!item) return 'empty';
     if (this.world.state.vendingSold[machine.id]?.includes(slot)) return 'sold out';
     const price = itemPrice(item, machine.km);
     const cost = `${price} coin${price === 1 ? '' : 's'}`;
-    // A can in the window says its size, and whether anything is in it.
-    const label = item.type === 'fluid_can'
-      ? `${litreText(item.capacity)} ${item.fluid} can${item.litres > 0 ? ` (${litreText(item.litres)})` : ', empty'}`
-      : itemLabel(item);
+    const label = itemLabel(item);
     return coins >= price
       ? `[F] buy ${label} — ${cost}`
       : `${label} — ${cost} · you have ${coins}`;
-  }
-
-  /**
-   * The nozzle under the crosshair: the price of a litre here and, with a petrol can in
-   * hand, how full it is and what this hold has poured and cost so far.
-   */
-  private pumpPrompt(machine: VendingMachine, coins: number): string {
-    const head = `petrol ${fuelPricePerLitre(machine.km).toFixed(1)} coins/L`;
-    const can = this.inventory.held;
-    if (can?.type !== 'fluid_can') return `${head} — hold a can to the nozzle (empty cans in the window)`;
-    if (can.fluid !== 'petrol') return `${head} — not into a ${can.fluid} can`;
-    const pump = this.pump;
-    const here = pump.machineId === machine.id;
-    const level = `can ${can.litres.toFixed(1)}/${litreText(can.capacity)}`;
-    const sale = here && pump.litres > 0 ? ` · +${pump.litres.toFixed(1)} L for ${pump.coins} coin${pump.coins === 1 ? '' : 's'}` : '';
-    if (can.litres >= can.capacity - FLUID_FULL_EPSILON) return `${level} full${sale}`;
-    if (coins <= 0 && !(here && pump.credit > FLUID_FULL_EPSILON)) return `${head} — out of coins · ${level}${sale}`;
-    return `[F] hold to fill — ${head} · ${level}${sale} · ${coins} coin${coins === 1 ? '' : 's'}`;
-  }
-
-  /**
-   * One tick of the nozzle held to the can in hand. Coins are taken one at a time as the
-   * litres they buy run out, so the fill stops on the tick the can is full or the pack has
-   * no coin for the next drop; whatever a last coin bought and the can had no room for
-   * stays in the machine as `credit`. A press that pours nothing is refused, and so is the
-   * tick a running fill runs out of coins.
-   */
-  private pumpFuel(dt: number, machineId: string, pressed: boolean): void {
-    const machine = this.market.machine(machineId);
-    const can = this.inventory.held;
-    const pump = this.pump;
-    if (pump.machineId !== machineId) {
-      pump.machineId = machineId;
-      pump.credit = 0;
-      pump.litres = 0;
-      pump.coins = 0;
-    }
-    if (pressed) {
-      pump.litres = 0;
-      pump.coins = 0;
-      pump.dry = false;
-    }
-    if (!machine?.pump || can?.type !== 'fluid_can' || can.fluid !== 'petrol') {
-      if (pressed) this.sound = 'refused';
-      return;
-    }
-    const room = can.capacity - can.litres;
-    if (room <= FLUID_FULL_EPSILON) {
-      if (pressed) this.sound = 'refused';
-      return;
-    }
-    const want = Math.min(PUMP_RATE * dt, room);
-    const litresPerCoin = 1 / fuelPricePerLitre(machine.km);
-    while (pump.credit < want && spendCoins(this.inventory, 1)) {
-      pump.credit += litresPerCoin;
-      pump.coins += 1;
-    }
-    const poured = Math.min(want, pump.credit);
-    if (poured < want && !pump.dry) {
-      pump.dry = true;
-      this.sound = 'refused';
-    }
-    if (poured <= 0) return;
-    can.litres += poured;
-    pump.credit -= poured;
-    pump.litres += poured;
-    this.continuous = 'pour';
   }
 
   /**
@@ -3124,16 +3007,10 @@ export class Interaction {
 
   private tryEnter(resolved: Resolved): void {
     if (!resolved.vehicle || !resolved.carId) return;
-    // A car on a lot is bought before anyone sits in it: F there pays.
-    const lot = this.lotCarAimed(resolved);
-    if (lot) {
-      if (lot.lotPrice !== undefined && spendCoins(this.inventory, lot.lotPrice)) {
-        this.world.apply({ t: 'car_buy', carId: lot.id });
-        this.market.carSold(lot.id);
-        this.sound = 'pickup';
-      } else {
-        this.sound = 'refused';
-      }
+    // A car on a lot is not the player's until he takes its key from the key box beside
+    // it (world/keybox.ts): F at the car itself only refuses.
+    if (this.lotCarAimed(resolved)) {
+      this.sound = 'refused';
       return;
     }
     const target = resolved.target;
@@ -3172,7 +3049,7 @@ export class Interaction {
       target.carId !== resolved.carId ||
       resolved.vehicleDist >= VEHICLE_RANGE
     ) return;
-    if (this.cabinRefusal() !== null) {
+    if (this.cabinRefusal() !== null || this.world.state.cars[resolved.carId]?.lotPrice !== undefined) {
       this.sound = 'refused';
       return;
     }

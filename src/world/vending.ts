@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { fuelPricePerLitre } from '../economy/economy';
 import type { GameWorld } from '../game/state';
-import { makeSponge, type Item } from '../items/items';
-import { IMPORT_ENGINE_IDS, type PartInstance } from '../parts/registry';
+import type { Item, ShadeTint } from '../items/items';
+import { STICKERS } from '../items/stickercatalog';
+import type { PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import type { ChunkContext } from './chunks';
 import type { Poi } from './poi';
@@ -22,115 +22,51 @@ import {
 } from './market';
 
 /**
- * The vending machines: where everything the road used to leave lying about is bought.
+ * The МАГАЗИН machines: where the small things a driver needs are bought.
  *
- * One stands at every stop with a building (every POI but the masts), by the wall that
- * faces the road, so it is seen from the asphalt. Its window is four rows of up to three
- * units; each row holds one ware. What it holds is a pure function of the stop (its seed
- * and its km band), so the machine needs no saved stock of its own: `vendingSold` records
- * which slots were paid for, and those stay empty for good. A machine never restocks.
+ * One kind of machine, the same everywhere. Its window is four rows of three units; what
+ * it holds is a pure function of the stop's seed, so the machine needs no saved stock of
+ * its own: `vendingSold` records which slots were paid for, and those stay empty for
+ * good. A machine never restocks.
  *
- * Petrol is not in the window. A FUEL machine has a nozzle: a petrol can held to it is
- * filled by the litre for as long as the player holds F (or LMB), paid coin by coin at
- * `fuelPricePerLitre`, until the can is full or the coins run out. The window sells the
- * empty cans to fill and the engine's other two fluids in bottles. The pump never runs dry.
+ * Every machine draws from one short list (game-design2.md §8): one or two spray cans of
+ * a random paint (the colour stands in the window), sun shades of a random tint, an air
+ * filter, a turbine, empty cans of 5, 10 or 20 litres, bubble gum and four or five
+ * envelopes of random stickers. Not every machine has every kind, and slots past the
+ * last ware stay empty. No fluid is sold: an empty can is filled at a stop's barrels
+ * (world/barrels.ts) or from another can.
  *
  * Prices are not set here: the economy prices each item where the machine stands
  * (`itemPrice`, economy/economy.ts), so further down the road the same can costs more.
  */
 
 /** Domain tag for the vending rolls. */
-const VENDING_DOMAIN = 0x56454e31; // 'VEN1'
-/** Kilometres per assortment band: rarer wares unlock band by band, not metre by metre. */
-const KM_BAND = 25;
+const VENDING_DOMAIN = 0x56454e32; // 'VEN2'
 
-export type VendingAssortment = 'fuel' | 'parts' | 'mixed';
+type Ware = 'spray' | 'shades' | 'air_filter' | 'turbine' | 'can5' | 'can10' | 'can20' | 'gum' | 'sticker';
 
-/** `VendingAim.slot` when the eye ray meets a FUEL machine's nozzle. */
-export const PUMP_SLOT = -2;
-
-type Ware =
-  | 'can20'
-  | 'can10'
-  | 'can5'
-  | 'oil5'
-  | 'water5'
-  | 'gum'
-  | 'medicine'
-  | 'sponge'
-  | 'spray'
-  | 'air_filter'
-  | 'radiator'
-  | 'turbine'
-  | 'engine';
-
-/** A ware a machine may stock, by weight, from `fromKm` down the road on. */
-interface WareRow {
-  readonly ware: Ware;
-  readonly weight: number;
-  readonly fromKm: number;
-}
-
-/**
- * What each kind of machine sells. A fuel machine's window is empty petrol cans in three
- * sizes, for its nozzle to fill, and the engine's other two fluids; a parts machine sells
- * the service parts, the turbocharger from 75 km on and an imported engine past 150 km; a
- * mixed one a bit of everything a driver runs out of, a small empty can among it.
- */
-const POOLS: Readonly<Record<VendingAssortment, readonly WareRow[]>> = {
-  fuel: [
-    { ware: 'can10', weight: 2.5, fromKm: 0 },
-    { ware: 'can5', weight: 2, fromKm: 0 },
-    { ware: 'can20', weight: 1.5, fromKm: 0 },
-    { ware: 'oil5', weight: 2, fromKm: 0 },
-    { ware: 'water5', weight: 2, fromKm: 0 },
-    { ware: 'gum', weight: 0.5, fromKm: 0 },
-  ],
-  parts: [
-    { ware: 'air_filter', weight: 3, fromKm: 0 },
-    { ware: 'oil5', weight: 1.5, fromKm: 0 },
-    { ware: 'water5', weight: 1, fromKm: 0 },
-    { ware: 'sponge', weight: 1.2, fromKm: 0 },
-    { ware: 'spray', weight: 1, fromKm: 0 },
-    { ware: 'radiator', weight: 1.2, fromKm: 25 },
-    { ware: 'turbine', weight: 0.6, fromKm: 75 },
-    { ware: 'engine', weight: 0.35, fromKm: 150 },
-  ],
-  mixed: [
-    { ware: 'can5', weight: 1.2, fromKm: 0 },
-    { ware: 'oil5', weight: 1.5, fromKm: 0 },
-    { ware: 'water5', weight: 1.5, fromKm: 0 },
-    { ware: 'gum', weight: 1.2, fromKm: 0 },
-    { ware: 'medicine', weight: 0.8, fromKm: 0 },
-    { ware: 'sponge', weight: 1, fromKm: 0 },
-    { ware: 'air_filter', weight: 1, fromKm: 0 },
-    { ware: 'spray', weight: 0.6, fromKm: 0 },
-  ],
-};
-
-const TITLE: Readonly<Record<VendingAssortment, string>> = { fuel: 'FUEL', parts: 'PARTS', mixed: 'GOODS' };
-const BODY_COLOUR: Readonly<Record<VendingAssortment, number>> = {
-  fuel: C.fadedRed,
-  parts: C.fadedBlue,
-  mixed: C.fadedGreen,
-};
+const SHADE_TINTS: readonly ShadeTint[] = ['green', 'yellow', 'red'];
+const CAN_WARES: readonly Ware[] = ['can5', 'can5', 'can10', 'can10', 'can20'];
 
 /** How each ware looks in the window: a coloured block of its size, metres [w, h, d]. */
 const PRODUCT_LOOK: Readonly<Record<Ware, { readonly colour: number; readonly size: readonly [number, number, number] }>> = {
-  can20: { colour: 0xb03a2e, size: [0.15, 0.17, 0.08] },
-  can10: { colour: 0xb03a2e, size: [0.12, 0.14, 0.07] },
-  can5: { colour: 0xb03a2e, size: [0.1, 0.12, 0.06] },
-  oil5: { colour: 0x3a3f4c, size: [0.1, 0.12, 0.06] },
-  water5: { colour: 0x2f6fa8, size: [0.1, 0.12, 0.06] },
-  gum: { colour: 0xd46a9a, size: [0.1, 0.05, 0.04] },
-  medicine: { colour: 0xe8e4da, size: [0.05, 0.09, 0.05] },
-  sponge: { colour: 0xd8b84a, size: [0.12, 0.06, 0.07] },
   spray: { colour: 0xffffff, size: [0.05, 0.15, 0.05] },
+  shades: { colour: 0x28251f, size: [0.13, 0.045, 0.03] },
   air_filter: { colour: 0xc87a35, size: [0.14, 0.07, 0.1] },
-  radiator: { colour: 0x7a8288, size: [0.15, 0.15, 0.03] },
   turbine: { colour: 0x9a9a92, size: [0.13, 0.12, 0.1] },
-  engine: { colour: 0x4a4f52, size: [0.16, 0.16, 0.1] },
+  can20: { colour: 0x5a6238, size: [0.15, 0.17, 0.08] },
+  can10: { colour: 0x5a6238, size: [0.12, 0.14, 0.07] },
+  can5: { colour: 0x5a6238, size: [0.1, 0.12, 0.06] },
+  gum: { colour: 0xd46a9a, size: [0.1, 0.05, 0.04] },
+  sticker: { colour: 0xe6dcc2, size: [0.12, 0.085, 0.012] },
 };
+
+/** A pair of shades shows its lens colour in the window, as the item itself does. */
+const SHADE_LOOK: Readonly<Record<ShadeTint, number>> = { green: 0x416a42, yellow: 0xb78e32, red: 0x8b3934 };
+
+/** The machine's paint and its head board. */
+const BODY_COLOUR = C.fadedBlue;
+const TITLE = 'МАГАЗИН';
 
 // The cabinet, local metres: base centre at the origin, front facing -Z.
 const W = 0.9;
@@ -153,38 +89,6 @@ const TRAY_X = 0.12;
 const TRAY_Z = FRONT - 0.1;
 const TRAY_TOP = 0.26;
 const TRAY_MOUTH_H = 0.3;
-/**
- * The FUEL machine's nozzle, hung in its holster under the coin panel, on the viewer's
- * right: the box the eye ray takes for it, in the front's local x and height.
- */
-const PUMP_X0 = -0.42;
-const PUMP_X1 = -0.18;
-const PUMP_Y0 = 0.4;
-const PUMP_Y1 = 0.88;
-const PUMP_X = -0.29;
-
-/**
- * Which machine a stop has, by its kind and seed, or null for a mast (no building to
- * stand it by). FUEL is the commonest everywhere but at a store: a forecourt is nearly
- * always one, a home or a wreck most often one, a scrapyard sells parts as often.
- */
-export function vendingAssortment(poi: Poi): VendingAssortment | null {
-  const roll = hash01(poi.variantSeed, VENDING_DOMAIN, 0);
-  switch (poi.stock) {
-    case 'fuel':
-      return roll < 0.85 ? 'fuel' : 'mixed';
-    case 'store':
-      return roll < 0.4 ? 'parts' : roll < 0.75 ? 'mixed' : 'fuel';
-    case 'home':
-      return roll < 0.6 ? 'fuel' : 'mixed';
-    case 'salvage':
-      return roll < 0.5 ? 'parts' : 'fuel';
-    case 'scrap':
-      return roll < 0.5 ? 'fuel' : roll < 0.8 ? 'parts' : 'mixed';
-    case 'mast':
-      return null;
-  }
-}
 
 /** The machine's key in `WorldState.vendingSold`. */
 export function vendingMachineId(poiIndex: number): string {
@@ -192,80 +96,86 @@ export function vendingMachineId(poiIndex: number): string {
 }
 
 function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
-  const can = (fluid: 'petrol' | 'oil' | 'water', capacity: number, litres: number): Item => ({
-    type: 'fluid_can',
-    id,
-    fluid,
-    capacity,
-    litres,
-  });
+  const can = (capacity: number): Item => ({ type: 'fluid_can', id, fluid: null, capacity, litres: 0 });
   const part = (variantId: string): Item => {
     const instance: PartInstance = { id, variantId, dirt: 0, rust: 0 };
     if (variantId === 'air_filter') instance.clog = 0;
     return { type: 'part', id, part: instance };
   };
   switch (ware) {
-    case 'can20':
-      return can('petrol', 20, 0);
-    case 'can10':
-      return can('petrol', 10, 0);
-    case 'can5':
-      return can('petrol', 5, 0);
-    case 'oil5':
-      return can('oil', 5, 5);
-    case 'water5':
-      return can('water', 5, 5);
-    case 'gum':
-      return { type: 'bubble_gum', id, charges: 5 };
-    case 'medicine':
-      return { type: 'medicine', id };
-    case 'sponge':
-      return makeSponge(id, hash01(seed, VENDING_DOMAIN, slot, 41));
     case 'spray':
       return { type: 'spray_can', id, paint: pick(CAR_PAINTS, seed, VENDING_DOMAIN, slot, 43).hex, charge: 1 };
+    case 'shades':
+      return { type: 'sun_shades', id, tint: pick(SHADE_TINTS, seed, VENDING_DOMAIN, slot, 45) };
     case 'air_filter':
       return part('air_filter');
-    case 'radiator':
-      return part('radiator');
     case 'turbine':
       return part('turbine_standard');
-    case 'engine':
-      return part(pick(IMPORT_ENGINE_IDS, seed, VENDING_DOMAIN, slot, 47));
+    case 'can5':
+      return can(5);
+    case 'can10':
+      return can(10);
+    case 'can20':
+      return can(20);
+    case 'gum':
+      return { type: 'bubble_gum', id, charges: 5 };
+    case 'sticker':
+      return {
+        type: 'sticker_envelope',
+        id,
+        stickerKind: pick(STICKERS, seed, VENDING_DOMAIN, slot, 47).kind,
+        completedContractId: id,
+      };
   }
 }
 
 /**
- * What a machine was stocked with, by slot, and the ware behind each (for its look).
- * Each row draws one ware from the pool its km band has unlocked and holds one to three
- * of it; an engine fills its row alone.
+ * The wares a machine was stocked with, in window order: each kind is there by its own
+ * roll and in its own count, and a machine that drew more than its window holds gives
+ * up gum, then cans, then a sticker until it fits.
  */
-export function vendingStock(
+function vendingWares(seed: number): Ware[] {
+  const roll = (k: number): number => hash01(seed, VENDING_DOMAIN, k);
+  const count = (k: number, chance: number, min: number, max: number): number =>
+    roll(k) < chance ? min + Math.floor(roll(k + 1) * (max - min + 1)) : 0;
+  const counts = {
+    spray: count(10, 0.85, 1, 2),
+    shades: count(12, 0.6, 1, 1),
+    air_filter: count(14, 0.6, 1, 1),
+    turbine: count(16, 0.3, 1, 1),
+    cans: count(18, 0.9, 1, 3),
+    gum: count(20, 0.7, 1, 2),
+    sticker: count(22, 0.85, 4, 5),
+  };
+  const total = (): number => Object.values(counts).reduce((sum, n) => sum + n, 0);
+  while (total() > VENDING_SLOTS && counts.gum > 0) counts.gum--;
+  while (total() > VENDING_SLOTS && counts.cans > 1) counts.cans--;
+  while (total() > VENDING_SLOTS && counts.sticker > 4) counts.sticker--;
+  const wares: Ware[] = [];
+  const add = (ware: Ware, n: number): void => {
+    for (let i = 0; i < n; i++) wares.push(ware);
+  };
+  add('spray', counts.spray);
+  add('shades', counts.shades);
+  add('air_filter', counts.air_filter);
+  add('turbine', counts.turbine);
+  for (let i = 0; i < counts.cans; i++) wares.push(pick(CAN_WARES, seed, VENDING_DOMAIN, 30 + i));
+  add('gum', counts.gum);
+  add('sticker', counts.sticker);
+  return wares;
+}
+
+/** What a machine was stocked with, by slot, and the ware behind each (for its look). */
+function vendingStock(
   world: GameWorld,
   poi: Poi,
-  assortment: VendingAssortment,
 ): { readonly items: (Item | null)[]; readonly wares: (Ware | null)[] } {
-  const bandKm = Math.floor(poi.s / 1000 / KM_BAND) * KM_BAND;
-  const pool = POOLS[assortment].filter((row) => row.fromKm <= bandKm);
-  const total = pool.reduce((sum, row) => sum + row.weight, 0);
   const items = new Array<Item | null>(VENDING_SLOTS).fill(null);
   const wares = new Array<Ware | null>(VENDING_SLOTS).fill(null);
-  for (let row = 0; row < VENDING_ROWS; row++) {
-    let roll = hash01(poi.variantSeed, VENDING_DOMAIN, bandKm, 10 + row) * total;
-    let ware = pool[0]!.ware;
-    for (const entry of pool) {
-      roll -= entry.weight;
-      if (roll < 0) {
-        ware = entry.ware;
-        break;
-      }
-    }
-    const units = ware === 'engine' ? 1 : 1 + Math.floor(hash01(poi.variantSeed, VENDING_DOMAIN, 20 + row) * VENDING_COLUMNS);
-    for (let column = 0; column < units; column++) {
-      const slot = row * VENDING_COLUMNS + column;
-      items[slot] = makeWare(ware, world.generatedPartId('vend', poi.index, slot), poi.variantSeed, slot);
-      wares[slot] = ware;
-    }
-  }
+  vendingWares(poi.variantSeed).forEach((ware, slot) => {
+    items[slot] = makeWare(ware, world.generatedPartId('vend', poi.index, slot), poi.variantSeed, slot);
+    wares[slot] = ware;
+  });
   return { items, wares };
 }
 
@@ -277,7 +187,6 @@ export function vendingStock(
 export function buildVendingMachine(
   ctx: ChunkContext,
   poi: Poi,
-  assortment: VendingAssortment,
   x: number,
   z: number,
   yaw: number,
@@ -297,15 +206,14 @@ export function buildVendingMachine(
   y -= 0.04;
 
   const id = vendingMachineId(poi.index);
-  const { items, wares } = vendingStock(ctx.world, poi, assortment);
+  const { items, wares } = vendingStock(ctx.world, poi);
   const sold = ctx.world.state.vendingSold[id] ?? [];
 
   const root = new THREE.Group();
   root.name = 'vending-machine';
   root.position.set(x - ctx.originX, y, z - ctx.originZ);
   root.rotation.y = yaw;
-  const body = BODY_COLOUR[assortment];
-  box(root, [W, H, D], [0, H / 2, 0], body);
+  box(root, [W, H, D], [0, H / 2, 0], BODY_COLOUR);
   box(root, [W + 0.04, 0.08, D + 0.04], [0, 0.04, 0], C.darkMetal);
   box(root, [W + 0.04, 0.05, D + 0.04], [0, H + 0.025, 0], C.darkMetal);
   // The window: a pale lit back, a frame and a shelf under each row.
@@ -325,30 +233,12 @@ export function buildVendingMachine(
   // The tray: a dark mouth tall enough for a 20 L can, and the ledge in front of it.
   box(root, [0.5, TRAY_MOUTH_H, 0.02], [TRAY_X, TRAY_TOP + TRAY_MOUTH_H / 2, FRONT - 0.005], 0x16191a);
   box(root, [0.5, 0.03, 0.2], [TRAY_X, TRAY_TOP - 0.015, TRAY_Z], C.darkMetal);
-  // The head sign naming what it sells.
-  const sign = new THREE.Mesh(SIGN_PLANE, signMaterial([TITLE[assortment]], '#f1e7c8', '#26221c', 512, 128));
+  // The head board: МАГАЗИН.
+  const sign = new THREE.Mesh(SIGN_PLANE, signMaterial([TITLE], '#f1e7c8', '#26221c', 512, 128));
   sign.scale.set(0.84, 0.21, 1);
   sign.position.set(0, 1.74, FRONT - 0.006);
   sign.rotation.y = Math.PI;
   root.add(sign);
-  const pump = assortment === 'fuel';
-  if (pump) {
-    // The nozzle in its holster under the coin panel, its hose looping down to the plinth
-    // and back into the cabinet, and over the panel the price of a litre here.
-    box(root, [0.14, 0.18, 0.05], [PUMP_X, 0.74, FRONT - 0.025], C.metal);
-    box(root, [0.06, 0.16, 0.06], [PUMP_X, 0.73, FRONT - 0.07], 0x141617);
-    box(root, [0.035, 0.035, 0.12], [PUMP_X, 0.8, FRONT - 0.12], 0x141617, [0.5, 0, 0]);
-    box(root, [0.04, 0.42, 0.04], [PUMP_X - 0.03, 0.44, FRONT - 0.08], 0x141617, [0, 0, 0.12]);
-    box(root, [0.04, 0.04, 0.14], [PUMP_X - 0.055, 0.23, FRONT - 0.06], 0x141617);
-    const board = new THREE.Mesh(
-      SIGN_PLANE,
-      signMaterial(['PETROL', `${fuelPricePerLitre(poi.s / 1000).toFixed(1)} /L`], '#1d1f1e', '#f2c14e', 256, 192),
-    );
-    board.scale.set(0.19, 0.15, 1);
-    board.position.set(PUMP_X, 1.51, FRONT - 0.006);
-    board.rotation.y = Math.PI;
-    root.add(board);
-  }
 
   const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(VENDING_SLOTS).fill(null);
   for (let slot = 0; slot < VENDING_SLOTS; slot++) {
@@ -356,7 +246,7 @@ export function buildVendingMachine(
     const item = items[slot];
     if (!ware || !item || sold.includes(slot)) continue;
     const look = PRODUCT_LOOK[ware];
-    const colour = item.type === 'spray_can' ? item.paint : look.colour;
+    const colour = item.type === 'spray_can' ? item.paint : item.type === 'sun_shades' ? SHADE_LOOK[item.tint] : look.colour;
     const row = Math.floor(slot / VENDING_COLUMNS);
     const column = slot % VENDING_COLUMNS;
     const floor = WIN_Y1 - (row + 1) * ROW_H + 0.008;
@@ -385,13 +275,11 @@ export function buildVendingMachine(
   );
   const machine: VendingMachine = {
     id,
-    title: TITLE[assortment],
     km: poi.s / 1000,
     x,
     y,
     z,
     yaw,
-    pump,
     stock: items,
     products,
   };
@@ -399,10 +287,7 @@ export function buildVendingMachine(
   registered.push(id);
 }
 
-/**
- * Where the eye ray meets a machine's front: its distance, and the window slot, the
- * nozzle (`PUMP_SLOT`) or -1.
- */
+/** Where the eye ray meets a machine's front: its distance, and the window slot or -1. */
 export interface VendingAim {
   distance: number;
   slot: number;
@@ -440,10 +325,6 @@ export function aimVending(
   if (hx < -W / 2 || hx > W / 2 || hy < 0 || hy > H) return false;
   out.distance = t;
   out.slot = -1;
-  if (machine.pump && hx >= PUMP_X0 && hx <= PUMP_X1 && hy >= PUMP_Y0 && hy <= PUMP_Y1) {
-    out.slot = PUMP_SLOT;
-    return true;
-  }
   if (hx >= WIN_X0 && hx <= WIN_X1 && hy >= WIN_Y0 && hy <= WIN_Y1) {
     const column = Math.min(VENDING_COLUMNS - 1, Math.floor((WIN_X1 - hx) / COL_W));
     const row = Math.min(VENDING_ROWS - 1, Math.floor((WIN_Y1 - hy) / ROW_H));

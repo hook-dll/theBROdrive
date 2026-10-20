@@ -852,7 +852,6 @@ bun tools/service.ts
 
 ```sh
 bun tools/traffic-bench.ts
-npx tsx tools/wreck-spacing.ts
 npx tsx tools/trunk-grid.ts
 npx tsx tools/anchor-parts.ts
 bun tools/runtime-lifecycle.ts
@@ -862,7 +861,6 @@ bun tools/autosave.ts
 Назначение:
 
 - traffic: catalogue-only ids, движение обеих сторон, свет, обгоны, no impacts, despawn;
-- wreck spacing: реальные footprint всех моделей не пересекаются в POI;
 - trunk grid: catalog contract и save migration общей сетки;
 - anchor parts: service parts не предлагаются на cosmetic anchors;
 - runtime lifecycle: load/unload/floating-origin/loose parts/trailer representative path;

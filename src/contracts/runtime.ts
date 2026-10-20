@@ -92,14 +92,4 @@ export class ContractRuntime {
     const wear = knock * RADIO_WEAR_PER_SCRATCH + (dropped ? RADIO_DROP_WEAR : 0);
     if (wear > 0) item.progress.condition = Math.max(0, (item.progress.condition ?? 1) - wear);
   }
-
-  /**
-   * A thing came off a seat in the cabin onto the floor or into a door (vehicle/cabin.ts
-   * `CabinRide`): a fragile radio takes it as it takes a drop.
-   */
-  fell(item: ContractCargoItem): void {
-    if (item.contractKind !== 'fragile_radio') return;
-    if (!item.progress) item.progress = defaultProgress();
-    item.progress.condition = Math.max(0, (item.progress.condition ?? 1) - RADIO_DROP_WEAR);
-  }
 }

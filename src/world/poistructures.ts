@@ -7,7 +7,7 @@ import { createVariantInstance, warmVariantAssets, type VariantInstance } from '
 import { MAST_IDS } from './poislots';
 
 /**
- * Every building the world scatters: the three masts built from the POI kit, then the
+ * Every building the world scatters: the two masts built from the POI kit, then the
  * fifty exterior-only dwellings. The story house is one of these dwellings, placed on its
  * own by src/story/sitebuild.ts rather than by the road's POI stream.
  *

@@ -27,9 +27,26 @@ import { type ChunkContext } from '../src/world/chunks';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
-import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
+import {
+  PoiProvider,
+  desertPoiClearOfRoad,
+  desertPoisBetween,
+  houseRect,
+  poisBetween,
+  rectGap,
+  standingHouses,
+  type GroundRect,
+} from '../src/world/poi';
 import { MarketField } from '../src/world/market';
-import { POI_SPACING, type PoiStock } from '../src/world/poislots';
+import { MAST_IDS, POI_SPACING } from '../src/world/poislots';
+import { laybyNear, laybyOuterAt } from '../src/world/layby';
+import {
+  roadsideStop,
+  SERVICE_HALF,
+  spotPose,
+  structureHalfExtents,
+  type SettlementSpot,
+} from '../src/world/settlement';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
   POI_STRUCTURES,
@@ -51,8 +68,6 @@ import {
   storySite,
 } from '../src/story/site';
 import { halfWidthAt } from '../src/world/roadprofile';
-import type { TrailerField } from '../src/vehicle/trailer';
-import type { WreckTrunkField } from '../src/world/wrecktrunks';
 import { installDocumentShim } from './domshim';
 
 // The story runway is laid in the road's own asphalt, which paints its maps on a 2D
@@ -163,24 +178,22 @@ const MAX_RESIDUAL_M = 0.6;
 // --- 2. the whole catalogue is reachable -------------------------------------
 {
   const seen = new Set<number>();
-  const perStock = new Map<PoiStock, number>();
+  let settlements = 0;
+  let lone = 0;
   for (let index = 1; index <= 4000; index++) {
     const spacing = POI_SPACING;
     const pois = poisBetween(SEED, index * spacing - 1, index * spacing + 1, spacing);
     const poi = pois[0];
     if (!poi) continue;
     seen.add(poi.structure);
-    perStock.set(poi.stock, (perStock.get(poi.stock) ?? 0) + 1);
+    if (roadsideStop(SEED, index)?.layout.settlement) settlements++;
+    else lone++;
   }
   check(
     seen.size === structureCount(),
     `only ${seen.size} of ${structureCount()} structures ever appear over 4,800 km`,
   );
-  const mix = [...perStock.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, count]) => `${name} ${count}`)
-    .join(', ');
-  console.log(`  ${seen.size}/${structureCount()} structures reachable; ${mix}`);
+  console.log(`  ${seen.size}/${structureCount()} structures reachable; ${settlements} settlements, ${lone} lone stops`);
 }
 
 // --- 3. the story site holds together ----------------------------------------
@@ -569,11 +582,10 @@ const MAX_RESIDUAL_M = 0.6;
   const provider = new PoiProvider(
     { spawn: () => {}, forget: () => {} } as never,
     { register: () => {}, attachLids: () => {}, forget: () => {} } as never,
-    { register: () => {}, forget: () => {} } as never,
     roadDistance,
     undefined as never,
     new MarketField(),
-    new Set(),
+    { register: () => {}, forget: () => {} } as never,
   );
 
   /**
@@ -664,6 +676,205 @@ const MAX_RESIDUAL_M = 0.6;
   console.log(
     `  ${buildings.length} buildings over ${walkKm} km: worst gap under a wall ` +
       `${worstGap.toFixed(3)} m`,
+  );
+}
+
+// --- 7. settlements: nothing stands in anything -------------------------------
+//
+// Every courier/post stop is a settlement (world/settlement.ts): houses of one type on
+// both sides of the road and a service strip along one long lay-by. The layout is pure
+// and spaced in the road frame; what is checked here is the world it builds, with the
+// houses that actually stand (`standingHouses`): over seeds 1-20 and the first 300 km,
+// no house in another house, on any pass of the road, on the lay-by's asphalt or on a
+// service spot, and no service on the asphalt or in another service.
+//
+// The houses' measured sizes are written down (world/dwellings/bounds.ts) so the layout
+// can stay pure; that table must contain what the built house measures.
+{
+  let worstTable = 0;
+  let worstTableId = '';
+  for (let index = MAST_IDS.length; index < structureCount(); index++) {
+    const instance = createStructureInstance(index);
+    const [halfX, halfZ] = structureHalfExtents(index);
+    const id = structureDef(index).id;
+    check(
+      halfX >= instance.halfExtentX - 1e-6 && halfZ >= instance.halfExtentZ - 1e-6,
+      `${id}: dwellings/bounds.ts says ${halfX} x ${halfZ}, the house measures ` +
+        `${instance.halfExtentX.toFixed(3)} x ${instance.halfExtentZ.toFixed(3)}`,
+    );
+    const slack = Math.max(halfX - instance.halfExtentX, halfZ - instance.halfExtentZ);
+    check(slack <= 0.05, `${id}: dwellings/bounds.ts is ${slack.toFixed(2)} m larger than the house`);
+    if (slack > worstTable) {
+      worstTable = slack;
+      worstTableId = id;
+    }
+  }
+  console.log(`  measured bounds table within ${worstTable.toFixed(3)} m of the built houses (${worstTableId || 'exact'})`);
+
+  const SEEDS = 20;
+  const REACH_M = 300_000;
+  /** Least clear ground, metres, the checks hold each pair to. */
+  const HOUSE_HOUSE_M = 1.5;
+  const HOUSE_ROAD_M = 6;
+  const HOUSE_LAYBY_M = 1.5;
+  const HOUSE_SPOT_M = 1.5;
+  const SPOT_SPOT_M = 1;
+  const SPOT_ASPHALT_M = 0.3;
+
+  /** Points round a rectangle's outline, a half metre apart, corners included. */
+  const outline = (r: GroundRect): { x: number; z: number }[] => {
+    const points: { x: number; z: number }[] = [];
+    const c = Math.cos(r.yaw);
+    const s = Math.sin(r.yaw);
+    const push = (lx: number, lz: number): void => {
+      points.push({ x: r.x + c * lx + s * lz, z: r.z - s * lx + c * lz });
+    };
+    const nx = Math.max(2, Math.ceil((2 * r.halfX) / 0.5));
+    const nz = Math.max(2, Math.ceil((2 * r.halfZ) / 0.5));
+    for (let i = 0; i <= nx; i++) {
+      const lx = -r.halfX + (2 * r.halfX * i) / nx;
+      push(lx, -r.halfZ);
+      push(lx, r.halfZ);
+    }
+    for (let j = 1; j < nz; j++) {
+      const lz = -r.halfZ + (2 * r.halfZ * j) / nz;
+      push(-r.halfX, lz);
+      push(r.halfX, lz);
+    }
+    return points;
+  };
+  /** Depth of a point inside a rectangle grown by `margin`; positive is inside. */
+  const inside = (r: GroundRect, x: number, z: number, margin: number): boolean => {
+    const c = Math.cos(r.yaw);
+    const s = Math.sin(r.yaw);
+    const dx = x - r.x;
+    const dz = z - r.z;
+    // The inverse of the outline's rotation.
+    const lx = c * dx - s * dz;
+    const lz = s * dx + c * dz;
+    return Math.abs(lx) < r.halfX + margin && Math.abs(lz) < r.halfZ + margin;
+  };
+
+  let settlements = 0;
+  let lone = 0;
+  let housesLaid = 0;
+  let housesStanding = 0;
+  let oneSided = 0;
+  const perSettlement = new Map<number, number>();
+  let nearestRoad = Infinity;
+  let nearestLayby = Infinity;
+  let nearestHouse = Infinity;
+  let nearestSpot = Infinity;
+  const firstFailures = failures.length;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    const seedRoad = new Road(seed);
+    const seedTerrain = new Terrain(seed, seedRoad);
+    const seedDistance = new RoadDistance(seedRoad);
+    const lastSlot = Math.floor(REACH_M / POI_SPACING);
+    for (let slot = 1; slot <= lastSlot; slot++) {
+      const stop = roadsideStop(seed, slot);
+      if (!stop) continue;
+      const { layout, roll } = stop;
+      if (layout.settlement) settlements++;
+      else lone++;
+      const where = `seed ${seed} km ${(roll.s / 1000).toFixed(1)}`;
+      const layby = laybyNear(seed, roll.s);
+      const own = layby?.poiIndex === roll.index ? layby : null;
+      check(!layout.settlement || own !== null, `${where}: a settlement has no lay-by`);
+
+      const standing = standingHouses(layout, seedRoad, seedTerrain, seedDistance);
+      housesLaid += layout.houses.length;
+      housesStanding += standing.length;
+      if (layout.settlement) {
+        perSettlement.set(standing.length, (perSettlement.get(standing.length) ?? 0) + 1);
+        const sides = new Set(standing.map((house) => Math.sign(house.lateral)));
+        if (sides.size < 2) oneSided++;
+      }
+
+      // The services as rectangles: facing the road their X runs along it; a car or
+      // a trailer parked along the road has its X across it.
+      const spots: { name: string; rect: GroundRect; s: number }[] = [];
+      const addSpot = (name: string, at: SettlementSpot | null, along: number, across: number): void => {
+        if (!at) return;
+        const pose = spotPose(seedRoad, at);
+        const alongRoad = Math.abs(Math.sin(at.yaw)) < 0.5;
+        spots.push({
+          name,
+          s: at.s,
+          rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across },
+        });
+      };
+      for (const name of ['post', 'shop', 'barrels', 'lot', 'trailer'] as const) {
+        addSpot(name, layout[name], SERVICE_HALF[name][0], SERVICE_HALF[name][1]);
+      }
+      if (own) {
+        // The signpost (world/signposts.ts): two posts and a 2.6 m board at the pad's start.
+        addSpot('signpost', { s: own.sPadStart + 4, lateral: own.side * (own.padOuter + 1), yaw: 0.5 * Math.PI * own.side }, 1.4, 0.2);
+      }
+
+      const rects = standing.map((house) => houseRect(seedRoad, house));
+      for (let a = 0; a < standing.length; a++) {
+        const house = standing[a]!;
+        const rect = rects[a]!;
+        const points = outline(rect);
+        for (const p of points) {
+          // Every pass of the road: the nearest one, wherever along the road it is.
+          const owner = seedDistance.ownerAt(p.x, p.z, 50);
+          const near = seedRoad.project(p.x, p.z, owner);
+          const roadGap = Math.abs(near.lateral) - seedRoad.halfWidthAt(near.s);
+          nearestRoad = Math.min(nearestRoad, roadGap);
+          check(roadGap >= HOUSE_ROAD_M, `${where}: a ${structureDef(house.structure).id} stands ${roadGap.toFixed(2)} m from asphalt`);
+          // The stop's own lay-by, in its road frame.
+          if (own) {
+            const at = seedRoad.project(p.x, p.z, house.s);
+            const u = at.lateral * own.side;
+            if (u > 0 && at.s > own.sEntry - HOUSE_LAYBY_M && at.s < own.sExit + HOUSE_LAYBY_M) {
+              const sc = Math.min(own.sExit, Math.max(own.sEntry, at.s));
+              const gap = Math.hypot(Math.max(0, u - laybyOuterAt(own, sc, seedRoad.halfWidthAt(sc))), at.s - sc);
+              nearestLayby = Math.min(nearestLayby, gap);
+              check(gap >= HOUSE_LAYBY_M, `${where}: a house stands ${gap.toFixed(2)} m from the lay-by's asphalt`);
+            }
+          }
+          for (let b = 0; b < rects.length; b++) {
+            if (b === a) continue;
+            check(!inside(rects[b]!, p.x, p.z, HOUSE_HOUSE_M), `${where}: two houses stand within ${HOUSE_HOUSE_M} m of each other`);
+          }
+          for (const spot of spots) {
+            check(!inside(spot.rect, p.x, p.z, HOUSE_SPOT_M), `${where}: a house stands on the ${spot.name}`);
+          }
+        }
+        for (let b = a + 1; b < rects.length; b++) nearestHouse = Math.min(nearestHouse, rectGap(rect, rects[b]!));
+      }
+
+      for (let i = 0; i < spots.length; i++) {
+        const spot = spots[i]!;
+        for (let j = i + 1; j < spots.length; j++) {
+          const gap = rectGap(spot.rect, spots[j]!.rect);
+          nearestSpot = Math.min(nearestSpot, gap);
+          check(gap >= SPOT_SPOT_M, `${where}: the ${spot.name} and the ${spots[j]!.name} are ${gap.toFixed(2)} m apart`);
+        }
+        if (!own) continue;
+        for (const p of outline(spot.rect)) {
+          const at = seedRoad.project(p.x, p.z, spot.s);
+          const outer = laybyOuterAt(own, at.s, seedRoad.halfWidthAt(at.s));
+          check(
+            at.lateral * own.side >= outer + SPOT_ASPHALT_M,
+            `${where}: the ${spot.name} stands on the lay-by's asphalt`,
+          );
+        }
+      }
+    }
+  }
+  check(settlements > SEEDS * 20, `only ${settlements} settlements over ${SEEDS} x ${REACH_M / 1000} km`);
+  const counts = [...perSettlement.entries()].sort((a, b) => a[0] - b[0]).map(([n, k]) => `${n}:${k}`).join(' ');
+  console.log(
+    `  ${settlements} settlements and ${lone} lone stops over seeds 1-${SEEDS} x ${REACH_M / 1000} km; ` +
+      `${housesStanding}/${housesLaid} houses stand (houses per settlement ${counts}; ${oneSided} one-sided)`,
+  );
+  console.log(
+    `  nearest: house-asphalt ${nearestRoad.toFixed(2)} m, house-lay-by ${nearestLayby.toFixed(2)} m, ` +
+      `house-house ${nearestHouse.toFixed(2)} m, spot-spot ${nearestSpot.toFixed(2)} m; ` +
+      `${failures.length - firstFailures} overlaps`,
   );
 }
 

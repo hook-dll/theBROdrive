@@ -61,7 +61,7 @@ export interface InputFrame {
   interact: boolean;
   /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
   mount: boolean;
-  /** The same key while it is held down: a FUEL machine's nozzle pours while it is. */
+  /** The same key while it is held down: a world fixture held on (a barrel's tap) works while it is. */
   mountDown: boolean;
   /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
   useHeld: boolean;

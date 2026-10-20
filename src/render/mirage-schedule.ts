@@ -56,43 +56,15 @@ function sameApparition(a: MirageApparition, b: MirageApparition): boolean {
   return b.system === 'tableau' && a.kind === b.kind;
 }
 
-/**
- * A dream's apparitions: `count` of them between `fromS` and `toS`, none elsewhere
- * (GAME_DESIGN.md §15.9). Spread evenly with a seeded wobble, and never closer than
- * the free drive's `MIN_GAP_M`, so two still never share the screen: a short route
- * holds fewer than it asks for.
- */
-export interface MirageStretch {
-  readonly fromS: number;
-  readonly toS: number;
-  readonly count: number;
-}
-
 export class MirageSchedule {
   readonly encounters: readonly MirageEncounter[];
 
-  constructor(seed: number, roadLength: number, stretch: MirageStretch | null = null) {
+  constructor(seed: number, roadLength: number) {
     const starts: number[] = [];
-    if (stretch === null) {
-      for (let startS = MIN_GAP_M + hashUnit3(seed, -1, SALT_GAP) * GAP_RANGE_M; startS < roadLength; ) {
-        starts.push(startS);
-        startS += MIN_GAP_M + hashUnit3(seed, starts.length - 1, SALT_GAP) * GAP_RANGE_M;
-      }
-    } else {
-      const span = Math.min(stretch.toS, roadLength) - stretch.fromS;
-      const room = Math.max(1, Math.floor(span / MIN_GAP_M));
-      const count = span <= 0 ? 0 : Math.min(Math.max(0, Math.floor(stretch.count)), room);
-      // Slots of `span / count`, each apparition inside its own slot, wobbling by at
-      // most the slack its slot has over the minimum gap.
-      const slot = count > 0 ? span / count : 0;
-      const wobble = Math.max(0, slot - MIN_GAP_M) / 2;
-      for (let i = 0; i < count; i++) {
-        starts.push(stretch.fromS + slot * (i + 0.5) + (hashUnit3(seed, i, SALT_GAP) * 2 - 1) * wobble);
-      }
+    for (let startS = MIN_GAP_M + hashUnit3(seed, -1, SALT_GAP) * GAP_RANGE_M; startS < roadLength; ) {
+      starts.push(startS);
+      startS += MIN_GAP_M + hashUnit3(seed, starts.length - 1, SALT_GAP) * GAP_RANGE_M;
     }
-    // A stretch deals from its own shuffle, so dreams on one seed do not all open
-    // with the same card.
-    const deal = stretch === null ? seed : (seed ^ Math.imul(Math.floor(stretch.fromS) + 1, 0x9e3779b1)) >>> 0;
     const encounters: MirageEncounter[] = [];
     let round: MirageApparition[] = [];
     let previous: MirageApparition | null = null;
@@ -101,7 +73,7 @@ export class MirageSchedule {
         round = [...DECK];
         const block = index / DECK.length;
         for (let i = round.length - 1; i > 0; i--) {
-          const j = Math.floor(hashUnit3(deal, block * 64 + i, SALT_DEAL) * (i + 1));
+          const j = Math.floor(hashUnit3(seed, block * 64 + i, SALT_DEAL) * (i + 1));
           [round[i], round[j]] = [round[j]!, round[i]!];
         }
         // A round is a fresh shuffle, so its first card can be the last one shown.

@@ -19,7 +19,6 @@ import { maxAnisotropy } from './texturequality';
 import { variant } from '../parts/registry';
 import type { EngineSpec, PartVariant } from '../parts/registry';
 import type {
-  FluidKind,
   Item,
   QuarryItem,
   ShadeTint,
@@ -646,17 +645,12 @@ function buildSprayCanInto(b: MeshBuilder, paint: number): void {
 }
 
 /**
- * Colour-codes the can by fluid, the way a workshop shelf does: red petrol, and the
- * two engine fluids in the colours those bottles actually come in — blue water, dark
- * blue-black oil. It is the only way to tell three identical cans apart at a glance
- * in the inventory strip.
+ * One jerrycan for every fluid, the khaki steel of a real one: a can holds whatever was
+ * poured into it first (items/items.ts), so its colour says nothing about its contents.
+ * The label (`itemLabel`) does.
  */
-function buildFluidCanInto(b: MeshBuilder, fluid: FluidKind): void {
-  const color =
-    fluid === 'petrol' ? 0xb03a2e
-    : fluid === 'water' ? 0x2f6fa8
-    : 0x2b2f3a;
-  const metal = cond(color, 0.7, 0.4);
+function buildFluidCanInto(b: MeshBuilder): void {
+  const metal = cond(0x5a6238, 0.7, 0.4);
   const cap = flat(0x23262a, 0.6);
   b.box('fuel_body', 0.34, 0.24, 0.16, metal, [0, 0, 0]);
   b.box('fuel_handle_l', 0.04, 0.1, 0.04, metal, [-0.08, 0.18, 0]);
@@ -2219,7 +2213,7 @@ export function createItemMesh(item: Item): THREE.Object3D {
       // stood too big against a vending machine's tray), smaller cans by the cube root
       // of their volume, so a 5 L bottle stands two thirds of a 20 L can's height.
       const can = buildGroup(
-        itemBlueprint(`fluid_${item.fluid}`, (b) => buildFluidCanInto(b, item.fluid)).instructions,
+        itemBlueprint('fluid_can', buildFluidCanInto).instructions,
       );
       can.scale.setScalar(0.85 * Math.cbrt(Math.min(1, Math.max(0.1, item.capacity / 20))));
       return can;

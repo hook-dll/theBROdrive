@@ -42,8 +42,11 @@ const ROADSIDE_INDEX_BASE = 50_000_000;
 const VARIANT_SETBACK_MIN_M = 10;
 const VARIANT_SETBACK_SPAN_M = 12;
 
-/** The three masts built from the POI kit; they come first in `POI_STRUCTURES`. */
-export const MAST_IDS = ['standing-tower', 'fallen-tower', 'relay-cluster'] as const;
+/**
+ * The masts built from the POI kit; they come first in `POI_STRUCTURES`. The fallen
+ * tower is not among them: it stays in the POI gallery (world/poi-variants.ts) only.
+ */
+export const MAST_IDS = ['standing-tower', 'relay-cluster'] as const;
 /** Masts, then every dwelling: the length of world/poistructures.ts `POI_STRUCTURES`. */
 const STRUCTURE_COUNT = MAST_IDS.length + DWELLINGS.length;
 
@@ -61,50 +64,26 @@ export function dwellingFootprint(structure: number): readonly [number, number] 
 }
 
 /**
- * What a stop leaves outside for the player, in the terms the world used when every
- * building was one of them: a forecourt's `fuel`, a shop's `store` of tools, a `home`'s
- * medicine, a scrapyard's `salvage` field of cars, a wreck's `scrap` and a mast's
- * maintenance kit.
+ * Which building stands at a slot: a hash of the slot, so having seen an izba at one
+ * stop tells a player nothing about the next one.
  */
-export type PoiStock = 'fuel' | 'store' | 'home' | 'salvage' | 'scrap' | 'mast';
-
-/**
- * A dwelling's stock, by weight. The weights are the old catalogue's building counts
- * per kind — five petrol stations, five shops, six houses, three container yards, four
- * wrecks — so a stop pays out, on average, exactly what a stop paid out before the
- * buildings were replaced. Masts keep the mast stock.
- */
-const DWELLING_STOCK: readonly { readonly stock: PoiStock; readonly weight: number }[] = [
-  { stock: 'fuel', weight: 5 },
-  { stock: 'store', weight: 5 },
-  { stock: 'home', weight: 6 },
-  { stock: 'salvage', weight: 3 },
-  { stock: 'scrap', weight: 4 },
-];
-const DWELLING_STOCK_TOTAL = DWELLING_STOCK.reduce((sum, entry) => sum + entry.weight, 0);
-
-/**
- * Which building, and what it holds. There is deliberately no progression to learn:
- * both are hashes of the slot, so having seen fuel outside one izba tells a player
- * nothing about the next one.
- */
-export function rollStructure(seed: number, domain: number, key: number): { structure: number; stock: PoiStock } {
-  const structure = Math.min(STRUCTURE_COUNT - 1, Math.floor(hash01(seed, domain, key, 1) * STRUCTURE_COUNT));
-  if (structureIsMast(structure)) return { structure, stock: 'mast' };
-  let cursor = hash01(seed, domain, key, 5) * DWELLING_STOCK_TOTAL;
-  for (const entry of DWELLING_STOCK) {
-    cursor -= entry.weight;
-    if (cursor < 0) return { structure, stock: entry.stock };
-  }
-  return { structure, stock: DWELLING_STOCK[DWELLING_STOCK.length - 1]!.stock };
+export function rollStructure(seed: number, domain: number, key: number): number {
+  return Math.min(STRUCTURE_COUNT - 1, Math.floor(hash01(seed, domain, key, 1) * STRUCTURE_COUNT));
 }
 
+/** Structure indices of the dwellings people still live in: what a settlement is built of. */
+const LIVED_IN: readonly number[] = DWELLINGS.flatMap((definition, index) =>
+  definition.abandoned ? [] : [MAST_IDS.length + index],
+);
+
 /**
- * Whether a roadside slot has a building: null rolls read as empty desert. A courier
- * slot always has one, because the courier parks beside it.
+ * A settlement's one dwelling type: the slot's own roll, unless that is a mast or a ruin,
+ * which nobody runs a post and a shop out of; then another draw among the lived-in ones.
  */
-function roadsideOccupied(seed: number, slot: number, spacing: number): boolean {
-  return hash01(seed, POI_DOMAIN, slot) < POI_OCCUPANCY || isCourierPoiSlot(seed, slot, spacing);
+function rollSettlement(seed: number, slot: number): number {
+  const rolled = rollStructure(seed, POI_DOMAIN, slot);
+  if (LIVED_IN.includes(rolled)) return rolled;
+  return LIVED_IN[Math.floor(hash01(seed, POI_DOMAIN, slot, 6) * LIVED_IN.length)]!;
 }
 
 /** One occupied roadside slot, rolled: everything about the stop except its lateral. */
@@ -119,16 +98,20 @@ export interface RoadsideSlot {
   /** Clear ground between the asphalt edge (`halfWidthAt`) and the building, metres. */
   readonly verge: number;
   readonly structure: number;
-  readonly stock: PoiStock;
   readonly variantSeed: number;
+  /** A courier/post stop: a settlement of `structure` houses (world/settlement.ts). */
+  readonly settlement: boolean;
 }
 
 /** The roadside slot's roll, or null when the slot is empty desert or off the road. */
 export function roadsideSlot(seed: number, slot: number, spacing: number): RoadsideSlot | null {
   const s = slot * spacing;
   if (slot < 1 || s > ROAD_LENGTH) return null;
-  if (!roadsideOccupied(seed, slot, spacing)) return null;
-  const { structure, stock } = rollStructure(seed, POI_DOMAIN, slot);
+  // A courier slot always has a building: it is a settlement, and the post and the
+  // courier are there. Any other slot that does not roll one reads as empty desert.
+  const settlement = isCourierPoiSlot(seed, slot, spacing);
+  if (!settlement && hash01(seed, POI_DOMAIN, slot) >= POI_OCCUPANCY) return null;
+  const structure = settlement ? rollSettlement(seed, slot) : rollStructure(seed, POI_DOMAIN, slot);
   return {
     slot,
     index: ROADSIDE_INDEX_BASE + slot,
@@ -136,7 +119,7 @@ export function roadsideSlot(seed: number, slot: number, spacing: number): Roads
     side: hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1,
     verge: VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, slot, 3) * VARIANT_SETBACK_SPAN_M,
     structure,
-    stock,
     variantSeed: hash(seed, POI_DOMAIN, slot, 4),
+    settlement,
   };
 }

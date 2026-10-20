@@ -1,5 +1,5 @@
 /**
- * A rotary dial: the goal terminal's PIN entry (dreams/terminal.ts).
+ * A rotary dial for entering a parcel's PIN (kept for the post machine's registered parcels).
  *
  * A finger plate with ten holes over a ring of printed digits. Put the pointer in a
  * hole, drag the plate clockwise until the hole meets the finger stop, let go: the

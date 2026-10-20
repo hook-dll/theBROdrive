@@ -94,3 +94,36 @@ export class FixtureField {
     for (const fixture of this.fixtures.values()) fixture.update?.(dt);
   }
 }
+
+/**
+ * Distance along a ray (origin `o`, direction `d`, both in the box's frame) to an
+ * axis-aligned box (centre `c`, half extents `h`), or Infinity for a miss or a box
+ * behind the eye. The one slab test a fixture's `aim` needs for each of its parts.
+ */
+export function rayBox(
+  ox: number, oy: number, oz: number,
+  dx: number, dy: number, dz: number,
+  cx: number, cy: number, cz: number,
+  hx: number, hy: number, hz: number,
+): number {
+  let near = -Infinity;
+  let far = Infinity;
+  const slab = (o: number, d: number, c: number, h: number): boolean => {
+    const lo = c - h - o;
+    const hi = c + h - o;
+    if (Math.abs(d) < 1e-9) return lo <= 0 && hi >= 0;
+    let t0 = lo / d;
+    let t1 = hi / d;
+    if (t0 > t1) {
+      const swap = t0;
+      t0 = t1;
+      t1 = swap;
+    }
+    if (t0 > near) near = t0;
+    if (t1 < far) far = t1;
+    return near <= far;
+  };
+  if (!slab(ox, dx, cx, hx) || !slab(oy, dy, cy, hy) || !slab(oz, dz, cz, hz)) return Infinity;
+  if (far < 0) return Infinity;
+  return Math.max(0, near);
+}

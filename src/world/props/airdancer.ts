@@ -63,14 +63,6 @@ const BODY_SIDES = 20;
 const ARM_RINGS = 16;
 const ARM_SIDES = 12;
 
-/**
- * Where a dancer stands relative to the car it advertises: this far forward along the
- * car's own heading, and this far further from the road than the car's parked flank.
- * 2.8 m clears the widest car's half-track and keeps the blower off the lane.
- */
-export const DANCER_ALONG_M = 0.5;
-export const DANCER_OUT_M = 2.8;
-
 // ---------------------------------------------------------------------------
 // Simulation
 // ---------------------------------------------------------------------------

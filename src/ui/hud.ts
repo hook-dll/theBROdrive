@@ -4,6 +4,7 @@ import type { EngineTempReadout } from '../vehicle/cooling';
 import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
+import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -83,6 +84,18 @@ export interface DrivingReadout {
    * for it.
    */
   autopilotMode: AutopilotMode | null;
+}
+
+/**
+ * The ride of the car the player drives (trip/ride.ts `RideMeter` is one): smoothed
+ * horizontal acceleration in the car's frame, m/s², and the harsh moments counted so far.
+ */
+export interface RideReadout {
+  /** Along the nose: positive speeding up, negative braking. */
+  readonly longitudinal: number;
+  /** Across the car: positive towards its left. */
+  readonly lateral: number;
+  readonly harshMoments: number;
 }
 
 /**
@@ -268,6 +281,15 @@ const RACE_LINE_PX = 260;
  * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
  */
 const CROSSHAIR_IDLE_MS = 4000;
+/**
+ * THE G-FORCE WIDGET: a small round instrument that shows how hard the car pushes what
+ * it carries. The dot is the push itself, where the load is thrown — up the face when
+ * braking, to the right in a left bend — and the rings are the ride's thresholds
+ * (trip/ride.ts): calm inside, uncomfortable between, harsh outside. Radius in the
+ * widget's own units; the face's edge is `RIDE_FULL_MPS2`.
+ */
+const RIDE_R = 26;
+const RIDE_FULL_MPS2 = 5;
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -321,7 +343,7 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
 }
 
 export class Hud {
-  private readonly tops: HTMLElement[] = [];
+  private readonly tops: Element[] = [];
 
   private readonly crosshairEl: HTMLElement;
   /** When the view was last turned, ms (`noteLook`); the crosshair fades after it. */
@@ -377,6 +399,17 @@ export class Hud {
   private readonly damageVignetteEl: HTMLElement;
   private readonly deathFadeEl: HTMLElement;
   private readonly root: HTMLElement;
+  /** The G-force widget (`setRide`), its dot, and the ring that flashes on a harsh moment. */
+  private readonly rideEl: SVGSVGElement;
+  private readonly rideDot: SVGCircleElement;
+  private readonly ridePulse: SVGCircleElement;
+  private rideShown = false;
+  /** Last written dot position (widget units) and zone; NaN/-1 force a write. */
+  private rideX = Number.NaN;
+  private rideY = Number.NaN;
+  private rideZone = -1;
+  /** Harsh moments already pulsed for; a new one past this flashes the ring. */
+  private rideHarshSeen = 0;
   private damageStrength = -1;
   private deathFade = -1;
   private gumBubbleProgress = -1;
@@ -532,6 +565,10 @@ export class Hud {
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
+    const ride = this.buildRideWidget();
+    this.rideEl = ride.svg;
+    this.rideDot = ride.dot;
+    this.ridePulse = ride.pulse;
 
     this.tops = [
       this.crosshairEl,
@@ -542,6 +579,7 @@ export class Hud {
       this.toastEl,
       this.raceEl,
       this.gumBubbleEl,
+      this.rideEl,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
@@ -560,6 +598,42 @@ export class Hud {
     svg.appendChild(path);
     lamp.appendChild(svg);
     return lamp;
+  }
+
+  private buildRideWidget(): { svg: SVGSVGElement; dot: SVGCircleElement; pulse: SVGCircleElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', 'hud-ride is-hidden');
+    svg.setAttribute('viewBox', `${-RIDE_R - 4} ${-RIDE_R - 4} ${2 * RIDE_R + 8} ${2 * RIDE_R + 8}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Ride: G-force');
+    const ring = (className: string, r: number): SVGCircleElement => {
+      const circle = svgEl('circle');
+      circle.setAttribute('class', className);
+      circle.setAttribute('r', r.toFixed(2));
+      svg.appendChild(circle);
+      return circle;
+    };
+    ring('hud-ride-face', RIDE_R + 3);
+    ring('hud-ride-zone is-harsh', RIDE_R);
+    ring('hud-ride-zone is-uncomfortable', (RIDE_HARSH_MPS2 / RIDE_FULL_MPS2) * RIDE_R);
+    ring('hud-ride-zone is-calm', (RIDE_EASY_MPS2 / RIDE_FULL_MPS2) * RIDE_R);
+    for (const [x1, y1, x2, y2] of [[-RIDE_R, 0, RIDE_R, 0], [0, -RIDE_R, 0, RIDE_R]] as const) {
+      const line = svgEl('line');
+      line.setAttribute('class', 'hud-ride-cross');
+      line.setAttribute('x1', String(x1));
+      line.setAttribute('y1', String(y1));
+      line.setAttribute('x2', String(x2));
+      line.setAttribute('y2', String(y2));
+      svg.appendChild(line);
+    }
+    // The car's nose, at the top of the face, as on the wind gauge.
+    const nose = svgEl('path');
+    nose.setAttribute('class', 'hud-ride-nose');
+    nose.setAttribute('d', `M 0 ${-RIDE_R - 2.6} L 2.6 ${-RIDE_R + 1.4} H -2.6 Z`);
+    svg.appendChild(nose);
+    const pulse = ring('hud-ride-pulse', RIDE_R);
+    const dot = ring('hud-ride-dot', 3.4);
+    return { svg, dot, pulse };
   }
 
   /** The ring an inset instrument is drawn in, placed under the dial's needle. */
@@ -1011,6 +1085,61 @@ export class Hud {
   /** Player's dashboard size (Settings.dashboardSize), on top of the presentation's own. */
   setDashboardScale(scale: number): void {
     this.drivingCluster.style.setProperty('--hud-dash-scale', String(scale));
+  }
+
+  /**
+   * The G-force widget: shown with a reading while the player drives a car carrying
+   * ride-sensitive cargo (trip/ride.ts `carriesRideSensitive`), hidden on null.
+   */
+  setRide(ride: RideReadout | null): void {
+    if (ride === null) {
+      if (this.rideShown) {
+        this.rideShown = false;
+        this.rideEl.classList.add('is-hidden');
+      }
+      return;
+    }
+    if (!this.rideShown) {
+      this.rideShown = true;
+      this.rideEl.classList.remove('is-hidden');
+      // What happened before the widget was up is not news.
+      this.rideHarshSeen = ride.harshMoments;
+    }
+    // The push is opposite the acceleration: braking throws the load forward (up the
+    // face), a left bend throws it right.
+    const scale = RIDE_R / RIDE_FULL_MPS2;
+    let x = ride.lateral * scale;
+    let y = ride.longitudinal * scale;
+    const reach = Math.hypot(x, y);
+    if (reach > RIDE_R) {
+      x *= RIDE_R / reach;
+      y *= RIDE_R / reach;
+    }
+    x = Math.round(x * 4) / 4;
+    y = Math.round(y * 4) / 4;
+    if (x !== this.rideX || y !== this.rideY) {
+      this.rideX = x;
+      this.rideY = y;
+      this.rideDot.setAttribute('cx', String(x));
+      this.rideDot.setAttribute('cy', String(y));
+    }
+    const magnitude = Math.hypot(ride.longitudinal, ride.lateral);
+    const zone = magnitude > RIDE_HARSH_MPS2 ? 2 : magnitude > RIDE_EASY_MPS2 ? 1 : 0;
+    if (zone !== this.rideZone) {
+      this.rideZone = zone;
+      this.rideEl.classList.toggle('is-uncomfortable', zone === 1);
+      this.rideEl.classList.toggle('is-harsh', zone === 2);
+    }
+    if (ride.harshMoments > this.rideHarshSeen) {
+      this.rideHarshSeen = ride.harshMoments;
+      this.ridePulse.animate(
+        [
+          { opacity: 0.95, transform: 'scale(0.75)' },
+          { opacity: 0, transform: 'scale(1.18)' },
+        ],
+        { duration: 650, easing: 'ease-out' },
+      );
+    }
   }
 
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */

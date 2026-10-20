@@ -7,10 +7,10 @@ import { TOILET_VARIANTS } from './toilets/catalog';
 import { buildToiletShell, toiletFootprint } from './toilets/geometry';
 
 /**
- * The kit-built buildings: the three masts the world places, then the Japanese toilet
- * shells (world/toilets), which only the POI gallery shows so far. Everything else is a
- * dwelling (world/dwellings); see world/poistructures.ts for the list the world draws
- * from.
+ * The kit-built buildings: the two masts the world places (world/poislots.ts `MAST_IDS`),
+ * the fallen tower, then the Japanese toilet shells (world/toilets). The fallen tower and
+ * the toilets are shown only by the POI gallery. Everything else is a dwelling
+ * (world/dwellings); see world/poistructures.ts for the list the world draws from.
  */
 export interface PoiVariantDefinition {
   readonly id: string;

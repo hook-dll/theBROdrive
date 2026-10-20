@@ -105,21 +105,19 @@ export function contractPay(seed: number, item: ContractCargoItem): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Base prices at home, coins. Vending machines multiply by `kmIndex` of where they
+ * Base prices at home, coins. The МАГАЗИН machines multiply by `kmIndex` of where they
  * stand (`itemPrice`); cars are priced flat (`carPrice`).
  */
 export const PRICE_TABLE = {
-  /** Fluids by the litre, plus the can they come in. */
-  fluidPerLitre: { petrol: 1.2, oil: 2.5, water: 0.3 } as const,
+  /** An empty can: a coin, plus a little for every litre it holds. Fluids are not sold. */
   can: 1,
+  canPerLitre: 0.1,
   /** Parts by kind, new. A worn part sells for less (`itemPrice`). */
   part: { engine: 30, gearbox: 15, radiator: 8, turbine: 25, air_filter: 3 } as Readonly<Record<PartKind, number>>,
-  sponge: 2,
   bubble_gum: 1,
-  medicine: 3,
   spray_can: 3,
+  sun_shades: 4,
   sticker_envelope: 4,
-  ammo: 2,
   /** Cars by model id, flat (never × km index). Unlisted models: `CAR_PRICE_DEFAULT`. */
   car: {
     kit_vaz1111: 20,
@@ -155,10 +153,10 @@ export const PRICE_TABLE = {
 const CAR_PRICE_DEFAULT = 60;
 
 /**
- * What a vending machine at `km` asks for this item: its base price × the km index,
+ * What a МАГАЗИН machine at `km` asks for this item: its base price × the km index,
  * rounded, never under one coin. A part is priced by kind and scaled down by its
- * wear; a can by its contents plus the can. Items no machine sells (the postcard,
- * contract cargo, coins) price at 0.
+ * wear; a can by its size. Items no machine sells (the postcard, contract cargo,
+ * coins) price at 0.
  */
 export function itemPrice(item: Item, km: number): number {
   const base = itemBasePrice(item);
@@ -166,35 +164,22 @@ export function itemPrice(item: Item, km: number): number {
   return Math.max(1, Math.round(base * kmIndex(km)));
 }
 
-/**
- * What a FUEL machine's nozzle at `km` asks for a litre of petrol: the petrol base price
- * × the km index, unrounded. The nozzle charges whole coins and pours each coin's worth
- * (`1 / price` litres), so only the coin is rounded, never the litre.
- */
-export function fuelPricePerLitre(km: number): number {
-  return PRICE_TABLE.fluidPerLitre.petrol * kmIndex(km);
-}
-
 function itemBasePrice(item: Item): number {
   switch (item.type) {
     case 'fluid_can':
-      return PRICE_TABLE.can + item.litres * PRICE_TABLE.fluidPerLitre[item.fluid];
+      return PRICE_TABLE.can + item.capacity * PRICE_TABLE.canPerLitre;
     case 'part': {
       const wear = Math.max(item.part.dirt, item.part.rust);
       return PRICE_TABLE.part[variant(item.part.variantId).kind] * (1 - 0.5 * Math.min(1, Math.max(0, wear)));
     }
-    case 'tool':
-      return PRICE_TABLE.sponge * Math.max(0.25, item.integrity);
     case 'bubble_gum':
       return PRICE_TABLE.bubble_gum;
-    case 'medicine':
-      return PRICE_TABLE.medicine;
     case 'spray_can':
       return PRICE_TABLE.spray_can;
+    case 'sun_shades':
+      return PRICE_TABLE.sun_shades;
     case 'sticker_envelope':
       return PRICE_TABLE.sticker_envelope;
-    case 'ammo':
-      return PRICE_TABLE.ammo;
     default:
       return 0;
   }

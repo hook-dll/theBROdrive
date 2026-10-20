@@ -14,7 +14,7 @@ import { oversizeKind } from './kinds/oversize';
 import { parcelKind } from './kinds/parcel';
 import { towingKind } from './kinds/towing';
 import { trailerEquipmentKind } from './kinds/trailerEquipment';
-import { CONTRACT_KIND_IDS, NO_COURIER, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
+import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
 
 /** Order matters: offers walk this list against their weights. */
 export const CONTRACT_KINDS: readonly ContractKindDef[] = [
@@ -57,7 +57,6 @@ export function contractAcceptRefusal(
   item: ContractCargoItem,
   probe: DeliveryProbe,
 ): string | null {
-  if (item.sourceCourierIndex === NO_COURIER) return 'this parcel goes to the gate at the end of the road';
   if (probe.targetCourierIndex <= item.sourceCourierIndex) {
     return 'this courier cannot sign its own parcel';
   }

@@ -80,6 +80,7 @@ interface ShimCanvasContext {
     end: number,
     ccw?: boolean,
   ): void;
+  clearRect(x: number, y: number, width: number, height: number): void;
   fill(): void;
   fillRect(x: number, y: number, width: number, height: number): void;
   fillText(text: string, x: number, y: number, maxWidth?: number): void;
@@ -144,6 +145,7 @@ class ShimCanvas {
     clip: () => {},
     closePath: () => {},
     drawImage: () => {},
+    clearRect: () => {},
     ellipse: () => {},
     fill: () => {},
     fillRect: () => {},

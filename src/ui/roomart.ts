@@ -1,11 +1,10 @@
 import * as THREE from 'three';
-import { DREAMS } from '../dreams/dream';
-import type { DreamProgress } from '../dreams/progress';
 
 /**
  * The title room's painted surfaces (ui/roomscene.ts): everything a canvas draws — the
- * wallpaper, the floorboards, the wall carpet, the play mat, the adventures' map, the
- * quilt, the clock faces, the calendar's page, the night sky and the sand outside. No
+ * wallpaper, the floorboards, the wall carpet, the play mat, the exercise book and the
+ * textbooks, the ruler, the crayon drawings on the walls, the quilt, the clock faces,
+ * the calendar's page, the night sky and the sand outside. No
  * downloads: the room is built in the browser in a few milliseconds.
  */
 
@@ -314,70 +313,430 @@ export function playMat(): THREE.CanvasTexture {
   });
 }
 
-/** The adventures' map: the road from stop to stop, a stop per adventure, done ones in green. */
-export function adventuresMap(progress: DreamProgress): THREE.CanvasTexture {
-  return canvasTexture(1024, 720, (g) => {
-    g.fillStyle = '#e4d5ae';
-    g.fillRect(0, 0, 1024, 720);
-    const r = rng(41);
-    for (let i = 0; i < 6000; i++) {
-      g.fillStyle = `rgba(110,80,40,${r() * 0.06})`;
-      g.fillRect(r() * 1024, r() * 720, 3, 3);
+/** A car side-on, as a hand draws it: body, glasshouse, two wheels; `w` long, sitting on `y`. */
+function doodleCar(g: CanvasRenderingContext2D, x: number, y: number, w: number, kind: number): void {
+  const h = w * 0.3;
+  g.beginPath();
+  if (kind % 3 === 0) {
+    // A saloon: bonnet, roof, boot.
+    g.moveTo(x, y - h * 0.35);
+    g.lineTo(x + w * 0.04, y - h * 0.62);
+    g.lineTo(x + w * 0.28, y - h * 0.68);
+    g.lineTo(x + w * 0.38, y - h * 1.15);
+    g.lineTo(x + w * 0.7, y - h * 1.15);
+    g.lineTo(x + w * 0.8, y - h * 0.68);
+    g.lineTo(x + w * 0.98, y - h * 0.62);
+    g.lineTo(x + w, y - h * 0.3);
+  } else if (kind % 3 === 1) {
+    // A hatchback: one long slope behind.
+    g.moveTo(x, y - h * 0.35);
+    g.lineTo(x + w * 0.05, y - h * 0.65);
+    g.lineTo(x + w * 0.3, y - h * 0.72);
+    g.lineTo(x + w * 0.45, y - h * 1.2);
+    g.lineTo(x + w * 0.78, y - h * 1.2);
+    g.lineTo(x + w * 0.98, y - h * 0.7);
+    g.lineTo(x + w, y - h * 0.3);
+  } else {
+    // A jeep: a box on big wheels.
+    g.moveTo(x, y - h * 0.4);
+    g.lineTo(x, y - h * 0.85);
+    g.lineTo(x + w * 0.25, y - h * 0.9);
+    g.lineTo(x + w * 0.3, y - h * 1.45);
+    g.lineTo(x + w * 0.95, y - h * 1.45);
+    g.lineTo(x + w, y - h * 0.4);
+  }
+  g.lineTo(x + w * 0.86, y - h * 0.3);
+  g.moveTo(x + w * 0.66, y - h * 0.3);
+  g.lineTo(x + w * 0.34, y - h * 0.3);
+  g.moveTo(x + w * 0.14, y - h * 0.3);
+  g.lineTo(x, y - h * 0.35);
+  g.stroke();
+  const wheel = kind % 3 === 2 ? h * 0.42 : h * 0.34;
+  for (const wx of [x + w * 0.24, x + w * 0.76]) {
+    g.beginPath();
+    g.arc(wx, y - wheel * 0.6, wheel, 0, Math.PI * 2);
+    g.stroke();
+    g.beginPath();
+    g.arc(wx, y - wheel * 0.6, wheel * 0.35, 0, Math.PI * 2);
+    g.stroke();
+  }
+}
+
+/** A line of joined-up handwriting with no words in it: loops along `y`. */
+function scribbleLine(g: CanvasRenderingContext2D, r: () => number, x0: number, x1: number, y: number, size: number): void {
+  let x = x0;
+  while (x < x1) {
+    const word = 20 + r() * 60;
+    g.beginPath();
+    g.moveTo(x, y);
+    for (let u = 0; u < word && x + u < x1; u += 3) {
+      g.lineTo(x + u, y - Math.abs(Math.sin(u * 0.55 + r() * 0.4)) * size * (r() < 0.1 ? 1.8 : 1));
     }
-    g.strokeStyle = 'rgba(120,90,50,0.35)';
+    g.stroke();
+    x += word + 8 + r() * 6;
+  }
+}
+
+/**
+ * An exercise book lying open: squared pages, a red margin, sums and lines of writing
+ * on the left, and on the right the lesson given up for cars drawn in ballpoint — one
+ * shaded over and over, a road running off the page.
+ */
+export function exerciseSpread(): THREE.CanvasTexture {
+  return canvasTexture(1024, 704, (g) => {
+    const r = rng(61);
+    for (const [x0, tint] of [[0, '#f1ede2'], [512, '#f4f0e6']] as const) {
+      g.fillStyle = tint;
+      g.fillRect(x0, 0, 512, 704);
+      g.strokeStyle = 'rgba(70,110,170,0.4)';
+      g.lineWidth = 1.5;
+      for (let x = x0 + 8; x < x0 + 512; x += 16) {
+        g.beginPath();
+        g.moveTo(x, 0);
+        g.lineTo(x, 704);
+        g.stroke();
+      }
+      for (let y = 8; y < 704; y += 16) {
+        g.beginPath();
+        g.moveTo(x0, y);
+        g.lineTo(x0 + 512, y);
+        g.stroke();
+      }
+      g.strokeStyle = 'rgba(200,50,50,0.55)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(x0 + 448, 0);
+      g.lineTo(x0 + 448, 704);
+      g.stroke();
+    }
+    // The fold: a soft shadow down the middle.
+    const fold = g.createLinearGradient(482, 0, 542, 0);
+    fold.addColorStop(0, 'rgba(60,40,20,0)');
+    fold.addColorStop(0.5, 'rgba(60,40,20,0.28)');
+    fold.addColorStop(1, 'rgba(60,40,20,0)');
+    g.fillStyle = fold;
+    g.fillRect(482, 0, 60, 704);
+    // The left page: the lesson, in blue ink.
+    g.strokeStyle = 'rgba(25,40,130,0.9)';
+    g.lineWidth = 3.5;
+    for (let i = 0; i < 9; i++) scribbleLine(g, r, 40, 420, 72 + i * 32, 9);
+    g.font = `600 30px ${COND}`;
+    g.fillStyle = 'rgba(25,40,130,0.9)';
+    for (let i = 0; i < 5; i++) {
+      const a = 12 + Math.floor(r() * 80);
+      const b = 3 + Math.floor(r() * 9);
+      g.fillText(`${a} × ${b} =`, 48, 400 + i * 48);
+      g.fillText(`${a * b}`, 170, 400 + i * 48);
+    }
+    // A car started in the margin of the lesson.
+    g.lineWidth = 4;
+    doodleCar(g, 290, 600, 120, 1);
+    // The right page: cars.
+    g.strokeStyle = 'rgba(20,32,120,0.92)';
+    g.lineWidth = 6;
+    doodleCar(g, 560, 230, 300, 0);
+    // Gone over many times.
     g.lineWidth = 3;
-    for (const x of [341, 683]) {
+    doodleCar(g, 563, 232, 300, 0);
+    g.lineWidth = 5;
+    doodleCar(g, 590, 470, 190, 2);
+    doodleCar(g, 800, 600, 150, 1);
+    // Hatching on the first one's flank.
+    g.lineWidth = 2;
+    for (let x = 640; x < 830; x += 7) {
+      g.beginPath();
+      g.moveTo(x, 210);
+      g.lineTo(x + 14, 196);
+      g.stroke();
+    }
+    // A road off to the page's corner, speed lines behind the jeep.
+    g.lineWidth = 4;
+    g.beginPath();
+    g.moveTo(540, 680);
+    g.quadraticCurveTo(760, 560, 980, 300);
+    g.moveTo(640, 690);
+    g.quadraticCurveTo(840, 590, 1000, 340);
+    g.stroke();
+    for (let i = 0; i < 4; i++) {
+      g.beginPath();
+      g.moveTo(540 - i * 4, 420 + i * 12);
+      g.lineTo(575, 420 + i * 12);
+      g.stroke();
+    }
+  });
+}
+
+/** A school textbook's cover: cloth-coloured board, a title block and a simple emblem. */
+export function textbookCover(title: string, color: string, emblem: 'triangle' | 'atom' | 'globe' | 'letters'): THREE.CanvasTexture {
+  return canvasTexture(256, 352, (g) => {
+    g.fillStyle = color;
+    g.fillRect(0, 0, 256, 352);
+    const r = rng(title.length * 97);
+    for (let i = 0; i < 1500; i++) {
+      g.fillStyle = `rgba(${r() < 0.5 ? '0,0,0' : '255,255,255'},${r() * 0.07})`;
+      g.fillRect(r() * 256, r() * 352, 2, 2);
+    }
+    // Worn corners.
+    g.fillStyle = 'rgba(240,230,210,0.35)';
+    for (const [x, y] of [[0, 0], [256, 0], [0, 352], [256, 352]] as const) {
+      g.beginPath();
+      g.arc(x, y, 18, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(245,236,214,0.92)';
+    g.font = `800 34px ${COND}`;
+    g.textAlign = 'center';
+    g.fillText(title, 128, 80);
+    g.strokeStyle = 'rgba(245,236,214,0.85)';
+    g.lineWidth = 5;
+    g.beginPath();
+    if (emblem === 'triangle') {
+      g.moveTo(128, 140);
+      g.lineTo(196, 260);
+      g.lineTo(60, 260);
+      g.closePath();
+      g.moveTo(128, 140);
+      g.lineTo(128, 260);
+    } else if (emblem === 'atom') {
+      for (let k = 0; k < 3; k++) g.ellipse(128, 210, 70, 24, (k * Math.PI) / 3, 0, Math.PI * 2);
+    } else if (emblem === 'globe') {
+      g.arc(128, 205, 64, 0, Math.PI * 2);
+      g.moveTo(64, 205);
+      g.lineTo(192, 205);
+      g.ellipse(128, 205, 28, 64, 0, 0, Math.PI * 2);
+    } else {
+      g.font = `700 64px ${COND}`;
+      g.fillStyle = 'rgba(245,236,214,0.85)';
+      g.fillText('А Б В', 128, 228);
+    }
+    g.stroke();
+  });
+}
+
+/** A textbook lying open: two printed pages, columns of type and a figure. */
+export function printedSpread(): THREE.CanvasTexture {
+  return canvasTexture(768, 512, (g) => {
+    g.fillStyle = '#ece6d6';
+    g.fillRect(0, 0, 768, 512);
+    const r = rng(83);
+    g.fillStyle = 'rgba(40,36,30,0.55)';
+    for (const x0 of [40, 424]) {
+      for (let y = 50; y < 470; y += 14) {
+        if (x0 === 424 && y > 150 && y < 290) continue;
+        g.fillRect(x0, y, 300 - r() * (r() < 0.15 ? 160 : 12), 5);
+      }
+    }
+    g.strokeStyle = 'rgba(40,36,30,0.7)';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(450, 280);
+    g.lineTo(600, 160);
+    g.lineTo(700, 280);
+    g.closePath();
+    g.stroke();
+    const fold = g.createLinearGradient(354, 0, 414, 0);
+    fold.addColorStop(0, 'rgba(60,40,20,0)');
+    fold.addColorStop(0.5, 'rgba(60,40,20,0.3)');
+    fold.addColorStop(1, 'rgba(60,40,20,0)');
+    g.fillStyle = fold;
+    g.fillRect(354, 0, 60, 512);
+  });
+}
+
+/** A wooden school ruler's face: centimetres and millimetres along one edge. */
+export function rulerFace(): THREE.CanvasTexture {
+  return canvasTexture(1024, 64, (g) => {
+    g.fillStyle = '#d8b878';
+    g.fillRect(0, 0, 1024, 64);
+    g.strokeStyle = '#2a1e10';
+    g.fillStyle = '#2a1e10';
+    g.lineWidth = 2;
+    g.font = `600 16px ${COND}`;
+    g.textAlign = 'center';
+    // 30 cm across the canvas, from a little in.
+    const mm = (1024 - 24) / 300;
+    for (let i = 0; i <= 300; i++) {
+      const x = 12 + i * mm;
+      const len = i % 10 === 0 ? 26 : i % 5 === 0 ? 18 : 10;
       g.beginPath();
       g.moveTo(x, 0);
-      g.lineTo(x, 720);
+      g.lineTo(x, len);
       g.stroke();
+      if (i % 10 === 0) g.fillText(String(i / 10), x, 46);
     }
-    g.beginPath();
-    g.moveTo(0, 360);
-    g.lineTo(1024, 360);
-    g.stroke();
-    g.strokeStyle = 'rgba(160,110,60,0.35)';
-    g.lineWidth = 2;
-    for (let k = 0; k < 7; k++) {
-      g.beginPath();
-      g.ellipse(250 + k * 90, 560 - k * 40, 120 + k * 10, 50 + k * 4, 0.3, 0, Math.PI * 2);
-      g.stroke();
-    }
-    const count = DREAMS.length;
-    const at = (i: number): [number, number] => {
-      const t = (i + 0.5) / count;
-      return [90 + t * 844, 380 + Math.sin(t * Math.PI * 2.2) * 170];
-    };
-    g.strokeStyle = '#a7462a';
-    g.lineWidth = 12;
+  });
+}
+
+/**
+ * A child's crayon drawing on a sheet of paper: cars and roads in waxy strokes, the sky
+ * a band at the top, the sun in a corner. Four of them, `which` 0-3.
+ */
+export function crayonDrawing(which: number): THREE.CanvasTexture {
+  return canvasTexture(512, 384, (g) => {
+    const r = rng(101 + which * 13);
+    g.fillStyle = '#f3efe4';
+    g.fillRect(0, 0, 512, 384);
     g.lineCap = 'round';
-    g.beginPath();
-    for (let k = 0; k <= 120; k++) {
-      const x = 40 + (k / 120) * 944;
-      const y = 380 + Math.sin(((x - 90) / 844) * Math.PI * 2.2) * 170;
-      if (k === 0) g.moveTo(x, y);
-      else g.lineTo(x, y);
+    g.lineJoin = 'round';
+    /** A waxy stroke: the same path laid a few times, each a little off and thin. */
+    const crayon = (color: string, width: number, path: () => void): void => {
+      g.strokeStyle = color;
+      for (let k = 0; k < 4; k++) {
+        g.globalAlpha = 0.45;
+        g.lineWidth = width * (0.6 + r() * 0.5);
+        g.save();
+        g.translate((r() - 0.5) * width * 0.6, (r() - 0.5) * width * 0.6);
+        g.beginPath();
+        path();
+        g.stroke();
+        g.restore();
+      }
+      g.globalAlpha = 1;
+    };
+    /** A crayon fill: back-and-forth strokes across a box, left gappy. */
+    const scrub = (color: string, x0: number, y0: number, x1: number, y1: number): void => {
+      crayon(color, 6, () => {
+        for (let y = y0; y < y1; y += 7) {
+          g.moveTo(x0 + r() * 8, y);
+          g.lineTo(x1 - r() * 8, y + 3 + r() * 3);
+        }
+      });
+    };
+    const sun = (x: number, y: number): void => {
+      crayon('#f2b51a', 8, () => g.arc(x, y, 30, 0, Math.PI * 2));
+      crayon('#f2b51a', 5, () => {
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2;
+          g.moveTo(x + Math.cos(a) * 40, y + Math.sin(a) * 40);
+          g.lineTo(x + Math.cos(a) * 60, y + Math.sin(a) * 60);
+        }
+      });
+    };
+    const wheel = (x: number, y: number, rad: number): void => {
+      crayon('#1d1d1d', 8, () => g.arc(x, y, rad, 0, Math.PI * 2));
+      crayon('#8a8a8a', 4, () => g.arc(x, y, rad * 0.4, 0, Math.PI * 2));
+    };
+    /** A car side-on in crayon: a filled body, windows, wheels. */
+    const car = (x: number, y: number, w: number, body: string, kind: number): void => {
+      const h = w * 0.32;
+      scrub(body, x, y - h, x + w, y - h * 0.2);
+      crayon(body, 7, () => {
+        if (kind === 2) {
+          g.rect(x + w * 0.05, y - h * 2, w * 0.9, h * 1.1);
+        } else {
+          g.moveTo(x + w * 0.22, y - h);
+          g.lineTo(x + w * 0.34, y - h * 1.8);
+          g.lineTo(x + w * (kind === 1 ? 0.92 : 0.72), y - h * 1.8);
+          g.lineTo(x + w * (kind === 1 ? 1 : 0.84), y - h);
+        }
+      });
+      crayon('#6fb6e0', 6, () => {
+        if (kind === 2) g.rect(x + w * 0.15, y - h * 1.8, w * 0.7, h * 0.5);
+        else g.rect(x + w * 0.36, y - h * 1.65, w * 0.3, h * 0.5);
+      });
+      wheel(x + w * 0.22, y - h * 0.15, h * 0.42);
+      wheel(x + w * 0.78, y - h * 0.15, h * 0.42);
+    };
+    // The sky: a band of blue scrubbed along the top.
+    scrub('#5a9ad8', 0, 0, 512, 46);
+    if (which === 0) {
+      sun(440, 90);
+      crayon('#5a5a5a', 30, () => {
+        g.moveTo(0, 320);
+        g.lineTo(512, 320);
+      });
+      crayon('#f3efe4', 4, () => {
+        for (let x = 20; x < 512; x += 60) {
+          g.moveTo(x, 320);
+          g.lineTo(x + 30, 320);
+        }
+      });
+      car(90, 305, 250, '#d8302a', 0);
+    } else if (which === 1) {
+      // A road to the horizon, a car on it, cacti either side.
+      sun(80, 90);
+      scrub('#e0a050', 0, 200, 512, 384);
+      crayon('#4a4a4a', 10, () => {
+        g.moveTo(240, 200);
+        g.lineTo(90, 384);
+        g.moveTo(272, 200);
+        g.lineTo(430, 384);
+      });
+      crayon('#f3efe4', 5, () => {
+        g.moveTo(256, 220);
+        g.lineTo(256, 250);
+        g.moveTo(256, 280);
+        g.lineTo(258, 320);
+        g.moveTo(258, 350);
+        g.lineTo(260, 384);
+      });
+      for (const [x, s] of [[70, 1], [440, 1.2], [380, 0.6]] as const) {
+        crayon('#3f8a3a', 12 * s, () => {
+          g.moveTo(x, 280);
+          g.lineTo(x, 280 - 90 * s);
+          g.moveTo(x - 24 * s, 230);
+          g.lineTo(x - 24 * s, 205 - 20 * s);
+          g.moveTo(x - 24 * s, 230);
+          g.lineTo(x, 230);
+        });
+      }
+      car(200, 330, 110, '#2a6ac8', 1);
+    } else if (which === 2) {
+      // A jeep going up a hill, a house on top.
+      sun(450, 80);
+      crayon('#4f9a40', 14, () => {
+        g.moveTo(0, 370);
+        g.quadraticCurveTo(250, 120, 512, 200);
+      });
+      crayon('#b84a2a', 8, () => {
+        g.rect(380, 120, 70, 60);
+        g.moveTo(370, 122);
+        g.lineTo(415, 82);
+        g.lineTo(460, 122);
+      });
+      const tilt = -0.35;
+      g.save();
+      g.translate(150, 300);
+      g.rotate(tilt);
+      car(-90, 0, 180, '#4c6a2a', 2);
+      g.restore();
+    } else {
+      // Two cars racing, a flag, the finish line.
+      crayon('#5a5a5a', 40, () => {
+        g.moveTo(0, 250);
+        g.lineTo(512, 250);
+      });
+      crayon('#5a5a5a', 40, () => {
+        g.moveTo(0, 340);
+        g.lineTo(512, 340);
+      });
+      for (let y = 220; y < 370; y += 20) {
+        crayon(Math.floor(y / 20) % 2 === 0 ? '#1d1d1d' : '#f3efe4', 10, () => {
+          g.moveTo(440, y);
+          g.lineTo(450, y + 10);
+        });
+      }
+      car(220, 245, 170, '#e8c020', 1);
+      car(60, 335, 170, '#d8302a', 0);
+      crayon('#1d1d1d', 4, () => {
+        for (const y of [215, 225, 305, 315]) {
+          g.moveTo(10 + r() * 20, y);
+          g.lineTo(45 + r() * 10, y);
+        }
+      });
+      sun(70, 100);
     }
+    // The paper's wear: a crease, and grain.
+    g.strokeStyle = 'rgba(120,100,70,0.18)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, 190 + r() * 20);
+    g.lineTo(512, 180 + r() * 30);
     g.stroke();
-    g.font = `600 26px ${COND}`;
-    g.textAlign = 'center';
-    DREAMS.forEach((dream, i) => {
-      const [x, y] = at(i);
-      const done = progress[dream.id] !== undefined;
-      g.fillStyle = done ? '#3f8f4f' : '#f2e8d0';
-      g.strokeStyle = done ? '#1f3a22' : '#6a4a30';
-      g.lineWidth = 5;
-      g.beginPath();
-      g.arc(x, y, done ? 20 : 15, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-      g.fillStyle = '#3a2a1a';
-      g.fillText(dream.title, x, y + (i % 2 === 0 ? -34 : 52));
-    });
-    g.font = `800 italic 44px ${COND}`;
-    g.textAlign = 'left';
-    g.fillStyle = 'rgba(80,50,30,0.8)';
-    g.fillText('ADVENTURES', 40, 70);
+    for (let i = 0; i < 1500; i++) {
+      g.fillStyle = `rgba(120,100,70,${r() * 0.06})`;
+      g.fillRect(r() * 512, r() * 384, 2, 2);
+    }
   });
 }
 

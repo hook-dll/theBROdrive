@@ -1,8 +1,15 @@
 import type { SurfaceType } from '../core/surfaces';
-import { isCourierPoiSlot } from './couriers';
 import { roadConditionAt } from './gradient';
-import { dwellingFootprint, POI_SPACING, roadsideSlot } from './poislots';
+import { POI_SPACING } from './poislots';
 import { CURVE_WIDENING_M, halfWidthAt, LANE_WIDTH } from './roadprofile';
+import {
+  LAYBY_TAPER_M,
+  PAD_HALF_LENGTH_M,
+  roadHalf,
+  roadsideStop,
+  SERVICE_DEPTH_M,
+  SETTLEMENT_HALF_LENGTH_M,
+} from './settlement';
 
 /**
  * LAY-BYS: the paved pull-in in front of every roadside dwelling.
@@ -28,7 +35,10 @@ import { CURVE_WIDENING_M, halfWidthAt, LANE_WIDTH } from './roadprofile';
  *
  * Masts get no lay-by: nobody pulls in at a relay mast. Every other roadside stop has
  * one, so it is attached to the stop rather than spawned on its own: loot, saves and
- * `Poi.index` are untouched by it.
+ * `Poi.index` are untouched by it. Its numbers are the stop's plan (world/settlement.ts):
+ * a lone house's pad runs across its front; a settlement's is longer and always full
+ * width, the service strip (post, parking, shop) along its outer edge and the houses on
+ * this side at both ends of it.
  */
 export interface Layby {
   /** `Poi.index` of the stop it serves. */
@@ -54,9 +64,9 @@ export interface Layby {
   readonly padInner: number;
   /** `u` of the pad's building-side edge. */
   readonly padOuter: number;
-  /** `u` of the building's far wall: the flattened site reaches past it. */
+  /** `u` of the farthest wall on this side: the flattened site reaches past it. */
   readonly siteOuter: number;
-  /** Half the building's authored size along the road. */
+  /** Half the along-road extent of the buildings on this side, about `s`. */
   readonly siteHalfAlong: number;
   /** Whether a courier car parks on this pad (`laybyCourierLateral`, at `s`). */
   readonly courier: boolean;
@@ -70,18 +80,6 @@ export interface Layby {
   readonly surface: SurfaceType;
 }
 
-/** Arclength of the pad at full width either side of the stop, metres. */
-const PAD_HALF_LENGTH_M = 22;
-/** Length of each slip: road edge to full pad width, metres. */
-export const LAYBY_TAPER_M = 36;
-/** Clear sand left between the pad and the building's front wall line, metres. */
-const FRONT_CLEAR_M = 2;
-/**
- * Widest the pad is past `padInner`, metres: two cars side by side with room to open a
- * door. A stop set 22 m back is not fronted by 20 m of asphalt; the pad stays a lay-by
- * and the sand runs on to the building.
- */
-const PAD_MAX_WIDTH_M = 8.5;
 /** Parking line: this far out from `padInner`, metres (a car's flank ~2 m off the road). */
 const PARK_INSET_M = 3;
 /** ...but never closer than this to the pad's outer edge. */
@@ -104,8 +102,11 @@ const SITE_MARGIN_M = 3;
  * 6.5 + 22 + 25 m, plus `SITE_MARGIN_M`, plus this, is 68.5 m.
  */
 const FLAT_BLEND_M = 12;
-/** Farthest from `Layby.s` anything of a lay-by reaches, along the road. */
-const LAYBY_REACH_M = PAD_HALF_LENGTH_M + LAYBY_TAPER_M + FLAT_BLEND_M;
+/**
+ * Farthest from `Layby.s` anything of a stop reaches along the road: a settlement's
+ * outermost house, and the levelled ground's blend past the slips.
+ */
+const LAYBY_REACH_M = SETTLEMENT_HALF_LENGTH_M + FLAT_BLEND_M;
 
 const laybyCache = new Map<number, Map<number, Layby | null>>();
 
@@ -118,36 +119,27 @@ function laybyAtSlot(seed: number, slot: number): Layby | null {
   }
   const cached = bySlot.get(slot);
   if (cached !== undefined) return cached;
-  const roll = roadsideSlot(seed, slot, POI_SPACING);
-  const footprint = roll ? dwellingFootprint(roll.structure) : null;
-  let layby: Layby | null = null;
-  if (roll && footprint) {
-    const half = Math.max(footprint[0], footprint[1]) / 2;
-    const sEntry = roll.s - PAD_HALF_LENGTH_M - LAYBY_TAPER_M;
-    const sExit = roll.s + PAD_HALF_LENGTH_M + LAYBY_TAPER_M;
-    let edge = 0;
-    for (let s = sEntry; s <= sExit; s += 6) edge = Math.max(edge, halfWidthAt(seed, s));
-    const padInner = edge + CURVE_WIDENING_M;
-    // The front wall line: world/poi.ts stands the building's centre at the half width
-    // plus the verge plus its half size, and its depth is never more than that size.
-    const front = halfWidthAt(seed, roll.s) + roll.verge;
-    const padOuter = Math.min(front - FRONT_CLEAR_M, padInner + PAD_MAX_WIDTH_M);
-    layby = {
-      poiIndex: roll.index,
-      s: roll.s,
-      side: roll.side,
-      sEntry,
-      sPadStart: roll.s - PAD_HALF_LENGTH_M,
-      sPadEnd: roll.s + PAD_HALF_LENGTH_M,
-      sExit,
-      padInner,
-      padOuter,
-      siteOuter: front + 2 * half,
-      siteHalfAlong: half,
-      courier: isCourierPoiSlot(seed, roll.slot, POI_SPACING),
-      surface: roadConditionAt(seed, roll.s).surface,
-    };
-  }
+  const stop = roadsideStop(seed, slot);
+  const pad = stop?.pad;
+  const layby: Layby | null =
+    stop && pad
+      ? {
+          poiIndex: stop.roll.index,
+          s: stop.roll.s,
+          side: stop.roll.side,
+          sEntry: pad.sEntry,
+          sPadStart: pad.sPadStart,
+          sPadEnd: pad.sPadEnd,
+          sExit: pad.sExit,
+          padInner: pad.padInner,
+          padOuter: pad.padOuter,
+          siteOuter: pad.siteOuter,
+          siteHalfAlong: pad.siteHalfAlong,
+          // The courier parks at every settlement, and only there.
+          courier: stop.roll.settlement,
+          surface: roadConditionAt(seed, stop.roll.s).surface,
+        }
+      : null;
   bySlot.set(slot, layby);
   return layby;
 }
@@ -262,8 +254,10 @@ export function onLaybyPad(l: Layby, s: number, lateral: number, halfWidth: numb
 }
 
 /**
- * Whether a point is on any lay-by's asphalt, or within `margin` metres of its outline:
- * the keep-clear verge furniture, scatter and ground cover test before standing in it.
+ * Whether a point is on any lay-by's asphalt or inside any roadside stop's building, or
+ * within `margin` metres of either: the keep-clear verge furniture, scatter and ground
+ * cover test before standing in it. A settlement's houses stand on both sides of the
+ * road, so the far side is tested too.
  */
 export function laybyKeepsClear(
   seed: number,
@@ -272,11 +266,25 @@ export function laybyKeepsClear(
   halfWidth: number,
   margin: number,
 ): boolean {
-  const l = laybyNear(seed, s);
+  const slot = Math.round(s / POI_SPACING);
+  if (slot < 1 || Math.abs(s - slot * POI_SPACING) > LAYBY_REACH_M) return false;
+  const stop = roadsideStop(seed, slot);
+  if (!stop) return false;
+  for (const house of stop.layout.houses) {
+    const { along, across } = roadHalf(house.halfX, house.halfZ);
+    if (Math.abs(s - house.s) <= along + margin && Math.abs(lateral - house.lateral) <= across + margin) return true;
+  }
+  const l = laybyAtSlot(seed, slot);
   if (!l || lateral * l.side <= 0) return false;
   if (s < l.sEntry - margin || s > l.sExit + margin) return false;
+  const u = lateral * l.side;
+  // A settlement's service strip: the sand past the pad where the post, the shop and
+  // the rest stand.
+  if (stop.layout.settlement && s >= l.sPadStart - margin && s <= l.sPadEnd + margin) {
+    if (u <= l.padOuter + SERVICE_DEPTH_M + margin) return true;
+  }
   const clamped = Math.min(l.sExit, Math.max(l.sEntry, s));
-  return lateral * l.side <= laybyOuterAt(l, clamped, halfWidth) + margin;
+  return u <= laybyOuterAt(l, clamped, halfWidth) + margin;
 }
 
 /**

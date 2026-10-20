@@ -4,9 +4,8 @@ import { hash, hash01, pick } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { MarketField } from './market';
-import { buildVendingMachine, vendingAssortment } from './vending';
-import { buildLotSign, lotOffer, makeLotCar } from './carlot';
-import { makeFlatMaterial } from '../render/materials';
+import { buildVendingMachine } from './vending';
+import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
@@ -15,25 +14,13 @@ import {
   isCarModelLoaded,
   loadCarModel,
 } from '../render/carmodel';
-import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
+import { CAR_MODELS } from '../vehicle/carmodels';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { TrailerField } from '../vehicle/trailer';
-import type { WreckTrunkField } from './wrecktrunks';
 import { courierDefaultStorage } from '../contracts/offers';
-import {
-  courierId,
-  courierParkingLateral,
-  couriersBetween,
-  type CourierField,
-  type CourierStop,
-} from './couriers';
-import { fitGround, type GroundPlane } from './footprint';
-import {
-  DANCER_ALONG_M,
-  DANCER_OUT_M,
-  DancerField,
-  type DancerHandle,
-} from './props/airdancer';
+import { courierId, couriersBetween, type CourierField, type CourierStop } from './couriers';
+import { fitGround } from './footprint';
+import { DancerField, type DancerHandle } from './props/airdancer';
 import { halfWidthAt, SHOULDER_WIDTH_M } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import { mesaFieldOf } from './mesas';
@@ -41,8 +28,9 @@ import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
-import { POI_SPACING, roadsideSlot, rollStructure, type PoiStock } from './poislots';
-import { laybyCourierLateral, laybyNear, laybyOuterAt, type Layby } from './layby';
+import { POI_SPACING, roadsideSlot, rollStructure } from './poislots';
+import { laybyCourierLateral, laybyNear, type Layby } from './layby';
+import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout, type SettlementSpot } from './settlement';
 import type { FixtureField } from './fixturefield';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
@@ -51,24 +39,23 @@ const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
  * Points of interest: the buildings that give the drive a reason to continue.
  *
  * Two populations, one model. ROADSIDE stops stand on slots every `POI_SPACING` metres
- * of arclength, just past the verge and facing the road. DESERT ones stand on slots half
- * a spacing off those, one per side, anywhere from 70 m to the better part of a
- * kilometre out and facing wherever they were left facing: a house you only find by
- * leaving the asphalt.
+ * of arclength, just past the verge and facing the road: at a courier/post stop a
+ * settlement of houses on both sides with its service strip, anywhere else one house
+ * (world/settlement.ts lays both out). DESERT ones stand on slots half a spacing off
+ * those, one per side, anywhere from 70 m to the better part of a kilometre out and
+ * facing wherever they were left facing: a house you only find by leaving the asphalt.
  *
  * Both are pure functions of the integer seed. A POI at km 300 is computed from its
  * slot index alone — never by walking the 249 slots before it — so chunk streaming
  * can materialise any stretch of road in any order and a save always restores the
  * exact same stop.
  *
- * WHAT STANDS THERE AND WHAT IT IS FOR ARE TWO ROLLS. The building is drawn from
- * `POI_STRUCTURES` (world/poistructures.ts); what kind of stop it is — fuel, store,
- * home, a salvage field — is its `PoiStock`, rolled separately. Nothing lies about a
- * stop for the taking: what a stop offers is sold (economy plan).
+ * The building is drawn from `POI_STRUCTURES` (world/poistructures.ts). Nothing lies
+ * about a stop for the taking: what a stop offers is sold (economy plan).
  *
- * A stop's world objects (a trailer, a car field's cars) are materialised exactly
- * once, keyed by `Poi.index`. `poi_looted` is the idempotency guard: on any later
- * rebuild that generation is skipped entirely.
+ * A stop's world objects (a trailer, the car for sale) are materialised exactly once,
+ * keyed by `Poi.index` and the car's id. `poi_looted` is the idempotency guard: on any
+ * later rebuild that generation is skipped entirely.
  */
 
 /** Domain tag for the desert slots. */
@@ -116,7 +103,6 @@ export interface Poi {
   readonly lateral: number;
   /** Index into `POI_STRUCTURES`: the building that stands here. */
   readonly structure: number;
-  readonly stock: PoiStock;
   /** Out in the desert rather than at the verge: faces anywhere, and has no courier. */
   readonly desert: boolean;
   /** Deterministic per-POI variation seed for shape and loot. */
@@ -150,7 +136,6 @@ function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
     s: roll.s,
     lateral: roll.side * (halfWidthAt(seed, roll.s) + roll.verge + halfStructure(roll.structure)),
     structure: roll.structure,
-    stock: roll.stock,
     desert: false,
     variantSeed: roll.variantSeed,
   };
@@ -175,15 +160,6 @@ export function poisBetween(
     if (poi) result.push(poi);
   }
   return result;
-}
-
-/**
- * The roadside POI at a slot, or null when that slot is empty desert. Same rolls as
- * `poisBetween`, so one slot can be resolved without sampling a whole stretch of road —
- * `tools/wreck-spacing.ts` reads a field that way.
- */
-export function poiAt(seed: number, slot: number, spacing = POI_SPACING): Poi | null {
-  return roadsidePoi(seed, slot, spacing);
 }
 
 const lakeCache = new Map<number, readonly LakeSite[]>();
@@ -232,7 +208,7 @@ export function desertPoisBetween(
       const s = (slot + 0.5 + (hash01(seed, DESERT_DOMAIN, key, 2) - 0.5) * 0.8) * spacing;
       if (s < fromS || s >= toS) continue;
       if (s < DESERT_END_CLEARANCE_M || s > ROAD_LENGTH - DESERT_END_CLEARANCE_M) continue;
-      const { structure, stock } = rollStructure(seed, DESERT_DOMAIN, key);
+      const structure = rollStructure(seed, DESERT_DOMAIN, key);
       const half = halfStructure(structure);
       const out = hash01(seed, DESERT_DOMAIN, key, 3);
       const lateral = side * (halfWidthAt(seed, s) + DESERT_NEAR_M + half + out * out * DESERT_SPAN_M);
@@ -242,7 +218,6 @@ export function desertPoisBetween(
         s,
         lateral,
         structure,
-        stock,
         desert: true,
         variantSeed: hash(seed, DESERT_DOMAIN, key, 4),
       });
@@ -312,89 +287,6 @@ function desertPoiClearOfNeighbours(poi: Poi, seed: number, spacing: number, roa
   return true;
 }
 
-/** Anchor in XZ plus the road heading, before any terrain sampling. */
-interface Anchor {
-  x: number;
-  z: number;
-  heading: number;
-}
-
-/** Ground position in XZ at a POI's arclength, before terrain sampling. */
-function anchorXZ(ctx: ChunkContext, poi: Poi): Anchor {
-  const sample = ctx.road.sampleAt(poi.s);
-  const p = ctx.road.offsetPoint(poi.s, poi.lateral);
-  return { x: p.x, z: p.z, heading: sample.heading };
-}
-
-/** Rotate a local (right, forward) offset into a world XZ offset at `yaw`. */
-function rotateXZ(lx: number, lz: number, yaw: number): { x: number; z: number } {
-  const c = Math.cos(yaw);
-  const s = Math.sin(yaw);
-  return { x: c * lx + s * lz, z: -s * lx + c * lz };
-}
-
-/**
- * A structure's site: the anchor its local (right, forward) offsets are measured
- * from, the yaw they are rotated by, and ONE plane fitted to the ground under the
- * whole footprint.
- *
- * One plane per site rather than one sample per part is the entire fix for
- * buildings half-buried in a dune: a canopy's four posts used to take four
- * independent centre samples and carry a level roof between them, so on the 9-10%
- * ground this world is made of, two of them stood on air. Now the site knows its
- * slope, `lift` raises anything standing on a laid apron, and a part either follows
- * the plane (`sitePoint`) or tilts onto it
- * (`plane.roll`/`plane.pitch`).
- */
-interface Site {
-  readonly x: number;
-  readonly z: number;
-  readonly yaw: number;
-  readonly plane: GroundPlane;
-  /** Top of the apron above the fitted plane, or zero on bare ground. */
-  readonly lift: number;
-}
-
-function siteAt(
-  ctx: ChunkContext,
-  poi: Poi,
-  anchor: Anchor,
-  yaw: number,
-  halfRight: number,
-  halfForward: number,
-  lift = 0,
-): Site {
-  return {
-    x: anchor.x,
-    z: anchor.z,
-    yaw,
-    lift,
-    // Five by five, not the default three: the residual is only as honest as the samples
-    // it is taken over, and a 30 m mast compound on the berm's curve hid 0.14 m of daylight
-    // under a wall between the nine a 3x3 grid takes. Once per building, 25 road samples.
-    plane: fitGround(ctx.terrain, anchor.x, anchor.z, yaw, halfRight, halfForward, poi.s, 5),
-  };
-}
-
-/** World position of a local offset, on the site's ground (or on its apron). */
-function sitePoint(site: Site, lx: number, lz: number): { x: number; y: number; z: number } {
-  const o = rotateXZ(lx, lz, site.yaw);
-  return { x: site.x + o.x, y: site.plane.yAt(lx, lz) + site.lift, z: site.z + o.z };
-}
-
-
-/** Terrain-grounded position offset along the road instead of in local space. */
-function groundPoint(
-  ctx: ChunkContext,
-  poi: Poi,
-  sDelta: number,
-  latDelta: number,
-): { x: number; y: number; z: number } {
-  const s = poi.s + sDelta;
-  const p = ctx.road.offsetPoint(s, poi.lateral + latDelta);
-  return { x: p.x, y: ctx.terrain.heightAt(p.x, p.z, s), z: p.z };
-}
-
 /**
  * Matrix from an upright-ish pose. `yaw` about Y, then `roll`/`pitch` tilts.
  *
@@ -454,11 +346,7 @@ export function geometryToTrimesh(
 /**
  * Static collider for a primitive. The streamer owns cleanup: it walks the returned
  * `bodies` array and calls `physics.removeBody`, which forgets the surface and
- * removes the fixed body plus its collider.
- *
- * Returns the collider so a caller that needs to identify it later (a revivable
- * wreck, which must be recognised when the aim ray hits it) can register the
- * handle. Null when the chunk carries no physics.
+ * removes the fixed body plus its collider. Null when the chunk carries no physics.
  */
 function addStaticCollider(
   ctx: ChunkContext,
@@ -477,87 +365,13 @@ function addStaticCollider(
   return collider;
 }
 
-/** Visual mesh + matching static collider, sharing one (unmutated) geometry. */
-function addStaticMesh(
-  ctx: ChunkContext,
-  geometry: THREE.BufferGeometry,
-  material: THREE.Material,
-  matrix: THREE.Matrix4,
-  surface: SurfaceType,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-): void {
-  const mesh = new THREE.Mesh(geometry, material);
-  setFromMatrix(mesh, matrix);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-  addStaticCollider(ctx, geometry, matrix, surface, bodies, colliders);
-}
-
 // ---------------------------------------------------------------------------
-// Kind builders. Each builds its scenery unconditionally and its world objects only
-// when `shouldLoot` is set, so a stop built once never builds them again.
+// Building a stop. Scenery is built unconditionally; world objects (a trailer, the car
+// for sale) only once, guarded by `poi_looted` and by the car's own id in world state.
 //
-// NOTHING LIES ABOUT A STOP FOR THE TAKING (economy plan): no cans, tools, gum,
-// medicine or parts by the front wall, and the buried shells' bonnets and boots are
-// empty. Fuel, fluids and parts are bought at a stop's vending machine.
+// NOTHING LIES ABOUT A STOP FOR THE TAKING (economy plan): fuel, fluids and parts are
+// bought at a settlement's machine; a car is bought from its lot.
 // ---------------------------------------------------------------------------
-
-/**
- * The strip of ground around a building where its vending machine stands.
- *
- * None of the buildings can be entered, so a machine stands where a person would put one
- * at a house: by a wall, on the sand, its back a hand's width off it (`machineSpot`).
- */
-interface Yard {
-  readonly site: Site;
-  readonly halfX: number;
-  readonly halfZ: number;
-}
-
-/**
- * Deepest the yard reaches beyond the front wall, metres. The wreck field keeps clear
- * of it, and it stops short of where a courier parks: the nearest verge is 10 m, and a
- * courier's flank stands about 10.4 m from the centreline.
- */
-const YARD_DEPTH_M = 2.4;
-
-/**
- * A trailer left beside the house. Take one, leave one: they are never owned, so this
- * records a world object rather than giving the player a possession, and `shouldLoot`
- * is what stops a stop growing a new one every reload.
- */
-function stockTrailer(
-  ctx: ChunkContext,
-  poi: Poi,
-  yard: Yard,
-  trailers: TrailerField,
-): void {
-  if (hash01(poi.variantSeed, TRAILER_DOMAIN, 0) >= TRAILER_STOP_CHANCE) return;
-  // Alongside the right-hand wall, drawbar to the front: clear of the building, of the
-  // loot by the front wall, and pointing the way a car would come to take it.
-  const o = rotateXZ(yard.halfX + 2.4, -yard.halfZ * 0.4, yard.site.yaw);
-  const x = yard.site.x + o.x;
-  const z = yard.site.z + o.z;
-  const yaw = yard.site.yaw + Math.PI;
-  const half = yaw / 2;
-  trailers.spawn({
-    id: `trailer:${poi.index}`,
-    hitchedTo: null,
-    cargoKg: 0,
-    x,
-    // Clear of the ground so it drops onto its own suspension rather than starting
-    // inside the terrain trimesh.
-    y: ctx.terrain.heightAt(x, z, poi.s) + 0.9,
-    z,
-    qx: 0,
-    qy: Math.sin(half),
-    qz: 0,
-    qw: Math.cos(half),
-  });
-}
 
 /**
  * Which way a building faces: toward the road it stands beside.
@@ -568,8 +382,9 @@ function stockTrailer(
  * story house's front (`src/story/site.ts`), which faces the same way for the same reason.
  * A small hash wobble keeps a row of them from looking stamped out.
  *
- * Exported because a bench that measures a building's footprint against the world has to
- * place it the way the game does; `tools/wreck-spacing.ts` is that bench.
+ * Exported because the story house (src/story/site.ts) is oriented by the same rule. A
+ * roadside stop's houses carry the same turn as a yaw relative to the road
+ * (world/settlement.ts).
  */
 export function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
   const outward = heading + (lateral >= 0 ? -Math.PI / 2 : Math.PI / 2);
@@ -596,26 +411,23 @@ export function poiYaw(poi: Poi, heading: number): number {
 const SEAT_BURY_MARGIN = 0.08;
 
 /**
- * One stop: a building on the sand, its collider, and its car field.
+ * One structure on the sand at an absolute spot, with its collider.
+ *
+ * See `NO APRON` below for how it meets the ground; `s` is any arclength near the spot,
+ * the hint the terrain samples with.
  */
-function buildStructurePoi(
+function seatStructure(
   ctx: ChunkContext,
-  poi: Poi,
+  structure: number,
+  x: number,
+  z: number,
+  yaw: number,
+  s: number,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  trailers: TrailerField,
-  wreckTrunks: WreckTrunkField,
-  registeredWrecks: string[],
-  deferredVisuals: Array<() => void>,
-  shouldLoot: boolean,
-  market: MarketField,
-  registeredMarket: string[],
 ): void {
-  const instance: VariantInstance = createStructureInstance(poi.structure);
-  const a = anchorXZ(ctx, poi);
-  const yaw = poiYaw(poi, a.heading);
-
+  const instance: VariantInstance = createStructureInstance(structure);
   // NO APRON. A building stands on the sand, pushed in far enough that the sand meets
   // its walls wherever the ground rises.
   //
@@ -630,163 +442,273 @@ function buildStructurePoi(
   // measured at 0.22-0.44 m across the catalogue — which is by definition the most any
   // point of ground under it can rise above the plane. So no wall can ever stand on air,
   // and none of it stands on anything man-made.
-  const halfX = instance.halfExtentX;
-  const halfZ = instance.halfExtentZ;
-  // Fitted over the larger of the measured bounds and the authored footprint: a mast
-  // compound's measured bounds stop at its masts, and the guy anchors, the hut's step and
-  // the cable runs past them still have to meet the sand.
-  const site = siteAt(ctx, poi, a, yaw, Math.max(halfX, instance.footprint[0] / 2), Math.max(halfZ, instance.footprint[1] / 2));
-  const seatY = site.plane.centreY - site.plane.residual - SEAT_BURY_MARGIN;
-
-  const at = sitePoint(site, 0, 0);
-  at.y = seatY;
-  instance.group.position.set(at.x - ctx.originX, at.y, at.z - ctx.originZ);
-  instance.group.rotation.set(site.plane.pitch, yaw, site.plane.roll, 'YXZ');
+  // The plane is fitted over the larger of the measured bounds and the authored footprint:
+  // a mast compound's measured bounds stop at its masts, and the guy anchors, the hut's
+  // step and the cable runs past them still have to meet the sand. Five by five, not the
+  // default three: the residual is only as honest as the samples it is taken over, and a
+  // 30 m mast compound on the berm's curve hid 0.14 m of daylight under a wall between
+  // the nine a 3x3 grid takes.
+  const plane = fitGround(
+    ctx.terrain,
+    x,
+    z,
+    yaw,
+    Math.max(instance.halfExtentX, instance.footprint[0] / 2),
+    Math.max(instance.halfExtentZ, instance.footprint[1] / 2),
+    s,
+    5,
+  );
+  const seatY = plane.centreY - plane.residual - SEAT_BURY_MARGIN;
+  instance.group.position.set(x - ctx.originX, seatY, z - ctx.originZ);
+  instance.group.rotation.set(plane.pitch, yaw, plane.roll, 'YXZ');
   instance.group.updateMatrixWorld(true);
   group.add(instance.group);
 
-  if (ctx.hasPhysics) {
-    const matrix = poseMatrix(
-      at.x,
-      at.y,
-      at.z,
-      yaw,
-      site.plane.roll,
-      site.plane.pitch,
-      ctx.originX,
-      ctx.originZ,
-    );
-    const trimesh = geometryToTrimesh(instance.solid, matrix);
-    if (trimesh.indices.length > 0) {
-      const collider = ctx.physics.addStaticTrimesh(
-        trimesh.vertices,
-        trimesh.indices,
-        SurfaceType.Concrete,
-      );
-      colliders.push(collider);
-      const parent = collider.parent();
-      if (parent) bodies.push(parent);
-    }
-  }
+  if (!ctx.hasPhysics) return;
+  const matrix = poseMatrix(x, seatY, z, yaw, plane.roll, plane.pitch, ctx.originX, ctx.originZ);
+  const trimesh = geometryToTrimesh(instance.solid, matrix);
+  if (trimesh.indices.length === 0) return;
+  const collider = ctx.physics.addStaticTrimesh(trimesh.vertices, trimesh.indices, SurfaceType.Concrete);
+  colliders.push(collider);
+  const parent = collider.parent();
+  if (parent) bodies.push(parent);
+}
 
-  // The car field. Every roadside stop has one — mostly shells to strip for parts —
-  // and a desert stop only when it is a scrapyard. `buildWrecks` places its cars around
-  // the POI's own anchor, which is exactly where this building stands, so it is handed
-  // the footprint to lay out around.
-  if (!poi.desert || poi.stock === 'salvage') {
-    buildWrecks(
-      ctx,
-      poi,
-      group,
-      bodies,
-      colliders,
-      wreckTrunks,
-      registeredWrecks,
-      deferredVisuals,
-      salvageKeepOut(poi, ctx.road, instance),
-      market,
-      registeredMarket,
-    );
-  }
+/** Clear ground between two of a stop's houses as they stand in the world, metres. */
+const HOUSE_CLEARANCE_M = 2;
+/** Clear ground between a house's corner radius and a mesa's footprint, metres. */
+const HOUSE_MESA_CLEARANCE_M = 4;
+/**
+ * Clear ground between a house's corner radius and the asphalt of ANOTHER pass of the
+ * road, metres. Its own pass it clears by its verge; where the road doubles back, a house
+ * across from the stop can stand on the next leg.
+ */
+const HOUSE_OTHER_PASS_CLEARANCE_M = 10;
+/** Arclength apart beyond which the nearest asphalt is another pass of the road, metres. */
+const OTHER_PASS_S_M = 200;
 
-  // A fuel stop leaves a trailer beside the house: a world object, never owned.
-  if (shouldLoot && poi.stock === 'fuel') stockTrailer(ctx, poi, { site, halfX, halfZ }, trailers);
-
-  // Every stop with a building sells from a machine (a mast has none), its back a hand's
-  // width off the wall that faces the road, so it is seen from the asphalt.
-  const assortment = vendingAssortment(poi);
-  if (assortment) {
-    const spot = machineSpot(ctx, poi, { site, halfX, halfZ });
-    buildVendingMachine(ctx, poi, assortment, spot.x, spot.z, spot.yaw, group, bodies, colliders, market, registeredMarket);
-  }
+/** A building's rectangle on the ground: centre, yaw, half extents in its own frame. */
+export interface GroundRect {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly halfX: number;
+  readonly halfZ: number;
 }
 
 /**
- * Where a stop's vending machine stands and which way it faces. A roadside building's
- * front faces the road: the machine stands by it toward the end away from the trailer,
- * far enough along that a courier parked in front of the middle (`buildCourier`, a car's
- * half length either side of the stop) does not hide it from the road.
- * A desert building faces anywhere, so the machine stands by whichever of its four walls
- * faces the road best, facing out. The trailer stands along the right wall (+X, see
- * `stockTrailer`) toward the front, so by that wall the machine keeps to the back end.
- * Every wall's strip is clear of the car field (`salvageKeepOut`).
+ * Gap between two rectangles along the axis that separates them best: positive is clear
+ * ground, negative an overlap. Exact for the separating-axis test; as a distance it is
+ * the larger of the per-axis gaps, which is all a minimum spacing needs.
  */
-function machineSpot(ctx: ChunkContext, poi: Poi, yard: Yard): { x: number; z: number; yaw: number } {
-  let wall = 0;
-  if (poi.desert) {
-    const road = ctx.road.offsetPoint(poi.s, 0);
-    const toRoadX = road.x - yard.site.x;
-    const toRoadZ = road.z - yard.site.z;
-    let best = -Infinity;
-    for (let k = 0; k < 4; k++) {
-      // The wall's outward normal: its machine's front, local -Z at the turned yaw.
-      const out = rotateXZ(0, -1, yard.site.yaw + (k * Math.PI) / 2);
-      const facing = out.x * toRoadX + out.z * toRoadZ;
-      if (facing > best) {
-        best = facing;
-        wall = k;
-      }
-    }
+export function rectGap(a: GroundRect, b: GroundRect): number {
+  let best = -Infinity;
+  for (const yaw of [a.yaw, a.yaw + Math.PI / 2, b.yaw, b.yaw + Math.PI / 2]) {
+    // The axis is local +X of a rectangle at `yaw` (`rotateXZ(1, 0, yaw)`).
+    const ax = Math.cos(yaw);
+    const az = -Math.sin(yaw);
+    const reach = (r: GroundRect): number =>
+      Math.abs(Math.cos(r.yaw) * ax - Math.sin(r.yaw) * az) * r.halfX
+      + Math.abs(Math.sin(r.yaw) * ax + Math.cos(r.yaw) * az) * r.halfZ;
+    const centre = Math.abs((b.x - a.x) * ax + (b.z - a.z) * az);
+    best = Math.max(best, centre - reach(a) - reach(b));
   }
-  const yaw = yard.site.yaw + (wall * Math.PI) / 2;
-  const along = wall % 2 === 0 ? yard.halfX : yard.halfZ;
-  const depth = wall % 2 === 0 ? yard.halfZ : yard.halfX;
-  const across = (wall === 3 ? 0.85 : -0.85) * Math.min(along, 4.5);
-  const o = rotateXZ(across, -(depth + 0.45), yaw);
-  return { x: yard.site.x + o.x, z: yard.site.z + o.z, yaw };
+  return best;
+}
+
+/** A house's ground rectangle where it stands on `road`. */
+export function houseRect(road: Road, house: SettlementHouse): GroundRect {
+  const pose = spotPose(road, house);
+  return { x: pose.x, z: pose.z, yaw: pose.yaw, halfX: house.halfX, halfZ: house.halfZ };
 }
 
 /**
- * The rectangle a salvage stop's car field lays out around: the building where it
- * stands, deepened by the yard so no car is parked on the loot. Exported so
- * `tools/wreck-spacing.ts` measures the very keep-out the world uses.
+ * The houses of a roadside stop that actually stand: the pure layout less any house the
+ * ground or the road will not have. A house on a landform's slope, in a mesa or a lake
+ * basin, or on another pass of the road is dropped, and so is one that the road's curve
+ * has brought into an earlier one (the layout spaces them in the road frame; on the
+ * inside of a bend that frame converges). Earlier in the layout wins, whichever chunk
+ * asks. Exported for tools/poi-placement.ts, which measures what this keeps.
  */
-export function salvageKeepOut(poi: Poi, road: Road, instance: VariantInstance): WreckKeepOut {
-  const centre = road.offsetPoint(poi.s, poi.lateral);
-  return {
-    x: centre.x,
-    z: centre.z,
-    yaw: poiYaw(poi, road.sampleAt(poi.s).heading),
-    // A desert building's machine may stand by a side wall (`machineSpot`): the strip
-    // runs round all four there.
-    halfX: instance.halfExtentX + (poi.desert ? YARD_DEPTH_M : 0),
-    halfZ: instance.halfExtentZ + YARD_DEPTH_M,
+export function standingHouses(
+  layout: SettlementLayout,
+  road: Road,
+  terrain: Terrain,
+  roadDistance: RoadDistance,
+): SettlementHouse[] {
+  const standing: SettlementHouse[] = [];
+  const rects: GroundRect[] = [];
+  for (const house of layout.houses) {
+    const rect = houseRect(road, house);
+    const radius = Math.hypot(house.halfX, house.halfZ);
+    if (inLakeBasin(road.seed, house.s, house.lateral, radius)) continue;
+    if (terrain.landforms.covers(rect.x, rect.z, house.s, radius)) continue;
+    if (mesaFieldOf(road, terrain).blocks(rect.x, rect.z, radius + HOUSE_MESA_CLEARANCE_M)) continue;
+    const owner = roadDistance.ownerAt(rect.x, rect.z, DESERT_OWNER_LATTICE_M);
+    const nearest = road.project(rect.x, rect.z, owner);
+    if (
+      Math.abs(nearest.s - house.s) > OTHER_PASS_S_M
+      && Math.abs(nearest.lateral) - road.halfWidthAt(nearest.s) - radius < HOUSE_OTHER_PASS_CLEARANCE_M
+    ) {
+      continue;
+    }
+    if (rects.some((other) => rectGap(rect, other) < HOUSE_CLEARANCE_M)) continue;
+    standing.push(house);
+    rects.push(rect);
+  }
+  return standing;
+}
+
+/** The car for sale's price board stands this far off its road-side flank, metres. */
+const LOT_BOARD_OUT_M = 0.9;
+
+/**
+ * A settlement's car for sale, at its `lot` spot, with its price board on the road-side
+ * flank (world/carlot.ts). The car is a real car in world state from the moment its chunk
+ * enters the physics band, carrying its price until it is bought; out there, distant
+ * scenery shows it as an upright static model.
+ */
+function buildLot(
+  ctx: ChunkContext,
+  poi: Poi,
+  lot: SettlementSpot,
+  side: 1 | -1,
+  group: THREE.Group,
+  deferredVisuals: Array<() => void>,
+  market: MarketField,
+  registeredMarket: string[],
+): void {
+  const def = lotModel(ctx.world.seed, poi);
+  if (!def) return;
+  const measure = carModelMeasure(def.id);
+  const half = measure.halfExtents;
+  const carId = ctx.world.generatedPartId('lot-car', poi.index, 0);
+  const pose = spotPose(ctx.road, lot);
+  const groundY = ctx.terrain.heightAt(pose.x, pose.z, lot.s);
+
+  // The price board, facing the road; only while the car is still for sale.
+  const priceBoard = (): void => {
+    const at = ctx.road.offsetPoint(lot.s, lot.lateral - side * (half[0] + LOT_BOARD_OUT_M));
+    const y = ctx.terrain.heightAt(at.x, at.z, lot.s);
+    const road = ctx.road.offsetPoint(lot.s, 0);
+    buildLotSign(ctx, group, carId, def, at.x, y, at.z, Math.atan2(road.x - at.x, road.z - at.z), market, registeredMarket);
   };
+
+  // A car made at a lot lives in world state from then on, sold or not.
+  const existing = ctx.world.state.cars[carId];
+  if (existing) {
+    if (existing.lotPrice !== undefined) priceBoard();
+    return;
+  }
+  priceBoard();
+  if (ctx.hasPhysics) {
+    // Created in clear air, so gravity and suspension find its ride height.
+    ctx.world.apply({
+      t: 'car_add',
+      car: makeLotCar(poi, carId, def, pose.x, carSpawnYAboveGround(measure, groundY), pose.z, pose.yaw),
+    });
+    return;
+  }
+  const plane = fitGround(ctx.terrain, pose.x, pose.z, pose.yaw, half[0], half[2], lot.s);
+  const matrix = poseMatrix(
+    pose.x,
+    plane.centreY + half[1] - 0.02,
+    pose.z,
+    pose.yaw,
+    plane.roll,
+    plane.pitch,
+    ctx.originX,
+    ctx.originZ,
+  );
+  const addPreview = (): void => {
+    const preview = createStaticCarModel(def.id, carId);
+    setFromMatrix(preview.model, matrix);
+    group.add(preview.model);
+  };
+  if (isCarModelLoaded(def.id)) {
+    addPreview();
+    return;
+  }
+  let cancelled = false;
+  deferredVisuals.push(() => {
+    cancelled = true;
+  });
+  void loadCarModel(def.id).then(
+    () => {
+      if (!cancelled) addPreview();
+    },
+    (error: unknown) => {
+      console.error(`failed to load lot car model "${def.id}"`, error);
+    },
+  );
 }
 
+/**
+ * A trailer left on a settlement's strip. Take one, leave one: they are never owned, so
+ * this records a world object rather than giving the player a possession, and
+ * `poi_looted` is what stops a stop growing a new one every reload.
+ */
+function spawnTrailer(ctx: ChunkContext, poi: Poi, at: SettlementSpot, trailers: TrailerField): void {
+  const pose = spotPose(ctx.road, at);
+  const half = pose.yaw / 2;
+  trailers.spawn({
+    id: `trailer:${poi.index}`,
+    hitchedTo: null,
+    cargoKg: 0,
+    x: pose.x,
+    // Clear of the ground so it drops onto its own suspension rather than starting
+    // inside the terrain trimesh.
+    y: ctx.terrain.heightAt(pose.x, pose.z, at.s) + 0.9,
+    z: pose.z,
+    qx: 0,
+    qy: Math.sin(half),
+    qz: 0,
+    qw: Math.cos(half),
+  });
+}
+
+/**
+ * One stop. Out in the desert: its building, facing wherever it was left facing. At the
+ * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
+ * sides, the shop's machine and the car for sale on the strip, and sometimes a trailer.
+ * The post, barrels and the lot's key box are fixtures built at the layout's spots by
+ * their own builders.
+ */
 function buildPoi(
   ctx: ChunkContext,
   poi: Poi,
+  roadDistance: RoadDistance,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
   trailers: TrailerField,
-  wreckTrunks: WreckTrunkField,
-  registeredWrecks: string[],
   market: MarketField,
   registeredMarket: string[],
 ): void {
-  const shouldLoot = ctx.hasPhysics && !ctx.world.state.lootedPois.includes(poi.index);
+  if (poi.desert) {
+    const at = ctx.road.offsetPoint(poi.s, poi.lateral);
+    const yaw = poiYaw(poi, ctx.road.headingAt(poi.s));
+    seatStructure(ctx, poi.structure, at.x, at.z, yaw, poi.s, group, bodies, colliders);
+    return;
+  }
 
-  buildStructurePoi(
-    ctx,
-    poi,
-    group,
-    bodies,
-    colliders,
-    trailers,
-    wreckTrunks,
-    registeredWrecks,
-    deferredVisuals,
-    shouldLoot,
-    market,
-    registeredMarket,
-  );
+  const layout = settlementLayout(ctx.world.seed, poi);
+  for (const house of standingHouses(layout, ctx.road, ctx.terrain, roadDistance)) {
+    const pose = spotPose(ctx.road, house);
+    seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
+  }
+  if (layout.shop) {
+    const pose = spotPose(ctx.road, layout.shop);
+    buildVendingMachine(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, market, registeredMarket);
+  }
+  if (layout.lot) buildLot(ctx, poi, layout.lot, layout.side, group, deferredVisuals, market, registeredMarket);
 
-  // Record that this POI's world objects are now materialised. The flag alone is the
+  // Record that this stop's world objects are now materialised. The flag alone is the
   // whole idempotency guard across chunk promotion / unload / reload.
-  if (shouldLoot) ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
+  if (!ctx.hasPhysics || ctx.world.state.lootedPois.includes(poi.index)) return;
+  if (layout.trailer) spawnTrailer(ctx, poi, layout.trailer, trailers);
+  ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
 
 // Couriers are their own sparse POIs. The sequence is random-access and every
@@ -801,7 +723,7 @@ function buildCourier(
   registeredCouriers: string[],
   dancers: DancerField,
   registeredDancers: DancerHandle[],
-  layby: Layby | null,
+  layby: Layby,
   deferredVisuals: Array<() => void>,
 ): void {
   const def = pick(COURIER_MODELS, stop.appearanceSeed);
@@ -879,17 +801,13 @@ function buildCourier(
   }
   if (!collider) return;
 
-  // The air dancer advertising the stop. With a lay-by it stands on the shoulder just
-  // before the entry slip, where the road starts widening into the pad: the sign you
-  // see before you have to turn in. A mast has no lay-by, and there it stands on the
-  // POI side of the car, off its flank. Either way it is turned to face the road. Its
-  // ground is the LOWEST of the blower's own footprint, so no corner of the box floats
-  // on ground that is only nearly flat.
-  const side = stop.lateral < 0 ? -1 : 1;
-  const dancerS = layby ? layby.sEntry - DANCER_BEFORE_ENTRY_M : stop.s + DANCER_ALONG_M;
-  const dancerLateral = layby
-    ? layby.side * (ctx.road.halfWidthAt(dancerS) + SHOULDER_WIDTH_M)
-    : stop.lateral + side * DANCER_OUT_M;
+  // The air dancer advertising the stop. It stands on the shoulder just before the
+  // entry slip, where the road starts widening into the pad: the sign you see before
+  // you have to turn in. It is turned to face the road. Its ground is the LOWEST of the
+  // blower's own footprint, so no corner of the box floats on ground that is only nearly
+  // flat.
+  const dancerS = layby.sEntry - DANCER_BEFORE_ENTRY_M;
+  const dancerLateral = layby.side * (ctx.road.halfWidthAt(dancerS) + SHOULDER_WIDTH_M);
   const dancerPoint = ctx.road.offsetPoint(dancerS, dancerLateral);
   let dancerY = ctx.terrain.heightAt(dancerPoint.x, dancerPoint.z, dancerS);
   for (const corner of DANCER_FOOTPRINT_CORNERS) {
@@ -927,320 +845,6 @@ const DANCER_SINK_M = 0.03;
 const DANCER_BEFORE_ENTRY_M = 3;
 
 /**
- * Layout of one roadside wreck field.
- *
- * The old placement drew each body's offsets independently — ±8 m of arclength and
- * ±6 m of lateral — which says nothing about where the previous body went, so two
- * 4.6 m cars landing 1 m apart was a routine roll rather than bad luck. Three of
- * them in a 16x12 m window collide most of the time, and a static shell is a solid
- * box collider, so the result was a car standing inside another car.
- *
- * So a slot is now REJECTION-SAMPLED: candidates come off the same deterministic hash
- * stream with the attempt index mixed in, and the first one that clears everything by
- * WRECK_CLEARANCE_M is taken.
- *
- * AND IT CLEARS THE BUILDING. The building at a stop stands on the POI's OWN anchor
- * (`siteAt` is given the POI's `s` and `lateral`), so a field laid out blind runs
- * through its walls — measured by `tools/wreck-spacing.ts` over 219 container stops,
- * 62.1% put a body inside the building's measured footprint, the deepest 2.53 m in, and
- * at a stop that rolls the roadworthy find the body inside the wall is the car itself.
- * So the caller hands the layout the building (`WreckKeepOut`) and it is one more term in
- * the same margin.
- *
- * WHEN NOTHING CLEARS, A LATTICE FINISHES THE JOB. Accepting the roomiest draw however
- * deep it sat was survivable in an empty field and is not one with a 12 m building on
- * its anchor. So a slot that the stream cannot place takes the first position on a
- * WRECK_LATTICE_STEP_M lattice over the same field that clears everything. If even that
- * finds none — three lorries asked to share one field — the roomiest lattice position is
- * taken, so a field still always lays out, never loops, and an impossible one is as far
- * from every neighbour as the ground allows.
- *
- * Separation uses each body's CIRCUMSCRIBED footprint radius, so the test holds at
- * whatever yaw, roll and sink the slot draws afterwards. Body-to-body distance is
- * measured in (arclength, lateral) road coordinates; over a 25 m field the road's
- * curvature moves that by centimetres. The building is NOT approximated that way: it is
- * a real object in the world, so the keep-out test places each candidate on the road and
- * measures it against the building where it actually stands. Doing it in the field's flat
- * frame left a body 0.28 m inside a wall on a curve, which is what the bench caught.
- *
- * The whole field is laid out before anything is built, so a slot's position cannot
- * depend on whether an earlier working car has already been driven away.
- */
-const WRECK_CLEARANCE_M = 1.4;
-/**
- * Metres of road the field is strung along, and its lateral spread, round an empty
- * anchor. With a building on the anchor the field is lengthened along the road by the
- * building's own size, so the cars stand beside it rather than being asked to fit in a
- * 26 m window a 25 m house already fills.
- */
-const WRECK_S_SPREAD = 26;
-const WRECK_LAT_SPREAD = 12;
-/** Candidate draws per slot before the lattice takes over. */
-const WRECK_PLACEMENT_ATTEMPTS = 48;
-/** Lattice spacing the fallback searches the field at, metres. */
-const WRECK_LATTICE_STEP_M = 1;
-
-export interface WreckSlot {
-  readonly def: CarModelDef;
-  /** Footprint radius, metres: yaw-independent, so the gap holds at any pose. */
-  readonly radius: number;
-  readonly sDelta: number;
-  readonly latDelta: number;
-}
-
-/**
- * The building a field must lay out around: where it stands, which way it faces, and its
- * measured half extents in its own frame, in world XZ.
- *
- * A rectangle is the only shape that fits — the circumscribed disc of a 12 x 10 m
- * building is 7.8 m in radius and covers the field's whole 12 m lateral spread, so no
- * field would lay out at all. The half extents are the measured ones the site fit and the
- * collider already use, and they CONTAIN the merged solid the collider is cut from
- * (roofs widen the bounds and are excluded from the trimesh), so clearing them clears the
- * wall the player hits.
- */
-export interface WreckKeepOut {
-  readonly x: number;
-  readonly z: number;
-  readonly yaw: number;
-  readonly halfX: number;
-  readonly halfZ: number;
-}
-
-export function layOutWreckField(poi: Poi, road: Road, keepOut?: WreckKeepOut): WreckSlot[] {
-  const sSpread = WRECK_S_SPREAD + (keepOut ? 2 * Math.max(keepOut.halfX, keepOut.halfZ) : 0);
-  // A scrapyard strings 1..3 bodies round its yard; any other stop 1..2.
-  const count = 1 + Math.floor(hash01(poi.variantSeed, 10) * (poi.stock === 'salvage' ? 3 : 2));
-  const slots: WreckSlot[] = [];
-  // The stop's lay-by, if it has one: no body is parked on its asphalt.
-  const nearLayby = poi.desert ? null : laybyNear(road.seed, poi.s);
-  const layby = nearLayby?.poiIndex === poi.index ? nearLayby : null;
-
-  for (let w = 0; w < count; w++) {
-    const def: CarModelDef = pick(CAR_MODELS, poi.variantSeed, w, 10);
-    const half = carModelMeasure(def.id).halfExtents;
-    const radius = Math.hypot(half[0], half[2]);
-
-    // A candidate's margin is the smaller of its gap off the building and its gap to
-    // every body already placed.
-    const marginAt = (sDelta: number, latDelta: number): number => {
-      let margin = Infinity;
-      if (keepOut) {
-        // Distance to the building's oriented rectangle: negative inside it. The
-        // rotation is the inverse of `rotateXZ`, the convention the whole placement
-        // shares — local (x, z) maps to world (c·x + s·z, -s·x + c·z).
-        const point = road.offsetPoint(poi.s + sDelta, poi.lateral + latDelta);
-        const c = Math.cos(keepOut.yaw);
-        const s = Math.sin(keepOut.yaw);
-        const dx = point.x - keepOut.x;
-        const dz = point.z - keepOut.z;
-        const lx = c * dx - s * dz;
-        const lz = s * dx + c * dz;
-        margin =
-          Math.hypot(
-            Math.max(Math.abs(lx) - keepOut.halfX, 0),
-            Math.max(Math.abs(lz) - keepOut.halfZ, 0),
-          ) - radius;
-      }
-      if (layby) {
-        // Gap off the lay-by's asphalt outline, in the road frame; zero and below
-        // (only the radius left) anywhere on it.
-        const s = poi.s + sDelta;
-        const sc = Math.min(layby.sExit, Math.max(layby.sEntry, s));
-        const u = (poi.lateral + latDelta) * layby.side;
-        const gap =
-          Math.hypot(Math.max(0, u - laybyOuterAt(layby, sc, road.halfWidthAt(sc))), s - sc) - radius;
-        if (gap < margin) margin = gap;
-      }
-      for (const other of slots) {
-        const gap =
-          Math.hypot(sDelta - other.sDelta, latDelta - other.latDelta) - radius - other.radius;
-        if (gap < margin) margin = gap;
-      }
-      return margin;
-    };
-
-    let chosen = { sDelta: 0, latDelta: 0, margin: -Infinity };
-    for (let attempt = 0; attempt < WRECK_PLACEMENT_ATTEMPTS; attempt++) {
-      const sDelta = (hash01(poi.variantSeed, w, 11, attempt) - 0.5) * sSpread;
-      const latDelta = (hash01(poi.variantSeed, w, 12, attempt) - 0.5) * WRECK_LAT_SPREAD;
-      const margin = marginAt(sDelta, latDelta);
-      if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
-      if (margin >= WRECK_CLEARANCE_M) break;
-    }
-
-    // Nothing in the stream cleared: walk a lattice over the same field and take the first
-    // position that does, or the roomiest one if even that finds none.
-    if (chosen.margin < WRECK_CLEARANCE_M) {
-      let settled = false;
-      for (
-        let sDelta = -sSpread / 2;
-        sDelta <= sSpread / 2 && !settled;
-        sDelta += WRECK_LATTICE_STEP_M
-      ) {
-        for (
-          let latDelta = -WRECK_LAT_SPREAD / 2;
-          latDelta <= WRECK_LAT_SPREAD / 2;
-          latDelta += WRECK_LATTICE_STEP_M
-        ) {
-          const margin = marginAt(sDelta, latDelta);
-          if (margin > chosen.margin) chosen = { sDelta, latDelta, margin };
-          if (margin >= WRECK_CLEARANCE_M) {
-            settled = true;
-            break;
-          }
-        }
-      }
-    }
-
-    slots.push({ def, radius, sDelta: chosen.sDelta, latDelta: chosen.latDelta });
-  }
-  return slots;
-}
-
-/**
- * One to three complete models scattered through a roadside wreck field, and at some
- * stops one upright car among them for sale (world/carlot.ts). Both draw from the whole
- * catalogue: a wreck is a state a body is found in, not a class of body, so the same car
- * you can buy is the one you find sunk in the sand beside it.
- */
-function buildWrecks(
-  ctx: ChunkContext,
-  poi: Poi,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-  wreckTrunks: WreckTrunkField,
-  registeredWrecks: string[],
-  deferredVisuals: Array<() => void>,
-  keepOut: WreckKeepOut,
-  market: MarketField,
-  registeredMarket: string[],
-): void {
-  const anchor = anchorXZ(ctx, poi);
-  const ox = ctx.originX;
-  const oz = ctx.originZ;
-  const slots = layOutWreckField(poi, ctx.road, keepOut);
-  const count = slots.length;
-
-  const lot = lotOffer(ctx.world.seed, poi, count);
-
-  for (let w = 0; w < count; w++) {
-    const isLotCar = lot !== null && w === lot.slot;
-    const def = isLotCar ? lot.def : slots[w]!.def;
-    const measure = carModelMeasure(def.id);
-    const half = measure.halfExtents;
-    const carId = ctx.world.generatedPartId('poi-car', poi.index, w);
-    const { sDelta, latDelta } = slots[w]!;
-    const p = groundPoint(ctx, poi, sDelta, latDelta);
-
-    // The lot's price board, at the car's road-side flank and facing the road; only
-    // while the car is still for sale.
-    const priceBoard = (): void => {
-      const side = poi.lateral < 0 ? -1 : 1;
-      const at = groundPoint(ctx, poi, sDelta, latDelta - side * (half[0] + 0.9));
-      const road = ctx.road.offsetPoint(poi.s + sDelta, 0);
-      buildLotSign(ctx, group, carId, def, at.x, at.y, at.z, Math.atan2(road.x - at.x, road.z - at.z), market, registeredMarket);
-    };
-
-    // A car made at a stop lives in world state from then on, sold or not (or, in a save
-    // from before the lots, taken for free): never a shell or a second car where it stood.
-    const existing = ctx.world.state.cars[carId];
-    if (existing) {
-      if (isLotCar && existing.lotPrice !== undefined) priceBoard();
-      continue;
-    }
-
-    const yawRoll = hash01(poi.variantSeed, w, 13);
-    let yaw = anchor.heading + (hash01(poi.variantSeed, w, 14) - 0.5) * 0.6;
-    if (!isLotCar) {
-      if (yawRoll < 0.32) yaw += Math.PI;
-      else if (yawRoll > 0.82) {
-        yaw += (hash01(poi.variantSeed, w, 15) < 0.5 ? 1 : -1) * Math.PI * 0.5;
-      }
-    }
-
-    // The shell lies ALONG the ground and then adds its own derelict lean; the
-    // fitted plane is what stops a body bridging a dune face on two wheels.
-    const plane = fitGround(ctx.terrain, p.x, p.z, yaw, half[0], half[2], poi.s);
-    const sink = isLotCar ? 0.02 : 0.25 + hash01(poi.variantSeed, w, 16) * half[1] * 0.5;
-    const roll = plane.roll + (isLotCar ? 0 : (hash01(poi.variantSeed, w, 17) - 0.5) * 0.3);
-    const pitch = plane.pitch + (isLotCar ? 0 : (hash01(poi.variantSeed, w, 18) - 0.5) * 0.22);
-    const originY = plane.centreY + half[1] - sink;
-
-    // Distant scenery shows the lot car as an upright static model. Promotion into the
-    // physics band replaces it with a real Vehicle, priced until it is bought.
-    if (isLotCar) priceBoard();
-    if (isLotCar && ctx.hasPhysics) {
-      // The distant static preview stands on the terrain; promotion creates the
-      // physical car in clear air so gravity and suspension determine its ride height.
-      const spawnY = carSpawnYAboveGround(measure, p.y);
-      ctx.world.apply({
-        t: 'car_add',
-        car: makeLotCar(poi, carId, def, p.x, spawnY, p.z, yaw),
-      });
-      continue;
-    }
-    const matrix = poseMatrix(p.x, originY, p.z, yaw, roll, pitch, ox, oz);
-    // A box approximates a static shell well enough for a solid obstacle.
-    const collider = addStaticCollider(
-      ctx,
-      new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
-      matrix,
-      SurfaceType.Rock,
-      bodies,
-      colliders,
-    );
-    const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
-    if (!isLotCar && collider) {
-      wreckTrunks.register({
-        id: carId,
-        modelId: def.id,
-        x: p.x,
-        y: originY,
-        z: p.z,
-        qx: rotation.x,
-        qy: rotation.y,
-        qz: rotation.z,
-        qw: rotation.w,
-        halfExtents: half,
-      });
-      registeredWrecks.push(carId);
-      // The shell is empty: nothing in the world is free for the taking.
-    }
-    // After the registration, so the shell's lids join a registered wreck.
-    const addShell = (): void => {
-      const shell = createStaticCarModel(def.id, carId);
-      setFromMatrix(shell.model, matrix);
-      group.add(shell.model);
-      // Only a registered shell is within the player's reach; its lids are eased there.
-      if (shell.lids) wreckTrunks.attachLids(carId, shell.lids);
-    };
-    if (isCarModelLoaded(def.id)) {
-      addShell();
-    } else {
-      let cancelled = false;
-      deferredVisuals.push(() => {
-        cancelled = true;
-      });
-      void loadCarModel(def.id).then(
-        () => {
-          if (!cancelled) addShell();
-        },
-        (error: unknown) => {
-          console.error(`failed to load static car model "${def.id}"`, error);
-        },
-      );
-    }
-  }
-}
-
-/** Fraction of fuel stops with a trailer left beside the house. */
-const TRAILER_STOP_CHANCE = 0.45;
-/** Domain tag for the trailer roll. */
-const TRAILER_DOMAIN = 0x54524c31; // 'TRL1'
-
-/**
  * Builds roadside and desert stops plus the sparse courier network. Static trunk
  * registries exist only for the live physics band; their edited contents remain in
  * WorldState.
@@ -1250,17 +854,11 @@ export class PoiProvider implements ChunkProvider {
 
   constructor(
     private readonly trailers: TrailerField,
-    private readonly wreckTrunks: WreckTrunkField,
     private readonly couriers: CourierField,
     private readonly roadDistance: RoadDistance,
     private readonly dancers: DancerField,
     /** The vending machines and lot cars' registry (world/market.ts). */
     private readonly market: MarketField,
-    /**
-     * `Poi.index` of stops where no courier parks: a dream's start and goal, whose
-     * parking pocket takes the courier's place on the pad (dreams/dream.ts).
-     */
-    private readonly courierFreeStops: ReadonlySet<number>,
     /** The streamed mechanical fixtures (world/fixturefield.ts): post, barrels, key boxes. */
     private readonly fixtures: FixtureField,
   ) {}
@@ -1281,7 +879,6 @@ export class PoiProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const deferredVisuals: Array<() => void> = [];
-    const registeredWrecks: string[] = [];
     const registeredCouriers: string[] = [];
     const registeredDancers: DancerHandle[] = [];
     const registeredMarket: string[] = [];
@@ -1292,31 +889,25 @@ export class PoiProvider implements ChunkProvider {
       buildPoi(
         ctx,
         poi,
+        this.roadDistance,
         group,
         bodies,
         colliders,
         deferredVisuals,
         this.trailers,
-        this.wreckTrunks,
-        registeredWrecks,
         this.market,
         registeredMarket,
       );
     }
     for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
       const courierPoi = pois.find((poi) => poi.s === stop.s);
-      if (!courierPoi || this.courierFreeStops.has(courierPoi.index)) continue;
-      // On the stop's lay-by when it has one, on its building side so the parking line
-      // beside it stays free (world/layby.ts); a mast has none, and the car stands on
-      // the verge as it always did.
-      const layby = laybyNear(ctx.world.seed, stop.s);
-      const own = layby?.poiIndex === courierPoi.index ? layby : null;
+      // Every courier stop is a settlement with a lay-by; the car parks on its pad, on
+      // the strip's side, so the parking line beside it stays free (world/layby.ts).
+      const layby = courierPoi ? laybyNear(ctx.world.seed, stop.s) : null;
+      if (!courierPoi || layby?.poiIndex !== courierPoi.index) continue;
       buildCourier(
         ctx,
-        {
-          ...stop,
-          lateral: own ? laybyCourierLateral(own) : courierParkingLateral(courierPoi.lateral),
-        },
+        { ...stop, lateral: laybyCourierLateral(layby) },
         group,
         bodies,
         colliders,
@@ -1324,7 +915,7 @@ export class PoiProvider implements ChunkProvider {
         registeredCouriers,
         this.dancers,
         registeredDancers,
-        own,
+        layby,
         deferredVisuals,
       );
     }
@@ -1334,7 +925,6 @@ export class PoiProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
-        this.wreckTrunks.forget(registeredWrecks);
         this.couriers.forget(registeredCouriers);
         this.dancers.forget(registeredDancers);
         this.market.forget(registeredMarket);
