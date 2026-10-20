@@ -16,7 +16,8 @@ import type { PlayerSeat } from '../game/state';
  * A thing on a seat stays where it was laid, however the car is driven: hard driving
  * costs ride quality (trip/ride.ts), never the thing's place. The floor places hold
  * only what older saves left there when things could still slide off a seat; they are
- * taken from like any other place.
+ * taken from like any other place. A teddy passenger sits only on a seat of its own —
+ * the front passenger's or a half of the bench — upright and facing forward (`SIT_ON`).
  *
  * Pure: no three.js. The view is vehicle/cabincargo.ts.
  */
@@ -142,25 +143,43 @@ export function layFit(bounds: ItemBounds, room: PlaceRoom): { turned: boolean }
 export type CabinRooms = readonly (PlaceRoom | null)[];
 
 /**
+ * The places a PASSENGER (a teddy, contracts/kinds/teddyPassengers.ts) is sat on through
+ * each door: a seat of its own, never the whole bench, the floor, the boot or the
+ * driver's seat.
+ */
+const SIT_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+  driver: [],
+  passenger: ['seat'],
+  'rear-left': ['bench_l'],
+  'rear-right': ['bench_r'],
+};
+
+/**
  * Where a thing in hand goes through `seat`'s door: the first place reached from it
- * that is free and fits, or why not.
+ * that is free and fits, or why not. A `passenger` goes only on a seat of its own
+ * (`SIT_ON`), sitting up and facing forward: unturned, or not at all.
  */
 export function layPlace(
   cabin: readonly (Item | null)[],
   rooms: CabinRooms,
   seat: PlayerSeat,
   bounds: ItemBounds,
+  passenger = false,
 ): { place: CabinPlace } | { refusal: string } {
-  const places = LAY_ON[seat];
-  if (places.length === 0) return { refusal: 'keep the driver\'s seat clear' };
+  const places = passenger ? SIT_ON[seat] : LAY_ON[seat];
+  if (places.length === 0) return { refusal: passenger ? 'passengers ride on a passenger seat' : 'keep the driver\'s seat clear' };
   let fitsSomewhere = false;
   for (const place of places) {
     const room = rooms[cabinIndex(place)];
-    if (!room || !layFit(bounds, room)) continue;
+    const fit = room ? layFit(bounds, room) : null;
+    if (!fit || (passenger && fit.turned)) continue;
     fitsSomewhere = true;
     if (placeFree(cabin, place)) return { place };
   }
-  if (!fitsSomewhere) return { refusal: seat === 'passenger' ? 'too big for the front seat — try the back' : 'too big for the seat' };
+  if (!fitsSomewhere) {
+    if (passenger) return { refusal: 'no seat for a passenger here' };
+    return { refusal: seat === 'passenger' ? 'too big for the front seat — try the back' : 'too big for the seat' };
+  }
   return { refusal: 'there is something on the seat already' };
 }
 

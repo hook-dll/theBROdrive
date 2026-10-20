@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 
 import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
-import { contractAcceptRefusal, contractDeliveryEffect, contractRewardSticker } from '../contracts/registry';
 import type { DeliveryProbe } from '../contracts/types';
-import { contractPay, contractSlotsFor, giveCoins, licenceFor } from '../economy/economy';
+import { contractSlotsFor } from '../economy/economy';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
+  ContractCargoItem,
   Inventory,
   Item,
   PartItem,
@@ -17,7 +17,8 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { contractIdOf, contractsAmong, drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { CABIN_PLACES, cabinIndex, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
 import type { CarStats, PartInstance } from '../parts/registry';
@@ -36,11 +37,8 @@ import {
   intersectStorageGrid,
   STORAGE_LID_CHANNELS,
   storageGridCentreLocal,
-  storageLidSide,
   storageRevealDistance,
-  TRUNK_CELL_COUNT,
   type StorageGridShape,
-  type StorageOwnerKind,
   type StorageSide,
   type TrunkGridRayHit,
   type TrunkViewState,
@@ -50,18 +48,13 @@ import {
   bonnetPart,
   bonnetSlotKind,
   bonnetWaterCapacity,
-  BONNET_SLOT_COUNT,
   partContainer,
 } from '../vehicle/bonnet';
 import { CAR_BODY_POSITION_ATTRIBUTE, setPartCondition } from '../render/materials';
-import { carModelMeasure } from '../render/carmodel';
 import { KIT_PICK_LAYER } from '../render/kitdraw';
 import type { FoleyEvent, FoleyContinuous } from '../audio/foley';
 import type { Player } from './player';
 import type { WorldOrigin } from '../world/origin';
-import type { WreckTrunkField } from '../world/wrecktrunks';
-import type { StaticCarLids } from '../render/staticlids';
-import type { CourierField, CourierTrunk } from '../world/couriers';
 import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
@@ -149,7 +142,7 @@ type Target =
   | { kind: 'loose-part'; partId: string }
   | { kind: 'loose-item'; itemId: string }
   | { kind: 'trailer'; trailerId: string }
-  | { kind: 'storage'; owner: StorageOwnerKind; side: StorageSide; id: string; cell: number | null }
+  | { kind: 'storage'; side: StorageSide; id: string; cell: number | null }
   | { kind: 'car-entry'; carId: string }
   /** The open (or shut) fuel flap of a kit car, aimed at with a can in hand. */
   | { kind: 'filler'; carId: string }
@@ -239,11 +232,6 @@ const GRID_PERSIST_RANGE = BOOT_RANGE * 2;
 /** What a sticker in hand asks for until the crosshair finds a car. */
 const STICKER_HINT = 'sticker in hand · aim at a car to try it on';
 
-const EMPTY_WRECK_TRUNK: readonly (Item | null)[] =
-  new Array<Item | null>(TRUNK_CELL_COUNT).fill(null);
-const EMPTY_WRECK_BONNET: readonly (Item | null)[] =
-  new Array<Item | null>(BONNET_SLOT_COUNT).fill(null);
-
 /**
  * A serviceable reservoir, resolved from the bonnet slot or the fuel flap the
  * crosshair is on.
@@ -329,15 +317,6 @@ function cabinLidOpen(rig: KitRig, side: StorageSide): boolean {
 }
 
 /**
- * Whether a roadside shell's compartment lies under a cabin lid (`KIT_DOOR_REACH_PART`):
- * the van's bay, reached only through the shell's open side door (`wreckDoors`).
- */
-function wreckCabinCompartment(lids: StaticCarLids, side: StorageSide): boolean {
-  for (const control of lids.controls) if (KIT_DOOR_REACH_PART.test(control.id) && storageLidSide(control.id) === side) return true;
-  return false;
-}
-
-/**
  * Where a resolved reservoir actually lives, and therefore which delta a pour
  * writes. A fitted container's level belongs to the CAR; a detached one carries it
  * on the part; a can carries its own.
@@ -378,6 +357,14 @@ export interface CarLookup {
   nearest(x: number, z: number, out: (string | null)[]): number;
 }
 
+/** What the composition root does for a world fixture (world/fixturefield.ts `FixtureContext`). */
+export interface InteractionHooks {
+  /** Opens the PIN dial with the game held still; `opened` runs once it is dialled right. */
+  dial(pin: string, opened: () => void): void;
+  /** A one-line message on the HUD. */
+  toast(text: string): void;
+}
+
 /** The bar action available where the player stands; see `towAction`. */
 interface TowAction {
   readonly towerId: string;
@@ -408,23 +395,13 @@ interface Resolved {
    * open door, or -1: F takes it.
    */
   kitPlace: number;
-  /**
-   * A roadside shell's lid or a courier's boot lid the eye ray meets (`aimWreckLid`), or
-   * null: E works it as it does a car's.
-   */
-  wreckLid: {
-    readonly owner: 'wreck' | 'courier';
-    readonly id: string;
-    readonly lids: StaticCarLids;
-    readonly control: KitControl;
-  } | null;
 }
 
-/** `DeliveryProbe` with writable fields, so one instance can track the aim. */
+/** `DeliveryProbe` with writable fields, so one instance serves every ask. */
 interface MutableDeliveryProbe {
-  targetCourierIndex: number;
-  courierX: number;
-  courierZ: number;
+  targetPostIndex: number;
+  postX: number;
+  postZ: number;
   drivingCarId: string | null;
   readonly trailerPosition: DeliveryProbe['trailerPosition'];
   readonly carPosition: DeliveryProbe['carPosition'];
@@ -542,9 +519,12 @@ function isGlassHit(hit: THREE.Intersection): boolean {
  * the rear bench instead (vehicle/cabin.ts).
  */
 const BOOT_ITEM_MAX_M = 0.8;
+/** A teddy passenger offered to the boot or the bonnet (contracts/kinds/teddyPassengers.ts). */
+const PASSENGER_SEAT_ONLY = 'passengers ride on a seat';
 
-/** Why `item` does not go in a boot, or null. */
+/** Why `item` does not go in a boot, or null. A passenger rides only on a seat. */
 function bootRefusal(item: Item): string | null {
+  if (isPassenger(item)) return PASSENGER_SEAT_ONLY;
   const size = cabinItemBounds(item);
   return Math.max(size.x, size.z) > BOOT_ITEM_MAX_M ? `the ${itemLabel(item)} is too long for the boot — lay it across the back seat` : null;
 }
@@ -586,7 +566,6 @@ export class Interaction {
    * away, and a relative position would silently move the compartment with it.
    */
   private openStorage: {
-    owner: StorageOwnerKind;
     side: StorageSide;
     id: string;
     x: number;
@@ -610,7 +589,6 @@ export class Interaction {
   /** Chassis-local grid offset, rotated into world space; see `storageGridCentre`. */
   private readonly gridScratch = new THREE.Vector3();
   private readonly trunkDirection = new THREE.Vector3();
-  private readonly trunkPosition = new THREE.Vector3();
   private readonly trunkQuaternion = new THREE.Quaternion();
   private readonly trunkInverse = new THREE.Quaternion();
   private readonly trunkRayHit: TrunkGridRayHit = { cell: 0, distance: 0 };
@@ -652,8 +630,6 @@ export class Interaction {
     place: -1,
     throughGlass: false,
   };
-  /** The lid `aimWreckLid` last found, valid for the call that filled it. */
-  private wreckLidAimed: KitControl | null = null;
   /** Side doors per rig, found once; a rebuilt car has a new rig and new nodes. */
   private readonly kitDoorCache = new WeakMap<KitRig, readonly KitDoor[]>();
   private readonly kitEye = new THREE.Vector3();
@@ -695,20 +671,31 @@ export class Interaction {
         if (item.type === 'part') self.loose.spawn(item.part, x, y, z);
         else self.loose.spawnItem(item, x, y, z);
       },
+      probe: (postIndex: number, x: number, z: number) => {
+        const probe = self.deliveryProbeValue;
+        probe.targetPostIndex = postIndex;
+        probe.postX = x;
+        probe.postZ = z;
+        probe.drivingCarId = self.world.state.player.drivingCarId;
+        return probe;
+      },
+      raceCoins: (contractId: string) => self.raceCoins(contractId),
+      dial: (pin: string, opened: () => void) => self.hooks.dial(pin, opened),
+      toast: (text: string) => self.hooks.toast(text),
     };
   })();
   /**
-   * The delivery probe handed to contract kinds, reused in place: the prompt that
-   * aims at a courier boot with a contract in hand rebuilds it every tick, and it
-   * must not allocate. Valid only for the call that filled it.
+   * The delivery probe handed to contract kinds, reused in place: the post's prompt
+   * rebuilds it every tick it is aimed at with cargo in hand, and it must not allocate.
+   * Valid only for the call that filled it.
    */
   private readonly deliveryProbeValue: MutableDeliveryProbe = {
-    targetCourierIndex: -1,
-    courierX: 0,
-    courierZ: 0,
+    targetPostIndex: -1,
+    postX: 0,
+    postZ: 0,
     drivingCarId: null,
     // Arrows, not values: they read the live world when the kind asks, and the
-    // fields above are only the courier this call is about.
+    // fields above are only the post this call is about.
     trailerPosition: (id) => this.trailerPositionOf(id),
     carPosition: (id) => this.carLookup.position(id),
     car: (id) => this.world.state.cars[id] ?? null,
@@ -720,8 +707,6 @@ export class Interaction {
     private readonly inventory: Inventory,
     private readonly loose: LoosePartField,
     private readonly trailers: TrailerField,
-    private readonly wreckTrunks: WreckTrunkField,
-    private readonly couriers: CourierField,
     /** Never re-derive the id from geometry. */
     private readonly getVehicle: () => { carId: string; vehicle: Vehicle } | null,
     /** The composition root's lookups over the world's cars, by id. */
@@ -744,12 +729,14 @@ export class Interaction {
     private readonly origin: WorldOrigin,
     /** Colliders that mean "this is the parked plane"; boarding is offered here. */
     private readonly boardable: BoardableField,
-    /** Coins a race win pays for handing this cargo in now; see `RivalRace.winCoins`. */
-    private readonly raceCoins: (itemId: string) => number,
+    /** Coins a race win pays for handing this contract in now; see `RivalRace.winCoins`. */
+    private readonly raceCoins: (contractId: string) => number,
     /** The vending machines and lot cars in the physics band (world/market.ts). */
     private readonly market: MarketField,
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,
+    /** What the composition root does for a fixture: the PIN dial, a HUD toast. */
+    private readonly hooks: InteractionHooks,
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
     this.raycaster.layers.enable(KIT_PICK_LAYER);
@@ -910,12 +897,6 @@ export class Interaction {
       this.kitClaimsE = true;
       if (useHeldPressed) this.workKitPart(resolved.vehicle, kitRig, kitPart.control);
     }
-    // A roadside shell's lid, or a courier's boot lid, takes E the same way.
-    const wreckLid = envelope === null && !kitPart ? resolved.wreckLid : null;
-    if (wreckLid) {
-      this.kitClaimsE = true;
-      if (useHeldPressed) this.workWreckLid(wreckLid.owner, wreckLid.id, wreckLid.lids, wreckLid.control);
-    }
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const aimedAt = resolved.target;
@@ -963,7 +944,6 @@ export class Interaction {
           ? resolved.target.cell
           : null;
         boot = {
-          owner: open.owner,
           side: open.side,
           id: open.id,
           cells,
@@ -973,7 +953,6 @@ export class Interaction {
     }
     // A refused seat says why (the prompt), so it does not also light the crosshair.
     const actionable = kitPart !== null
-      || wreckLid !== null
       || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
       || (resolved.target.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
     return { prompt, sound: this.sound, continuous: this.continuous, boot, board, actionable };
@@ -982,7 +961,7 @@ export class Interaction {
   /** A target that belongs to a car and is not an open storage grid. */
   private isClosedCarTarget(t: Target): boolean {
     if (t.kind === 'car-entry' || t.kind === 'car-body') return true;
-    return t.kind === 'storage' && t.owner === 'car' && !this.isStorageOpen(t);
+    return t.kind === 'storage' && !this.isStorageOpen(t);
   }
 
   /**
@@ -1086,47 +1065,26 @@ export class Interaction {
   }
 
   private storageCells(
-    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+    target: { readonly side: StorageSide; readonly id: string },
   ): readonly (Item | null)[] | null {
-    if (target.owner === 'wreck') {
-      return target.side === 'bonnet'
-        ? this.world.state.wreckBonnet[target.id] ?? EMPTY_WRECK_BONNET
-        : this.world.state.wreckStorage[target.id] ?? EMPTY_WRECK_TRUNK;
-    }
-    if (target.owner === 'courier') {
-      const courier = this.couriers.get(target.id);
-      return this.world.state.courierStorage[target.id] ?? courier?.defaultStorage ?? null;
-    }
     const car = this.world.state.cars[target.id];
     return target.side === 'bonnet' ? car?.bonnet ?? null : car?.storage ?? null;
   }
 
   /**
-   * Fills the shared probe for one courier and one aim and returns it. The prompt
-   * and the commit both go through here, so what the sentence promises and what F
-   * does are read from the same world at the same moment.
-   */
-  private deliveryProbe(courier: CourierTrunk): DeliveryProbe {
-    const probe = this.deliveryProbeValue;
-    probe.targetCourierIndex = courier.index;
-    probe.courierX = courier.x;
-    probe.courierZ = courier.z;
-    probe.drivingCarId = this.world.state.player.drivingCarId;
-    return probe;
-  }
-
-  /**
    * Why this car takes no more contracts, or null. How many it carries at once, in the
    * boot and the cabin together, is the body's (economy/economy.ts `contractSlotsFor`):
-   * one in a saloon, two in an estate, three in the van.
+   * one in a saloon, two in an estate, three in the van. Contracts, not items: a party
+   * of teddy passengers is one, so `held`'s own contract already aboard takes no slot.
    */
-  private contractSlotsRefusal(carId: string): string | null {
+  private contractSlotsRefusal(carId: string, held: ContractCargoItem): string | null {
     const car = this.world.state.cars[carId];
     if (!car) return null;
     const slots = contractSlotsFor(car.modelId);
-    let aboard = 0;
-    for (const cell of car.storage) if (cell?.type === 'contract_cargo') aboard++;
-    for (const place of car.cabin) if (place?.type === 'contract_cargo') aboard++;
+    const own = contractIdOf(held);
+    if (car.storage.some((cell) => cell?.type === 'contract_cargo' && contractIdOf(cell) === own)) return null;
+    if (car.cabin.some((place) => place?.type === 'contract_cargo' && contractIdOf(place) === own)) return null;
+    const aboard = contractsAmong(car.storage) + contractsAmong(car.cabin);
     if (aboard < slots) return null;
     return slots === 1
       ? 'one contract is already aboard — this car carries one'
@@ -1245,10 +1203,10 @@ export class Interaction {
   }
 
   private isStorageOpen(
-    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+    target: { readonly side: StorageSide; readonly id: string },
   ): boolean {
     const open = this.openStorage;
-    return open?.owner === target.owner && open.side === target.side && open.id === target.id;
+    return open !== null && open.side === target.side && open.id === target.id;
   }
 
   /**
@@ -1257,50 +1215,32 @@ export class Interaction {
    * thing the player is actually looking at rather than the car's centre.
    */
   private storageGridCentre(
-    target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string },
+    target: { readonly side: StorageSide; readonly id: string },
     out: THREE.Vector3,
   ): boolean {
-    let shape: StorageGridShape;
-    if (target.owner !== 'car') {
-      const fixed = target.owner === 'wreck'
-        ? this.wreckTrunks.get(target.id)
-        : this.couriers.get(target.id);
-      if (!fixed) return false;
-      shape = carModelMeasure(fixed.modelId);
-      this.trunkQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
-      out.set(fixed.x, fixed.y, fixed.z);
-    } else {
-      const vehicle = this.carLookup.vehicle(target.id);
-      if (!vehicle) return false;
-      shape = vehicle.modelMeasure;
-      vehicle.chassis.rotation(this.trunkQuaternion);
-      const t = vehicle.chassis.translation(this.tScratch);
-      out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
-    }
+    const vehicle = this.carLookup.vehicle(target.id);
+    if (!vehicle) return false;
+    const shape: StorageGridShape = vehicle.modelMeasure;
+    vehicle.chassis.rotation(this.trunkQuaternion);
+    const t = vehicle.chassis.translation(this.tScratch);
+    out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
     if (!storageGridCentreLocal(shape, target.side, this.gridScratch)) return false;
     out.add(this.gridScratch.applyQuaternion(this.trunkQuaternion));
     return true;
   }
 
-  /** A roadside shell's lids or a courier's boot lid, null for a car or before its model is drawn. */
-  private fixedLids(owner: StorageOwnerKind, id: string): StaticCarLids | null {
-    if (owner === 'wreck') return this.wreckTrunks.lids(id);
-    return owner === 'courier' ? this.couriers.lids(id) : null;
-  }
-
   /**
-   * Makes the lids the authority over their grids, a kit car's, a roadside shell's and a
-   * courier's: a grid whose lid has shut closes, and a lid's grid rides with its car. The
-   * grid shown is the aimed compartment under an open lid, else a car's lid that has just
-   * opened (a shell's or a courier's opens its grid itself, `workWreckLid`), else — with
-   * nothing open — the nearest open lid of the car within `GRID_PERSIST_RANGE`. One grid
-   * is up at a time, as the renderer draws one.
+   * Makes a kit car's lids the authority over its grids: a grid whose lid has shut
+   * closes, and a lid's grid rides with its car. The grid shown is the aimed compartment
+   * under an open lid, else a lid that has just opened, else — with nothing open — the
+   * nearest open lid of the car within `GRID_PERSIST_RANGE`. One grid is up at a time,
+   * as the renderer draws one.
    *
    * A car without a rig has no lid to follow and keeps the [F] that opens it.
    */
   private followLids(resolved: Resolved, eyeX: number, eyeY: number, eyeZ: number): void {
     const open = this.openStorage;
-    if (open?.owner === 'car') {
+    if (open) {
       const lid = lidOpen(this.carLookup.vehicle(open.id)?.kit ?? null, open.side);
       if (lid === false || !this.storageGridCentre(open, this.vScratch)) {
         this.openStorage = null;
@@ -1309,21 +1249,9 @@ export class Interaction {
         open.y = this.vScratch.y;
         open.z = this.vScratch.z;
       }
-    } else if (open && lidOpen(this.fixedLids(open.owner, open.id)?.rig ?? null, open.side) === false) {
-      this.openStorage = null;
     }
 
     const t = resolved.target;
-    // `resolve` offers a shell's compartment under its lid shut or open, a courier's boot
-    // only under its open lid; open, it shows.
-    if (
-      t.kind === 'storage'
-      && t.owner !== 'car'
-      && !this.isStorageOpen(t)
-      && lidOpen(this.fixedLids(t.owner, t.id)?.rig ?? null, t.side) === true
-    ) {
-      this.openGrid(t);
-    }
 
     const carId = resolved.carId;
     const rig = resolved.vehicle?.kit ?? null;
@@ -1334,7 +1262,7 @@ export class Interaction {
     const sameCar = seen.carId === carId;
     let side: StorageSide | null = null;
     // `resolve` offers a kit car's compartment only under its open lid.
-    if (t.kind === 'storage' && t.owner === 'car' && t.id === carId) side = t.side;
+    if (t.kind === 'storage' && t.id === carId) side = t.side;
     else if (sameCar && bonnet && !seen.bonnet) side = 'bonnet';
     else if (sameCar && trunk && !seen.trunk) side = 'trunk';
     seen.carId = carId;
@@ -1348,7 +1276,7 @@ export class Interaction {
       let nearest = GRID_PERSIST_RANGE * GRID_PERSIST_RANGE;
       for (const candidate of ['bonnet', 'trunk'] as const) {
         if (!(candidate === 'bonnet' ? bonnet : trunk)) continue;
-        if (!this.storageGridCentre({ owner: 'car', side: candidate, id: carId }, this.vScratch)) continue;
+        if (!this.storageGridCentre({ side: candidate, id: carId }, this.vScratch)) continue;
         const dx = eyeAbsX - this.vScratch.x;
         const dy = eyeY - this.vScratch.y;
         const dz = eyeAbsZ - this.vScratch.z;
@@ -1360,7 +1288,7 @@ export class Interaction {
       }
       if (side === null) return;
     }
-    const target = { owner: 'car', side, id: carId } as const;
+    const target = { side, id: carId } as const;
     if (this.isStorageOpen(target) || !this.storageGridCentre(target, this.vScratch)) return;
     this.openStorage = { ...target, x: this.vScratch.x, y: this.vScratch.y, z: this.vScratch.z };
   }
@@ -1550,7 +1478,6 @@ export class Interaction {
           inCompartment = true;
           keep(this.trunkPickedDistance, {
             kind: 'storage',
-            owner: 'car',
             side,
             id: carId,
             cell: this.trunkPickedCell,
@@ -1593,89 +1520,6 @@ export class Interaction {
       }
     }
 
-    // The lid of a roadside shell or a courier nearest in the eye ray, if any (`aimWreckLid`).
-    let wreckLidOwner: 'wreck' | 'courier' = 'wreck';
-    let wreckLidId: string | null = null;
-    let wreckLids: StaticCarLids | null = null;
-    let wreckLidControl: KitControl | null = null;
-    let wreckLidDistance = Infinity;
-    for (const wreck of this.wreckTrunks.values()) {
-      this.trunkPosition.set(wreck.x - this.origin.x, wreck.y, wreck.z - this.origin.z);
-      this.trunkQuaternion.set(wreck.qx, wreck.qy, wreck.qz, wreck.qw);
-      // Both ends of a shell open, exactly as a driven car's do: the rear gives up the
-      // trunk's cans and tools, the service cells under the bonnet give up the worn
-      // parts. The nearer grid wins, so a buried nose exposes its boot. Every shell is a
-      // kit body and its grids lie under its lids (`StaticCarLids`), offered shut too,
-      // where F opens the lid first (`mount`); a shell whose model is still loading has
-      // no lids yet and offers nothing. The van's bay under its cabin engine cover is
-      // reached only through its open side door, `BOOT_RANGE` counted from the opening
-      // as on the driven van (`wreckCabinCompartment`).
-      const lids = this.wreckTrunks.lids(wreck.id);
-      if (!lids) continue;
-      const shape = carModelMeasure(wreck.modelId);
-      for (const side of ['trunk', 'bonnet'] as const) {
-        if (!lids.has(side)) continue;
-        let reach = BOOT_RANGE;
-        if (wreckCabinCompartment(lids, side)) {
-          const door = this.openDoorDistance(lids.rig, this.wreckDoors(lids), eyeX, eyeY, eyeZ, dx, dy, dz);
-          if (door === Infinity) continue;
-          reach += door;
-        }
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, shape, side, reach)) {
-          keep(this.trunkPickedDistance, {
-            kind: 'storage',
-            owner: 'wreck',
-            side,
-            id: wreck.id,
-            cell: this.trunkPickedCell,
-          });
-        }
-      }
-      const p = this.trunkPosition;
-      if (Math.hypot(p.x - eyeX, p.y - eyeY, p.z - eyeZ) > VEHICLE_RANGE) continue;
-      const distance = this.aimWreckLid(lids, eyeX, eyeY, eyeZ, dx, dy, dz);
-      if (distance < wreckLidDistance) {
-        wreckLidDistance = distance;
-        wreckLidOwner = 'wreck';
-        wreckLidId = wreck.id;
-        wreckLids = lids;
-        wreckLidControl = this.wreckLidAimed;
-      }
-    }
-
-    // A courier's boot lies under its boot lid or tailgate, as a shell's does, but it is
-    // offered only open: E on the lid opens it and the grid with it (`workWreckLid`), and
-    // F at the shut lid does nothing. Its bonnet and doors are part of the shell and never
-    // open. A courier whose model is still loading has no lid yet and offers nothing.
-    for (const courier of this.couriers.values()) {
-      const lids = this.couriers.lids(courier.id);
-      if (!lids) continue;
-      this.trunkPosition.set(courier.x - this.origin.x, courier.y, courier.z - this.origin.z);
-      this.trunkQuaternion.set(courier.qx, courier.qy, courier.qz, courier.qw);
-      if (
-        lidOpen(lids.rig, 'trunk') === true
-        && this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, this.trunkPosition, this.trunkQuaternion, courier, 'trunk', BOOT_RANGE)
-      ) {
-        keep(this.trunkPickedDistance, {
-          kind: 'storage',
-          owner: 'courier',
-          side: 'trunk',
-          id: courier.id,
-          cell: this.trunkPickedCell,
-        });
-      }
-      const p = this.trunkPosition;
-      if (Math.hypot(p.x - eyeX, p.y - eyeY, p.z - eyeZ) > VEHICLE_RANGE) continue;
-      const distance = this.aimWreckLid(lids, eyeX, eyeY, eyeZ, dx, dy, dz);
-      if (distance < wreckLidDistance) {
-        wreckLidDistance = distance;
-        wreckLidOwner = 'courier';
-        wreckLidId = courier.id;
-        wreckLids = lids;
-        wreckLidControl = this.wreckLidAimed;
-      }
-    }
-
     // A vending machine's front, its window slots in it.
     for (const machine of this.market.machineValues()) {
       if (aimVending(machine, this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE, this.vendAim)) {
@@ -1698,7 +1542,7 @@ export class Interaction {
       const aim = this.kitAimed;
       const t = target as Target;
       const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body' || t.kind === 'filler'
-        || (t.kind === 'storage' && t.owner === 'car' && t.id === carId);
+        || (t.kind === 'storage' && t.id === carId);
       if (own || aim.distance <= bestDist) {
         kitPart = aim.distance <= RAY_RANGE ? aim.part : null;
         // Getting in: the first thing the ray meets is a seat, not behind glass, and the
@@ -1712,42 +1556,7 @@ export class Interaction {
       }
     }
 
-    // A shell's or a courier's lid answers as a car's part does: unless something else
-    // stands nearer in the ray, its own compartments aside.
-    let wreckLid: Resolved['wreckLid'] = null;
-    if (wreckLidId !== null && wreckLids && wreckLidControl) {
-      const t = target as Target;
-      const own = t.kind === 'none' || (t.kind === 'storage' && t.owner === wreckLidOwner && t.id === wreckLidId);
-      if (own || wreckLidDistance <= bestDist) {
-        wreckLid = { owner: wreckLidOwner, id: wreckLidId, lids: wreckLids, control: wreckLidControl };
-      }
-    }
-
-    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, kitPlace, wreckLid };
-  }
-
-  /**
-   * Distance along the eye ray, within `RAY_RANGE`, to the nearest of a roadside shell's
-   * lids, or Infinity; its control in `wreckLidAimed`. Only the lids are tested, a few
-   * hundred triangles: the shell round them is never worked, so a cabin lid (the van's
-   * engine cover, `KIT_DOOR_REACH_PART`) answers only through the open side door, as on
-   * the driven van.
-   */
-  private aimWreckLid(lids: StaticCarLids, eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number): number {
-    this.raycaster.set(this.rayOrigin.set(eyeX, eyeY, eyeZ), this.rayDir.set(dx, dy, dz));
-    this.raycaster.far = RAY_RANGE;
-    this.hits.length = 0;
-    // Each call sorts the whole list, so after the last the nearest hit is first.
-    for (const pivot of lids.pivots) this.raycaster.intersectObject(pivot, true, this.hits);
-    const hit = this.hits[0];
-    this.hits.length = 0;
-    let control = hit ? (KitRig.controlOf(hit.object)?.control ?? null) : null;
-    if (control && KIT_DOOR_REACH_PART.test(control.id)
-      && this.openDoorDistance(lids.rig, this.wreckDoors(lids), eyeX, eyeY, eyeZ, dx, dy, dz) === Infinity) {
-      control = null;
-    }
-    this.wreckLidAimed = control;
-    return hit && control ? hit.distance : Infinity;
+    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, kitPlace };
   }
 
   /** Scratch for `pickBody`'s stamp read: the hit face's three corners and two edges. */
@@ -1999,23 +1808,6 @@ export class Interaction {
     return doors;
   }
 
-  /**
-   * A roadside shell's side doors that open (render/carmodel.ts `STATIC_SHELL_DOORS`:
-   * the van's middle door), found once per shell among its hinged pivots as `kitDoors`
-   * finds a car's. Empty for every other shell.
-   */
-  private wreckDoors(lids: StaticCarLids): readonly KitDoor[] {
-    const cached = this.kitDoorCache.get(lids.rig);
-    if (cached) return cached;
-    const doors: KitDoor[] = [];
-    for (const pivot of lids.pivots) {
-      const door = this.kitDoorOf(pivot);
-      if (door) doors.push(door);
-    }
-    this.kitDoorCache.set(lids.rig, doors);
-    return doors;
-  }
-
   /** `node` as a side door, if it is one with meshes to outline it. */
   private kitDoorOf(node: THREE.Object3D): KitDoor | null {
     const id = (node.userData.kitControl as KitControl | undefined)?.id;
@@ -2183,34 +1975,12 @@ export class Interaction {
   }
 
   /**
-   * Works a roadside shell's lid, or a courier's boot lid, as `workKitPart` works a car's.
-   * Opening it opens its compartment's grid too, as a car's lid does (`followLids`), even
-   * over another grid. The van shell's side door (`wreckDoors`) takes the engine cover
-   * with it: opened, the cover lifts and the bay's grid opens; shut, the cover drops and
-   * the grid goes.
-   */
-  private workWreckLid(owner: 'wreck' | 'courier', id: string, lids: StaticCarLids, control: KitControl): void {
-    this.sound = 'mount';
-    this.togglePanel(lids.rig, control);
-    let side = storageLidSide(control.id);
-    if (side === null && control.id.startsWith('door_')) {
-      const open = lids.rig.get(control.id);
-      for (const cover of lids.controls) {
-        if (!KIT_DOOR_REACH_PART.test(cover.id)) continue;
-        lids.rig.set(cover.id, open);
-        side = storageLidSide(cover.id);
-      }
-    }
-    if (side && lidOpen(lids.rig, side)) this.openGrid({ owner, side, id });
-  }
-
-  /**
    * Shows a compartment's grid, measured at its centre (`storageGridCentre`); false
    * when it cannot be placed. Opening rules are the callers'.
    */
-  private openGrid(target: { readonly owner: StorageOwnerKind; readonly side: StorageSide; readonly id: string }): boolean {
+  private openGrid(target: { readonly side: StorageSide; readonly id: string }): boolean {
     if (!this.storageGridCentre(target, this.vScratch)) return false;
-    this.openStorage = { owner: target.owner, side: target.side, id: target.id, x: this.vScratch.x, y: this.vScratch.y, z: this.vScratch.z };
+    this.openStorage = { side: target.side, id: target.id, x: this.vScratch.x, y: this.vScratch.y, z: this.vScratch.z };
     return true;
   }
 
@@ -2331,8 +2101,8 @@ export class Interaction {
       const cells = this.storageCells(t);
       if (!cells) return null;
       const label = t.side === 'bonnet' ? 'bonnet' : 'trunk';
-      // Aimed at shut: a compartment with no lid to follow, or a roadside shell's under
-      // its shut lid, which F opens first (`mount`); a kit car's is offered only open.
+      // Aimed at shut: a compartment with no lid to follow, which F opens; a kit car's is
+      // offered only open.
       if (!this.isStorageOpen(t)) return `[F] open ${label}`;
 
       // The grid itself shows which cells hold what, so the prompt names only what F
@@ -2340,13 +2110,6 @@ export class Interaction {
       if (t.cell === null) return null;
       const item = cells[t.cell];
       if (item) {
-        // A contract is signed out only to a licensed driver; the refusal names what
-        // is missing. The offer shows what it pays.
-        if (t.owner === 'courier' && item.type === 'contract_cargo') {
-          const licence = licenceFor(this.world.state, item.contractKind);
-          if (!licence.ok) return licence.reason ?? 'no licence for this cargo';
-          return `[F] take ${itemLabel(item)} — pays ${contractPay(this.world.seed, item)} coins`;
-        }
         // A fitted engine or radiator reports what it is holding.
         // Same resolution the pour uses, so the number you read is the number a can
         // fills — and holding one turns the readout into the pour offer itself.
@@ -2359,26 +2122,20 @@ export class Interaction {
       }
       if (t.side === 'bonnet') {
         if (!held) return null;
+        if (isPassenger(held)) return PASSENGER_SEAT_ONLY;
         if (!bonnetAccepts(t.cell, held)) {
           const slotLabel = bonnetSlotKind(t.cell)?.replace('_', ' ') ?? 'service';
           return `${slotLabel} slot — wrong part`;
         }
         return `[F] install ${itemLabel(held)}`;
       }
-      if (held?.type === 'contract_cargo' && t.owner === 'courier') {
-        const courier = this.couriers.get(t.id);
-        if (!courier) return null;
-        const refusal = contractAcceptRefusal(held, this.deliveryProbe(courier));
-        if (refusal) return refusal;
-        return `[F] deliver ${itemLabel(held)} — ${contractPay(this.world.seed, held)} coins`;
-      }
-      if (held?.type === 'contract_cargo' && t.owner === 'car') {
-        const full = this.contractSlotsRefusal(t.id);
-        if (full) return full;
-      }
       if (held && !cells[t.cell]) {
         const tooLong = bootRefusal(held);
         if (tooLong) return tooLong;
+      }
+      if (held?.type === 'contract_cargo') {
+        const full = this.contractSlotsRefusal(t.id, held);
+        if (full) return full;
       }
       if (held) return `[F] stow ${itemLabel(held)}`;
       return null;
@@ -2421,7 +2178,7 @@ export class Interaction {
           return item ? `[F] take ${itemLabel(item)}` : null;
         }
         case 'lay':
-          return `[F] lay ${itemLabel(action.item)} on the seat`;
+          return isPassenger(action.item) ? `[F] seat ${itemLabel(action.item)}` : `[F] lay ${itemLabel(action.item)} on the seat`;
         case 'sit':
           return this.cabinRefusal();
       }
@@ -2479,7 +2236,7 @@ export class Interaction {
       const reservoir = fillerReservoir(car, resolved.vehicle.stats);
       return reservoir ? { ...reservoir, sink: 'car', carId: t.carId } : null;
     }
-    if (t.kind !== 'storage' || t.side !== 'bonnet' || t.owner !== 'car' || t.cell === null) {
+    if (t.kind !== 'storage' || t.side !== 'bonnet' || t.cell === null) {
       return null;
     }
     if (!this.isStorageOpen(t) || !resolved.vehicle) return null;
@@ -2767,12 +2524,9 @@ export class Interaction {
       return;
     }
 
-
     // A compartment with no lid to follow (a car without a rig) opens on the first press;
-    // a kit car's and a courier's are offered only under an open lid, already shown
-    // (`followLids`). A roadside shell's opens with its lid: the press lifts every leaf
-    // over the compartment first, so the grid never shows under a shut lid. Further
-    // presses operate the aimed cell.
+    // a kit car's is offered only under an open lid, already shown (`followLids`).
+    // Further presses operate the aimed cell.
     if (t.kind === 'storage') {
       if (!this.isStorageOpen(t)) {
         // Located from the same transform the target was resolved against, so this
@@ -2780,12 +2534,6 @@ export class Interaction {
         // keeps the persistence rule measuring a real compartment.
         if (!this.openGrid(t)) return;
         this.sound = 'mount';
-        const lids = t.owner === 'wreck' ? this.wreckTrunks.lids(t.id) : null;
-        if (lids && !lidOpen(lids.rig, t.side)) {
-          for (const control of lids.controls) {
-            if (storageLidSide(control.id) === t.side) this.togglePanel(lids.rig, control);
-          }
-        }
         return;
       }
       if (t.cell === null) return;
@@ -2795,77 +2543,15 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
-      if (!cells[t.cell] && held?.type === 'contract_cargo' && t.owner === 'courier') {
-        const courier = this.couriers.get(t.id);
-        if (!courier) {
-          this.sound = 'refused';
-          return;
-        }
-        const probe = this.deliveryProbe(courier);
-        if (contractAcceptRefusal(held, probe)) {
-          this.sound = 'refused';
-          return;
-        }
-        // The kind's signature sticker, or the offer's seed-random one for a kind
-        // without a signature. Nothing on the way is scored; a delivery never fails.
-        const envelope: StickerEnvelopeItem = {
-          type: 'sticker_envelope',
-          id: `${held.id}:signed:${courier.index}`,
-          stickerKind: contractRewardSticker(held),
-          completedContractId: held.id,
-        };
-        // What the kind consumes besides the cargo: the trailer or car the contract
-        // named. The world deltas follow the `courier_storage` delta that writes the
-        // completed id, so a crash between the halves cannot pay twice.
-        const effect = contractDeliveryEffect(held, probe);
-        const nextCells = cells.slice();
-        nextCells[t.cell] = envelope;
-        // The delivery pays coins (economy/economy.ts `contractPay`), and a race won
-        // adds its prize to them. They go into the pack the cargo just left.
-        const coins = contractPay(this.world.seed, held) + this.raceCoins(held.id);
-        this.world.apply({
-          t: 'courier_storage',
-          courierId: t.id,
-          cells: nextCells,
-          consumedItemId: held.id,
-          completedContractId: held.id,
-          completedContractKind: held.contractKind,
-        });
-        if (effect?.deltas) {
-          for (const delta of effect.deltas) this.world.apply(delta);
-        }
-        this.inventory.remove(held.id);
-        const leftover = giveCoins(this.inventory, coins, `${held.id}:coin`);
-        if (leftover) {
-          // A pack too heavy even for a coin: it waits in the courier's boot.
-          const free = nextCells.findIndex((cell) => cell === null);
-          if (free >= 0) {
-            const withCoin = nextCells.slice();
-            withCoin[free] = leftover;
-            this.world.apply({ t: 'courier_storage', courierId: t.id, cells: withCoin });
-          }
-        }
-        this.sound = 'mount';
-        return;
-      }
       if (held && !cells[t.cell] && bootRefusal(held)) {
         this.sound = 'refused';
         return;
       }
-      if (held?.type === 'contract_cargo' && t.owner === 'car' && cells[t.cell]?.type !== 'contract_cargo') {
-        if (this.contractSlotsRefusal(t.id)) {
+      if (held?.type === 'contract_cargo' && cells[t.cell]?.type !== 'contract_cargo') {
+        if (this.contractSlotsRefusal(t.id, held)) {
           this.sound = 'refused';
           return;
         }
-      }
-      const taking = cells[t.cell];
-      if (
-        t.owner === 'courier'
-        && taking?.type === 'contract_cargo'
-        && !licenceFor(this.world.state, taking.contractKind).ok
-      ) {
-        this.sound = 'refused';
-        return;
       }
       const result = operateTrunkCell(cells, t.cell, held, this.inventory);
       if (result.action === 'refused') {
@@ -2873,17 +2559,7 @@ export class Interaction {
         return;
       }
       if (result.action === 'none') return;
-      if (t.owner === 'wreck') {
-        this.world.apply(
-          t.side === 'bonnet'
-            ? { t: 'wreck_bonnet', wreckId: t.id, cell: t.cell, item: result.item }
-            : { t: 'wreck_storage', wreckId: t.id, cell: t.cell, item: result.item },
-        );
-      } else if (t.owner === 'courier') {
-        const nextCells = cells.slice();
-        nextCells[t.cell] = result.item;
-        this.world.apply({ t: 'courier_storage', courierId: t.id, cells: nextCells });
-      } else if (t.side === 'bonnet') {
+      if (t.side === 'bonnet') {
         // The delta itself moves the slot's fluid into the part coming out and out of
         // the part going in (`moveSlotFluid`, game/state.ts). Nothing to zero here.
         this.world.apply({ t: 'car_bonnet', carId: t.id, cell: t.cell, item: result.item });
@@ -3083,10 +2759,10 @@ export class Interaction {
     const held = this.inventory.held;
     if (held && this.cabinRefusal() !== null && seat !== 'driver') {
       if (held.type === 'contract_cargo') {
-        const full = this.contractSlotsRefusal(car.id);
+        const full = this.contractSlotsRefusal(car.id, held);
         if (full) return { kind: 'refuse', why: full };
       }
-      const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held));
+      const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held), isPassenger(held));
       if ('refusal' in lay) return { kind: 'refuse', why: lay.refusal };
       return { kind: 'lay', place: cabinIndex(lay.place), item: held };
     }
@@ -3101,6 +2777,7 @@ export class Interaction {
    */
   private cabinRefusal(): string | null {
     for (const item of this.inventory.contents) {
+      if (isPassenger(item)) return `seat the ${itemLabel(item)} through a passenger door first`;
       if (item.type === 'contract_cargo') return `stow the ${itemLabel(item)} in the boot or lay it on a seat first`;
       if (itemMass(item) > CABIN_ITEM_LIMIT_KG) return `the ${itemLabel(item)} won't fit in the cabin`;
     }

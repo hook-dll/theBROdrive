@@ -160,8 +160,8 @@ export function installVehicleAutosave(
       case 'car_cabin':
       case 'car_bonnet':
       case 'car_lights':
-      case 'wreck_storage':
-      case 'wreck_bonnet':
+      // A post's offer released, or cargo posted (world/post.ts).
+      case 'courier_storage':
       case 'trailer_hitch':
       case 'trailer_cargo':
       case 'sticker_place':
@@ -466,8 +466,8 @@ export function migrateState(raw: unknown): WorldState {
   const loosePartsRaw = recordField(obj.looseParts, 'looseParts');
   const looseItemsRaw = recordField(obj.looseItems, 'looseItems');
   const trailersRaw = recordField(obj.trailers, 'trailers');
-  const wreckStorageRaw = recordField(obj.wreckStorage, 'wreckStorage');
-  const wreckBonnetRaw = recordField(obj.wreckBonnet, 'wreckBonnet');
+  // `wreckStorage`/`wreckBonnet` of saves from the roadside-shell days are ignored: the
+  // shells are gone, and nothing they held can be reached any more.
   const courierStorageRaw = recordField(obj.courierStorage, 'courierStorage');
 
   const seed = seedRaw >>> 0;
@@ -543,19 +543,11 @@ export function migrateState(raw: unknown): WorldState {
     trailers[id] = migrateTrailer(asRecord(value, `trailer "${id}"`));
   }
 
-  const wreckStorage: Record<string, (Item | null)[]> = {};
-  for (const [id, value] of Object.entries(wreckStorageRaw)) {
-    wreckStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `wreck "${id}" trunk`);
-  }
-
-  const wreckBonnet: Record<string, (Item | null)[]> = {};
-  for (const [id, value] of Object.entries(wreckBonnetRaw)) {
-    wreckBonnet[id] = migrateStorage(migrateBonnetLayout(value, version), BONNET_SLOT_COUNT, `wreck "${id}" bonnet`);
-  }
-
   const courierStorage: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(courierStorageRaw)) {
-    courierStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `courier "${id}" trunk`);
+    // A post's stock (contracts/offers.ts `postStock`); a courier-era boot of eight
+    // cells reads the same way, its leftovers handed back through the post's tray.
+    courierStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `post "${id}" stock`);
   }
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
@@ -620,8 +612,6 @@ export function migrateState(raw: unknown): WorldState {
     settings: sanitizeSettings(obj.settings, false),
     player,
     cars,
-    wreckStorage,
-    wreckBonnet,
     courierStorage,
     completedContractIds,
     deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind, seed, completedContractIds),
@@ -1024,15 +1014,21 @@ function isRemovedLegacyItem(raw: unknown): boolean {
 }
 
 /**
- * Rebuilds a contract's saved progress: `started`, and a fragile radio's `condition`
- * when it has one. Older saves also carry heat, violated and status fields from when
- * deliveries were scored; they are dropped.
+ * Rebuilds a contract's saved progress: `started`, a fragile radio's `condition` and a
+ * passenger's ride (`comfort`, `harsh`) when it has them. Older saves also carry heat,
+ * violated and status fields from when deliveries were scored; they are dropped.
  */
 function sanitizeContractProgress(raw: unknown): ContractProgress {
   const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
   const progress: ContractProgress = { started: obj.started === true };
   if (typeof obj.condition === 'number' && Number.isFinite(obj.condition)) {
     progress.condition = Math.min(1, Math.max(0, obj.condition));
+  }
+  if (typeof obj.comfort === 'number' && Number.isFinite(obj.comfort)) {
+    progress.comfort = Math.min(1, Math.max(0, obj.comfort));
+  }
+  if (typeof obj.harsh === 'number' && Number.isFinite(obj.harsh) && obj.harsh > 0) {
+    progress.harsh = Math.trunc(obj.harsh);
   }
   return progress;
 }
@@ -1220,6 +1216,10 @@ function migrateItem(raw: unknown, where: string): Item {
         rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
         progress: sanitizeContractProgress(obj.progress),
+        ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
+        ...(typeof obj.registeredPin === 'string' && /^\d{6}$/.test(obj.registeredPin)
+          ? { registeredPin: obj.registeredPin }
+          : {}),
       };
       if (typeof obj.massKg === 'number' && Number.isFinite(obj.massKg) && obj.massKg > 0) {
         item.massKg = obj.massKg;
@@ -1227,6 +1227,13 @@ function migrateItem(raw: unknown, where: string): Item {
       if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
       const shape = CARGO_SHAPES.find((known) => known === obj.shape);
       if (shape) item.shape = shape;
+      // A passenger's party: its contract id and 1–3 teddies. Anything else is dropped,
+      // and the teddy then delivers as a party of its own.
+      const party = typeof obj.party === 'object' && obj.party !== null ? (obj.party as Record<string, unknown>) : null;
+      const partySize = typeof party?.size === 'number' ? Math.trunc(party.size) : 0;
+      if (party && typeof party.id === 'string' && partySize >= 1 && partySize <= 3) {
+        item.party = { id: party.id, size: partySize };
+      }
       return item;
     }
     case 'sticker_envelope':

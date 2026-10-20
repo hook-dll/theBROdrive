@@ -15,7 +15,6 @@ const TRUNK_GRID_BODY_FRACTION = 1.65;
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
 
 export type StorageSide = 'trunk' | 'bonnet';
-export type StorageOwnerKind = 'car' | 'wreck' | 'courier';
 
 /**
  * One bonnet cell lying flat in the engine bay, chassis-local metres: (x, z) the centre
@@ -42,10 +41,10 @@ export interface StorageGridShape {
   readonly bonnetCells?: readonly StorageCellRect[];
 }
 
-/** Fixed-step trunk view handed from world interaction to the renderer. */
+/** Fixed-step trunk view handed from world interaction to the renderer: one car's grid. */
 export interface TrunkViewState {
-  readonly owner: StorageOwnerKind;
   readonly side: StorageSide;
+  /** The car's id. */
   readonly id: string;
   readonly cells: readonly (Item | null)[];
   readonly selectedCell: number | null;
@@ -54,8 +53,7 @@ export interface TrunkViewState {
 /**
  * A kit body's lids over each compartment, by rig channel (carkit/kit.ts `shellMotion`):
  * the bonnet, and the boot lid or tailgate behind (either leaf of a split one), whichever
- * the body has. A compartment's grid is reached only with one of its lids open, on a
- * driven car and on a roadside shell alike.
+ * the body has. A compartment's grid is reached only with one of its lids open.
  */
 export const STORAGE_LID_CHANNELS: Readonly<Record<StorageSide, readonly string[]>> = {
   // Forward-control vans expose their service bay through the cabin engine cover rather

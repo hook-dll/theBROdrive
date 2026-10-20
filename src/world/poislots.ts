@@ -1,6 +1,6 @@
 import { hash, hash01 } from '../core/rng';
 import { GAMEPLAY_CONFIG } from '../config';
-import { isCourierPoiSlot } from './couriers';
+import { isPostPoiSlot } from './poststops';
 import { DWELLINGS } from './dwellings/list';
 import { ROAD_LENGTH } from './road';
 
@@ -107,9 +107,9 @@ export interface RoadsideSlot {
 export function roadsideSlot(seed: number, slot: number, spacing: number): RoadsideSlot | null {
   const s = slot * spacing;
   if (slot < 1 || s > ROAD_LENGTH) return null;
-  // A courier slot always has a building: it is a settlement, and the post and the
-  // courier are there. Any other slot that does not roll one reads as empty desert.
-  const settlement = isCourierPoiSlot(seed, slot, spacing);
+  // A post slot always has a building: it is a settlement with its «ПОЧТА» machine.
+  // Any other slot that does not roll one reads as empty desert.
+  const settlement = isPostPoiSlot(seed, slot, spacing);
   if (!settlement && hash01(seed, POI_DOMAIN, slot) >= POI_OCCUPANCY) return null;
   const structure = settlement ? rollSettlement(seed, slot) : rollStructure(seed, POI_DOMAIN, slot);
   return {

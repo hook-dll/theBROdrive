@@ -267,51 +267,6 @@ export function attachKitDraw(body: THREE.Object3D, model: KitDrawModel, paint: 
   return skeleton;
 }
 
-/**
- * Bones that never move: each at its rest frame or folded, written once. Shared by every
- * instance it is made for, and never written again (`update` does nothing).
- */
-class FixedKitSkeleton extends THREE.Skeleton {
-  constructor(shown: readonly boolean[]) {
-    super();
-    // Three sizes the bone texture by `bones.length`; nothing else reads them.
-    this.bones = new Array<THREE.Bone>(shown.length);
-    const out = new Float32Array(shown.length * 16);
-    shown.forEach((on, i) => {
-      if (on) _bone.identity().toArray(out, i * 16);
-    });
-    this.boneMatrices = out;
-  }
-
-  override update(): void {}
-}
-
-/**
- * The parts of a kit model `shown` picks (by the node each bone is: `body`'s nodes, the
- * template `prepareKitDraw` ran on), at rest, every other part folded away: a skeleton
- * for `kitRestMesh`, built once per model and shared by all its instances.
- */
-export function kitRestSkeleton(model: KitDrawModel, body: THREE.Object3D, shown: (node: THREE.Object3D) => boolean): THREE.Skeleton {
-  const order: THREE.Object3D[] = [];
-  body.traverse((node) => order.push(node));
-  return new FixedKitSkeleton(model.bones.map((index) => shown(order[index]!)));
-}
-
-/**
- * The model's merged opaque mesh over a `kitRestSkeleton`, in the car's one material
- * (`paint`): a static shell's cabin, bay and boot (render/carmodel.ts `cloneStaticModel`).
- * Add it where `attachKitDraw` would: under a node in `body`'s own frame. Its program is
- * the driven car's (skinned, the same material and buffer), so it links nothing new.
- */
-export function kitRestMesh(model: KitDrawModel, skeleton: THREE.Skeleton, paint: THREE.Material): THREE.SkinnedMesh {
-  const mesh = skinned(model.opaque, paint, skeleton, model.opaque.boundingSphere!);
-  // Casts only where its parts do (`KIT_SHADOW_ATTRIBUTE`), receives only where they do.
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.customDepthMaterial = kitCastDepthMaterial();
-  return mesh;
-}
-
 /** One wheel set as one skinned mesh on one body: its pieces per material, and each wheel's rest. */
 export interface KitWheelModel {
   readonly geometry: THREE.BufferGeometry;

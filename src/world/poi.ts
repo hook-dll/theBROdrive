@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-import { hash, hash01, pick } from '../core/rng';
+import { hash, hash01 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { MarketField } from './market';
@@ -9,19 +9,16 @@ import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
   carModelMeasure,
   carSpawnYAboveGround,
-  createCourierCarModel,
   createStaticCarModel,
   isCarModelLoaded,
   loadCarModel,
 } from '../render/carmodel';
-import { CAR_MODELS } from '../vehicle/carmodels';
+import { carPrice } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { TrailerField } from '../vehicle/trailer';
-import { courierDefaultStorage } from '../contracts/offers';
-import { courierId, couriersBetween, type CourierField, type CourierStop } from './couriers';
+import { postStopsBetween } from './poststops';
 import { fitGround } from './footprint';
-import { DancerField, type DancerHandle } from './props/airdancer';
-import { halfWidthAt, SHOULDER_WIDTH_M } from './roadprofile';
+import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
 import { mesaFieldOf } from './mesas';
 import type { RoadDistance } from './roaddistance';
@@ -29,11 +26,11 @@ import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
 import { POI_SPACING, roadsideSlot, rollStructure } from './poislots';
-import { laybyCourierLateral, laybyNear, type Layby } from './layby';
 import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout, type SettlementSpot } from './settlement';
 import type { FixtureField } from './fixturefield';
-
-const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
+import { buildPost } from './post';
+import { buildBarrelStand } from './barrels';
+import { buildKeyBox } from './keybox';
 
 /**
  * Points of interest: the buildings that give the drive a reason to continue.
@@ -343,28 +340,6 @@ export function geometryToTrimesh(
   return { vertices, indices };
 }
 
-/**
- * Static collider for a primitive. The streamer owns cleanup: it walks the returned
- * `bodies` array and calls `physics.removeBody`, which forgets the surface and
- * removes the fixed body plus its collider. Null when the chunk carries no physics.
- */
-function addStaticCollider(
-  ctx: ChunkContext,
-  geometry: THREE.BufferGeometry,
-  matrix: THREE.Matrix4,
-  surface: SurfaceType,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-): RAPIER.Collider | null {
-  if (!ctx.hasPhysics) return null;
-  const t = geometryToTrimesh(geometry, matrix);
-  const collider = ctx.physics.addStaticTrimesh(t.vertices, t.indices, surface);
-  colliders.push(collider);
-  const parent = collider.parent();
-  if (parent) bodies.push(parent);
-  return collider;
-}
-
 // ---------------------------------------------------------------------------
 // Building a stop. Scenery is built unconditionally; world objects (a trailer, the car
 // for sale) only once, guarded by `poi_looted` and by the car's own id in world state.
@@ -561,6 +536,8 @@ export function standingHouses(
 
 /** The car for sale's price board stands this far off its road-side flank, metres. */
 const LOT_BOARD_OUT_M = 0.9;
+/** The key box's post stands this far beside the price board's, along the board, metres. */
+const KEY_BOX_BESIDE_M = 0.65;
 
 /**
  * A settlement's car for sale, at its `lot` spot, with its price board on the road-side
@@ -574,9 +551,13 @@ function buildLot(
   lot: SettlementSpot,
   side: 1 | -1,
   group: THREE.Group,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
   market: MarketField,
   registeredMarket: string[],
+  fixtures: FixtureField,
+  registeredFixtures: string[],
 ): void {
   const def = lotModel(ctx.world.seed, poi);
   if (!def) return;
@@ -586,21 +567,29 @@ function buildLot(
   const pose = spotPose(ctx.road, lot);
   const groundY = ctx.terrain.heightAt(pose.x, pose.z, lot.s);
 
-  // The price board, facing the road; only while the car is still for sale.
-  const priceBoard = (): void => {
+  // The price board, facing the road, and the key box on its post beside it, the same
+  // way round (world/keybox.ts); only while the car is still for sale.
+  const priceBoard = (price: number): void => {
     const at = ctx.road.offsetPoint(lot.s, lot.lateral - side * (half[0] + LOT_BOARD_OUT_M));
     const y = ctx.terrain.heightAt(at.x, at.z, lot.s);
     const road = ctx.road.offsetPoint(lot.s, 0);
-    buildLotSign(ctx, group, carId, def, at.x, y, at.z, Math.atan2(road.x - at.x, road.z - at.z), market, registeredMarket);
+    const face = Math.atan2(road.x - at.x, road.z - at.z);
+    buildLotSign(ctx, group, carId, def, at.x, y, at.z, face, market, registeredMarket);
+    const boxX = at.x + Math.cos(face) * KEY_BOX_BESIDE_M;
+    const boxZ = at.z - Math.sin(face) * KEY_BOX_BESIDE_M;
+    buildKeyBox(
+      ctx, carId, price, boxX, ctx.terrain.heightAt(boxX, boxZ, lot.s), boxZ, face,
+      group, bodies, colliders, fixtures, registeredFixtures, market,
+    );
   };
 
   // A car made at a lot lives in world state from then on, sold or not.
   const existing = ctx.world.state.cars[carId];
   if (existing) {
-    if (existing.lotPrice !== undefined) priceBoard();
+    if (existing.lotPrice !== undefined) priceBoard(existing.lotPrice);
     return;
   }
-  priceBoard();
+  priceBoard(carPrice(def.id));
   if (ctx.hasPhysics) {
     // Created in clear air, so gravity and suspension find its ride height.
     ctx.world.apply({
@@ -622,8 +611,8 @@ function buildLot(
   );
   const addPreview = (): void => {
     const preview = createStaticCarModel(def.id, carId);
-    setFromMatrix(preview.model, matrix);
-    group.add(preview.model);
+    setFromMatrix(preview, matrix);
+    group.add(preview);
   };
   if (isCarModelLoaded(def.id)) {
     addPreview();
@@ -670,9 +659,8 @@ function spawnTrailer(ctx: ChunkContext, poi: Poi, at: SettlementSpot, trailers:
 /**
  * One stop. Out in the desert: its building, facing wherever it was left facing. At the
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
- * sides, the shop's machine and the car for sale on the strip, and sometimes a trailer.
- * The post, barrels and the lot's key box are fixtures built at the layout's spots by
- * their own builders.
+ * sides, its «ПОЧТА» machine (world/post.ts), the shop's machine, the car for sale with
+ * its key box, a barrel stand, and sometimes a trailer.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -685,6 +673,9 @@ function buildPoi(
   trailers: TrailerField,
   market: MarketField,
   registeredMarket: string[],
+  fixtures: FixtureField,
+  registeredFixtures: string[],
+  disposers: Array<() => void>,
 ): void {
   if (poi.desert) {
     const at = ctx.road.offsetPoint(poi.s, poi.lateral);
@@ -698,11 +689,27 @@ function buildPoi(
     const pose = spotPose(ctx.road, house);
     seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
   }
+  if (layout.post) {
+    const stop = postStopsBetween(ctx.world.seed, poi.s - 1, poi.s + 1).find((candidate) => candidate.s === poi.s);
+    if (stop) {
+      const pose = spotPose(ctx.road, layout.post);
+      buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    }
+  }
   if (layout.shop) {
     const pose = spotPose(ctx.road, layout.shop);
     buildVendingMachine(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, market, registeredMarket);
   }
-  if (layout.lot) buildLot(ctx, poi, layout.lot, layout.side, group, deferredVisuals, market, registeredMarket);
+  if (layout.barrels) {
+    const pose = spotPose(ctx.road, layout.barrels);
+    buildBarrelStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures);
+  }
+  if (layout.lot) {
+    buildLot(
+      ctx, poi, layout.lot, layout.side, group, bodies, colliders, deferredVisuals,
+      market, registeredMarket, fixtures, registeredFixtures,
+    );
+  }
 
   // Record that this stop's world objects are now materialised. The flag alone is the
   // whole idempotency guard across chunk promotion / unload / reload.
@@ -711,152 +718,17 @@ function buildPoi(
   ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
 }
 
-// Couriers are their own sparse POIs. The sequence is random-access and every
-// adjacent pair is 5–12 km apart, independent of ordinary POI density.
-function buildCourier(
-  ctx: ChunkContext,
-  stop: CourierStop,
-  group: THREE.Group,
-  bodies: RAPIER.RigidBody[],
-  colliders: RAPIER.Collider[],
-  courierField: CourierField,
-  registeredCouriers: string[],
-  dancers: DancerField,
-  registeredDancers: DancerHandle[],
-  layby: Layby,
-  deferredVisuals: Array<() => void>,
-): void {
-  const def = pick(COURIER_MODELS, stop.appearanceSeed);
-  const measure = carModelMeasure(def.id);
-  const half = measure.halfExtents;
-  const road = ctx.road.sampleAt(stop.s);
-  const point = ctx.road.offsetPoint(stop.s, stop.lateral);
-  const yaw = road.heading + (hash01(stop.appearanceSeed, 1) - 0.5) * 0.16;
-  // A parked car sits ALONG the slope it is parked on. One centre sample used to
-  // leave half a metre of air under the downhill wheels on this ground.
-  const plane = fitGround(ctx.terrain, point.x, point.z, yaw, half[0], half[2], stop.s);
-  point.y = plane.centreY;
-  const originY = point.y + half[1] - 0.02;
-  const id = courierId(stop.index);
-  const matrix = poseMatrix(
-    point.x,
-    originY,
-    point.z,
-    yaw,
-    plane.roll,
-    plane.pitch,
-    ctx.originX,
-    ctx.originZ,
-  );
-  const collider = addStaticCollider(
-    ctx,
-    new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2),
-    matrix,
-    SurfaceType.Rock,
-    bodies,
-    colliders,
-  );
-  if (collider) {
-    const rotation = new THREE.Quaternion().setFromRotationMatrix(matrix);
-    courierField.register({
-      id,
-      index: stop.index,
-      modelId: def.id,
-      x: point.x,
-      y: originY,
-      z: point.z,
-      qx: rotation.x,
-      qy: rotation.y,
-      qz: rotation.z,
-      qw: rotation.w,
-      halfExtents: half,
-      defaultStorage: courierDefaultStorage(ctx.world.seed, stop.index),
-    });
-    registeredCouriers.push(id);
-  }
-
-  // After the registration, so the boot lid joins a registered courier.
-  const addModel = (): void => {
-    const courier = createCourierCarModel(def.id, id);
-    setFromMatrix(courier.model, matrix);
-    group.add(courier.model);
-    // Only a registered courier is within the player's reach; its boot lid is eased there.
-    if (courier.lids) courierField.attachLids(id, courier.lids);
-  };
-  if (isCarModelLoaded(def.id)) {
-    addModel();
-  } else {
-    let cancelled = false;
-    deferredVisuals.push(() => {
-      cancelled = true;
-    });
-    void loadCarModel(def.id).then(
-      () => {
-        if (!cancelled) addModel();
-      },
-      (error: unknown) => {
-        console.error(`failed to load courier car model "${def.id}"`, error);
-      },
-    );
-  }
-  if (!collider) return;
-
-  // The air dancer advertising the stop. It stands on the shoulder just before the
-  // entry slip, where the road starts widening into the pad: the sign you see before
-  // you have to turn in. It is turned to face the road. Its ground is the LOWEST of the
-  // blower's own footprint, so no corner of the box floats on ground that is only nearly
-  // flat.
-  const dancerS = layby.sEntry - DANCER_BEFORE_ENTRY_M;
-  const dancerLateral = layby.side * (ctx.road.halfWidthAt(dancerS) + SHOULDER_WIDTH_M);
-  const dancerPoint = ctx.road.offsetPoint(dancerS, dancerLateral);
-  let dancerY = ctx.terrain.heightAt(dancerPoint.x, dancerPoint.z, dancerS);
-  for (const corner of DANCER_FOOTPRINT_CORNERS) {
-    const h = ctx.terrain.heightAt(
-      dancerPoint.x + corner[0],
-      dancerPoint.z + corner[1],
-      dancerS,
-    );
-    if (h < dancerY) dancerY = h;
-  }
-  const roadCentre = ctx.road.offsetPoint(dancerS, 0);
-  registeredDancers.push(
-    dancers.spawn(group, {
-      x: dancerPoint.x,
-      y: dancerY - DANCER_SINK_M,
-      z: dancerPoint.z,
-      yaw: Math.atan2(roadCentre.x - dancerPoint.x, roadCentre.z - dancerPoint.z),
-      seed: stop.appearanceSeed,
-      originX: ctx.originX,
-      originZ: ctx.originZ,
-    }),
-  );
-}
-
-/** Blower-box corners, metres from its centre, the dancer is planted on. */
-const DANCER_FOOTPRINT_CORNERS: readonly (readonly [number, number])[] = [
-  [-0.4, -0.4],
-  [0.4, -0.4],
-  [-0.4, 0.4],
-  [0.4, 0.4],
-];
-/** Sunk this far under that lowest corner, so the seam never shows air. */
-const DANCER_SINK_M = 0.03;
-/** Along the road short of a lay-by's entry slip, metres: on the plain shoulder still. */
-const DANCER_BEFORE_ENTRY_M = 3;
-
 /**
- * Builds roadside and desert stops plus the sparse courier network. Static trunk
- * registries exist only for the live physics band; their edited contents remain in
- * WorldState.
+ * Builds roadside and desert stops, the post network's machines among them. Fixture and
+ * market registries exist only for the live physics band; what is edited at them remains
+ * in WorldState.
  */
 export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
 
   constructor(
     private readonly trailers: TrailerField,
-    private readonly couriers: CourierField,
     private readonly roadDistance: RoadDistance,
-    private readonly dancers: DancerField,
     /** The vending machines and lot cars' registry (world/market.ts). */
     private readonly market: MarketField,
     /** The streamed mechanical fixtures (world/fixturefield.ts): post, barrels, key boxes. */
@@ -879,8 +751,6 @@ export class PoiProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const deferredVisuals: Array<() => void> = [];
-    const registeredCouriers: string[] = [];
-    const registeredDancers: DancerHandle[] = [];
     const registeredMarket: string[] = [];
     /** Ids of the world fixtures this chunk registered; forgotten with it. */
     const registeredFixtures: string[] = [];
@@ -897,25 +767,8 @@ export class PoiProvider implements ChunkProvider {
         this.trailers,
         this.market,
         registeredMarket,
-      );
-    }
-    for (const stop of couriersBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, POI_SPACING)) {
-      const courierPoi = pois.find((poi) => poi.s === stop.s);
-      // Every courier stop is a settlement with a lay-by; the car parks on its pad, on
-      // the strip's side, so the parking line beside it stays free (world/layby.ts).
-      const layby = courierPoi ? laybyNear(ctx.world.seed, stop.s) : null;
-      if (!courierPoi || layby?.poiIndex !== courierPoi.index) continue;
-      buildCourier(
-        ctx,
-        { ...stop, lateral: laybyCourierLateral(layby) },
-        group,
-        bodies,
-        colliders,
-        this.couriers,
-        registeredCouriers,
-        this.dancers,
-        registeredDancers,
-        layby,
+        this.fixtures,
+        registeredFixtures,
         deferredVisuals,
       );
     }
@@ -925,8 +778,6 @@ export class PoiProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
-        this.couriers.forget(registeredCouriers);
-        this.dancers.forget(registeredDancers);
         this.market.forget(registeredMarket);
         this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();

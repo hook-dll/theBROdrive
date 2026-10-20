@@ -30,7 +30,6 @@ import { POI_SPACING } from '../src/world/poislots';
 import { structureDef, type PoiStructureKind } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
 import type { TrailerField } from '../src/vehicle/trailer';
-import type { CourierField } from '../src/world/couriers';
 import type { FixtureField } from '../src/world/fixturefield';
 
 const SEED = Number(process.argv[2] ?? 1337) >>> 0;
@@ -44,11 +43,10 @@ const terrain = new Terrain(SEED, road);
 const world = new GameWorld(newWorldState(SEED));
 
 const noTrailers = { spawn: () => {}, forget: () => {} } as unknown as TrailerField;
-const noCouriers = { register: () => {}, attachLids: () => {}, forget: () => {} } as unknown as CourierField;
 const noFixtures = { register: () => {}, forget: () => {} } as unknown as FixtureField;
 
 const roadDistance = new RoadDistance(road);
-const provider = new PoiProvider(noTrailers, noCouriers, roadDistance, undefined as never, new MarketField(), noFixtures);
+const provider = new PoiProvider(noTrailers, roadDistance, new MarketField(), noFixtures);
 
 interface Piece {
   readonly minX: number;

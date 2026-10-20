@@ -255,11 +255,21 @@ export interface ContractCargoItem {
   /** Cargo mass, kg, when the kind carries more than the usual 12 (heavy crate). */
   massKg?: number;
   /**
-   * A race offer: how many couriers on its destination is, 1 or 2. The cargo is
+   * A race offer: how many posts on its destination is, 1 or 2. The cargo is
    * signed only from there on, three rivals carry the same thing there, and the
    * player handing in first wins this many coins. Absent on an ordinary trip.
    */
   raceLegs?: 1 | 2;
+  /**
+   * The place name of the post it is bound for, printed on its label (world/placenames.ts).
+   * Absent on cargo from before the post machines.
+   */
+  readonly destination?: string;
+  /**
+   * A registered parcel's six-digit PIN, printed on its label: the receiving post's slot
+   * opens only after it is dialled (ui/dial.ts). Absent on every other cargo.
+   */
+  readonly registeredPin?: string;
   /**
    * How it looks when it is not a box of its kind (a special parcel or a passenger):
    * `carpet`, a rug rolled up and tied, longer than a front seat, a half of the bench or
@@ -269,10 +279,41 @@ export interface ContractCargoItem {
    */
   shape?: CargoShape;
   /**
+   * A passenger contract's party (contracts/kinds/teddyPassengers.ts): the contract's id,
+   * shared by every teddy of it, and how many teddies it is. The offer carries it too, so
+   * the post machine can say how many ride. Absent on every other contract.
+   */
+  party?: CargoParty;
+  /**
    * Contract state, saved on the item so it travels with every physical move.
-   * The contract runtime (`contracts/runtime.ts`) is its only writer.
+   * Written by the contract runtime (`contracts/runtime.ts`) and, for a passenger's
+   * ride, by `trackPassengerRide`.
    */
   progress: ContractProgress;
+}
+
+export interface CargoParty {
+  readonly id: string;
+  readonly size: number;
+}
+
+/**
+ * The contract an item belongs to: its party's id for a passenger, its own id otherwise.
+ * A party of three teddies is ONE contract in a car's contract slots and to the police.
+ */
+export function contractIdOf(item: ContractCargoItem): string {
+  return item.party?.id ?? item.id;
+}
+
+/** Distinct contracts among `items` (a passenger party counts once), `except` one contract id. */
+export function contractsAmong(items: Iterable<Item | null | undefined>, except: string | null = null): number {
+  const seen: string[] = [];
+  for (const item of items) {
+    if (item?.type !== 'contract_cargo') continue;
+    const id = contractIdOf(item);
+    if (id !== except && !seen.includes(id)) seen.push(id);
+  }
+  return seen.length;
 }
 
 /** Signed physical reward, consumed only when its sticker is confirmed on a car. */
@@ -346,9 +387,9 @@ export function isHaulKind(kind: ContractKind): boolean {
 }
 
 /**
- * The short title a courier's boot shows before the cargo's name, so the four offers
- * read at a glance: a sticker run, a race to the next courier (a coin to the winner),
- * a race two couriers on (two coins), and a haul with a trailer or a car in tow.
+ * The short title a post's display shows before the cargo's name, so the four offers
+ * read at a glance: a sticker run, a race to the next post (a coin to the winner),
+ * a race two posts on (two coins), and a haul with a trailer or a car in tow.
  */
 export function contractTier(item: ContractCargoItem): string {
   if (item.raceLegs === 1) return 'race · 1 stop';
@@ -414,7 +455,10 @@ export function itemLabel(item: Item): string {
       // A knocked radio says how much of its pay it still carries.
       const condition = item.progress?.condition;
       const worn = condition !== undefined && condition < 1 ? ` · ${Math.round(condition * 100)}%` : '';
-      return `${contractTier(item)}: ${item.cargoName}${worn}`;
+      const to = item.destination ? ` → ${item.destination}` : '';
+      const pin = item.registeredPin ? ` · registered, PIN ${item.registeredPin}` : '';
+      const party = item.party ? ` · party of ${item.party.size}` : '';
+      return `${contractTier(item)}: ${item.cargoName}${party}${to}${pin}${worn}`;
     }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.

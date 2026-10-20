@@ -3,7 +3,6 @@ import type { FluidKind, Item, StickerKind, SunShadesItem } from '../items/items
 import type { PartInstance } from '../parts/registry';
 import type { ContractKind } from '../contracts/types';
 import { AIR_FILTER_CELL, bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
-import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import type { CarPaint } from '../vehicle/carpaint';
 import { DEFAULT_SETTINGS } from './settings';
 import { localSolarDateAt } from './calendar';
@@ -314,14 +313,6 @@ export interface WorldState {
   settings: Settings;
   player: PlayerState;
   cars: Record<string, CarState>;
-  /** Persistent contents of deterministic static wreck trunks, keyed by wreck id. */
-  wreckStorage: Record<string, (Item | null)[]>;
-  /**
-   * Persistent service cells of deterministic static wreck bonnets, keyed by wreck id.
-   * The cells are fixed by `BONNET_SLOT_KINDS` (engine, turbine, radiator, air
-   * filter); a wreck's bonnet gives up worn parts, its trunk gives up cans and tools.
-   */
-  wreckBonnet: Record<string, (Item | null)[]>;
   /** Trailers standing in the world or coupled to a car, keyed by trailer id. */
   trailers: Record<string, TrailerState>;
   /** Parts lying loose in the world, keyed by part id. */
@@ -348,7 +339,11 @@ export interface WorldState {
    * migrates through `migrateNumberArray` like every other index list in the save.
    */
   flattenedProps: number[];
-  /** Full contents of courier trunks after their first physical mutation. */
+  /**
+   * A post's stock after its first release, keyed by `postId` (world/poststops.ts): the
+   * offers it still holds (contracts/offers.ts `postStock`). Saved key from the courier
+   * days, kept.
+   */
   courierStorage: Record<string, (Item | null)[]>;
   /** Contract cargo ids already exchanged for signed envelopes. */
   completedContractIds: string[];
@@ -399,20 +394,8 @@ export type WorldDelta =
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   /** One place in a car's cabin (vehicle/cabin.ts) laid on or cleared. */
   | { t: 'car_cabin'; carId: string; place: number; item: Item | null }
-  | { t: 'wreck_storage'; wreckId: string; cell: number; item: Item | null }
-  | { t: 'wreck_bonnet'; wreckId: string; cell: number; item: Item | null }
-  /**
-   * A generated shell's first contents. Bulk rather than one delta per cell because
-   * this is world generation, not a player edit: the per-cell deltas are what the
-   * autosave listens for, and materialising a POI must not queue a save per find.
-   */
   | {
-      t: 'wreck_loot';
-      wreckId: string;
-      bonnet: readonly (Item | null)[];
-      trunk: readonly (Item | null)[];
-    }
-  | {
+      /** A post's stock rewritten, and what a posting consumed and completed (world/post.ts). */
       t: 'courier_storage';
       courierId: string;
       cells: readonly (Item | null)[];
@@ -495,8 +478,6 @@ export function newWorldState(seed: number): WorldState {
       police: { heat: 0, heatUntil: 0 },
     },
     cars: {},
-    wreckStorage: {},
-    wreckBonnet: {},
     courierStorage: {},
     completedContractIds: [],
     deliveriesByKind: {},
@@ -601,16 +582,6 @@ export class GameWorld {
         if (item) bump(item.id);
       }
       for (const item of car.cabin) {
-        if (item) bump(item.id);
-      }
-    }
-    for (const storage of Object.values(state.wreckStorage)) {
-      for (const item of storage) {
-        if (item) bump(item.id);
-      }
-    }
-    for (const storage of Object.values(state.wreckBonnet)) {
-      for (const item of storage) {
         if (item) bump(item.id);
       }
     }
@@ -799,26 +770,6 @@ export class GameWorld {
         if (car && delta.place >= 0 && delta.place < car.cabin.length) car.cabin[delta.place] = delta.item;
         break;
       }
-      case 'wreck_storage': {
-        if (delta.cell < 0 || delta.cell >= TRUNK_CELL_COUNT) break;
-        const storage =
-          s.wreckStorage[delta.wreckId] ??
-          (s.wreckStorage[delta.wreckId] = new Array<Item | null>(TRUNK_CELL_COUNT).fill(null));
-        storage[delta.cell] = delta.item;
-        break;
-      }
-      case 'wreck_bonnet': {
-        if (delta.cell < 0 || delta.cell >= BONNET_SLOT_COUNT) break;
-        const storage =
-          s.wreckBonnet[delta.wreckId] ??
-          (s.wreckBonnet[delta.wreckId] = new Array<Item | null>(BONNET_SLOT_COUNT).fill(null));
-        storage[delta.cell] = delta.item;
-        break;
-      }
-      case 'wreck_loot':
-        s.wreckBonnet[delta.wreckId] = delta.bonnet.slice();
-        s.wreckStorage[delta.wreckId] = delta.trunk.slice();
-        break;
       case 'trailer_add':
         s.trailers[delta.trailer.id] = delta.trailer;
         break;

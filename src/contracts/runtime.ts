@@ -1,6 +1,6 @@
 /**
- * The per-tick walk over live contracts. It visits the four places a contract cargo
- * can be, marks the cargo started once it has left its source courier, and hands
+ * The per-tick walk over live contracts. It visits the places a contract cargo
+ * can be, marks the cargo started once it has left its source post, and hands
  * each item to the composition root (world objects, race, delivery target).
  *
  * Nothing is scored on the way: no impacts, drops or tips are tracked. The tick scans
@@ -63,11 +63,12 @@ export class ContractRuntime {
       const item = state.looseItems[key]?.item;
       if (isCargo(item)) this.visit(item, 'loose', null, 0, onContractItem);
     }
+    // The offers still in a post's stock (`courierStorage`, a saved key).
     for (const key of Object.keys(state.courierStorage)) {
       const cells = state.courierStorage[key];
       if (!cells) continue;
       for (const item of cells) {
-        if (isCargo(item)) this.visit(item, 'courier', null, 0, onContractItem);
+        if (isCargo(item)) this.visit(item, 'post', null, 0, onContractItem);
       }
     }
   }
@@ -84,7 +85,7 @@ export class ContractRuntime {
     onContractItem(item, place, carId);
     // A hand-made or very old item may lack the record; the runtime owns it.
     if (!item.progress) item.progress = defaultProgress();
-    if (place !== 'courier') item.progress.started = true;
+    if (place !== 'post') item.progress.started = true;
     if (item.contractKind !== 'fragile_radio') return;
     const previous = this.lastPlace.get(item.id);
     this.lastPlace.set(item.id, place);

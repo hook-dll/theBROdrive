@@ -1,13 +1,13 @@
 /**
  * THE RACE: three hurried rivals carry the same cargo to the race offer's finish,
- * the next courier or the one after (`ContractCargoItem.raceLegs`).
+ * the next post or the one after (`ContractCargoItem.raceLegs`).
  *
- * Taking a race offer out of a courier starts it. Two rivals already left (one
- * `AHEAD_FAR_M`, one `AHEAD_NEAR_M` up the road), and the third leaves the courier
+ * Releasing a race offer from a post starts it. Two rivals already left (one
+ * `AHEAD_FAR_M`, one `AHEAD_NEAR_M` up the road), and the third leaves the post
  * once the player is `LATE_DEPARTURE_M` gone, so it is behind him from the start.
  * Whoever hands the cargo in at the finish first wins; a rival "hands in" by pulling
- * into the courier's lay-by, standing beside the courier car for `HAND_IN_S` — a parcel
- * passed through a window, not the player's walk to his boot — and pulling back out.
+ * into the post's lay-by, standing beside the post for `HAND_IN_S` — a parcel
+ * dropped in the slot from the window, not the player's walk to it — and pulling back out.
  * The delivery always pays its sticker; winning adds one coin per leg (`winCoins`).
  * Slice rules: no save (a reload forgets the race).
  *
@@ -21,19 +21,19 @@
  *
  * THE HAND-IN IS THE STREAM'S LAY-BY STOP (`RoadTraffic.rivalHandIn`), asked for while
  * the entry slip is `HAND_IN_ASK_*_M` ahead: in from its own side, or across the
- * oncoming lanes when the courier stands on the far side — held in its lane until they
+ * oncoming lanes when the post stands on the far side — held in its lane until they
  * are clear, and waiting for them again on the way out. Its place is beside the
- * courier on the parking line, a car's width inside it; the lay-by is reserved while a
+ * post on the parking line, a car's width inside it; the lay-by is reserved while a
  * race finishes there (`reserveHandIn`), so nobody else parks in its way. A car held up
  * on the pad short of its place — the player's car left on the line — hands in from
- * where it stands and waits behind that car to leave. A courier with no lay-by, or a
+ * where it stands and waits behind that car to leave. A post with no lay-by, or a
  * rival that came into the physical window too late to pull in, stops in its lane
  * alongside the mark instead: a braking curve fed to the autopilot as its speed cap.
  * There is never a reverse.
  *
  * THE RIVALS FINISH THEIR RUN. The race is decided by the player's hand-in, by all
  * three rivals', or by his driving on past the finish; the rivals still on the road
- * then carry on to the courier, hand in (their place is announced, nothing is paid)
+ * then carry on to the post, hand in (their place is announced, nothing is paid)
  * and only then go back to the stream. Those runs are kept apart from the race, so a
  * new race can be taken meanwhile; a run ends when its last rival has handed in, a
  * ghost of it more than `FINISHING_DROP_M` behind the player is dropped unseen, and
@@ -41,10 +41,10 @@
  */
 import { hash, hash01 } from '../core/rng';
 import { shouldShelter } from '../vehicle/weatherpace';
-import type { ContractCargoItem } from '../items/items';
+import { contractIdOf, type ContractCargoItem } from '../items/items';
 import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
 import { CAR_MODELS } from '../vehicle/carmodels';
-import { courierStop } from '../world/couriers';
+import { postStop } from '../world/poststops';
 import type { RoadConditionBuffer } from '../world/gradient';
 import { laybyNear, type Layby } from '../world/layby';
 import type { DriveRoad } from '../world/road';
@@ -77,14 +77,14 @@ const BEHIND_BAND_MIN_M = 450;
 const BEHIND_BAND_MAX_M = 600;
 const BEHIND_CLOSING_MPS = 2.5;
 const SPAWN_RETRY_S = 0.5;
-/** Rest point past the receiving courier's arclength: alongside it, not short of it. */
-const STOP_PAST_COURIER_M = 12;
+/** Rest point past the receiving post's arclength: alongside it, not short of it. */
+const STOP_PAST_POST_M = 12;
 const STOP_DECEL_MPS2 = 2.5;
 /** Below the curve's tail, so a car a metre short does not crawl at nothing for ever. */
 const STOP_CREEP_MPS = 1.5;
 const ARRIVE_WINDOW_M = 25;
 const ARRIVE_SPEED_MPS = 1;
-/** A rival's hand-in: the parcel through the courier's window, seconds. */
+/** A rival's hand-in: the parcel into the post's slot, seconds. */
 const HAND_IN_S = 2;
 /**
  * Road before the lay-by's entry slip from which a live rival asks to pull in. It asks
@@ -96,10 +96,10 @@ const HAND_IN_ASK_MAX_M = 450;
 const FINISHING_DROP_M = 2000;
 const FINISHING_MAX_S = 600;
 /**
- * How far past the receiving courier the player may drive before the race is called
+ * How far past the receiving post the player may drive before the race is called
  * lost. Enough to brake from speed, or to overshoot and turn back; beyond it he has
  * driven on, and a bead line pinned at the finish with nobody around was a race that
- * never ended. The cargo itself is untouched: any later courier still takes it.
+ * never ended. The cargo itself is untouched: any later post still takes it.
  */
 const FORFEIT_PAST_M = 600;
 /**
@@ -133,7 +133,7 @@ const GHOST_HELD_M = 2500;
 const GHOST_HELD_ABOVE = 0.55;
 const GHOST_HELD_SHARE = 0.75;
 
-/** Everyone's place on the race line, 0 at the source courier and 1 at the finish. */
+/** Everyone's place on the race line, 0 at the source post and 1 at the finish. */
 export interface RaceProgress {
   player: number;
   readonly rivals: number[];
@@ -171,8 +171,8 @@ interface Race {
   readonly itemId: string;
   readonly cargo: ContractCargoItem;
   readonly sourceS: number;
-  /** The receiving courier, and its lay-by (null without one). */
-  readonly courierS: number;
+  /** The receiving post, and its lay-by (null without one). */
+  readonly postS: number;
   readonly layby: Layby | null;
   readonly stopS: number;
   readonly rivals: Rival[];
@@ -184,7 +184,7 @@ interface Race {
   decided: boolean;
   /** Seconds since it was decided; see FINISHING_MAX_S. */
   decidedFor: number;
-  /** Couriers to the finish, 1 or 2: also the coins a win pays. */
+  /** Posts to the finish, 1 or 2: also the coins a win pays. */
   readonly legs: 1 | 2;
 }
 
@@ -194,8 +194,8 @@ export interface RivalHost {
   rivalPose(id: string, out: RivalPose): boolean;
   setRivalSpeedCap(id: string, mps: number): void;
   releaseRival(id: string): void;
-  rivalHandIn(id: string, courierS: number, standS: number, parkS: number): boolean;
-  reserveHandIn(courierS: number, reserved: boolean): void;
+  rivalHandIn(id: string, postS: number, standS: number, parkS: number): boolean;
+  reserveHandIn(postS: number, reserved: boolean): void;
 }
 
 export interface RaceSnapshot {
@@ -237,10 +237,10 @@ export class RivalRace {
 
   /**
    * Called for every live cargo item BEFORE the contract runtime marks it started,
-   * so `!started` away from the courier is exactly the moment it was first taken.
+   * so `!started` away from the post is exactly the moment it was first taken.
    */
   observe(item: ContractCargoItem, place: ContractPlace, playerS: number): void {
-    if (this.race !== null || place === 'courier' || item.progress?.started) return;
+    if (this.race !== null || place === 'post' || item.progress?.started) return;
     if (item.raceLegs === undefined) return;
     this.start(item, playerS);
   }
@@ -262,7 +262,7 @@ export class RivalRace {
     race.finishers++;
     this.end(
       place === 1
-        ? `race won — ${race.legs === 1 ? 'a coin' : 'two coins'} in the courier's boot`
+        ? `race won — ${race.legs === 1 ? 'a coin' : 'two coins'} more in the pay`
         : `race lost — you delivered ${ordinal(place)}`,
     );
   }
@@ -299,7 +299,7 @@ export class RivalRace {
     if (race.delivered >= RIVAL_COUNT) {
       this.end('race lost — all three rivals handed in first');
     } else if (playerS > race.stopS + FORFEIT_PAST_M) {
-      this.end('race lost — you drove past the courier');
+      this.end('race lost — you drove past the post');
     }
   }
 
@@ -362,11 +362,11 @@ export class RivalRace {
       if (rival.phase !== 'done' && rival.live) this.host.releaseRival(rival.id);
       rival.phase = 'done';
     }
-    this.host.reserveHandIn(race.courierS, false);
+    this.host.reserveHandIn(race.postS, false);
   }
 
   /**
-   * The HUD bead line: everyone's progress from the source courier (0) to the
+   * The HUD bead line: everyone's progress from the source post (0) to the
    * receiving one (1), written into `out`; false with no race. A rival that handed
    * in sits at 1; one still waiting at the source sits at 0. No distances: only
    * where each is relative to the others and to the finish.
@@ -374,7 +374,7 @@ export class RivalRace {
   progress(playerS: number, out: RaceProgress): boolean {
     const race = this.race;
     if (race === null) return false;
-    const finishS = race.stopS - STOP_PAST_COURIER_M;
+    const finishS = race.stopS - STOP_PAST_POST_M;
     const span = Math.max(1, finishS - race.sourceS);
     out.player = Math.min(1, Math.max(0, (playerS - race.sourceS) / span));
     for (let i = 0; i < RIVAL_COUNT; i++) {
@@ -405,12 +405,12 @@ export class RivalRace {
   }
 
   private start(item: ContractCargoItem, playerS: number): void {
-    const sourceS = courierStop(this.seed, item.sourceCourierIndex).s;
+    const sourceS = postStop(this.seed, item.sourceCourierIndex).s;
     const legs = item.raceLegs ?? 1;
-    const courierS = courierStop(this.seed, item.sourceCourierIndex + legs).s;
-    const stopS = courierS + STOP_PAST_COURIER_M;
-    const nearby = laybyNear(this.seed, courierS);
-    const layby = nearby && Math.abs(nearby.s - courierS) < 1 ? nearby : null;
+    const postS = postStop(this.seed, item.sourceCourierIndex + legs).s;
+    const stopS = postS + STOP_PAST_POST_M;
+    const nearby = laybyNear(this.seed, postS);
+    const layby = nearby && Math.abs(nearby.s - postS) < 1 ? nearby : null;
     const raceKey = this.serial++;
     const rivals: Rival[] = [];
     const starts = [playerS + AHEAD_FAR_M, playerS + AHEAD_NEAR_M, sourceS];
@@ -441,10 +441,11 @@ export class RivalRace {
       void this.prepareModel(model.id).catch(() => {});
     }
     this.race = {
-      itemId: item.id,
+      // The contract, not the item: a passenger party races as one (`contractIdOf`).
+      itemId: contractIdOf(item),
       cargo: item,
       sourceS,
-      courierS,
+      postS,
       layby,
       stopS,
       rivals,
@@ -454,9 +455,9 @@ export class RivalRace {
       decidedFor: 0,
       legs,
     };
-    this.host.reserveHandIn(courierS, true);
+    this.host.reserveHandIn(postS, true);
     this.notify(
-      `race on — three rivals carry the same ${item.cargoName} to ${legs === 1 ? 'the next courier' : 'the courier after next'}`,
+      `race on — three rivals carry the same ${item.cargoName} to ${legs === 1 ? 'the next post' : 'the post after next'}`,
     );
   }
 
@@ -490,7 +491,7 @@ export class RivalRace {
     let s = Math.min(race.stopS, rival.s + rival.speed * dt);
     // NOTHING ARRIVES UNSEEN. A ghost coming up behind the player stops at the edge of
     // view and waits for its car there; it used to slip inside when the traffic refused
-    // its site, and "handed in" invisibly beside a player waiting at the courier.
+    // its site, and "handed in" invisibly beside a player waiting at the post.
     const edge = playerS - BEHIND_BAND_MIN_M;
     if (rival.s <= edge && s > edge) s = edge;
     rival.s = s;
@@ -512,7 +513,7 @@ export class RivalRace {
             rival.handInAsked = true;
           } else if (
             ahead <= HAND_IN_ASK_MAX_M &&
-            this.host.rivalHandIn(rival.id, race.courierS, layby.s, HAND_IN_S)
+            this.host.rivalHandIn(rival.id, race.postS, layby.s, HAND_IN_S)
           ) {
             rival.handInAsked = true;
             rival.phase = 'pulling-in';

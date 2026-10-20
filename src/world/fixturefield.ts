@@ -1,4 +1,5 @@
 import type { FoleyContinuous, FoleyEvent } from '../audio/foley';
+import type { DeliveryProbe } from '../contracts/types';
 import type { GameWorld } from '../game/state';
 import type { Inventory, Item } from '../items/items';
 
@@ -33,6 +34,20 @@ export interface FixtureContext {
   give(itemId: string): Item | null;
   /** Lets a real loose item fall at an ABSOLUTE world point (a tray, a drawer). */
   drop(item: Item, x: number, y: number, z: number): void;
+  /**
+   * The delivery-time world at post `postIndex`, its haul place at ABSOLUTE (`x`, `z`)
+   * (contracts/types.ts). Reused in place: valid only for the call that asked.
+   */
+  probe(postIndex: number, x: number, z: number): DeliveryProbe;
+  /** Coins a race win adds for handing contract `contractId` in now (contracts/race.ts). */
+  raceCoins(contractId: string): number;
+  /**
+   * Opens the rotary dial (ui/dial.ts) for `pin` with the game held still; `opened` runs
+   * once the right number is dialled, never on a hang-up.
+   */
+  dial(pin: string, opened: () => void): void;
+  /** A one-line message on the HUD. */
+  toast(text: string): void;
 }
 
 /** What one tick of F held on a fixture did. */

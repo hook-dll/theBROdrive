@@ -2,6 +2,75 @@
 
 ## Unreleased
 
+- The «ПОЧТА» machine replaces the couriers (game-design2.md §7, §6.6; `src/world/post.ts`,
+  `src/world/poststops.ts`, `src/contracts/offers.ts`, `src/world/poi.ts`).
+  - The courier stop network stays as the POST network (`world/couriers.ts` →
+    `world/poststops.ts`: `postStop`, `postStopsBetween`, `nextPostIndex`, `isPostPoiSlot`,
+    `postId`; same seed draws, so saved `sourceCourierIndex`, contract ids, pay and race legs
+    are unchanged). Every settlement's `post` spot gets a blue cabinet under a «ПОЧТА» board
+    with a lit display, a SELECTOR WHEEL (F: one animated click to the next offer still in
+    stock; the display shows name, destination place name and km, coins, cargo kind, tier),
+    a RELEASE LEVER on its flank (F: the offer drops into the TRAY behind a little hinged
+    door — a teddy party one teddy each; a haul's papers go straight into the hand and its
+    trailer or car waits on the lay-by; without the licence, or with full hands for papers,
+    the lever jams and rattles back and the prompt names why), the TRAY DOOR (F opens and
+    shuts it) and a DROP-OFF HATCH with a hinged flap (F posts the cargo in hand: coins into
+    the pack, the signed sticker envelope into the tray; a haul is handed in with its
+    trailer or car on the lay-by and its papers in hand, in the pack or in any boot; teddies
+    one by one, the last completes the party). All parts animate; new foley event `click`.
+  - Registered parcels: 15% of parcel offers (never the drive's first job) carry a
+    six-digit `registeredPin` printed on the label; the hatch opens the rotary dial
+    (ui/dial.ts, game held still) and posts once it is dialled right. Offers also carry
+    `destination` (the target post's place name) on the label: `easy run: parcel → Tinderly`.
+  - Stock persists in `WorldState.courierStorage` (saved key kept) as the four offers by
+    slot (null once released), `courier_storage` delta as before (now autosaved). A courier-era
+    save's boot reads the same way (`postStock`): an offer is in stock while its item is in
+    any cell, and whatever else was left in the boot comes back through the tray when its
+    door is first opened. `ContractPlace` 'courier' is 'post'; `DeliveryProbe` is
+    `targetPostIndex`/`postX`/`postZ`, the post's haul place on the lay-by
+    (`contracts/world.ts postHaulPlace`, `layby.ts laybyHaulLateral`), which is also where a
+    haul's trailer or car now spawns. The race is keyed by `contractIdOf`; rivals hand in
+    at the post's lay-by as before. HUD route line: `POST · Tinderly 9.2 km`.
+  - Settlements now build the post, the barrel stand at `barrels` (settlements and lone
+    houses that roll one) and a key box 0.65 m beside every lot car's price board while the
+    car is for sale. All of kit boxes/cylinders and sign boards: `marketProgramAnchor`
+    links them at boot; the display is one sign-shaped material per machine, repainted.
+  - Removed: the parked courier car (`COURIER_MODELS`, `buildCourier`, `CourierField`,
+    `createCourierCarModel` and its rim shader variant), the cactus air dancer
+    (`world/props/airdancer.ts`, `DancerField`, `audio/dancervoice.ts`,
+    `GameAudio.updateDancer`), the courier boot grid and its delivery path in `Interaction`,
+    the roadside-shell code (`WreckTrunkField`, wreck lids, `wreckStorage`/`wreckBonnet` and
+    the `wreck_*` deltas — ignored in old saves), `render/staticlids.ts` and static-shell lids
+    (`kitRestSkeleton`/`kitRestMesh`, `STATIC_SHELL_DOORS`), `StorageOwnerKind` (a storage
+    grid is a car's), `layby.courier`, tools/wreck-lids.ts. Dev: `__bro.standAtPost(i)`,
+    `__bro.postAt(i)` (was `courierAt`), `__bro.fixtures`. tools/trunk-grid.ts checks a
+    courier-era save loads.
+- Teddy-bear passengers (game-design2.md §10, §11; `src/contracts/kinds/teddyPassengers.ts`,
+  `src/vehicle/cabin.ts`, `src/trip/ride.ts`, `src/economy/economy.ts`).
+  - A new contract kind, `teddy_passengers` (non-haul, weight 2). Each offer rolls its party
+    from its seed, 1–3 teddies, fixed. The offer item carries `party { id, size }` (its own
+    id) and `shape: 'teddy'`; the post machine releases the party as that many physical
+    teddies (`contractRelease`), ids `<offer>:teddy:<k>`, 0.6 kg each, all sharing the
+    party. Labels read `… teddy passenger · party of 3`.
+  - A party is ONE contract: `contractIdOf(item)` is the party's id, and the car's contract
+    slots (interaction `contractSlotsRefusal`) and the police waybill (`contractsAmong`)
+    count contracts, not items. A second teddy of a party already aboard takes no slot.
+  - Teddies sit only on a passenger seat of their own: the front passenger's or a half of
+    the rear bench (`layPlace(…, passenger)`, `SIT_ON`), upright and facing forward, never
+    the whole bench, the floor, the boot, the bonnet or the driver's seat ("passengers ride
+    on a seat"). Every kit car (all 27 in `KIT_SPECS`, the Oka included) has all three
+    places with room for a teddy unturned. Nothing makes them leave the seat.
+  - While the party rides in the car the player drives, `trackPassengerRide` accounts it in
+    the `RideMeter` under the party id (`track(key, comfort, harsh)` now takes the ride
+    already had) and writes comfort and harsh moments onto each teddy's saved progress,
+    so a reload mid-trip keeps the ride; the G widget shows (`rideSensitive`).
+  - Delivery is one teddy at a time through the destination post's slot
+    (`contractPosting`): each posted teddy is recorded by its own id, and the last of the
+    party completes the contract, pays and is counted once in the ledger. Pay is 4 coins
+    base, +50% per passenger past the first, × km index × ride quality (comfort less 10%
+    per harsh moment, never under 40%). The toast reads `Passengers delivered — smooth ride
+    · 9 coins` or `… 2 harsh moments · 6 coins` (`contractDeliveredText`).
+  - Dev: `__bro.teddies(size?)` drops a party in front of the player.
 - Roadside settlements; wreck fields and the fallen tower are gone (game-design2.md §6;
   `src/world/settlement.ts`, `src/world/poi.ts`, `src/world/layby.ts`, `src/world/poislots.ts`).
   - Every courier/post stop is a SETTLEMENT: 4–7 houses of ONE dwelling type (the slot's

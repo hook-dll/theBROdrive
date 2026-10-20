@@ -429,6 +429,8 @@ export class Hud {
   private windStrength = Number.NaN;
   /** Delivery distance in tens of metres last written to the route label. */
   private raceLabelKey = Number.NaN;
+  /** The destination post's place name last written to the route label. */
+  private raceLabelPlace = '';
   private warningsSignature = '';
   /**
    * The mode the faces are currently painted for, so the class writes happen on a
@@ -1413,15 +1415,17 @@ export class Hud {
 
   /**
    * The route bead line at the top. `race`: the player and each rival as 0 (source
-   * courier) .. 1 (finish). `delivery`: the player alone, 0 at the last courier behind
-   * and 1 at the nearest one ahead that will sign for the cargo, `remainingM` away.
-   * Null hides it. A bead is moved only when it shifts half a pixel.
+   * post) .. 1 (finish). `delivery`: the player alone, 0 at the last post behind and 1
+   * at the nearest one ahead that will sign for the cargo, `remainingM` away; `place` is
+   * that post's place name (world/placenames.ts). Null hides it. A bead is moved only
+   * when it shifts half a pixel.
    */
   setRouteProgress(
     kind: 'race' | 'delivery' | null,
     player: number,
     rivals: readonly number[],
     remainingM: number,
+    place = '',
   ): void {
     if (this.disposed) return;
     if (kind !== this.raceKind) {
@@ -1433,14 +1437,16 @@ export class Hud {
     }
     if (kind === null) return;
     // Tenths of a kilometre out, tens of metres within one: the label is rebuilt only
-    // when that reading changes, not every tick.
+    // when that reading or the place changes, not every tick.
     const near = remainingM < 1000;
     const key = kind === 'race' ? -1 : near ? Math.round(remainingM / 10) : 1e6 + Math.round(remainingM / 100);
-    if (key !== this.raceLabelKey) {
+    if (key !== this.raceLabelKey || place !== this.raceLabelPlace) {
       this.raceLabelKey = key;
+      this.raceLabelPlace = place;
+      const to = place ? `POST · ${place}` : 'POST';
       this.raceLabelEl.textContent = kind === 'race'
         ? 'RACE'
-        : near ? `COURIER ${key * 10} M` : `COURIER ${((key - 1e6) / 10).toFixed(1)} KM`;
+        : near ? `${to} ${key * 10} m` : `${to} ${((key - 1e6) / 10).toFixed(1)} km`;
     }
     const count = kind === 'race' ? rivals.length + 1 : 1;
     while (this.raceBeads.length < count) {

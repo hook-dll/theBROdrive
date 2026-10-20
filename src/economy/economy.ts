@@ -13,9 +13,10 @@
 
 import type { WorldState } from '../game/state';
 import type { ContractKind } from '../contracts/types';
+import { passengerQuality } from '../contracts/kinds/teddyPassengers';
 import type { ContractCargoItem, Inventory, Item } from '../items/items';
 import { variant, type PartKind } from '../parts/registry';
-import { courierStop } from '../world/couriers';
+import { postStop } from '../world/poststops';
 
 /** How quickly pay and prices saturate with distance, km. */
 const KM_INDEX_SCALE_KM = 150;
@@ -78,26 +79,37 @@ export const DELIVERY_BASE_PAY: Readonly<Record<ContractKind, number>> = {
   oversize: 12,
   towing: 10,
   car_transfer: 10,
+  teddy_passengers: 4,
 };
 
+/** Each passenger of a party past the first adds this share of the kind's base pay. */
+const EXTRA_PASSENGER_SHARE = 0.5;
+
 /**
- * Coins one delivery pays: base by kind × the SOURCE courier's km index × the
- * delivery's quality (0..1; a fragile radio's condition, 1 for every other kind).
- * Never below one coin: a delivered contract always pays something.
+ * Coins one delivery pays: base by kind × the SOURCE post stop's km index × the
+ * delivery's quality (0..1; a fragile radio's condition, a passenger party's ride,
+ * 1 for every other kind), and for a party of `passengers` teddies half the base again
+ * for each past the first. Never below one coin: a delivered contract always pays
+ * something.
  */
-export function deliveryPay(kind: ContractKind, sourceKm: number, quality: number): number {
+export function deliveryPay(kind: ContractKind, sourceKm: number, quality: number, passengers = 1): number {
   const q = Math.min(1, Math.max(0, quality));
-  return Math.max(1, Math.round(DELIVERY_BASE_PAY[kind] * kmIndex(sourceKm) * q));
+  const party = 1 + EXTRA_PASSENGER_SHARE * Math.max(0, passengers - 1);
+  return Math.max(1, Math.round(DELIVERY_BASE_PAY[kind] * party * kmIndex(sourceKm) * q));
 }
 
 /**
- * What this cargo pays when a courier signs it: `deliveryPay` at its source courier's
- * distance, with a fragile radio's condition as the quality.
+ * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
+ * distance, with a fragile radio's condition or a passenger party's ride
+ * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
+ * last) as the quality.
  */
 export function contractPay(seed: number, item: ContractCargoItem): number {
-  const sourceKm = courierStop(seed, item.sourceCourierIndex).s / 1000;
-  const quality = item.contractKind === 'fragile_radio' ? item.progress.condition ?? 1 : 1;
-  return deliveryPay(item.contractKind, sourceKm, quality);
+  const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
+  const quality = item.contractKind === 'fragile_radio'
+    ? item.progress.condition ?? 1
+    : item.contractKind === 'teddy_passengers' ? passengerQuality(item) : 1;
+  return deliveryPay(item.contractKind, sourceKm, quality, item.party?.size ?? 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,8 +222,8 @@ export function deliveriesOf(state: WorldState, kind: ContractKind): number {
 }
 
 /**
- * Whether the player may take a contract of this kind from a courier. Checked when
- * the cargo is TAKEN, not when it is offered: every courier shows its four offers,
+ * Whether the player may take a contract of this kind from a post. Checked when the
+ * selected offer is RELEASED, not when it is shown: every post shows its four offers,
  * and the refusal says what is missing.
  *  - parcels and fragile radios: always;
  *  - heavy crates: after three parcels delivered;
@@ -251,7 +263,7 @@ const CONTRACT_SLOTS: Readonly<Record<string, number>> = {
   kit_uaz2206: 3,
 };
 
-/** How many contract cargo items one car of this model may carry in its boot. */
+/** How many contracts one car of this model may carry, boot and cabin together; a teddy party is one. */
 export function contractSlotsFor(modelId: string): number {
   return CONTRACT_SLOTS[modelId] ?? 1;
 }

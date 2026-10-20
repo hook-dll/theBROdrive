@@ -27,9 +27,10 @@
  * if he stopped on it, and once both stand: [F] hands over the papers (`handOver`).
  *
  * THE STOP. Speeding is fined by how far over the limit, a collision flatly, a car whose
- * papers are not the player's (`CarState.papers`) flatly, and every contract cargo item
- * not on the car's waybill — carried in the pack, or past the body's contract slots in
- * the boot (`contractSlotsFor`) — per item; all of it times `1 + heat`. A clean check
+ * papers are not the player's (`CarState.papers`) flatly, and every contract (a party of
+ * teddy passengers is one) not on the car's waybill — carried in the pack, or past the
+ * body's contract slots in the boot (`contractSlotsFor`) — per contract; all of it times
+ * `1 + heat`. A clean check
  * costs nothing. The fine comes out of the coins in the pack, as far as they go. The
  * pack's `inventory` delta and the `police_heat` delta are not save triggers behind the
  * wheel, so what the stop took is saved with the next exit (save.ts). A stop paid in full
@@ -46,7 +47,7 @@ import { hash01 } from '../core/rng';
 import { coinsHeld, contractSlotsFor, spendCoins } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { POLICE_HEAT_MAX } from '../game/state';
-import type { Inventory } from '../items/items';
+import { contractsAmong, type Inventory } from '../items/items';
 import type { CarPaint } from '../vehicle/carpaint';
 import type { Vehicle } from '../vehicle/vehicle';
 import { laybysBetween, shoulderPullOff, type Layby } from './layby';
@@ -787,13 +788,11 @@ export class PolicePatrol {
       items.push('no papers for this car');
     }
     // THE WAYBILL is the boot and the cabin up to the body's contract slots; anything
-    // past it, and anything carried in the pack, is undeclared.
-    let undeclared = 0;
-    for (const item of state.player.carried) if (item.type === 'contract_cargo') undeclared++;
+    // past it, and anything carried in the pack, is undeclared. Contracts, not items: a
+    // party of teddy passengers is one.
+    let undeclared = contractsAmong(state.player.carried);
     if (car) {
-      let aboard = 0;
-      for (const item of car.storage) if (item?.type === 'contract_cargo') aboard++;
-      for (const item of car.cabin) if (item?.type === 'contract_cargo') aboard++;
+      const aboard = contractsAmong([...car.storage, ...car.cabin]);
       undeclared += Math.max(0, aboard - contractSlotsFor(car.modelId));
     }
     if (undeclared > 0) {

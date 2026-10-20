@@ -32,6 +32,7 @@ import {
   type ContractCargoItem,
 } from './items/items';
 import { carriesRideSensitive, RideMeter } from './trip/ride';
+import { trackPassengerRide } from './contracts/kinds/teddyPassengers';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
@@ -119,9 +120,9 @@ import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
-import { WreckTrunkField } from './world/wrecktrunks';
-import { CourierField, courierStop, nextCourierIndex } from './world/couriers';
-import { DancerField, type DancerHeard } from './world/props/airdancer';
+import { nextPostIndex, postStop } from './world/poststops';
+import { placeNameAt } from './world/placenames';
+import { dialPin } from './ui/dial';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -457,9 +458,6 @@ async function boot(): Promise<void> {
   // Trailers are world objects like cars, not chunk scenery: they move, so they
   // must outlive the chunk they were found standing in.
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
-  // Static trunk registries follow streamed physics chunks; edited contents live in state.
-  const wreckTrunks = new WreckTrunkField();
-  const couriers = new CourierField();
   /** The vending machines and lot cars in the physics band (world/market.ts). */
   const market = new MarketField();
   /** The streamed mechanical fixtures: post machines, barrels, key boxes (world/fixturefield.ts). */
@@ -494,13 +492,10 @@ async function boot(): Promise<void> {
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
-  // Cactus air dancers beside every courier. Built here, before the boot warm-up, so
-  // the hidden anchor dancer it adds to the scene compiles their program under the
-  // loading cover. See world/props/airdancer.ts.
-  const dancers = new DancerField(renderer.scene);
-  // The 20 km marks, the sidetracks, the loose items and the market's machines and lot
-  // signs are built only where they stand; their hidden program anchors are in the scene
-  // from boot for the same reason as the dancer's. Telegraph poles are drawn per chunk as
+  // The 20 km marks, the sidetracks, the loose items, the market's machines and lot signs
+  // and the post machines, barrels and key boxes (POI kit boxes and sign boards) are built
+  // only where they stand; their hidden program anchors are in the scene from boot so the
+  // first one in view links nothing. Telegraph poles are drawn per chunk as
   // InstancedMeshes: their program is linked here too.
   renderer.scene.add(
     monumentProgramAnchor(),
@@ -520,24 +515,6 @@ async function boot(): Promise<void> {
   // Near traffic's shadows: every near traffic car casts as its far mesh here, a field on
   // the shadow-only layer that no picture draws (core/renderer.ts `SHADOW_ONLY_LAYER`).
   const shadowCars = new FarCarField(renderer.scene, 'shadow-cars', SHADOW_ONLY_LAYER);
-  /** Reused receiver for the nearest dancer's sound; see `DancerField.heard`. */
-  const dancerSound: DancerHeard = { x: 0, y: 0, z: 0, flapMps: 0, airRate: 0 };
-  /**
-   * Every live car near a dancer shoves its tube; one visitor, made once. Heading and
-   * velocity are read only for a car that is actually near one.
-   */
-  const knockPosition = { x: 0, y: 0, z: 0 };
-  const knockDancers = (_id: string, vehicle: Vehicle): void => {
-    const p = vehicle.absoluteTranslation(knockPosition);
-    if (!dancers.near(p.x, p.z)) return;
-    const q = vehicle.chassis.rotation();
-    // The chassis' +Z on the ground plane.
-    const fx = 2 * (q.x * q.z + q.w * q.y);
-    const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
-    const f = Math.hypot(fx, fz) || 1;
-    const v = vehicle.chassis.linvel();
-    dancers.knock(p.x, p.z, fx / f, fz / f, v.x, v.z);
-  };
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -653,9 +630,7 @@ async function boot(): Promise<void> {
   streamer.register(
     new PoiProvider(
       trailerField,
-      couriers,
       roadDistance,
-      dancers,
       market,
       fixtures,
     ),
@@ -881,7 +856,7 @@ async function boot(): Promise<void> {
       return true;
     },
   );
-  /** Three hurried rivals carrying the player's cargo to the next courier; see contracts/race.ts. */
+  /** Three hurried rivals carrying the player's cargo to the next post; see contracts/race.ts. */
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
@@ -890,8 +865,8 @@ async function boot(): Promise<void> {
   /** Reused receiver for the chasing police car's position; see `PolicePatrol.sirenAt`. */
   const sirenPoint = { x: 0, y: 0, z: 0 };
   const NO_RIVALS: readonly number[] = [];
-  /** How far past a receiving courier's arclength it stays the delivery target, m. */
-  const DELIVERY_PAST_COURIER_M = 40;
+  /** How far past a receiving post's arclength it stays the delivery target, m. */
+  const DELIVERY_PAST_POST_M = 40;
   /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
   const groundUnder = (x: number, y: number, z: number): boolean =>
     physics.hasFixedGroundBelow(
@@ -1183,8 +1158,6 @@ async function boot(): Promise<void> {
     inventory,
     loose,
     trailerField,
-    wreckTrunks,
-    couriers,
     () => {
       const active = activeCar();
       return active ? { carId: active.id, vehicle: active.vehicle } : null;
@@ -1243,9 +1216,30 @@ async function boot(): Promise<void> {
     },
     origin,
     boardable,
-    (itemId) => race.winCoins(itemId),
+    (contractId) => race.winCoins(contractId),
     market,
     fixtures,
+    {
+      // The dial holds the game still, as the pause does; deferred out of the fixed step
+      // the [F] arrived in, so the loop is stopped between steps, never inside one.
+      dial: (pin, opened) => {
+        queueMicrotask(() => {
+          if (paused) return;
+          paused = true;
+          loop.stop();
+          pads.stopRumble();
+          if (document.pointerLockElement !== null) document.exitPointerLock();
+          void dialPin(uiRoot, pin).then((result) => {
+            input.resyncPad();
+            paused = false;
+            if (result === 'opened') opened();
+            loop.start();
+            void canvas.requestPointerLock().catch(() => undefined);
+          });
+        });
+      },
+      toast: (text) => hud.setToast(text),
+    },
   );
   interaction.attachPlayer(player);
 
@@ -1280,8 +1274,9 @@ async function boot(): Promise<void> {
     markResumeTarget,
   );
   world.onDelta((delta) => {
-    if (delta.t === 'courier_storage' && delta.completedContractId) {
-      hud.setToast('delivered — signed sticker envelope received');
+    // The post machine (world/post.ts) shows the delivery itself; a completed contract
+    // (kind recorded: not one teddy of a party) decides the race.
+    if (delta.t === 'courier_storage' && delta.completedContractId && delta.completedContractKind) {
       race.playerDelivered(delta.completedContractId);
     } else if (delta.t === 'sticker_place') {
       hud.setToast('stuck on');
@@ -1460,8 +1455,7 @@ async function boot(): Promise<void> {
         input,
         loose,
         debris,
-        couriers,
-        dancers,
+        fixtures,
         sky,
         trailers: trailerField,
         road,
@@ -1560,14 +1554,14 @@ async function boot(): Promise<void> {
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
   /**
-   * The world objects the live contracts are about — a loaded trailer spawned at its
-   * source courier, or the car of a transfer or a tow. Idempotent, and called from the
-   * tick for every cargo item, so a save that predates a kind heals on the next tick.
+   * The world objects the live contracts are about — a loaded trailer spawned on its
+   * source post's lay-by, or the car of a transfer or a tow. Idempotent, and called from
+   * the tick for every cargo item, so a save that predates a kind heals on the next tick.
    */
-  const contractWorldDeps: ContractWorldDeps = { world, road, terrain, couriers };
+  const contractWorldDeps: ContractWorldDeps = { world, road, terrain };
 
   /**
-   * The lowest courier index any cargo the player has on them (in hand or in the car
+   * The lowest post index any cargo the player has on them (in hand or in the car
    * being driven) may be handed in at, gathered during one contracts tick and read by
    * the next one's HUD line; Infinity with nothing aboard.
    */
@@ -1675,14 +1669,14 @@ async function boot(): Promise<void> {
     if (race.progress(activeS, raceProgress)) {
       hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);
     } else if (deliveryMinIndex !== Infinity) {
-      // No race: the bead line runs from the last courier behind to the nearest one
-      // ahead that will sign for the cargo. It stays the target until the car is
+      // No race: the bead line runs from the last post behind to the nearest one
+      // ahead that will sign for the cargo, named. It stays the target until the car is
       // past its stand, so stopping alongside does not flip it to the next one.
-      const target = nextCourierIndex(world.seed, activeS - DELIVERY_PAST_COURIER_M, deliveryMinIndex);
-      const targetS = courierStop(world.seed, target).s;
-      const fromS = target > 0 ? Math.min(activeS, courierStop(world.seed, target - 1).s) : 0;
+      const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, deliveryMinIndex);
+      const targetS = postStop(world.seed, target).s;
+      const fromS = target > 0 ? Math.min(activeS, postStop(world.seed, target - 1).s) : 0;
       const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
-      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS));
+      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS));
     } else {
       hud.setRouteProgress(null, 0, NO_RIVALS, 0);
     }
@@ -2181,6 +2175,8 @@ async function boot(): Promise<void> {
       }
       driving.chassis.linvel(rideVelocity);
       ride.step(dt, rideVelocity.x, rideVelocity.z, driving.heading);
+      const passengersCar = s.cars[drivingId!];
+      if (passengersCar) trackPassengerRide(ride, passengersCar);
     } else if (rideCarId !== null) {
       ride.idle();
       rideCarId = null;
@@ -2340,10 +2336,8 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
-    // Roadside shells' lids and couriers' boot lids the player opened or shut ease on the
-    // rendered frame, as a driven car's do.
-    wreckTrunks.syncVisuals(frameDt);
-    couriers.syncVisuals(frameDt);
+    // The post machines' wheels, levers, doors and flaps, the barrels' taps and the key
+    // boxes ease on the rendered frame.
     fixtures.update(frameDt);
     // The camera has moved for this frame: the ground cover's pages take their range,
     // and in the Clean style the pages whose every tuft is under a few pixels go too.
@@ -2608,16 +2602,6 @@ async function boot(): Promise<void> {
       vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
     });
     contactPatches.endFrame();
-    // The courier air dancers stand in the chunk frame; the field only needs the
-    // camera in absolute metres to know which of them are near enough to simulate.
-    // Any car that reaches one knocks it over first (its blower is not solid).
-    if (dancers.count > 0) {
-      for (const [id, vehicle] of vehicles) knockDancers(id, vehicle);
-      traffic.forEachVehicle(knockDancers);
-    }
-    dancers.update(frameDt, cam.x + origin.x, cam.z + origin.z, headlightVisibility);
-    const dancerHeard = dancers.heard(cam.x + origin.x, cam.z + origin.z, dancerSound);
-    audio.updateDancer(dancerHeard, dancerSound.x, dancerSound.y, dancerSound.z, dancerSound.flapMps, dancerSound.airRate);
     const sirenOn = police.sirenAt(sirenPoint);
     audio.updateSiren(sirenOn, sirenPoint.x, sirenPoint.y, sirenPoint.z);
     frameProfiler?.end('effects');
@@ -2888,14 +2872,8 @@ async function boot(): Promise<void> {
     hud.setCabinEditor(cabinCamera.hud);
     trunkView.update(
       boot,
-      boot?.owner === 'car' ? (vehicles.get(boot.id) ?? null) : null,
-      boot?.owner === 'wreck'
-        ? wreckTrunks.get(boot.id)
-        : boot?.owner === 'courier'
-          ? couriers.get(boot.id)
-          : null,
+      boot ? (vehicles.get(boot.id) ?? null) : null,
       alpha,
-      origin,
       s.timeOfDay,
       sky.dayFactor,
       renderer.camera.position,
@@ -3009,13 +2987,13 @@ async function boot(): Promise<void> {
   );
   // Dev: `__bro.loop.stop()` freezes the simulation where it stands, so a bench can
   // draw the very same frame again and again (`renderer.render()`); `start()` resumes.
-  // `mirageSchedule` and `courierAt(index)` say where the mirages and the couriers stand,
+  // `mirageSchedule` and `postAt(index)` say where the mirages and the post stops stand,
   // for a bench that wants one in view (tools/look/gpucost.mjs).
   if (import.meta.env.DEV) {
     Object.assign((window as unknown as { __bro: Record<string, unknown> }).__bro, {
       loop,
       mirageSchedule,
-      courierAt: (index: number) => courierStop(world.seed, index),
+      postAt: (index: number) => postStop(world.seed, index),
       // The vending machines and lot signs in the physics band (world/market.ts).
       market,
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.

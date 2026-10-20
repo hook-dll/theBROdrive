@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import { migrateState } from '../src/save/save';
+import { generateContractOffer, postStock } from '../src/contracts/offers';
 import { Inventory, type BubbleGumItem } from '../src/items/items';
 import { operateTrunkCell } from '../src/player/interaction';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
@@ -63,17 +64,31 @@ oldSave.cars[car.id]!.storage.splice(
   null,
   { type: 'bubble_gum', id: 'old:2', charges: 4 },
 );
-oldSave.wreckStorage['wreck:test'] = [{ type: 'bubble_gum', id: 'wreck:0', charges: 3 }];
+// A save from the courier days: a wreck's trunk (gone with the wrecks) and a courier's
+// eight-cell boot holding three of its offers and an envelope left behind.
+Object.assign(oldSave, {
+  wreckStorage: { 'wreck:test': [{ type: 'bubble_gum', id: 'wreck:0', charges: 3 }] },
+  wreckBonnet: { 'wreck:test': [null, null, null, null] },
+});
+const oldOffers = [0, 2, 3].map((slot) => generateContractOffer(oldSave.seed, 4, slot));
+oldSave.courierStorage['courier:4'] = [
+  oldOffers[0]!, null, oldOffers[1]!, oldOffers[2]!,
+  { type: 'sticker_envelope', id: 'courier:3:offer:0:signed:4', stickerKind: oldOffers[0]!.rewardStickerKind, completedContractId: 'courier:3:offer:0' },
+  null, null, null,
+];
 const migrated = migrateState(oldSave);
 check(
   'old car storage expands without loss',
   migrated.cars[car.id]!.storage.length === 8 && migrated.cars[car.id]!.storage[2]?.id === 'old:2',
   `${migrated.cars[car.id]!.storage.length} cells`,
 );
+const stock = postStock(migrated, migrated.seed, 4);
 check(
-  'wreck storage persists as eight cells',
-  migrated.wreckStorage['wreck:test']?.length === 8 && migrated.wreckStorage['wreck:test']?.[0]?.id === 'wreck:0',
-  `${migrated.wreckStorage['wreck:test']?.length ?? 0} cells`,
+  'courier-era save loads: wreck storage dropped, the boot reads as the post stock',
+  !('wreckStorage' in migrated) && !('wreckBonnet' in migrated)
+    && stock.offers.map((offer) => offer !== null).join() === 'true,false,true,true'
+    && stock.strays.length === 1 && stock.strays[0]!.type === 'sticker_envelope',
+  `offers ${stock.offers.map((offer) => (offer ? 'x' : '-')).join('')} · strays ${stock.strays.length}`,
 );
 
 const shape = { halfExtents: [0.9, 0.65, 2.1] as const };

@@ -172,14 +172,9 @@ Integration outside the folder:
   every car gets its own copy of the one material (`makeCarBodyConditionMaterial`, `kit`)
   and of the glass, over the template's merged buffers (`attachKitDraw`), and its wheel
   set as one mesh (`CarModelInstance.wheelDraw`). `cloneWheels` rescales the pack's wheel
-  sets to the kit tyre. Static clones (wrecks, couriers: `cloneStaticModel`) are the mid
-  shell less their lids, its panes as the tinted mirror and its wheels as one plain mesh: three draws. A
-  wreck's shell is cut round its bonnet and boot lid or tailgate (`kitStaticParts`), and
-  on the UAZ-2206 round its middle side door to the bay too (`STATIC_SHELL_DOORS`); a
-  courier's round its boot lid or tailgate alone (`StaticLidSet` `'boot'`). These
-  hang on the driven car's hinges with their controls (`hangStaticLids`, a draw each) and
-  are worked by render/staticlids.ts `StaticCarLids`; while one is open the cabin, bay and
-  boot draw from the merged buffer over a fixed skeleton (kitdraw.ts `kitRestSkeleton`).
+  sets to the kit tyre. Static clones (a lot car's distant preview: `cloneStaticModel`) are
+  the whole mid shell, its panes as the tinted mirror and its wheels as one plain mesh: three
+  draws; nothing on them opens.
   Mid traffic (`CarMidInstance`) draws the shut shell without its detail groups in the
   car's own one material (lenses lit by its own lamps) and its panes in its own glass,
   the wheels as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.

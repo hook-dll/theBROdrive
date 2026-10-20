@@ -15,7 +15,6 @@ import { AudioMixer, setListenerPose, setPannerPosition, sliderGain } from './mi
 import { playCrash, VehicleAudio, type CarPose } from './vehicleaudio';
 import { TrafficAudio } from './trafficaudio';
 import type { SampleName } from './samples';
-import { DancerVoice } from './dancervoice';
 import { SirenVoice } from './sirenvoice';
 import { Ambience, type AmbienceFrame } from './ambience';
 import type { CabinOpenness } from './cabinopenness';
@@ -58,8 +57,6 @@ export class GameAudio {
   private readonly ambience = new Ambience(this.mixer);
   private readonly radios = new Map<string, Radio>();
   private readonly trafficVoices = new Map<string, TrafficAudio>();
-  /** The nearest courier air dancer, when one is near enough to hear; see `updateDancer`. */
-  private dancerVoice: DancerVoice | null = null;
   /** The chasing police car's siren, while there is one; see `updateSiren`. */
   private sirenVoice: SirenVoice | null = null;
   private readonly trafficCandidates: TrafficCandidate[] = [];
@@ -315,20 +312,6 @@ export class GameAudio {
   }
 
   /**
-   * The nearest air dancer, or `heard` false when none is in earshot. Position is its
-   * top in the relative (listener) frame; see `DancerVoice.update`.
-   */
-  updateDancer(heard: boolean, x: number, y: number, z: number, flapMps: number, airRate: number): void {
-    if (!heard) {
-      this.dancerVoice?.release();
-      this.dancerVoice = null;
-      return;
-    }
-    this.dancerVoice ??= new DancerVoice(this.mixer);
-    this.dancerVoice.update(x, y, z, flapMps, airRate);
-  }
-
-  /**
    * The police siren (world/police.ts), or `on` false when no chase is sounding one.
    * Position is the car's in the relative (listener) frame.
    */
@@ -464,8 +447,6 @@ export class GameAudio {
     this.radios.clear();
     for (const voice of this.trafficVoices.values()) voice.dispose();
     this.trafficVoices.clear();
-    this.dancerVoice?.dispose();
-    this.dancerVoice = null;
     this.sirenVoice?.dispose();
     this.sirenVoice = null;
     this.mixer.dispose();

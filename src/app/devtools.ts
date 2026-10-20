@@ -11,7 +11,9 @@
 
 import * as THREE from 'three';
 import type { BirdFlock } from '../agents/birds';
-import { STICKERS } from '../items/stickercatalog';
+import { STICKERS, stickerKindForSeed } from '../items/stickercatalog';
+import { teddyPassengersKind } from '../contracts/kinds/teddyPassengers';
+import { defaultProgress } from '../contracts/types';
 import { uprightStickerRoll } from '../render/stickers';
 import { stickerAtlas } from '../render/stickerart';
 import type { TumbleweedField } from '../agents/tumbleweed';
@@ -21,7 +23,7 @@ import type { PhysicsWorld } from '../core/physics';
 import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
-import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type ContractCargoItem, type Item } from '../items/items';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
 import type { Interaction } from '../player/interaction';
@@ -46,8 +48,10 @@ import type { Hud } from '../ui/hud';
 import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
 import type { ChunkStreamer } from '../world/chunks';
-import type { CourierField } from '../world/couriers';
-import type { DancerField } from '../world/props/airdancer';
+import type { FixtureField } from '../world/fixturefield';
+import { poisBetween } from '../world/poi';
+import { postStop } from '../world/poststops';
+import { settlementLayout, spotPose } from '../world/settlement';
 import type { DebrisField } from '../world/debris';
 import type { DesertTileStreamer } from '../world/deserttiles';
 import type { WorldOrigin } from '../world/origin';
@@ -75,7 +79,7 @@ const TRAILER_DROP_CLEARANCE = 0.35;
 /**
  * Reach of the dev pause-menu flip, metres, measured from the player to a body
  * centre. Wide enough to right a car from wherever you got out of it, and short
- * enough that it cannot reach past one wreck to another at a gas stop.
+ * enough that it cannot reach past one car to another at a gas stop.
  */
 const DEV_FLIP_RADIUS = 12;
 /**
@@ -95,8 +99,8 @@ export interface DevToolsContext {
   readonly input: InputReader;
   readonly loose: LoosePartField;
   readonly debris: DebrisField;
-  readonly couriers: CourierField;
-  readonly dancers: DancerField;
+  /** The streamed world fixtures: post machines, barrels, key boxes. */
+  readonly fixtures: FixtureField;
   readonly sky: Sky;
   readonly trailers: TrailerField;
   readonly road: Road;
@@ -490,8 +494,14 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * `updateLakeSeek`'s loop until `settled()` — every wanted visual tile attached and
    * no streaming job pending — so a caller only waits on that one flag.
    */
-  let jumpHold: { s: number; frames: number } | null = null;
-  const placeAtJump = (s: number): void => {
+  let jumpHold: { s: number; frames: number; stand: { x: number; z: number; yaw: number } | null } | null = null;
+  const placeAtJump = (s: number, stand: { x: number; z: number; yaw: number } | null = null): void => {
+    if (stand) {
+      ctx.player.teleport(stand.x, ctx.terrain.heightAt(stand.x, stand.z, s) + 1.2, stand.z, s);
+      ctx.player.pushState();
+      ctx.camera.setYaw(stand.yaw);
+      return;
+    }
     const sample = ctx.road.sampleAt(s);
     const at = ctx.road.offsetPoint(s, DEV_JUMP_LATERAL);
     const y = Math.max(sample.y, ctx.terrain.heightAt(at.x, at.z, s));
@@ -506,8 +516,28 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   const devJumpTo = (km: number): void => {
     const s = Math.min(ctx.road.length - 1000, Math.max(0, km * 1000));
-    jumpHold = { s, frames: 0 };
+    jumpHold = { s, frames: 0, stand: null };
     placeAtJump(s);
+  };
+  /**
+   * Like `jumpTo`, but to post stop `index`, ending on foot 1.3 m in front of its machine
+   * and facing it: the shortest way to the «ПОЧТА» machine for a scripted session.
+   */
+  const devStandAtPost = (index: number): boolean => {
+    if (ctx.world.state.player.drivingCarId) {
+      ctx.hud.setToast('step out of the car first');
+      return false;
+    }
+    const stop = postStop(ctx.world.seed, index);
+    const poi = poisBetween(ctx.world.seed, stop.s - 1, stop.s + 1).find((candidate) => candidate.s === stop.s);
+    const spot = poi ? settlementLayout(ctx.world.seed, poi).post : null;
+    if (!spot) return false;
+    const pose = spotPose(ctx.road, spot);
+    // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world.
+    const stand = { x: pose.x - Math.sin(pose.yaw) * 1.3, z: pose.z - Math.cos(pose.yaw) * 1.3, yaw: pose.yaw };
+    jumpHold = { s: stop.s, frames: 0, stand };
+    placeAtJump(stop.s, stand);
+    return true;
   };
   const jumpSettled = (): boolean => {
     if (jumpHold) return false;
@@ -516,7 +546,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   const updateJump = (): void => {
     if (!jumpHold) return;
-    placeAtJump(jumpHold.s);
+    placeAtJump(jumpHold.s, jumpHold.stand);
     // A few frames first: the streamers only learn the new position on their next
     // update, and until then their queues look empty.
     jumpHold.frames++;
@@ -563,8 +593,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     input: ctx.input,
     loose: ctx.loose,
     debris: ctx.debris,
-    couriers: ctx.couriers,
-    dancers: ctx.dancers,
+    fixtures: ctx.fixtures,
+    // `postAt(i)`: post stop i ({ index, s }); `standAtPost(i)` jumps there and stands
+    // the player on foot a step in front of its «ПОЧТА» machine, facing it.
+    postAt: (index: number) => postStop(ctx.world.seed, index),
+    standAtPost: (index: number) => devStandAtPost(index),
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,
@@ -618,6 +651,41 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
+  /**
+   * `teddies(size?)`: a teddy-passenger party of `size` (1–3; the seed's roll when
+   * omitted) signed out at the first post, dropped side by side in front of the player
+   * as the post machine's tray would release it (contracts/kinds/teddyPassengers.ts).
+   * Returns the party id.
+   */
+  dev['teddies'] = (size?: number): string => {
+    const offer: ContractCargoItem = {
+      type: 'contract_cargo',
+      id: `dev:teddies:${ctx.world.runtimePartId()}`,
+      sourceCourierIndex: 0,
+      contractKind: 'teddy_passengers',
+      cargoName: 'teddy passengers',
+      rewardStickerKind: stickerKindForSeed(Date.now() >>> 0),
+      generatedSeed: Date.now() >>> 0,
+      progress: defaultProgress(),
+    };
+    teddyPassengersKind.dressOffer!(offer);
+    if (size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
+    const eye = ctx.camera.eyePosition;
+    const dir = ctx.camera.eyeDirection;
+    const flat = Math.hypot(dir.x, dir.z) || 1;
+    const fx = dir.x / flat;
+    const fz = dir.z / flat;
+    const teddies = teddyPassengersKind.release!(offer);
+    teddies.forEach((teddy, k) => {
+      const side = (k - (teddies.length - 1) / 2) * 0.45;
+      const x = eye.x + fx * 1.2 - fz * side;
+      const z = eye.z + fz * 1.2 + fx * side;
+      const ground = ctx.physics.raycast({ x, y: eye.y + SPAWN_PROBE_HEIGHT, z }, { x: 0, y: -1, z: 0 }, SPAWN_PROBE_HEIGHT + 12, ctx.player.rigidBody);
+      ctx.loose.spawnItem(teddy, x + ctx.origin.x, (ground ? ground.point.y : eye.y) + 0.3, z + ctx.origin.z);
+    });
+    ctx.hud.setToast(`spawned ${teddies.length} teddy passenger${teddies.length === 1 ? '' : 's'}`);
+    return offer.id;
+  };
   /**
    * Covers the driven (or given) car with one of every sticker in the catalog, for
    * judging the designs and how they wear: rays from a lattice round the car find

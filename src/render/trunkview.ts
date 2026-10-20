@@ -9,10 +9,6 @@ import {
   type StorageGridShape,
   type TrunkViewState,
 } from '../vehicle/trunk';
-import { carModelMeasure } from './carmodel';
-import type { WorldOrigin } from '../world/origin';
-import type { WreckTrunk } from '../world/wrecktrunks';
-import type { CourierTrunk } from '../world/couriers';
 
 const CELL_INSET = 0.9;
 const ITEM_FIT = 0.68;
@@ -113,37 +109,18 @@ export class TrunkView {
   update(
     view: TrunkViewState | null,
     vehicle: Vehicle | null,
-    fixed: WreckTrunk | CourierTrunk | null,
     alpha: number,
-    origin: WorldOrigin,
     timeOfDay: number,
     dayFactor: number,
     eye: THREE.Vector3,
   ): void {
-    if (!view) {
+    if (!view || !vehicle) {
       this.root.visible = false;
       return;
     }
 
-    let shape: StorageGridShape;
-    if (view.owner === 'car') {
-      if (!vehicle) {
-        this.root.visible = false;
-        return;
-      }
-      shape = vehicle.modelMeasure;
-      vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
-    } else {
-      if (!fixed) {
-        this.root.visible = false;
-        return;
-      }
-      // The shell's own model measure: it carries the bay's cells once the model has
-      // loaded, which it has by the time the shell is drawn.
-      shape = carModelMeasure(fixed.modelId);
-      this.posePosition.set(fixed.x - origin.x, fixed.y, fixed.z - origin.z);
-      this.poseQuaternion.set(fixed.qx, fixed.qy, fixed.qz, fixed.qw);
-    }
+    const shape: StorageGridShape = vehicle.modelMeasure;
+    vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
 
     this.root.visible = true;
     this.root.position.copy(this.posePosition);

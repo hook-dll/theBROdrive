@@ -278,9 +278,6 @@ function buildScrub(): THREE.BufferGeometry {
  * These forms were painted against a frame shown linear-encoded, where a hex decoded
  * from sRGB came out a gamma darker than the props standing beside it; the frame is
  * now encoded once at the end (core/renderer.ts `drawFrame`), which keeps that relation.
- *
- * Shared with the courier air dancers (props/airdancer.ts), whose blower, tube and
- * face are three display colours on one skinned material.
  */
 export function paint(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
   const colour = new THREE.Color().setHex(hex, THREE.LinearSRGBColorSpace);

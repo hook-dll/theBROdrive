@@ -17,15 +17,17 @@ import type { Item } from '../items/items';
  *   since the last one began (Infinity before the first).
  *
  * Accounting, for contracts (teddy passengers, fragile cargo pay). Keys are the caller's
- * own, e.g. a contract item's id:
- * - `track(key)`: starts accounting under `key` at full comfort (no-op if tracked);
+ * own, e.g. a passenger party's id:
+ * - `track(key, comfort?, harsh?)`: starts accounting under `key`, from the ride already
+ *   had (full comfort, no harsh moment by default; no-op if tracked);
  * - `comfort(key)`: 0..1, how the ride felt since `track`; 1 for an untracked key;
  * - `harsh(key)`: harsh moments since `track`; 0 for an untracked key;
  * - `tracking(key)`: whether `key` is tracked;
  * - `forget(key)`: stops accounting and drops the record.
  * A tracked key accumulates only on steps the composition root reports as the player
  * driving (`step`); on foot, as a passenger or in the title room nothing is added.
- * Runtime-only: a reload starts every record afresh.
+ * Runtime-only: a caller that must survive a reload keeps the reading on its own saved
+ * state and seeds `track` with it (contracts/kinds/teddyPassengers.ts).
  *
  * The thresholds are the old trip record's: under `RIDE_EASY_MPS2` (pulling away, a
  * firm stop at a junction, a brisk bend) costs nothing; comfort drains with the excess
@@ -119,8 +121,8 @@ export class RideMeter {
     this.magnitude = 0;
   }
 
-  track(key: string): void {
-    if (!this.records.has(key)) this.records.set(key, { comfortLoss: 0, harsh: 0 });
+  track(key: string, comfort = 1, harsh = 0): void {
+    if (!this.records.has(key)) this.records.set(key, { comfortLoss: 1 - comfort, harsh });
   }
 
   tracking(key: string): boolean {
@@ -143,12 +145,12 @@ export class RideMeter {
 
 /**
  * Whether a thing minds how it is driven: the HUD shows the G-force widget while the
- * driven car carries one. A fragile contract item (the courier's radio, a lamp, a teddy
- * bear); passenger contracts extend this when they arrive.
+ * driven car carries one. A fragile contract item (the courier's radio, a lamp) or a
+ * teddy passenger.
  */
 export function rideSensitive(item: Item | null | undefined): boolean {
   if (item?.type !== 'contract_cargo') return false;
-  return item.contractKind === 'fragile_radio' || item.shape === 'lamp' || item.shape === 'teddy';
+  return item.contractKind === 'fragile_radio' || item.contractKind === 'teddy_passengers' || item.shape === 'lamp';
 }
 
 /** Something in `car`'s cabin or boot, or in the driver's own hands, is `rideSensitive`. */

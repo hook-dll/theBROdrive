@@ -7,7 +7,7 @@ import { CAR_MODELS } from '../src/vehicle/carmodels';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import type { Vehicle } from '../src/vehicle/vehicle';
 import {
-  laybyCourierLateral,
+  laybyHaulLateral,
   laybyLevel,
   laybyParkLateral,
   laybysBetween,
@@ -20,7 +20,7 @@ import { DENSITY_FLOOR, RoadTraffic, type RivalPose } from '../src/world/traffic
 import { TRAFFIC_CAPS } from '../src/game/settings';
 import { RivalRace } from '../src/contracts/race';
 import type { ContractCargoItem } from '../src/items/items';
-import { couriersBetween } from '../src/world/couriers';
+import { postStopsBetween } from '../src/world/poststops';
 import { Terrain } from '../src/world/terrain';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
 import { widenessAt } from '../src/world/roadprofile';
@@ -664,9 +664,7 @@ check(
 // the whole stream drives past it; this counts the stops that reach their place and
 // come back out into the lane, and holds them to the pad and to the bodies round them.
 {
-  const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000).find(
-    (candidate) => !candidate.courier || Math.abs(laybyCourierLateral(candidate) - laybyParkLateral(candidate)) >= 2.8,
-  );
+  const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000)[0];
   if (!layby) throw new Error('no usable lay-by on this seed');
   addLaybyCollider(physics, road, layby);
   const stops = new RoadTraffic(
@@ -735,26 +733,26 @@ check(
   );
   stops.dispose();
 }
-// A RIVAL HANDS IN AT THE COURIER'S LAY-BY, AND FINISHES ITS RUN AFTER THE RACE.
+// A RIVAL HANDS IN AT THE POST'S LAY-BY, AND FINISHES ITS RUN AFTER THE RACE.
 //
-// A race to the courier at a lay-by on each side of the road (the rivals drive the
+// A race to the post at a lay-by on each side of the road (the rivals drive the
 // road forward, so a left-hand lay-by is across the oncoming lane). The player stands
-// just past the finish. Every live rival must pull in, stand beside the courier car for
-// its short hand-in, pull out and be back in its lane before the race hands it back to
-// the stream, touching nothing — the courier car is a fixed body here. On the right-hand
+// just past the finish. Every live rival must pull in, stand beside the post for its
+// short hand-in, pull out and be back in its lane before the race hands it back to the
+// stream, touching nothing — a haul's car left at the post's place is a fixed body here. On the right-hand
 // lay-by the player wins at once, so the rivals measured there all finish after the
 // race was decided.
 {
   const paved = new Set<number>([laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000)[0]!.poiIndex]);
   for (const side of [-1, 1] as const) {
     const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000).find(
-      (candidate) => candidate.side === side && couriersBetween(SEED, candidate.s - 1, candidate.s + 1).length > 0,
+      (candidate) => candidate.side === side && postStopsBetween(SEED, candidate.s - 1, candidate.s + 1).length > 0,
     );
-    if (!layby) throw new Error(`no courier lay-by on side ${side} on this seed`);
-    const courier = couriersBetween(SEED, layby.s - 1, layby.s + 1)[0]!;
+    if (!layby) throw new Error(`no post lay-by on side ${side} on this seed`);
+    const courier = postStopsBetween(SEED, layby.s - 1, layby.s + 1)[0]!;
     if (!paved.has(layby.poiIndex)) addLaybyCollider(physics, road, layby);
     paved.add(layby.poiIndex);
-    const courierPoint = road.offsetPoint(layby.s, laybyCourierLateral(layby));
+    const courierPoint = road.offsetPoint(layby.s, laybyHaulLateral(layby));
     const heading = road.headingAt(layby.s);
     const courierBody = physics.world.createRigidBody(
       physics.rapier.RigidBodyDesc.fixed()

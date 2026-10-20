@@ -53,6 +53,8 @@ export type FoleyEvent =
   | 'detach'
   | 'drop'
   | 'coin'
+  /** A selector wheel's detent (world/post.ts): one dry tick. */
+  | 'click'
   | 'refused';
 
 export type FoleyContinuous = 'scrub' | 'pour' | 'spray' | null;
@@ -301,6 +303,10 @@ export class Foley {
         // One coin down a slot: a bright clink and the little ring of it landing.
         this.mixer.blip(this.out, { gain: 0.06, frequency: 3300, endFrequency: 2900, decay: 0.05 });
         this.mixer.burst(this.out, { gain: 0.09, frequency: 2400, q: 4, decay: 0.04 });
+        break;
+      case 'click':
+        this.mixer.burst(this.out, { gain: 0.11, frequency: 3800, q: 6, decay: 0.018 });
+        this.mixer.blip(this.out, { gain: 0.03, frequency: 1300, endFrequency: 900, decay: 0.03 });
         break;
       case 'refused':
         // Too heavy / wrong fuel: a dull, deliberately unsatisfying knock.

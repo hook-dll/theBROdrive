@@ -1,7 +1,7 @@
 /**
  * The contract kind registry. One entry per kind, from its own module under
  * `kinds/`; adding a kind means importing its definition here and nowhere else. The
- * helper functions are what the courier code, the interaction prompts and the
+ * helper functions are what the post machine (world/post.ts), the interaction prompts and the
  * runtime call.
  */
 
@@ -13,6 +13,7 @@ import { heavyCrateKind } from './kinds/heavyCrate';
 import { oversizeKind } from './kinds/oversize';
 import { parcelKind } from './kinds/parcel';
 import { towingKind } from './kinds/towing';
+import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
 import { trailerEquipmentKind } from './kinds/trailerEquipment';
 import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
 
@@ -25,6 +26,7 @@ export const CONTRACT_KINDS: readonly ContractKindDef[] = [
   oversizeKind,
   towingKind,
   carTransferKind,
+  teddyPassengersKind,
 ];
 
 const BY_KIND = Object.fromEntries(
@@ -39,31 +41,70 @@ export function contractKindDef(kind: ContractKind): ContractKindDef {
   return BY_KIND[kind] ?? parcelKind;
 }
 
+/**
+ * The physical items the post machine releases for `offer`: one teddy per passenger
+ * of a party, else the offer item itself. All of them go into the tray together.
+ */
+export function contractRelease(offer: ContractCargoItem): readonly ContractCargoItem[] {
+  return contractKindDef(offer.contractKind).release?.(offer) ?? [offer];
+}
+
+/** What posting one item does to its contract; see `contractPosting`. */
+export interface ContractPosting {
+  /** The contract the item belongs to (`contractIdOf`): what completes, pays and is raced. */
+  readonly contractId: string;
+  /** This item is the last of its contract still out: the contract completes and pays now. */
+  readonly completes: boolean;
+  /** Items of the contract still out after this one. */
+  readonly left: number;
+}
+
+/**
+ * Posting `item` at a post's slot, given the saved `completedContractIds`. An ordinary
+ * contract completes with its one item. A passenger party is posted one teddy at a
+ * time: each posted teddy's own id is recorded (without a kind, so the ledger does not
+ * count it), and the teddy that finds every other one of its party already recorded
+ * completes the party's contract.
+ */
+export function contractPosting(item: ContractCargoItem, completedIds: readonly string[]): ContractPosting {
+  if (!item.party) return { contractId: item.id, completes: true, left: 0 };
+  let left = 0;
+  for (const id of teddyPartyIds(item.party)) {
+    if (id !== item.id && !completedIds.includes(id)) left++;
+  }
+  return { contractId: item.party.id, completes: left === 0, left };
+}
+
+/** The line a completed delivery shows: the kind's own summary, or null for the generic one. */
+export function contractDeliveredText(item: ContractCargoItem, coins: number): string | null {
+  return contractKindDef(item.contractKind).deliveredText?.(item, coins) ?? null;
+}
+
 /** True for every declared kind id, so a saved item's kind can be validated. */
 export function isContractKind(value: unknown): value is ContractKind {
   return typeof value === 'string' && CONTRACT_KIND_IDS[value as ContractKind] === true;
 }
 
 /**
- * Why this courier may not accept the cargo, or null. The base rule — a courier
+ * Why this post may not accept the cargo, or null. The base rule — a post
  * never signs cargo from itself or one further down the road — applies to every
  * kind; a kind adds its own on top (trailer equipment needs its trailer in the yard,
  * car transfer needs its car parked empty).
  *
- * `probe` is the world at the accepting courier, built by the delivery code and
+ * `probe` is the world at the accepting post, built by the post machine and
  * handed to the prompt and the commit alike.
  */
 export function contractAcceptRefusal(
   item: ContractCargoItem,
   probe: DeliveryProbe,
 ): string | null {
-  if (probe.targetCourierIndex <= item.sourceCourierIndex) {
-    return 'this courier cannot sign its own parcel';
+  if (probe.targetPostIndex <= item.sourceCourierIndex) {
+    return 'this post cannot sign its own parcel';
   }
   // A two-stop race is signed from its finish on: handing it in at the first stop
   // would end a two-coin race at the distance of a one-coin one.
-  if (item.raceLegs !== undefined && probe.targetCourierIndex < item.sourceCourierIndex + item.raceLegs) {
-    return 'this one races on to the next courier';
+  if (item.raceLegs !== undefined && probe.targetPostIndex < item.sourceCourierIndex + item.raceLegs) {
+    return 'this one races on to the next post';
   }
   return contractKindDef(item.contractKind).acceptRefusal?.(item, probe) ?? null;
 }

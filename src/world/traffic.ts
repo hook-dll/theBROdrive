@@ -26,7 +26,6 @@ import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
 import type { WorldOrigin } from './origin';
 import {
-  laybyCourierLateral,
   laybyDriveLateral,
   laybyParkLateral,
   laybyNear,
@@ -444,8 +443,6 @@ const LAYBY_SLOT_END_M = 6;
 const LAYBY_SLOT_SPACING_M = 10;
 /** Short of its place by less than this, and stopped, a car is parked, metres. */
 const LAYBY_PARKED_M = 2;
-/** Lateral a parking line keeps from a courier car standing on the pad, centre to centre. */
-const LAYBY_COURIER_CLEAR_M = 2.8;
 /**
  * Road over which a car drifts from its lane to the edge lane a slip leaves from, and
  * back from the one it rejoins at, metres. Shorter than `LAYBY_REJOIN_M`.
@@ -468,7 +465,7 @@ const LAYBY_EDGE_BLEND_M = 20;
  * fleet (VAZ-1111 Oka, sleeper) took 8.6 s from a standstill to clear it — 5.8 s of
  * that drifting over its own lane at 19-32° — so the gap was eleven seconds, and with a
  * frantic car at 150 km/h that was half a kilometre of empty oncoming road: three rivals
- * stood at a courier with their indicators on for minutes. Round the turn, from a
+ * stood at a post with their indicators on for minutes. Round the turn, from a
  * standstill at the hold, the same Oka is clear in 4.0 s in and 5.1 s out over one
  * oncoming lane, 4.6 s and 5.4 s over two, and on the oncoming lanes for 0.9-1.7 s of
  * it; a GAZ-24 and the UAZ-330364 truck are quicker. The car's own path meets the road
@@ -775,7 +772,7 @@ interface LaybyVisit {
   merging: boolean;
   /** Seconds standing while it means to move; see LAYBY_STALL_S. */
   stalledFor: number;
-  /** A rival's hand-in (`rivalHandIn`): its own place beside the courier, a short stop. */
+  /** A rival's hand-in (`rivalHandIn`): its own place beside the post, a short stop. */
   readonly handIn: boolean;
   /** The lay-by is across the oncoming carriageway from this car's lane. */
   readonly far: boolean;
@@ -1157,7 +1154,7 @@ export class RoadTraffic {
   /**
    * Lay-bys a race finishes at (`Layby.poiIndex`, with a count of the races): nobody
    * else stops there, and whoever is parked there finishes up (LAYBY_RESERVED_PARK_S),
-   * so the place beside the courier and the pad out to the exit are the rival's.
+   * so the place beside the post and the pad out to the exit are the rival's.
    */
   private readonly laybyReserved = new Map<number, number>();
   /** Cars waiting to cross the oncoming lanes to or from a lay-by, first come first; see `assignCrossYields`. */
@@ -1615,11 +1612,11 @@ export class RoadTraffic {
    * A stop at this lay-by, or null when there is no room for one: another car already
    * on its way in (cars arrive one at a time, so nobody overtakes his way to a place
    * behind a car that is not there yet), no free place behind the cars already parked,
-   * a courier standing too near the parking line, or no ground yet under the slip and
+   * or no ground yet under the slip and
    * the place — the pad's collider streams in with its chunk. `key` is the car's
    * `laybyKey`; a car spawned already `parked` takes only the pad's first place.
    *
-   * `handIn` is a rival's (`rivalHandIn`): its place is at `standS`, beside the courier,
+   * `handIn` is a rival's (`rivalHandIn`): its place is at `standS`, beside the post,
    * whoever else is on the pad (the lay-by is reserved for it, so nobody new is), and it
    * stands there `parkS`. Its lay-by may be across the road.
    */
@@ -1640,11 +1637,6 @@ export class RoadTraffic {
       }
       if (slot >= LAYBY_SLOTS || (phase === 'parked' && slot > 0)) return null;
     }
-    // A courier car stands on some pads, out on the building side; the parking line has
-    // to pass it with a body's width to spare or this pad is not for stopping at.
-    if (layby.courier && Math.abs(laybyCourierLateral(layby) - laybyParkLateral(layby)) < LAYBY_COURIER_CLEAR_M) {
-      return null;
-    }
     const enterS = direction === 1 ? Math.min(layby.sEntry, layby.sExit) : Math.max(layby.sEntry, layby.sExit);
     const padA = (layby.sPadStart - enterS) * direction;
     const padB = (layby.sPadEnd - enterS) * direction;
@@ -1663,7 +1655,7 @@ export class RoadTraffic {
     const far = layby.side === direction;
     // Across the road: in where the pad reaches full width; out from the pad's far end,
     // half the turn still on the pad, so the car waiting for its gap has left its place
-    // to the next (a rival behind it hands in at the same courier).
+    // to the next (a rival behind it hands in at the same post).
     let turnIn: CrossTurn | null = null;
     let turnOut: CrossTurn | null = null;
     if (far) {
@@ -2335,17 +2327,17 @@ export class RoadTraffic {
   }
 
   /**
-   * A RIVAL HANDS ITS CARGO IN AT THE COURIER'S LAY-BY (`contracts/race.ts`): it pulls
+   * A RIVAL HANDS ITS CARGO IN AT THE POST'S LAY-BY (`contracts/race.ts`): it pulls
    * in — across the road when the lay-by is on the far side — stops at `standS` beside
-   * the courier for `parkS`, and pulls back out. False with nothing changed when there
-   * is no lay-by at `courierS`, the car is not a live rival driving the road, its pad
+   * the post for `parkS`, and pulls back out. False with nothing changed when there
+   * is no lay-by at `postS`, the car is not a live rival driving the road, its pad
    * has no ground yet, or it is nearer than `LAYBY_HANDIN_ROOM_M` to where it would
    * leave its lane (the slip, or across the road the turn); the race then asks again,
    * or stops it in its lane.
    */
-  rivalHandIn(id: string, courierS: number, standS: number, parkS: number): boolean {
+  rivalHandIn(id: string, postS: number, standS: number, parkS: number): boolean {
     const car = this.rivalCar(id);
-    const layby = laybyNear(this.sourceWorld.seed, courierS);
+    const layby = laybyNear(this.sourceWorld.seed, postS);
     if (!car || !layby || car.layby || car.rails || car.turnS >= 0 || car.settleFor > 0) return false;
     // The pad's start is past any place it leaves its lane: past that bound, too late
     // without planning a visit.
@@ -2362,11 +2354,11 @@ export class RoadTraffic {
   }
 
   /**
-   * A race finishes at the courier at `courierS` (`reserved`), or no longer does: while
+   * A race finishes at the post at `postS` (`reserved`), or no longer does: while
    * any race does, its lay-by is the rivals' (see `laybyReserved`).
    */
-  reserveHandIn(courierS: number, reserved: boolean): void {
-    const layby = laybyNear(this.sourceWorld.seed, courierS);
+  reserveHandIn(postS: number, reserved: boolean): void {
+    const layby = laybyNear(this.sourceWorld.seed, postS);
     if (!layby) return;
     const count = (this.laybyReserved.get(layby.poiIndex) ?? 0) + (reserved ? 1 : -1);
     if (count > 0) this.laybyReserved.set(layby.poiIndex, count);

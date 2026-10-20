@@ -85,7 +85,7 @@ try {
     if (scene === 'road') return fromS;
     if (scene === 'courier') {
       for (let i = 0; i < 500; i++) {
-        const stop = b.courierAt(i);
+        const stop = b.postAt(i);
         if (stop.s > fromS + 800) return stop.s - 220;
       }
     }

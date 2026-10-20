@@ -2,7 +2,7 @@
  * The physical contract system's shared shapes.
  *
  * A contract is not a journal entry: it is a `contract_cargo` item that exists in
- * one physical place (a courier boot, a hand, a car boot, the ground). What makes
+ * one physical place (a post's stock, a hand, a car boot, the ground). What makes
  * two of them different is `contractKind`, and every kind's behaviour lives in its
  * own module under `kinds/` behind `ContractKindDef` (registry.ts). This file holds
  * only what all of them share: the kind ids, the progress record that is saved ON
@@ -11,7 +11,7 @@
  * NOTHING IS SCORED ON THE WAY but the fragile radio's condition: knocks to the car
  * it rides in and drops to the ground wear it down, and the delivery pays that share
  * of its coins (economy/economy.ts `deliveryPay`). The other thing remembered on the
- * item is whether it has left its source courier (`progress.started`), which the
+ * item is whether it has left its source post (`progress.started`), which the
  * rival race reads.
  *
  * `kind` ids are saved: never rename one.
@@ -29,7 +29,8 @@ export type ContractKind =
   | 'trailer_equipment'
   | 'oversize'
   | 'towing'
-  | 'car_transfer';
+  | 'car_transfer'
+  | 'teddy_passengers';
 
 /** Every declared kind id, for the save validator. */
 export const CONTRACT_KIND_IDS: Record<ContractKind, true> = {
@@ -40,20 +41,28 @@ export const CONTRACT_KIND_IDS: Record<ContractKind, true> = {
   oversize: true,
   towing: true,
   car_transfer: true,
+  teddy_passengers: true,
 };
 
-/** Where a contract cargo item currently is. */
-export type ContractPlace = 'courier' | 'hand' | 'car' | 'loose';
+/** Where a contract cargo item currently is: `post` is an offer still in a post's stock. */
+export type ContractPlace = 'post' | 'hand' | 'car' | 'loose';
 
 /** What a contract remembers, saved on the item. */
 export interface ContractProgress {
-  /** Set the first time the cargo leaves its source courier. */
+  /** Set the first time the cargo leaves its source post. */
   started: boolean;
   /**
    * A fragile radio's condition, 1 (as signed out) down to 0; the delivery's quality.
    * Absent on every other kind and on a radio not yet knocked.
    */
   condition?: number;
+  /**
+   * A passenger's ride so far (trip/ride.ts): comfort 1 (calm) down to 0, and the harsh
+   * moments counted, while its party rode in the car the player drove. Written by
+   * `trackPassengerRide` (kinds/teddyPassengers.ts); absent before the first drive.
+   */
+  comfort?: number;
+  harsh?: number;
 }
 
 /** A fresh, unstarted contract. */
@@ -62,7 +71,7 @@ export function defaultProgress(): ContractProgress {
 }
 
 /**
- * A read-only look at the physical world at the courier that would accept the
+ * A read-only look at the physical world at the post that would accept the
  * cargo, built by the delivery code and handed to BOTH the prompt and the commit.
  * That is what keeps a prompt honest: the sentence the player reads while aiming is
  * produced by the same function F will run.
@@ -72,11 +81,11 @@ export function defaultProgress(): ContractProgress {
  * three kilometres away still resolves.
  */
 export interface DeliveryProbe {
-  /** Index of the courier being delivered to. */
-  readonly targetCourierIndex: number;
-  /** Absolute parking position of that courier. */
-  readonly courierX: number;
-  readonly courierZ: number;
+  /** Index of the post being delivered to. */
+  readonly targetPostIndex: number;
+  /** Absolute position of that post's lay-by, where a haul is left (`laybyHaulLateral`). */
+  readonly postX: number;
+  readonly postZ: number;
   /** The car the player sits in (any seat), or null on foot. */
   readonly drivingCarId: string | null;
   /** Absolute X/Z of a trailer, live or saved; null when no such trailer exists. */
@@ -105,7 +114,7 @@ export interface DeliveryEffect {
 /** The registry entry for one kind: how it is offered, delivered and rewarded. */
 export interface ContractKindDef {
   readonly kind: ContractKind;
-  /** Relative chance of being drawn as a courier offer. Parcel is the common one. */
+  /** Relative chance of being drawn as a post offer. Parcel is the common one. */
   readonly weight: number;
   /** Cargo names this kind draws from, per offer. */
   readonly offerNames: readonly string[];
@@ -117,14 +126,26 @@ export interface ContractKindDef {
   /** Cargo mass this kind adds to a car or a pair of hands, kg. Omitted = 12 kg. */
   readonly massKg?: (seed: number) => number;
   /**
-   * Why this courier may not accept the cargo, or null. Called after the base rule
-   * (a courier never signs cargo from itself or further down the road).
+   * Why this post may not accept the cargo, or null. Called after the base rule
+   * (a post never signs cargo from itself or further down the road).
    */
   readonly acceptRefusal?: (item: ContractCargoItem, probe: DeliveryProbe) => string | null;
   /**
    * The world change this delivery also performs: consuming the trailer, car or
-   * part the contract is about. Applied only after the courier accepted the cargo,
+   * part the contract is about. Applied only after the post accepted the cargo,
    * in the same transaction as the envelope.
    */
   readonly onDelivered?: (item: ContractCargoItem, probe: DeliveryProbe) => DeliveryEffect | null;
+  /**
+   * Finishes a freshly generated offer of this kind: its look (`shape`) and, for a
+   * passenger contract, its `party`. Called last by `generateContractOffer`.
+   */
+  readonly dressOffer?: (offer: ContractCargoItem) => void;
+  /**
+   * The physical items the post machine releases for this offer: a passenger party is
+   * one teddy per passenger. Omitted = the offer item itself.
+   */
+  readonly release?: (offer: ContractCargoItem) => readonly ContractCargoItem[];
+  /** The line shown when a delivery of this kind completes and pays `coins`; omitted = the generic one. */
+  readonly deliveredText?: (item: ContractCargoItem, coins: number) => string;
 }
