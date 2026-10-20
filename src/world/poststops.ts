@@ -1,19 +1,30 @@
-import { GAMEPLAY_CONFIG } from '../config';
 import { hash01 } from '../core/rng';
+import { ROAD_LENGTH } from './road';
 
 /**
- * THE POST NETWORK: one «ПОЧТА» machine (world/post.ts) every ~9 km, jittered and snapped
- * to a guaranteed POI slot, which is always a settlement (world/settlement.ts). The
- * sequence is random-access and monotonic along the road: stop `index` hands out its four
- * offers (contracts/offers.ts) and signs cargo from any lower index.
+ * THE POST NETWORK: the settlements down the road, each with its «ПОЧТА» machine
+ * (world/post.ts) and its shop. Stop 0 stands 1-1.5 km from the house, so the first
+ * contract is a short walk of the drive away; stops 1-3 follow at 2.5-4 km each, and
+ * every later one at 2.5-8 km. The sequence is monotonic along the road: stop `index`
+ * hands out its offers (contracts/offers.ts) and signs cargo from any lower index.
  *
- * The draws keep the courier domain the network was born with, so every saved contract
- * (`ContractCargoItem.sourceCourierIndex`) still names the same stop.
+ * Every stop's arclength is the sum of the gaps before it, so the stops are kept in one
+ * prefix table per seed, grown on demand: the whole 40 000 km road is under 16 000 stops,
+ * and every reader (the chunk builders, the terrain and vista workers through the
+ * lay-bys) draws the same gaps from the seed alone.
+ *
+ * The draws keep the courier domain the network was born with.
  */
-const POST_PERIOD_M = 9_000;
-const POST_JITTER_M = 1_200;
-const DEFAULT_POI_SPACING_M = GAMEPLAY_CONFIG.poiSpacingMetres;
-const FIRST_POST_M = 7_000;
+const FIRST_POST_MIN_M = 1_000;
+const FIRST_POST_SPAN_M = 500;
+/** Stops 1 to `EARLY_GAPS` follow at the short gap. */
+const EARLY_GAPS = 3;
+const EARLY_GAP_MIN_M = 2_500;
+const EARLY_GAP_SPAN_M = 1_500;
+const GAP_MIN_M = 2_500;
+const GAP_SPAN_M = 5_500;
+/** The shortest gap between two stops: a reader may assume no two are closer. */
+export const POST_GAP_MIN_M = Math.min(EARLY_GAP_MIN_M, GAP_MIN_M);
 const POST_DOMAIN = 0x43555231; // 'CUR1'
 
 export interface PostStop {
@@ -30,23 +41,45 @@ export function postId(index: number): string {
   return `courier:${index}`;
 }
 
-export function postSlotIndex(seed: number, band: number, poiSpacing = DEFAULT_POI_SPACING_M): number {
-  const target = FIRST_POST_M
-    + band * POST_PERIOD_M
-    + (hash01(seed, POST_DOMAIN, band, 0) - 0.5) * POST_JITTER_M * 2;
-  return Math.max(1, Math.round(target / poiSpacing));
+/** One seed's stop arclengths, `count` of them valid; grown by doubling. */
+interface PostTable {
+  s: Float64Array;
+  count: number;
 }
 
-export function isPostPoiSlot(
-  seed: number,
-  poiIndex: number,
-  poiSpacing = DEFAULT_POI_SPACING_M,
-): boolean {
-  const estimate = Math.round((poiIndex * poiSpacing - FIRST_POST_M) / POST_PERIOD_M);
-  for (let band = estimate - 1; band <= estimate + 1; band++) {
-    if (band >= 0 && postSlotIndex(seed, band, poiSpacing) === poiIndex) return true;
+const tables = new Map<number, PostTable>();
+
+/** Gap from stop `index - 1` to stop `index`; stop 0's is from the house. */
+function gapBefore(seed: number, index: number): number {
+  const roll = hash01(seed, POST_DOMAIN, index, 0);
+  if (index === 0) return FIRST_POST_MIN_M + roll * FIRST_POST_SPAN_M;
+  if (index <= EARLY_GAPS) return EARLY_GAP_MIN_M + roll * EARLY_GAP_SPAN_M;
+  return GAP_MIN_M + roll * GAP_SPAN_M;
+}
+
+/** The seed's table, filled at least through stop `index` or past arclength `s`. */
+function tableThrough(seed: number, index: number, s: number): PostTable {
+  let table = tables.get(seed);
+  if (!table) {
+    table = { s: new Float64Array(256), count: 0 };
+    tables.set(seed, table);
   }
-  return false;
+  while (table.count <= index || (table.count > 0 && table.s[table.count - 1]! <= s && table.s[table.count - 1]! <= ROAD_LENGTH)) {
+    if (table.count === table.s.length) {
+      const grown = new Float64Array(table.s.length * 2);
+      grown.set(table.s);
+      table.s = grown;
+    }
+    const before = table.count > 0 ? table.s[table.count - 1]! : 0;
+    table.s[table.count] = before + gapBefore(seed, table.count);
+    table.count++;
+  }
+  return table;
+}
+
+/** Arclength of stop `index`, metres from the house. */
+export function postS(seed: number, index: number): number {
+  return tableThrough(seed, index, -Infinity).s[index]!;
 }
 
 /**
@@ -54,50 +87,58 @@ export function isPostPoiSlot(
  * range query; this is the same draw for one index, so a system that only knows "the
  * cargo came from stop 7" can find it without the chunk being built.
  */
-export function postStop(
-  seed: number,
-  index: number,
-  poiSpacing = DEFAULT_POI_SPACING_M,
-): PostStop {
-  return { index, s: postSlotIndex(seed, index, poiSpacing) * poiSpacing };
+export function postStop(seed: number, index: number): PostStop {
+  return { index, s: postS(seed, index) };
 }
 
-export function postStopsBetween(
-  seed: number,
-  fromS: number,
-  toS: number,
-  poiSpacing = DEFAULT_POI_SPACING_M,
-): PostStop[] {
-  const first = Math.max(
-    0,
-    Math.floor((fromS - FIRST_POST_M - POST_JITTER_M) / POST_PERIOD_M) - 1,
-  );
-  const last = Math.max(
-    first,
-    Math.ceil((toS - FIRST_POST_M + POST_JITTER_M) / POST_PERIOD_M) + 1,
-  );
+/**
+ * Index of the first stop at or past arclength `s` (binary search over the table, which
+ * is filled past `s` first).
+ */
+function firstStopAtOrPast(seed: number, s: number): number {
+  const table = tableThrough(seed, 0, s);
+  let lo = 0;
+  let hi = table.count - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (table.s[mid]! < s) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Stops whose arclength falls in [fromS, toS), in order. */
+export function postStopsBetween(seed: number, fromS: number, toS: number): PostStop[] {
   const out: PostStop[] = [];
-  for (let index = first; index <= last; index++) {
-    const stop = postStop(seed, index, poiSpacing);
-    if (stop.s < fromS || stop.s >= toS) continue;
-    out.push(stop);
+  for (let index = firstStopAtOrPast(seed, fromS); ; index++) {
+    const s = postS(seed, index);
+    if (s >= toS || s > ROAD_LENGTH) break;
+    out.push({ index, s });
   }
   return out;
 }
 
+/** Index of the first post stop at or past `fromS` whose index is at least `minIndex`. */
+export function nextPostIndex(seed: number, fromS: number, minIndex: number): number {
+  return Math.max(minIndex, firstStopAtOrPast(seed, fromS));
+}
+
+/** The last bracket found: the terrain asks about neighbouring arclengths in runs. */
+let lastTable: PostTable | null = null;
+let lastAfter = 0;
+
 /**
- * Index of the first post stop at or past `fromS` whose index is at least `minIndex`.
- * Stop arclengths grow with the index (the jitter is under half a period), so the walk
- * starts one band short of the estimate and stops at the first match.
+ * The stops either side of arclength `s`: the last one before it (-1 before stop 0) and
+ * the first at or past it. What the roadside slots (world/poislots.ts) are looked up by.
  */
-export function nextPostIndex(
-  seed: number,
-  fromS: number,
-  minIndex: number,
-  poiSpacing = DEFAULT_POI_SPACING_M,
-): number {
-  const estimate = Math.floor((fromS - FIRST_POST_M - POST_JITTER_M) / POST_PERIOD_M) - 1;
-  let index = Math.max(0, minIndex, estimate);
-  while (postSlotIndex(seed, index, poiSpacing) * poiSpacing < fromS) index++;
-  return index;
+export function postBracket(seed: number, s: number): { before: number; after: number } {
+  const table = tables.get(seed);
+  if (table && table === lastTable && lastAfter < table.count) {
+    const at = table.s[lastAfter]!;
+    if (at >= s && (lastAfter === 0 || table.s[lastAfter - 1]! < s)) return { before: lastAfter - 1, after: lastAfter };
+  }
+  const after = firstStopAtOrPast(seed, s);
+  lastTable = tables.get(seed)!;
+  lastAfter = after;
+  return { before: after - 1, after };
 }

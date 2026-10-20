@@ -298,6 +298,8 @@ class Barrel implements WorldFixture {
     const target = this.turning > 0 ? 1 : 0;
     this.open += Math.sign(target - this.open) * Math.min(Math.abs(target - this.open), HANDLE_SPEED * dt);
     this.handle.rotation.y = this.open * HANDLE_TURN;
+    // The chunk froze every matrix when it was placed (world/chunks.ts `freezeStaticSubtree`).
+    this.handle.updateMatrix();
     this.stream.visible = this.running > 0;
   }
 }

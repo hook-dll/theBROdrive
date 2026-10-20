@@ -655,6 +655,12 @@ function lensNames(def: CarModelDef): Set<string> {
  * set, and the Soviet sets all paint their wheels from the one palette. Nothing about
  * a wheel's material is ever written per car — no dirt, no paint, no lamp — so the
  * copies bought nothing and cost a material switch on every wheel draw.
+ *
+ * A Soviet set arrives as FBX Phong over the pack's swatch atlas. It is shared as the
+ * atlas wheel material (`makeUnifiedAtlasMaterial`): a Standard material whose atlas
+ * cells say what each surface is, rubber tyre and painted steel rim, so a wheel is lit
+ * by the same model as everything else on the car, sky reflection included. Phong was
+ * the one lighting model in the game besides Standard, with programs of its own.
  */
 const sharedWheelMaterials = new Map<string, THREE.Material>();
 
@@ -683,10 +689,16 @@ function shareWheelMaterials(root: THREE.Object3D): void {
   const share = (material: THREE.Material): THREE.Material => {
     const signature = materialSignature(material);
     if (signature === null) return material;
-    const shared = sharedWheelMaterials.get(signature);
-    if (shared) return shared;
-    sharedWheelMaterials.set(signature, material);
-    return material;
+    let shared = sharedWheelMaterials.get(signature);
+    if (!shared) {
+      shared = material instanceof THREE.MeshPhongMaterial && material.map !== null
+        ? makeUnifiedAtlasMaterial(material, true)
+        : material;
+      // `prepareMaterials` wrote the shadow side on the source; the conversion starts fresh.
+      shared.shadowSide = material.shadowSide;
+      sharedWheelMaterials.set(signature, shared);
+    }
+    return shared;
   };
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
@@ -847,9 +859,10 @@ function floatGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
 function unifyCarMaterials(scene: THREE.Group, def: CarModelDef): void {
   if (!CAR_STYLE_UNIFIED) return;
   const lamps = lampNames(def);
-  // A wheel's grey steel swatch is its own rim, not a bumper: see CAR_ATLAS_FINISH.
-  // Packs that mark wheels only by shape are renamed too late for this pass, and no
-  // shipped pack with an atlas does that (the Soviet pack names all four nodes).
+  // A Soviet wheel's atlas is converted for every style, when its set is shared
+  // (`shareWheelMaterials`), so this pass leaves it to that. Packs that mark wheels
+  // only by shape are renamed too late for this pass, and no shipped pack with an
+  // atlas does that (the Soviet pack names all four nodes).
   const wheelNodes = new Set<string>();
   for (const wheelId of WHEEL_IDS) {
     for (const name of def.wheelNodes?.[wheelId] ?? []) wheelNodes.add(name);
@@ -864,10 +877,9 @@ function unifyCarMaterials(scene: THREE.Group, def: CarModelDef): void {
       const shared = NAMED_SURFACE_FINISH[source.name];
       if (shared) return makeUnifiedSurfaceMaterial(source, { finish: shared });
       if (!(source instanceof THREE.MeshPhongMaterial)) return source;
+      if (source.map === null) return makeUnifiedSurfaceMaterial(source, { finish: CAR_SURFACE_FINISH.trim, keepColor: true });
       // An atlas material: its surfaces are told apart by UV cell, not by slot.
-      return source.map === null
-        ? makeUnifiedSurfaceMaterial(source, { finish: CAR_SURFACE_FINISH.trim, keepColor: true })
-        : makeUnifiedAtlasMaterial(source, wheel);
+      return wheel ? source : makeUnifiedAtlasMaterial(source, false);
     };
     mesh.material = Array.isArray(mesh.material)
       ? mesh.material.map(unify)
@@ -2219,10 +2231,12 @@ function farSurfaceOf(def: CarModelDef, bodywork: boolean): (mesh: THREE.Mesh, m
     if (slot !== undefined && slot !== 'glass') return KIT_FAR_SURFACE;
     // The role `VehicleLamps.bindLampMaterials` binds the lens by: mesh name, then material.
     const lamp = roles.findIndex((selectors) => selectors.includes(mesh.name) || selectors.includes(material.name)) + 1;
-    // The Soviet wheel sets and bodies are Phong with a palette map: their colour is the
-    // texel, their finish a tyre's or a painted rim's, so a mid roughness stands for all.
-    // Their lenses are Phong too and glow by their role as the near lens does: without it
-    // a lit head lamp went dark at `MID_CAR_ENTER_M` and lit up again coming back in.
+    // The Soviet bodies are Phong with a palette map: their colour is the texel, their
+    // finish a panel's or a bumper's, so a mid roughness stands for all. (The Soviet
+    // wheel sets are the Standard atlas material by now, `shareWheelMaterials`: their
+    // finish below is the atlas base's.) Their lenses are Phong too and glow by their
+    // role as the near lens does: without it a lit head lamp went dark at
+    // `MID_CAR_ENTER_M` and lit up again coming back in.
     if (material instanceof THREE.MeshPhongMaterial) {
       return { color: material.color, vertexColors: material.vertexColors, paint: false, roughness: 0.7, metalness: 0.1, lamp, map: material.map };
     }

@@ -349,8 +349,8 @@ export interface WorldState {
   completedContractIds: string[];
   /**
    * The delivery ledger: completed deliveries counted by contract kind, written with
-   * the completed id (`courier_storage`). Licences read it (economy/economy.ts
-   * `licenceFor`). Saves from before the ledger rebuild it from their completed ids.
+   * the completed id (`courier_storage`): the record the delivery skills will read
+   * (game-design2.md §12). Saves from before the ledger rebuild it from their completed ids.
    */
   deliveriesByKind: Partial<Record<ContractKind, number>>;
   /**

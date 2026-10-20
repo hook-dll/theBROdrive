@@ -24,6 +24,7 @@ import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
 import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type ContractCargoItem, type Item } from '../items/items';
+import { giveCoins } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
 import type { Interaction } from '../player/interaction';
@@ -144,6 +145,8 @@ export interface DevTools {
   seatInNearestCar(): void;
   /** Puts the player on the road side of one lake site. */
   jumpToLake(index: number): void;
+  /** Puts 100 coins in the pack. */
+  giveCoins(): void;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
   updateLakeSeek(activeS: number): void;
 }
@@ -320,6 +323,20 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     }
     ctx.loose.spawnItem(item, dropX + ctx.origin.x, groundY + 0.3, dropZ + ctx.origin.z);
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);
+  };
+
+  /**
+   * The dev purse behind `PauseHooks.giveCoins`: 100 coins onto the pile in the pack, or
+   * at the player's feet when the pack has no room for a pile.
+   */
+  const devGiveCoins = (): void => {
+    const amount = 100;
+    const leftover = giveCoins(ctx.inventory, amount, ctx.world.runtimePartId());
+    if (leftover) {
+      const eye = ctx.camera.eyePosition;
+      ctx.loose.spawnItem(leftover, eye.x + ctx.origin.x, eye.y - 1.2, eye.z + ctx.origin.z);
+    }
+    ctx.hud.setToast(leftover ? `${amount} coins at your feet — the pack is full` : `+${amount} coins`);
   };
 
   /**
@@ -520,21 +537,22 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     placeAtJump(s);
   };
   /**
-   * Like `jumpTo`, but to post stop `index`, ending on foot 1.3 m in front of its machine
-   * and facing it: the shortest way to the «ПОЧТА» machine for a scripted session.
+   * Like `jumpTo`, but to post stop `index`, ending on foot 1.7 m in front of its machine
+   * (`machine`: the «ПОЧТА», or the settlement's «МАГАЗИН») and facing it: the shortest
+   * way to a machine for a scripted session.
    */
-  const devStandAtPost = (index: number): boolean => {
+  const devStandAtPost = (index: number, machine: 'post' | 'shop' = 'post'): boolean => {
     if (ctx.world.state.player.drivingCarId) {
       ctx.hud.setToast('step out of the car first');
       return false;
     }
     const stop = postStop(ctx.world.seed, index);
     const poi = poisBetween(ctx.world.seed, stop.s - 1, stop.s + 1).find((candidate) => candidate.s === stop.s);
-    const spot = poi ? settlementLayout(ctx.world.seed, poi).post : null;
+    const spot = poi ? settlementLayout(ctx.world.seed, poi)[machine] : null;
     if (!spot) return false;
     const pose = spotPose(ctx.road, spot);
     // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world.
-    const stand = { x: pose.x - Math.sin(pose.yaw) * 1.3, z: pose.z - Math.cos(pose.yaw) * 1.3, yaw: pose.yaw };
+    const stand = { x: pose.x - Math.sin(pose.yaw) * 1.7, z: pose.z - Math.cos(pose.yaw) * 1.7, yaw: pose.yaw };
     jumpHold = { s: stop.s, frames: 0, stand };
     placeAtJump(stop.s, stand);
     return true;
@@ -595,9 +613,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     debris: ctx.debris,
     fixtures: ctx.fixtures,
     // `postAt(i)`: post stop i ({ index, s }); `standAtPost(i)` jumps there and stands
-    // the player on foot a step in front of its «ПОЧТА» machine, facing it.
+    // the player on foot a step in front of its «ПОЧТА» machine, facing it, or of its
+    // «МАГАЗИН» with `standAtPost(i, 'shop')`.
     postAt: (index: number) => postStop(ctx.world.seed, index),
-    standAtPost: (index: number) => devStandAtPost(index),
+    standAtPost: (index: number, machine: 'post' | 'shop' = 'post') => devStandAtPost(index, machine),
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,
@@ -784,6 +803,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     flipVehicle: devFlipVehicle,
     seatInNearestCar: devSeatInNearestCar,
     jumpToLake: devJumpToLake,
+    giveCoins: devGiveCoins,
     updateLakeSeek,
   };
 }

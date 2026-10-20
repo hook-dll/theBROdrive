@@ -1,6 +1,6 @@
 {
   "dayCycleMinutes": 24,
-  "poiSpacingMetres": 7700,
+  "desertPoiSpacingMetres": 7700,
   "dayCycleMinutesMin": 8,
   "dayCycleMinutesMax": 128,
   "defaultMasterVolume": 0.8,

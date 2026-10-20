@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import { POI_SPACING } from './poislots';
+import { roadsideSlotNear } from './poislots';
 
 /**
  * PLACE NAMES: what every roadside stop is called.
@@ -10,7 +10,7 @@ import { POI_SPACING } from './poislots';
  *
  * Handed out per seed: each world shuffles the list once, and a stop takes the entry at
  * its roadside slot's number. Neighbouring stops therefore never share a name, and the
- * same name comes round again only 240 slots (over 1 800 km) on. Pure in (seed, s).
+ * same name comes round again only 240 slots (over 600 km) on. Pure in (seed, s).
  */
 export const PLACE_NAMES: readonly string[] = [
   'Dustwell', 'Kettlebend', 'Old Marrow', 'Sorry Flats', 'Little Thirst', 'Copper Yawn',
@@ -71,9 +71,9 @@ function order(seed: number): number[] {
   return shuffled;
 }
 
-/** The name of the roadside stop at arclength `s` (its slot's `Poi.s`). */
+/** The name of the roadside stop at arclength `s` (its slot's `Poi.s`): the nearest one. */
 export function placeNameAt(seed: number, s: number): string {
-  const slot = Math.round(s / POI_SPACING);
+  const slot = Math.max(0, roadsideSlotNear(seed, s, Infinity));
   const shuffled = order(seed);
   return PLACE_NAMES[shuffled[slot % shuffled.length]!]!;
 }

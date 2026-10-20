@@ -9,7 +9,9 @@
  * it. A share of the parcels is REGISTERED: a six-digit PIN printed on the label, which
  * the receiving post asks for on its dial (world/post.ts).
  *
- * The post's stock — which of its four offers it still holds — lives here rather than in
+ * A post never runs dry: an offer taken out is replaced in its slot by the next ROUND of
+ * that slot (`nextOffer`), drawn the same way, so the machine always shows one offer of
+ * each tier. The post's stock — which round each slot stands at — lives here rather than in
  * `world/poststops.ts` on purpose: it is contract content, and `world/poststops.ts` must
  * stay free of contract imports. `kinds/*` reach the stop geometry through
  * `contracts/world.ts`, and a contract import in that leaf would close a module-init
@@ -52,11 +54,16 @@ function totalWeight(haul: boolean): number {
   return total;
 }
 
-function pickKind(seed: number, courierIndex: number, slot: number, haul: boolean): ContractKindDef {
-  // The first post's easy run is always a parcel: the drive's first job needs no
-  // licence (economy/economy.ts `licenceFor`) and starts the parcel count.
-  if (courierIndex === 0 && slot === 0) return CONTRACT_KINDS[0]!;
-  let roll = hash01(seed, KIND_DOMAIN, courierIndex, slot) * totalWeight(haul);
+/** The draw key of round `round` of `slot`: round 0 keeps the key the offers always had. */
+function drawKey(slot: number, round: number): number {
+  return slot + round * POST_OFFER_COUNT;
+}
+
+function pickKind(seed: number, courierIndex: number, key: number, haul: boolean): ContractKindDef {
+  // The first post's first easy run is always a parcel: the drive's first job starts the
+  // parcel count.
+  if (courierIndex === 0 && key === 0) return CONTRACT_KINDS[0]!;
+  let roll = hash01(seed, KIND_DOMAIN, courierIndex, key) * totalWeight(haul);
   let last: ContractKindDef | null = null;
   for (const def of CONTRACT_KINDS) {
     if (isHaulKind(def.kind) !== haul) continue;
@@ -70,9 +77,19 @@ function pickKind(seed: number, courierIndex: number, slot: number, haul: boolea
 /** The race each slot is: none, one post on, two posts on, none (the haul). */
 const SLOT_RACE_LEGS: readonly (1 | 2 | undefined)[] = [undefined, 1, 2, undefined];
 
-/** The saved id of offer `slot` at post `index`. Saved: never changed. */
-export function offerId(index: number, slot: number): string {
-  return `courier:${index}:offer:${slot}`;
+/**
+ * The saved id of round `round` of offer `slot` at post `index`. Saved: never changed;
+ * round 0 has the id the offers always had.
+ */
+export function offerId(index: number, slot: number, round = 0): string {
+  return round === 0 ? `courier:${index}:offer:${slot}` : `courier:${index}:offer:${slot}:${round}`;
+}
+
+/** The (slot, round) an offer id of post `index` names, or null for any other id. */
+function parseOfferId(index: number, id: string): { slot: number; round: number } | null {
+  const match = /^courier:(\d+):offer:(\d+)(?::(\d+))?$/.exec(id);
+  if (!match || Number(match[1]) !== index) return null;
+  return { slot: Number(match[2]), round: match[3] === undefined ? 0 : Number(match[3]) };
 }
 
 /** The post an offer is bound for: the next one, or the race's finish. */
@@ -84,19 +101,21 @@ export function generateContractOffer(
   seed: number,
   courierIndex: number,
   slot: number,
+  round = 0,
 ): ContractCargoItem {
-  const def = pickKind(seed, courierIndex, slot, slot === 3);
-  const generatedSeed = hash(seed, OFFER_DOMAIN, courierIndex, slot);
-  const nameIndex = Math.floor(hash01(seed, NAME_DOMAIN, courierIndex, slot) * def.offerNames.length);
+  const key = drawKey(slot, round);
+  const def = pickKind(seed, courierIndex, key, slot === 3);
+  const generatedSeed = hash(seed, OFFER_DOMAIN, courierIndex, key);
+  const nameIndex = Math.floor(hash01(seed, NAME_DOMAIN, courierIndex, key) * def.offerNames.length);
   const massKg = def.massKg?.(generatedSeed);
   const raceLegs = SLOT_RACE_LEGS[slot];
   // The drive's very first job stays plain; any other parcel may go registered.
   const registered = def.kind === 'parcel'
-    && !(courierIndex === 0 && slot === 0)
-    && hash01(seed, REGISTERED_DOMAIN, courierIndex, slot) < REGISTERED_SHARE;
+    && !(courierIndex === 0 && key === 0)
+    && hash01(seed, REGISTERED_DOMAIN, courierIndex, key) < REGISTERED_SHARE;
   const item: ContractCargoItem = {
     type: 'contract_cargo',
-    id: offerId(courierIndex, slot),
+    id: offerId(courierIndex, slot, round),
     sourceCourierIndex: courierIndex,
     contractKind: def.kind,
     cargoName: def.offerNames[nameIndex]!,
@@ -112,10 +131,17 @@ export function generateContractOffer(
   return item;
 }
 
+/** The offer that replaces `offer` in its slot once it is taken out: the next round. */
+export function nextOffer(seed: number, offer: ContractCargoItem): ContractCargoItem {
+  const at = parseOfferId(offer.sourceCourierIndex, offer.id);
+  if (!at) throw new Error(`nextOffer: ${offer.id} is not a post offer`);
+  return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round + 1);
+}
+
 /** A post's stock as the machine reads it: its offers by slot, and anything else left in it. */
 export interface PostStock {
-  /** Offer per slot while it is still in the machine, null once released. */
-  readonly offers: readonly (ContractCargoItem | null)[];
+  /** The offer standing in each slot: always one, whichever round the slot is at. */
+  readonly offers: readonly ContractCargoItem[];
   /**
    * Things a save from the courier days left in the courier's boot (an envelope, a coin,
    * a stashed part): the machine gives them back through its tray.
@@ -124,24 +150,24 @@ export interface PostStock {
 }
 
 /**
- * What post `index` still holds. Untouched (no `WorldState.courierStorage` entry), all
- * four offers. After the first release the saved cells own it: an offer is in stock
- * while its item is anywhere in the cells (a courier-era boot kept them in any cell, and
- * eight of them). The offers are generated fresh, so an old save's stock reads with
- * today's label (destination, PIN).
+ * What post `index` holds. Untouched (no `WorldState.courierStorage` entry), round 0 of
+ * every slot. After the first release the saved cells own it: a slot stands at the round
+ * of its offer found anywhere in the cells (a courier-era boot kept them in any cell, and
+ * eight of them), and at round 1 when none is there (a save from before the rounds,
+ * whose taken offer left its slot empty). The offers are generated fresh, so an old
+ * save's stock reads with today's label (destination, PIN).
  */
 export function postStock(state: WorldState, seed: number, index: number): PostStock {
   const saved = state.courierStorage[postId(index)];
-  const offers: (ContractCargoItem | null)[] = [];
-  for (let slot = 0; slot < POST_OFFER_COUNT; slot++) {
-    const id = offerId(index, slot);
-    offers.push(!saved || saved.some((cell) => cell?.id === id) ? generateContractOffer(seed, index, slot) : null);
+  const rounds = new Array<number>(POST_OFFER_COUNT).fill(saved ? 1 : 0);
+  const isOffer = new Set<Item>();
+  for (const cell of saved ?? []) {
+    const at = cell ? parseOfferId(index, cell.id) : null;
+    if (!cell || !at || at.slot >= POST_OFFER_COUNT) continue;
+    rounds[at.slot] = at.round;
+    isOffer.add(cell);
   }
-  const strays: Item[] = [];
-  if (saved) {
-    for (const cell of saved) {
-      if (cell && !offers.some((offer) => offer?.id === cell.id)) strays.push(cell);
-    }
-  }
+  const offers = rounds.map((round, slot) => generateContractOffer(seed, index, slot, round));
+  const strays = (saved ?? []).filter((cell): cell is Item => cell !== null && !isOffer.has(cell));
   return { offers, strays };
 }

@@ -321,6 +321,8 @@ export class InputReader {
   private pitchDelta = 0;
   private wheelDelta = 0;
   private locked = false;
+  /** A machine is worked by the cursor (player/machinefocus.ts): a click must not re-lock. */
+  private cursorFree = false;
   /**
    * Desktop parking brake state. Changed only by a new key press, never key hold, and
    * only while driving (see `setDriving`).
@@ -494,6 +496,7 @@ export class InputReader {
 
   private onMouseDown = (e: MouseEvent): void => {
     if (!this.locked) {
+      if (this.cursorFree) return;
       void this.canvas.requestPointerLock();
       return;
     }
@@ -547,6 +550,19 @@ export class InputReader {
 
   get pointerLocked(): boolean {
     return this.locked;
+  }
+
+  /** While a machine is worked by the cursor, a click on the canvas leaves the pointer free. */
+  setCursorFree(free: boolean): void {
+    this.cursorFree = free;
+  }
+
+  /** Whether `code` is bound to walking (or jumping) on foot. */
+  isMoveKey(code: string): boolean {
+    for (const action of ['throttle', 'brake', 'left', 'right', 'jump']) {
+      if (this.keys[action]?.includes(code)) return true;
+    }
+    return false;
   }
 
   private anyHeld(codes: readonly string[]): boolean {

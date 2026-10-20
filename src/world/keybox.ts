@@ -192,6 +192,8 @@ function setFill(fill: THREE.Mesh, car: CarState | null): void {
   fill.scale.y = h;
   fill.position.y = TUBE_Y0 + h / 2;
   fill.visible = share > 0;
+  // The chunk froze its matrices when it was placed (world/chunks.ts `freezeStaticSubtree`).
+  fill.updateMatrix();
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -416,5 +418,11 @@ class KeyBox implements WorldFixture {
     this.lever.rotation.x = lever;
     this.drawerOut = drawer;
     this.drawer.position.z = FRONT + drawer;
+    // The chunk froze every matrix when it was placed (world/chunks.ts
+    // `freezeStaticSubtree`): what moves writes its own.
+    this.coin.updateMatrix();
+    this.key.updateMatrix();
+    this.lever.updateMatrix();
+    this.drawer.updateMatrix();
   }
 }

@@ -270,6 +270,16 @@ body.is-cinematic #ui {
   pointer-events: none;
 }
 
+/* Working a machine up close (player/machinefocus.ts): nothing is written over it. The
+   cursor is the hand and the machine is the text, so the prompt, the toasts, the route
+   bar and the crosshair all stand down until the player steps back. */
+body.is-machine-focus .hud-prompt,
+body.is-machine-focus .hud-toasts,
+body.is-machine-focus .hud-race,
+body.is-machine-focus .hud-crosshair {
+  display: none;
+}
+
 .hud-cabin-editor {
   position: absolute;
   left: 16px;

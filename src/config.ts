@@ -9,8 +9,8 @@ export interface MaterialsConfig {
 }
 export interface GameplayConfig {
   readonly dayCycleMinutes: number;
-  /** Metres of arclength between POI slots (world/poi.ts `POI_SPACING`). */
-  readonly poiSpacingMetres: number;
+  /** Metres of arclength between desert POI slots (world/poi.ts `DESERT_SPACING_M`). */
+  readonly desertPoiSpacingMetres: number;
   readonly dayCycleMinutesMin: number;
   readonly dayCycleMinutesMax: number;
   readonly defaultMasterVolume: number;
@@ -93,7 +93,7 @@ const MATERIALS_FIELDS: Fields<MaterialsConfig> = {
 
 const GAMEPLAY_FIELDS: Fields<GameplayConfig> = {
   dayCycleMinutes: true,
-  poiSpacingMetres: true,
+  desertPoiSpacingMetres: true,
   dayCycleMinutesMin: true,
   dayCycleMinutesMax: true,
   defaultMasterVolume: true,

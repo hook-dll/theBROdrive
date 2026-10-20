@@ -1,7 +1,7 @@
 import { hash01 } from '../core/rng';
 import { DWELLING_HALF_EXTENTS } from './dwellings/bounds';
 import { DWELLINGS } from './dwellings/list';
-import { dwellingFootprint, MAST_IDS, POI_SPACING, roadsideSlot, structureIsMast, type RoadsideSlot } from './poislots';
+import { dwellingFootprint, MAST_IDS, roadsideSlot, roadsideSlotOfIndex, structureIsMast, type RoadsideSlot } from './poislots';
 import { CURVE_WIDENING_M, halfWidthAt } from './roadprofile';
 import type { Poi } from './poi';
 import type { Road } from './road';
@@ -150,9 +150,9 @@ const TRAILER_CHANCE = 0.1;
 const LOT_ALONG_M = -16;
 const LOT_OUT_M = 4.3;
 const POST_ALONG_M = -6;
-const POST_OUT_M = 1.0;
+const POST_OUT_M = 1.2;
 const SHOP_ALONG_M = 6;
-const SHOP_OUT_M = 0.9;
+const SHOP_OUT_M = 1.2;
 const BARRELS_ALONG_M = 14;
 const BARRELS_OUT_M = 1.4;
 const TRAILER_ALONG_M = 23;
@@ -167,8 +167,10 @@ const LONE_BARRELS_OUT_M = 1.4;
  * against these.
  */
 export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'barrels' | 'lot' | 'trailer', readonly [number, number]>> = {
-  post: [1.0, 0.6],
-  shop: [0.6, 0.5],
+  // The card machines (world/cardmachine.ts): the crank's knob past one flank, the tray
+  // standing out of the front.
+  post: [0.75, 0.8],
+  shop: [0.75, 0.8],
   barrels: [1.8, 1.0],
   // The car and, on its road-side flank, its board and key box.
   lot: [2.7, 2.6],
@@ -424,7 +426,7 @@ export function roadsideStop(seed: number, slot: number): RoadsideStop | null {
   }
   const cached = bySlot.get(slot);
   if (cached !== undefined) return cached;
-  const roll = roadsideSlot(seed, slot, POI_SPACING);
+  const roll = roadsideSlot(seed, slot);
   const stop = roll === null ? null : roll.settlement ? settlementStop(seed, roll) : loneStop(seed, roll);
   bySlot.set(slot, stop);
   return stop;
@@ -433,7 +435,7 @@ export function roadsideStop(seed: number, slot: number): RoadsideStop | null {
 /** A roadside POI's layout: its buildings and services. Pure and memoised. */
 export function settlementLayout(seed: number, poi: Poi): SettlementLayout {
   if (poi.desert) throw new Error(`settlementLayout: POI ${poi.index} is out in the desert`);
-  const stop = roadsideStop(seed, Math.round(poi.s / POI_SPACING));
+  const stop = roadsideStop(seed, roadsideSlotOfIndex(poi.index));
   if (!stop || stop.layout.poiIndex !== poi.index) throw new Error(`settlementLayout: no roadside stop for POI ${poi.index}`);
   return stop.layout;
 }

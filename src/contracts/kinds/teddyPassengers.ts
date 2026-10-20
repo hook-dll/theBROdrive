@@ -17,8 +17,7 @@
  *
  * Delivery is one teddy at a time through the destination post's slot
  * (registry.ts `contractPosting`): the last one in completes the party and pays
- * `contractPay` scaled by the ride (`passengerQuality`), with a short summary
- * (`passengerSummary`).
+ * `contractPay` scaled by the ride (`passengerQuality`).
  */
 
 import { hash01 } from '../../core/rng';
@@ -37,8 +36,6 @@ const TEDDY_MASS_KG = 0.6;
 const HARSH_PAY_SHARE = 0.1;
 /** However the passengers were driven, a delivered party pays at least this share. */
 const PASSENGER_PAY_FLOOR = 0.4;
-/** Comfort at or above this, with no harsh moment, is a smooth ride. */
-const SMOOTH_COMFORT = 0.95;
 
 /** How many teddies ride on this offer: 1, 2 or 3, fixed by its seed. */
 export function teddyPartySize(seed: number): number {
@@ -60,15 +57,6 @@ export function passengerQuality(item: ContractCargoItem): number {
   const comfort = item.progress.comfort ?? 1;
   const harsh = item.progress.harsh ?? 0;
   return Math.max(PASSENGER_PAY_FLOOR, Math.min(1, comfort - HARSH_PAY_SHARE * harsh));
-}
-
-/** The toast of a completed party: how the ride went and what it paid. Functional, no dialogue. */
-export function passengerSummary(item: ContractCargoItem, coins: number): string {
-  const harsh = item.progress.harsh ?? 0;
-  const ride = harsh > 0
-    ? `${harsh} harsh moment${harsh === 1 ? '' : 's'}`
-    : (item.progress.comfort ?? 1) >= SMOOTH_COMFORT ? 'smooth ride' : 'uneasy ride';
-  return `Passengers delivered — ${ride} · ${coins} coin${coins === 1 ? '' : 's'}`;
 }
 
 /** Party ids the ride meter accounts for at the moment (`trackPassengerRide`). */
@@ -133,5 +121,4 @@ export const teddyPassengersKind: ContractKindDef = {
       progress: defaultProgress(),
     }));
   },
-  deliveredText: passengerSummary,
 };

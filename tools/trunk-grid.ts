@@ -86,9 +86,9 @@ const stock = postStock(migrated, migrated.seed, 4);
 check(
   'courier-era save loads: wreck storage dropped, the boot reads as the post stock',
   !('wreckStorage' in migrated) && !('wreckBonnet' in migrated)
-    && stock.offers.map((offer) => offer !== null).join() === 'true,false,true,true'
+    && stock.offers.map((offer) => offer.id.split(':').length).join() === '4,5,4,4'
     && stock.strays.length === 1 && stock.strays[0]!.type === 'sticker_envelope',
-  `offers ${stock.offers.map((offer) => (offer ? 'x' : '-')).join('')} · strays ${stock.strays.length}`,
+  `offers ${stock.offers.map((offer) => offer.id).join(' ')} · strays ${stock.strays.length}`,
 );
 
 const shape = { halfExtents: [0.9, 0.65, 2.1] as const };

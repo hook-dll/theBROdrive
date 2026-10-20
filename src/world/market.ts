@@ -1,81 +1,28 @@
 import * as THREE from 'three';
 import { maxAnisotropy } from '../render/texturequality';
 import { box, C } from './poi/kit';
-import type { Item } from '../items/items';
 
 /**
- * What the roadside sells: the vending machines (world/vending.ts) and the cars on the
- * lots (world/carlot.ts). This file holds the two things both need: the live registry
- * the eye ray reads, and the painted signs.
+ * What the roadside sells beside the machines: the cars on the lots (world/carlot.ts),
+ * whose price signs come down when they are bought, and the painted signs every machine
+ * and lot board is made of.
  *
- * Everything here is scenery for a streamed chunk. The machine's stock and the lot car's
- * price are pure functions of the seed and the stop; what has been sold is in
- * `WorldState` (`vendingSold`, `CarState.lotPrice`), so a rebuilt chunk shows exactly
- * what is left.
+ * Everything here is scenery for a streamed chunk. A lot car's price is a pure function
+ * of the seed and the stop; whether it was bought is in `WorldState` (`CarState.lotPrice`),
+ * so a rebuilt chunk shows exactly what is left.
  */
 
-/** Slot grid of a machine's window: rows top to bottom, units left to right. */
-export const VENDING_ROWS = 4;
-export const VENDING_COLUMNS = 3;
-export const VENDING_SLOTS = VENDING_ROWS * VENDING_COLUMNS;
-
-/** One vending machine standing in the physics band. */
-export interface VendingMachine {
-  /** `vend:<poi index>`, the key in `WorldState.vendingSold`. */
-  readonly id: string;
-  /** Kilometres from home where it stands: the price multiplier's argument. */
-  readonly km: number;
-  /** Base centre on the sand, ABSOLUTE world metres. */
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-  /** Yaw of its local frame; the front faces local -Z. */
-  readonly yaw: number;
-  /**
-   * The goods it was stocked with, by slot (`row * VENDING_COLUMNS + column`); null is a
-   * slot never filled. A sold slot still holds its item here: `vendingSold` decides.
-   */
-  readonly stock: readonly (Item | null)[];
-  /** The product drawn in each slot, hidden when it is sold. */
-  readonly products: readonly (THREE.Object3D | null)[];
-}
-
-/**
- * Live registrations, following streamed physics chunks like the courier and wreck
- * registries. Machines are keyed by id; a lot car's price sign by the car's id.
- */
+/** Live lot signs, following streamed physics chunks, keyed by the car's id. */
 export class MarketField {
-  private readonly machines = new Map<string, VendingMachine>();
   private readonly lotSigns = new Map<string, THREE.Object3D>();
-
-  registerMachine(machine: VendingMachine): void {
-    this.machines.set(machine.id, machine);
-  }
 
   registerLotSign(carId: string, sign: THREE.Object3D): void {
     this.lotSigns.set(carId, sign);
   }
 
-  /** Drops a chunk's registrations; ids are machine ids and lot car ids alike. */
+  /** Drops a chunk's registrations, by lot car id. */
   forget(ids: readonly string[]): void {
-    for (const id of ids) {
-      this.machines.delete(id);
-      this.lotSigns.delete(id);
-    }
-  }
-
-  machine(id: string): VendingMachine | null {
-    return this.machines.get(id) ?? null;
-  }
-
-  machineValues(): IterableIterator<VendingMachine> {
-    return this.machines.values();
-  }
-
-  /** A slot was paid for: its product leaves the window now, not at the next rebuild. */
-  sold(machineId: string, slot: number): void {
-    const product = this.machines.get(machineId)?.products[slot];
-    if (product) product.visible = false;
+    for (const id of ids) this.lotSigns.delete(id);
   }
 
   /** A lot car was bought: its price sign comes down. */

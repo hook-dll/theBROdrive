@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { hash, hash01 } from '../core/rng';
+import { GAMEPLAY_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { MarketField } from './market';
-import { buildVendingMachine } from './vending';
+import { buildShop } from './vending';
 import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
   carModelMeasure,
@@ -16,7 +17,7 @@ import {
 import { carPrice } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import type { TrailerField } from '../vehicle/trailer';
-import { postStopsBetween } from './poststops';
+import { postStop } from './poststops';
 import { fitGround } from './footprint';
 import { halfWidthAt } from './roadprofile';
 import { BASIN_OUTER_M, lakeSites, type LakeSite } from './lakes';
@@ -25,7 +26,7 @@ import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
-import { POI_SPACING, roadsideSlot, rollStructure } from './poislots';
+import { roadsideSlot, roadsideSlotOfIndex, roadsideSlotsBetween, rollStructure, slotPost } from './poislots';
 import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout, type SettlementSpot } from './settlement';
 import type { FixtureField } from './fixturefield';
 import { buildPost } from './post';
@@ -35,17 +36,17 @@ import { buildKeyBox } from './keybox';
 /**
  * Points of interest: the buildings that give the drive a reason to continue.
  *
- * Two populations, one model. ROADSIDE stops stand on slots every `POI_SPACING` metres
- * of arclength, just past the verge and facing the road: at a courier/post stop a
- * settlement of houses on both sides with its service strip, anywhere else one house
- * (world/settlement.ts lays both out). DESERT ones stand on slots half a spacing off
- * those, one per side, anywhere from 70 m to the better part of a kilometre out and
- * facing wherever they were left facing: a house you only find by leaving the asphalt.
+ * Two populations, one model. ROADSIDE stops stand on the roadside slots (world/
+ * poislots.ts), which follow the post network: a settlement of houses on both sides with
+ * its service strip at every post stop, sometimes one house in a long gap between two
+ * (world/settlement.ts lays both out). DESERT ones stand on a lattice of their own,
+ * one per side, anywhere from 70 m to the better part of a kilometre out and facing
+ * wherever they were left facing: a house you only find by leaving the asphalt.
  *
- * Both are pure functions of the integer seed. A POI at km 300 is computed from its
- * slot index alone — never by walking the 249 slots before it — so chunk streaming
- * can materialise any stretch of road in any order and a save always restores the
- * exact same stop.
+ * Both are pure functions of the integer seed. A desert POI is computed from its slot
+ * index alone; a roadside one from the post network's gaps, which every reader draws
+ * from the seed into the same table (world/poststops.ts). So chunk streaming can
+ * materialise any stretch of road in any order and a save always restores the same stop.
  *
  * The building is drawn from `POI_STRUCTURES` (world/poistructures.ts). Nothing lies
  * about a stop for the taking: what a stop offers is sold (economy plan).
@@ -55,6 +56,8 @@ import { buildKeyBox } from './keybox';
  * later rebuild that generation is skipped entirely.
  */
 
+/** Arclength between desert slots, from `config/gameplay.json`. */
+export const DESERT_SPACING_M = GAMEPLAY_CONFIG.desertPoiSpacingMetres;
 /** Domain tag for the desert slots. */
 const DESERT_DOMAIN = 0x44534b31; // 'DSK1'
 /** Chance that one side of one desert slot has a building on it. */
@@ -125,8 +128,8 @@ function radiusStructure(structure: number): number {
  * measured one because this is pure and cheap by contract — `poisBetween` resolves a
  * stretch of road without building a single triangle.
  */
-function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
-  const roll = roadsideSlot(seed, slot, spacing);
+function roadsidePoi(seed: number, slot: number): Poi | null {
+  const roll = roadsideSlot(seed, slot);
   if (!roll) return null;
   return {
     index: roll.index,
@@ -142,18 +145,10 @@ function roadsidePoi(seed: number, slot: number, spacing: number): Poi | null {
  * Roadside POIs whose slot falls in [fromS, toS). Pure and order-independent: no road
  * or terrain sampling happens here.
  */
-export function poisBetween(
-  seed: number,
-  fromS: number,
-  toS: number,
-  spacing = POI_SPACING,
-): Poi[] {
+export function poisBetween(seed: number, fromS: number, toS: number): Poi[] {
   const result: Poi[] = [];
-  const firstSlot = Math.max(1, Math.ceil(fromS / spacing));
-  // `toS - 1e-6` keeps a POI exactly on the upper boundary in the next chunk.
-  const lastSlot = Math.floor((toS - 1e-6) / spacing);
-  for (let slot = firstSlot; slot <= lastSlot; slot++) {
-    const poi = roadsidePoi(seed, slot, spacing);
+  for (const slot of roadsideSlotsBetween(seed, fromS, toS)) {
+    const poi = roadsidePoi(seed, slot);
     if (poi) result.push(poi);
   }
   return result;
@@ -182,9 +177,9 @@ function inLakeBasin(seed: number, s: number, lateral: number, half: number): bo
 /**
  * Desert POIs whose slot's arclength falls in [fromS, toS).
  *
- * A desert slot sits half a spacing off the roadside grid and carries one candidate on
- * each side, each moved up to 40% of a spacing along the road so the two sides do not
- * pair up. Its arclength decides which chunk builds it, exactly as a roadside one's does.
+ * A desert slot every `spacing` carries one candidate on each side, each moved up to
+ * 40% of a spacing along the road so the two sides do not pair up. Its arclength decides
+ * which chunk builds it, exactly as a roadside one's does.
  * What this cannot know without the road's geometry is whether another pass of the road
  * runs past the spot; `PoiProvider` checks that where it has the road.
  */
@@ -192,7 +187,7 @@ export function desertPoisBetween(
   seed: number,
   fromS: number,
   toS: number,
-  spacing = POI_SPACING,
+  spacing = DESERT_SPACING_M,
 ): Poi[] {
   const result: Poi[] = [];
   // One slot either side of the range: a jittered slot can land inside it from next door.
@@ -690,15 +685,13 @@ function buildPoi(
     seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
   }
   if (layout.post) {
-    const stop = postStopsBetween(ctx.world.seed, poi.s - 1, poi.s + 1).find((candidate) => candidate.s === poi.s);
-    if (stop) {
-      const pose = spotPose(ctx.road, layout.post);
-      buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
-    }
+    const stop = postStop(ctx.world.seed, slotPost(roadsideSlotOfIndex(poi.index)));
+    const pose = spotPose(ctx.road, layout.post);
+    buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
   if (layout.shop) {
     const pose = spotPose(ctx.road, layout.shop);
-    buildVendingMachine(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, market, registeredMarket);
+    buildShop(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
   if (layout.barrels) {
     const pose = spotPose(ctx.road, layout.barrels);
@@ -736,8 +729,8 @@ export class PoiProvider implements ChunkProvider {
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
-    const spacing = POI_SPACING;
-    const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing);
+    const spacing = DESERT_SPACING_M;
+    const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
     const desert = desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing).filter(
       (poi) =>
         desertPoiClearOfRoad(poi, ctx.road, this.roadDistance) &&

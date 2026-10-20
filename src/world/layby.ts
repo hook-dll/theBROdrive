@@ -1,6 +1,6 @@
 import type { SurfaceType } from '../core/surfaces';
 import { roadConditionAt } from './gradient';
-import { POI_SPACING } from './poislots';
+import { roadsideSlotNear, roadsideSlotsBetween } from './poislots';
 import { CURVE_WIDENING_M, halfWidthAt, LANE_WIDTH } from './roadprofile';
 import {
   LAYBY_TAPER_M,
@@ -143,9 +143,7 @@ function laybyAtSlot(seed: number, slot: number): Layby | null {
 /** Every lay-by whose [sEntry, sExit] overlaps [fromS, toS). */
 export function laybysBetween(seed: number, fromS: number, toS: number): Layby[] {
   const out: Layby[] = [];
-  const first = Math.max(1, Math.floor((fromS - LAYBY_REACH_M) / POI_SPACING));
-  const last = Math.ceil((toS + LAYBY_REACH_M) / POI_SPACING);
-  for (let slot = first; slot <= last; slot++) {
+  for (const slot of roadsideSlotsBetween(seed, fromS - LAYBY_REACH_M, toS + LAYBY_REACH_M)) {
     const layby = laybyAtSlot(seed, slot);
     if (layby && layby.sExit >= fromS && layby.sEntry < toS) out.push(layby);
   }
@@ -189,13 +187,13 @@ export function shoulderPullOff(seed: number, s: number, side: 1 | -1, id: numbe
 const SHOULDER_PARK_OFF_M = 1.1;
 
 /**
- * The lay-by whose levelled ground reaches arclength `s`, or null. One rounding and one
- * comparison on the ~99% of the road nowhere near one, which is what lets the terrain
- * ask it per vertex.
+ * The lay-by whose levelled ground reaches arclength `s`, or null. A bracket lookup the
+ * terrain's runs of neighbouring vertices mostly answer from the last one
+ * (world/poststops.ts `postBracket`), which is what lets the terrain ask it per vertex.
  */
 export function laybyNear(seed: number, s: number): Layby | null {
-  const slot = Math.round(s / POI_SPACING);
-  if (slot < 1 || Math.abs(s - slot * POI_SPACING) > LAYBY_REACH_M) return null;
+  const slot = roadsideSlotNear(seed, s, LAYBY_REACH_M);
+  if (slot < 0) return null;
   const layby = laybyAtSlot(seed, slot);
   if (!layby || s < layby.sEntry - FLAT_BLEND_M || s > layby.sExit + FLAT_BLEND_M) return null;
   return layby;
@@ -264,8 +262,8 @@ export function laybyKeepsClear(
   halfWidth: number,
   margin: number,
 ): boolean {
-  const slot = Math.round(s / POI_SPACING);
-  if (slot < 1 || Math.abs(s - slot * POI_SPACING) > LAYBY_REACH_M) return false;
+  const slot = roadsideSlotNear(seed, s, LAYBY_REACH_M);
+  if (slot < 0) return false;
   const stop = roadsideStop(seed, slot);
   if (!stop) return false;
   for (const house of stop.layout.houses) {

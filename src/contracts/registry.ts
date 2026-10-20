@@ -75,11 +75,6 @@ export function contractPosting(item: ContractCargoItem, completedIds: readonly 
   return { contractId: item.party.id, completes: left === 0, left };
 }
 
-/** The line a completed delivery shows: the kind's own summary, or null for the generic one. */
-export function contractDeliveredText(item: ContractCargoItem, coins: number): string | null {
-  return contractKindDef(item.contractKind).deliveredText?.(item, coins) ?? null;
-}
-
 /** True for every declared kind id, so a saved item's kind can be validated. */
 export function isContractKind(value: unknown): value is ContractKind {
   return typeof value === 'string' && CONTRACT_KIND_IDS[value as ContractKind] === true;

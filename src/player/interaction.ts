@@ -60,13 +60,16 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
-import { coinsHeld, itemPrice, spendCoins } from '../economy/economy';
-import type { MarketField } from '../world/market';
-import { aimVending, vendingTrayPoint, type VendingAim } from '../world/vending';
+import { coinsHeld, spendCoins } from '../economy/economy';
 import type { FixtureContext, FixtureField } from '../world/fixturefield';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
+/**
+ * The reach from a machine's framing camera (player/machinefocus.ts), which stands back
+ * far enough to show the whole machine: the hand is the cursor there, not the arm.
+ */
+const FOCUS_RAY_RANGE = 4;
 /** How far in front of the eye a dropped item materialises. */
 const DROP_DISTANCE = 1.2;
 /**
@@ -155,8 +158,6 @@ type Target =
       valid: boolean;
     }
   | { kind: 'loose-part'; partId: string }
-  /** A vending machine's front; `slot` is the window slot aimed at, or -1 off the window. */
-  | { kind: 'vending'; machineId: string; slot: number }
   /** A streamed `WorldFixture` (world/fixturefield.ts), by id. */
   | { kind: 'world-fixture'; id: string };
 
@@ -363,6 +364,8 @@ export interface InteractionHooks {
   dial(pin: string, opened: () => void): void;
   /** A one-line message on the HUD. */
   toast(text: string): void;
+  /** F on a machine worked up close (`WorldFixture.focus`): frame it (player/machinefocus.ts). */
+  focus(fixtureId: string): void;
 }
 
 /** The bar action available where the player stands; see `towAction`. */
@@ -654,8 +657,8 @@ export class Interaction {
   private readonly towEyeB = { x: 0, y: 0, z: 0 };
   private readonly towEyeC = { x: 0, y: 0, z: 0 };
   private readonly towEyeD = { x: 0, y: 0, z: 0 };
-  /** Where the eye ray met a vending machine's front, reused in place; see `aimVending`. */
-  private readonly vendAim: VendingAim = { distance: 0, slot: -1 };
+  /** The machine framed up close (player/machinefocus.ts), or null. */
+  private focusedFixture: string | null = null;
   /** What a world fixture may do to the player (world/fixturefield.ts); one object, read live. */
   private readonly fixtureContext: FixtureContext = (() => {
     const self = this;
@@ -731,8 +734,6 @@ export class Interaction {
     private readonly boardable: BoardableField,
     /** Coins a race win pays for handing this contract in now; see `RivalRace.winCoins`. */
     private readonly raceCoins: (contractId: string) => number,
-    /** The vending machines and lot cars in the physics band (world/market.ts). */
-    private readonly market: MarketField,
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,
     /** What the composition root does for a fixture: the PIN dial, a HUD toast. */
@@ -740,6 +741,16 @@ export class Interaction {
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
     this.raycaster.layers.enable(KIT_PICK_LAYER);
+  }
+
+  /** The machine now framed up close, or null; set by player/machinefocus.ts. */
+  setFocusedFixture(id: string | null): void {
+    this.focusedFixture = id;
+  }
+
+  /** What a world fixture may do to the player, for the focus controller's own calls. */
+  get fixtureCtx(): FixtureContext {
+    return this.fixtureContext;
   }
 
   /**
@@ -900,10 +911,12 @@ export class Interaction {
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const aimedAt = resolved.target;
-    // F held on a world fixture (a barrel's tap, a wheel being turned).
+    // F held on a world fixture (a barrel's tap, a wheel being turned); a machine worked
+    // up close takes it only once it is framed.
     if (aimedAt.kind === 'world-fixture' && input.mountDown) {
       const fixture = this.worldFixtures.get(aimedAt.id);
-      const held = fixture?.hold?.(this.fixtureContext, dt, mountPressed) ?? null;
+      const framed = !fixture?.focus || this.focusedFixture === aimedAt.id;
+      const held = framed ? fixture?.hold?.(this.fixtureContext, dt, mountPressed) ?? null : null;
       if (held) {
         if (held.sound) this.sound = held.sound;
         if (held.continuous) this.continuous = held.continuous;
@@ -1418,10 +1431,11 @@ export class Interaction {
     // construction, but if it has not (player is null) there is no capsule to
     // exclude — the MIN_HIT_TOI guard below still catches any residual self-hit
     // rather than crashing.
+    const reach = this.focusedFixture !== null ? FOCUS_RAY_RANGE : RAY_RANGE;
     const hit = this.physics.raycast(
       { x: eyeX, y: eyeY, z: eyeZ },
       { x: dx, y: dy, z: dz },
-      RAY_RANGE,
+      reach,
       this.player?.rigidBody,
     );
     if (hit && hit.toi >= MIN_HIT_TOI) {
@@ -1454,6 +1468,7 @@ export class Interaction {
     let vehicleDist = Infinity;
     let kitHit = false;
     let kitDoor: KitDoor | null = null;
+    let forSale = false;
     const tv = this.targetVehicle();
     if (tv) {
       vehicle = tv.vehicle;
@@ -1469,8 +1484,11 @@ export class Interaction {
       // reached into through an open side door: `BOOT_RANGE` then counts from where the
       // eye ray goes in through the door's opening, as the arm does.
       const rig = vehicle.kit;
+      // A car still for sale stays locked: no door, lid, flap or compartment answers
+      // until its key is bought (world/keybox.ts); only its body is aimed, for the price.
+      forSale = this.world.state.cars[carId]?.lotPrice !== undefined;
       let inCompartment = false;
-      for (const side of ['trunk', 'bonnet'] as const) {
+      for (const side of forSale ? [] : ['trunk', 'bonnet'] as const) {
         if (lidOpen(rig, side) === false) continue;
         const door = rig && cabinLidOpen(rig, side) ? this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) : Infinity;
         const reach = BOOT_RANGE + (door < Infinity ? door : 0);
@@ -1504,12 +1522,12 @@ export class Interaction {
       // inside VEHICLE_RANGE, and the ray itself stops there (`aimKit`).
       if (rig && vehicleDist <= VEHICLE_RANGE) {
         kitHit = this.aimKit(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz, VEHICLE_RANGE, false);
-        kitDoor = this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
+        kitDoor = forSale ? null : this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
       }
 
       // The fuel flap is a target of its own while it is open (its level is read there)
       // and, shut, while a can is in hand; it wins over the body it is cut into.
-      if (rig && (this.inventory.held?.type === 'fluid_can' || rig.get('flap') > LID_OPEN)) {
+      if (rig && !forSale && (this.inventory.held?.type === 'fluid_can' || rig.get('flap') > LID_OPEN)) {
         const distance = this.fillerDistance(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
         const current = target as Target;
         const body = current.kind === 'none' || current.kind === 'car-entry' || current.kind === 'car-body';
@@ -1520,16 +1538,9 @@ export class Interaction {
       }
     }
 
-    // A vending machine's front, its window slots in it.
-    for (const machine of this.market.machineValues()) {
-      if (aimVending(machine, this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE, this.vendAim)) {
-        keep(this.vendAim.distance, { kind: 'vending', machineId: machine.id, slot: this.vendAim.slot });
-      }
-    }
-
     for (const fixture of this.worldFixtures.values()) {
-      const distance = fixture.aim(this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
-      if (distance <= RAY_RANGE) keep(distance, { kind: 'world-fixture', id: fixture.id });
+      const distance = fixture.aim(this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, reach);
+      if (distance <= reach) keep(distance, { kind: 'world-fixture', id: fixture.id });
     }
 
     // The kit aim answers only when nothing else stands nearer in the ray (a loose part,
@@ -1538,7 +1549,7 @@ export class Interaction {
     let kitSeat: PlayerSeat | null = null;
     let kitPlace = -1;
     const rig = vehicle?.kit ?? null;
-    if (kitHit && rig && vehicle) {
+    if (kitHit && rig && vehicle && !forSale) {
       const aim = this.kitAimed;
       const t = target as Target;
       const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body' || t.kind === 'filler'
@@ -2048,7 +2059,6 @@ export class Interaction {
 
     if (t.kind === 'aircraft') return '[F] board the plane';
 
-    if (t.kind === 'vending') return this.vendingPrompt(t.machineId, t.slot);
     if (t.kind === 'world-fixture') return this.worldFixtures.get(t.id)?.prompt(this.fixtureContext) ?? null;
     const lot = this.lotCarAimed(resolved);
     if (lot) {
@@ -2470,13 +2480,15 @@ export class Interaction {
       return;
     }
 
-    if (t.kind === 'vending') {
-      this.buyFromMachine(t.machineId, t.slot);
-      return;
-    }
-
     if (t.kind === 'world-fixture') {
-      this.sound = this.worldFixtures.get(t.id)?.press(this.fixtureContext) ?? null;
+      const fixture = this.worldFixtures.get(t.id);
+      // A machine worked up close is framed by the first F; from then on F (or a click)
+      // works the part under the cursor.
+      if (fixture?.focus && this.focusedFixture !== t.id) {
+        this.hooks.focus(t.id);
+        return;
+      }
+      this.sound = fixture?.press(this.fixtureContext) ?? null;
       return;
     }
 
@@ -2642,43 +2654,6 @@ export class Interaction {
     const t = resolved.target;
     const aimed = t.kind === 'car-entry' || t.kind === 'car-body' || (t.kind === 'none' && resolved.kitHit);
     return aimed ? car : null;
-  }
-
-  /** The window slot under the crosshair: what it is and what it costs here. */
-  private vendingPrompt(machineId: string, slot: number): string | null {
-    const machine = this.market.machine(machineId);
-    if (!machine) return null;
-    const coins = coinsHeld(this.world.state);
-    if (slot < 0) return `МАГАЗИН — you have ${coins} coin${coins === 1 ? '' : 's'}`;
-    const item = machine.stock[slot];
-    if (!item) return 'empty';
-    if (this.world.state.vendingSold[machine.id]?.includes(slot)) return 'sold out';
-    const price = itemPrice(item, machine.km);
-    const cost = `${price} coin${price === 1 ? '' : 's'}`;
-    const label = itemLabel(item);
-    return coins >= price
-      ? `[F] buy ${label} — ${cost}`
-      : `${label} — ${cost} · you have ${coins}`;
-  }
-
-  /**
-   * Pays for one slot and lets its goods fall into the tray as a real loose thing. The
-   * slot is recorded sold before the thing exists, so no rebuild can hand it out twice.
-   */
-  private buyFromMachine(machineId: string, slot: number): void {
-    const machine = this.market.machine(machineId);
-    const item = slot >= 0 ? machine?.stock[slot] : null;
-    if (!machine || !item || this.world.state.vendingSold[machine.id]?.includes(slot)) return;
-    if (!spendCoins(this.inventory, itemPrice(item, machine.km))) {
-      this.sound = 'refused';
-      return;
-    }
-    this.world.apply({ t: 'vend_sold', machineId: machine.id, slot });
-    this.market.sold(machine.id, slot);
-    const tray = vendingTrayPoint(machine);
-    if (item.type === 'part') this.loose.spawn(item.part, tray.x, tray.y, tray.z);
-    else this.loose.spawnItem(item, tray.x, tray.y, tray.z);
-    this.sound = 'drop';
   }
 
   private tryEnter(resolved: Resolved): void {

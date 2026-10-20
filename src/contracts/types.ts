@@ -146,6 +146,4 @@ export interface ContractKindDef {
    * one teddy per passenger. Omitted = the offer item itself.
    */
   readonly release?: (offer: ContractCargoItem) => readonly ContractCargoItem[];
-  /** The line shown when a delivery of this kind completes and pays `coins`; omitted = the generic one. */
-  readonly deliveredText?: (item: ContractCargoItem, coins: number) => string;
 }

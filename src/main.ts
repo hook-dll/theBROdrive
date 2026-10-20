@@ -47,6 +47,7 @@ import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
+import { MachineFocus } from './player/machinefocus';
 import { ContractRuntime } from './contracts/runtime';
 import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
 import type { ContractPlace } from './contracts/types';
@@ -458,7 +459,7 @@ async function boot(): Promise<void> {
   // Trailers are world objects like cars, not chunk scenery: they move, so they
   // must outlive the chunk they were found standing in.
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
-  /** The vending machines and lot cars in the physics band (world/market.ts). */
+  /** The lot cars' price signs in the physics band (world/market.ts). */
   const market = new MarketField();
   /** The streamed mechanical fixtures: post machines, barrels, key boxes (world/fixturefield.ts). */
   const fixtures = new FixtureField();
@@ -1217,7 +1218,6 @@ async function boot(): Promise<void> {
     origin,
     boardable,
     (contractId) => race.winCoins(contractId),
-    market,
     fixtures,
     {
       // The dial holds the game still, as the pause does; deferred out of the fixed step
@@ -1234,14 +1234,26 @@ async function boot(): Promise<void> {
             paused = false;
             if (result === 'opened') opened();
             loop.start();
-            void canvas.requestPointerLock().catch(() => undefined);
+            // Back to looking about, unless a machine is still being worked by the cursor.
+            if (!machineFocus.working) void canvas.requestPointerLock().catch(() => undefined);
           });
         });
       },
       toast: (text) => hud.setToast(text),
+      focus: (fixtureId) => machineFocus.enter(fixtureId),
     },
   );
   interaction.attachPlayer(player);
+  /** The machine the player works up close with the cursor (player/machinefocus.ts). */
+  const machineFocus = new MachineFocus(
+    canvas,
+    input,
+    renderer.camera,
+    fixtures,
+    origin,
+    () => interaction.fixtureCtx,
+    (fixtureId) => interaction.setFocusedFixture(fixtureId),
+  );
 
   const saveName = (state: typeof world.state): string => {
     const label = carModel(Object.values(state.cars)[0]?.modelId ?? DEFAULT_CAR_MODEL_ID).label;
@@ -1584,6 +1596,9 @@ async function boot(): Promise<void> {
       // naturally without leaving any player control alive.
       Object.assign(f, deathInput);
     }
+    // A machine worked up close: the player stands, a click is F, a drag turns its crank.
+    const focusSound = machineFocus.tick(f, world.state.player.drivingCarId !== null);
+    if (focusSound) audio.foley(focusSound);
     lastInput = f;
     lookYawAccum += f.lookYaw;
     lookPitchAccum += f.lookPitch;
@@ -2004,7 +2019,8 @@ async function boot(): Promise<void> {
     }
 
     const eye = camera.eyePosition;
-    const dir = camera.eyeDirection;
+    // Working a machine, the cursor's ray picks; otherwise the eyes'.
+    const dir = machineFocus.ray() ?? camera.eyeDirection;
     // A police stop waiting for the papers takes the [F] before the world does.
     if (police.awaitingPapers && (f.mount || f.interact) && !medicineActive) {
       police.handOver();
@@ -2023,9 +2039,11 @@ async function boot(): Promise<void> {
       activeS,
       camera.mode === 'cabin',
     );
-    prompt = police.prompt ?? interacted.prompt;
-    actionable = interacted.actionable;
+    // Working a machine up close nothing is written on the screen: the machine is the text.
+    prompt = machineFocus.working ? null : police.prompt ?? interacted.prompt;
+    actionable = !machineFocus.working && interacted.actionable;
     boot = interacted.boot;
+    machineFocus.updateCursor();
     if (interacted.board && story === null && !dying) {
       // Boarding is an ending: a reload from here on must land on the title screen, not
       // resume beside a plane that has already gone.
@@ -2444,6 +2462,8 @@ async function boot(): Promise<void> {
       }
     } else {
       camera.update(frameDt, cameraInput, target, driving === null);
+      // Stepping up to a machine, or back from it: the view eases between the two.
+      machineFocus.updateCamera(frameDt, camera);
     }
     if (dying && camera.deathComplete && !deathReloadScheduled) {
       deathReloadScheduled = true;
@@ -2907,7 +2927,8 @@ async function boot(): Promise<void> {
             : held?.type === 'pocket_watch'
               ? true
               : lastInput.usePrimary;
-    heldView.update(story !== null ? null : held, camera.mode, frameDt, {
+    // Both hands are on a machine worked up close: what they held is out of the frame.
+    heldView.update(story !== null || machineFocus.active ? null : held, camera.mode, frameDt, {
       usePrimary: heldUse,
       moveMag: Math.min(1, Math.hypot(lastInput.moveX, lastInput.moveZ)),
       speedKmh: target.speedKmh,
@@ -2994,8 +3015,10 @@ async function boot(): Promise<void> {
       loop,
       mirageSchedule,
       postAt: (index: number) => postStop(world.seed, index),
-      // The vending machines and lot signs in the physics band (world/market.ts).
+      // The lot signs in the physics band (world/market.ts), and the machine being
+      // worked up close (player/machinefocus.ts).
       market,
+      machineFocus,
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
       mirrors: carMirrors,
       // `farCars.enabled = false` draws every traffic car in full, for the A/B; `stats`
@@ -3149,6 +3172,7 @@ async function boot(): Promise<void> {
     flipVehicle: devTools?.flipVehicle,
     seatInNearestCar: devTools?.seatInNearestCar,
     jumpToLake: devTools?.jumpToLake,
+    giveCoins: devTools?.giveCoins,
   };
 
   /**

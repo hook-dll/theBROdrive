@@ -1,6 +1,6 @@
 /**
- * The money of the drive: what a delivery pays, what a thing costs, which work the
- * player is licensed for and how many contracts a car carries.
+ * The money of the drive: what a delivery pays, what a thing costs and how many
+ * contracts a car carries.
  *
  * The coin item (`CoinItem`, items/items.ts) is the currency and the pack is the
  * purse: coins stack into one pile there, and `Inventory.spendCoins` takes from it.
@@ -200,54 +200,6 @@ function itemBasePrice(item: Item): number {
 /** A car's price, coins. Flat across the road: a car is a car wherever it stands. */
 export function carPrice(modelId: string): number {
   return PRICE_TABLE.car[modelId] ?? CAR_PRICE_DEFAULT;
-}
-
-// ---------------------------------------------------------------------------
-// Licences
-// ---------------------------------------------------------------------------
-
-/** Parcels delivered before heavy crates are signed out. */
-export const HEAVY_LICENCE_PARCELS = 3;
-
-const HAUL_LICENCE_KINDS: Readonly<Partial<Record<ContractKind, true>>> = {
-  trailer_equipment: true,
-  oversize: true,
-  towing: true,
-  car_transfer: true,
-};
-
-/** Completed deliveries of one kind, from the saved ledger. */
-export function deliveriesOf(state: WorldState, kind: ContractKind): number {
-  return state.deliveriesByKind[kind] ?? 0;
-}
-
-/**
- * Whether the player may take a contract of this kind from a post. Checked when the
- * selected offer is RELEASED, not when it is shown: every post shows its four offers,
- * and the refusal says what is missing.
- *  - parcels and fragile radios: always;
- *  - heavy crates: after three parcels delivered;
- *  - hauls (trailer, oversize, tow, car transfer): after a heavy crate AND a fragile
- *    radio delivered.
- */
-export function licenceFor(state: WorldState, kind: ContractKind): { ok: boolean; reason?: string } {
-  if (kind === 'heavy_crate') {
-    const parcels = deliveriesOf(state, 'parcel');
-    if (parcels >= HEAVY_LICENCE_PARCELS) return { ok: true };
-    const left = HEAVY_LICENCE_PARCELS - parcels;
-    return {
-      ok: false,
-      reason: `no heavy-cargo licence — deliver ${left} more parcel${left === 1 ? '' : 's'} first`,
-    };
-  }
-  if (HAUL_LICENCE_KINDS[kind]) {
-    const missing: string[] = [];
-    if (deliveriesOf(state, 'heavy_crate') < 1) missing.push('a heavy crate');
-    if (deliveriesOf(state, 'fragile_radio') < 1) missing.push('a fragile radio');
-    if (missing.length === 0) return { ok: true };
-    return { ok: false, reason: `no haulage licence — deliver ${missing.join(' and ')} first` };
-  }
-  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

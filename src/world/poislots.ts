@@ -1,6 +1,5 @@
 import { hash, hash01 } from '../core/rng';
-import { GAMEPLAY_CONFIG } from '../config';
-import { isPostPoiSlot } from './poststops';
+import { POST_GAP_MIN_M, postBracket, postS } from './poststops';
 import { DWELLINGS } from './dwellings/list';
 import { ROAD_LENGTH } from './road';
 
@@ -14,21 +13,102 @@ import { ROAD_LENGTH } from './road';
  */
 
 /**
- * Metres of arclength between POI slots: 7.7 km, from `config/gameplay.json`. Not a
- * player setting any more; a slider that re-rolled every stop on the road was a debug
- * knob, and it moved `Poi.index`, which the looted flags are keyed by.
+ * THE ROADSIDE SLOTS follow the post network (world/poststops.ts): slot `2k + 1` is post
+ * stop `k`, always a settlement; slot `2k + 2` is the gap after it, where a lone house
+ * may stand when the gap is long enough to keep it `POST_GAP_MIN_M` from both
+ * settlements. So no two roadside stops are ever closer than that, the first one is the
+ * first post, and a slot's arclength comes from the seed alone.
  */
-export const POI_SPACING = GAMEPLAY_CONFIG.poiSpacingMetres;
-/** Fraction of roadside slots that contain a POI; the rest read as empty desert. */
-const POI_OCCUPANCY = 0.55;
+/** Fraction of long gaps that hold a lone house; the rest read as empty desert. */
+const LONE_OCCUPANCY = 0.55;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
 const POI_DOMAIN = 0x504f4931; // 'POI1'
 
 /**
  * Where the roadside population's identities live in `lootedPois`; see
- * `DESERT_INDEX_BASE` in world/poi.ts for why both are offset.
+ * `DESERT_INDEX_BASE` in world/poi.ts for why both are offset. Moved on from 50 000 000
+ * when the slots stopped being a fixed lattice: an index from before names another stop.
  */
-const ROADSIDE_INDEX_BASE = 50_000_000;
+const ROADSIDE_INDEX_BASE = 70_000_000;
+
+/** The post stop a slot is (or follows, for a gap slot). */
+export function slotPost(slot: number): number {
+  return (slot - 1) >> 1;
+}
+
+/** The roadside slot behind a roadside `Poi.index`. */
+export function roadsideSlotOfIndex(poiIndex: number): number {
+  return poiIndex - ROADSIDE_INDEX_BASE;
+}
+
+/** Gap-house arclengths per seed and slot, NaN for none: the terrain asks constantly. */
+const gapCache = new Map<number, Map<number, number>>();
+
+/**
+ * Arclength of roadside slot `slot`, or NaN when it is a gap too short for a house or
+ * does not roll one. Pure in (seed, slot).
+ */
+export function roadsideSlotS(seed: number, slot: number): number {
+  if (slot < 1) return NaN;
+  const k = slotPost(slot);
+  if (slot % 2 === 1) return postS(seed, k);
+  let bySlot = gapCache.get(seed);
+  if (!bySlot) {
+    bySlot = new Map();
+    gapCache.set(seed, bySlot);
+  }
+  const cached = bySlot.get(slot);
+  if (cached !== undefined) return cached;
+  const at = postS(seed, k);
+  const next = postS(seed, k + 1);
+  const room = (next - at) / 2 - POST_GAP_MIN_M;
+  const s = room < 0 || hash01(seed, POI_DOMAIN, slot) >= LONE_OCCUPANCY
+    ? NaN
+    : (at + next) / 2 + (hash01(seed, POI_DOMAIN, slot, 5) - 0.5) * 2 * room;
+  bySlot.set(slot, s);
+  return s;
+}
+
+/** Occupied roadside slots whose arclength falls in [fromS, toS), in order. */
+export function roadsideSlotsBetween(seed: number, fromS: number, toS: number): number[] {
+  const out: number[] = [];
+  // From the gap before the first post at or past `fromS`: its house may stand inside.
+  for (let k = Math.max(0, postBracket(seed, fromS).before); ; k++) {
+    if (postS(seed, k) >= toS) {
+      // The gap before this post may still hold a house inside the range.
+      const gapS = k > 0 ? roadsideSlotS(seed, 2 * k) : NaN;
+      if (gapS >= fromS && gapS < toS) out.push(2 * k);
+      break;
+    }
+    for (const slot of [2 * k, 2 * k + 1]) {
+      if (slot < 1) continue;
+      const s = roadsideSlotS(seed, slot);
+      if (s >= fromS && s < toS && s <= ROAD_LENGTH) out.push(slot);
+    }
+  }
+  return out;
+}
+
+/**
+ * The occupied roadside slot nearest arclength `s` if it is within `reach` metres, else
+ * -1. Constant work: the posts either side and the gap house between them.
+ */
+export function roadsideSlotNear(seed: number, s: number, reach: number): number {
+  const { before, after } = postBracket(seed, s);
+  let best = -1;
+  let bestD = reach;
+  const consider = (slot: number): void => {
+    const d = Math.abs(roadsideSlotS(seed, slot) - s);
+    if (d <= bestD) {
+      best = slot;
+      bestD = d;
+    }
+  };
+  if (before >= 0) consider(2 * before + 1);
+  consider(2 * after + 1);
+  if (before >= 0) consider(2 * after);
+  return best;
+}
 
 /**
  * Clear verge between the ASPHALT EDGE and a building's nearest wall, metres.
@@ -104,13 +184,11 @@ export interface RoadsideSlot {
 }
 
 /** The roadside slot's roll, or null when the slot is empty desert or off the road. */
-export function roadsideSlot(seed: number, slot: number, spacing: number): RoadsideSlot | null {
-  const s = slot * spacing;
-  if (slot < 1 || s > ROAD_LENGTH) return null;
-  // A post slot always has a building: it is a settlement with its «ПОЧТА» machine.
-  // Any other slot that does not roll one reads as empty desert.
-  const settlement = isPostPoiSlot(seed, slot, spacing);
-  if (!settlement && hash01(seed, POI_DOMAIN, slot) >= POI_OCCUPANCY) return null;
+export function roadsideSlot(seed: number, slot: number): RoadsideSlot | null {
+  const s = roadsideSlotS(seed, slot);
+  if (!(s <= ROAD_LENGTH)) return null;
+  // A post slot is a settlement with its «ПОЧТА» machine; a gap slot is one house.
+  const settlement = slot % 2 === 1;
   const structure = settlement ? rollSettlement(seed, slot) : rollStructure(seed, POI_DOMAIN, slot);
   return {
     slot,

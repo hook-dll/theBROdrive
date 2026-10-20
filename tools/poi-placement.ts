@@ -28,6 +28,7 @@ import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import {
+  DESERT_SPACING_M,
   PoiProvider,
   desertPoiClearOfRoad,
   desertPoisBetween,
@@ -38,7 +39,8 @@ import {
   type GroundRect,
 } from '../src/world/poi';
 import { MarketField } from '../src/world/market';
-import { MAST_IDS, POI_SPACING } from '../src/world/poislots';
+import { MAST_IDS, roadsideSlotOfIndex, roadsideSlotsBetween } from '../src/world/poislots';
+import { postS } from '../src/world/poststops';
 import { laybyNear, laybyOuterAt } from '../src/world/layby';
 import {
   roadsideStop,
@@ -103,11 +105,7 @@ const MAX_RESIDUAL_M = 0.6;
   let checked = 0;
   let worstVerge = Infinity;
   let tightest = '';
-  for (let index = 1; index <= 260; index++) {
-    const s = index * POI_SPACING;
-    const pois = poisBetween(SEED, s - 1, s + 1, POI_SPACING);
-    const poi = pois[0];
-    if (!poi) continue;
+  for (const poi of poisBetween(SEED, 0, 2_000_000)) {
     const def = structureDef(poi.structure);
     const halfBuilding = Math.max(def.footprint[0], def.footprint[1]) / 2;
     const edge = halfWidthAt(SEED, poi.s);
@@ -155,7 +153,7 @@ const MAX_RESIDUAL_M = 0.6;
 
   // DESERT BUILDINGS STAND OUT IN THE DESERT, clear of every pass of the road and not in
   // one another: the lateral alone cannot promise that where the road doubles back.
-  const spacing = POI_SPACING;
+  const spacing = DESERT_SPACING_M;
   const desert = desertPoisBetween(SEED, 0, 400 * spacing, spacing);
   const standing = desert.filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance));
   let nearestRoad = Infinity;
@@ -180,13 +178,9 @@ const MAX_RESIDUAL_M = 0.6;
   const seen = new Set<number>();
   let settlements = 0;
   let lone = 0;
-  for (let index = 1; index <= 4000; index++) {
-    const spacing = POI_SPACING;
-    const pois = poisBetween(SEED, index * spacing - 1, index * spacing + 1, spacing);
-    const poi = pois[0];
-    if (!poi) continue;
+  for (const poi of poisBetween(SEED, 0, 4_800_000)) {
     seen.add(poi.structure);
-    if (roadsideStop(SEED, index)?.layout.settlement) settlements++;
+    if (roadsideStop(SEED, roadsideSlotOfIndex(poi.index))?.layout.settlement) settlements++;
     else lone++;
   }
   check(
@@ -194,6 +188,24 @@ const MAX_RESIDUAL_M = 0.6;
     `only ${seen.size} of ${structureCount()} structures ever appear over 4,800 km`,
   );
   console.log(`  ${seen.size}/${structureCount()} structures reachable; ${settlements} settlements, ${lone} lone stops`);
+
+  // THE SPACING RULE: the first settlement 1-1.5 km from the house, the next three
+  // 2.5-4 km apart, every later one 2.5-8 km; no two roadside stops under 2.5 km apart.
+  for (let seed = 1; seed <= 40; seed++) {
+    const first = postS(seed, 0);
+    check(first >= 1000 && first <= 1500, `seed ${seed}: the first settlement is at ${first.toFixed(0)} m`);
+    for (let k = 1; k <= 400; k++) {
+      const gap = postS(seed, k) - postS(seed, k - 1);
+      const [lo, hi] = k <= 3 ? [2500, 4000] : [2500, 8000];
+      check(gap >= lo && gap <= hi, `seed ${seed}: settlement ${k} is ${gap.toFixed(0)} m past the last`);
+    }
+    const stops = poisBetween(seed, 0, postS(seed, 400));
+    check(stops[0]?.s === first, `seed ${seed}: the first roadside stop is not the first settlement`);
+    for (let i = 1; i < stops.length; i++) {
+      const gap = stops[i]!.s - stops[i - 1]!.s;
+      check(gap >= 2500 - 1e-6 && gap <= 8000 + 1e-6, `seed ${seed}: roadside stops ${gap.toFixed(0)} m apart at ${stops[i]!.s.toFixed(0)} m`);
+    }
+  }
 }
 
 // --- 3. the story site holds together ----------------------------------------
@@ -770,8 +782,7 @@ const MAX_RESIDUAL_M = 0.6;
     const seedRoad = new Road(seed);
     const seedTerrain = new Terrain(seed, seedRoad);
     const seedDistance = new RoadDistance(seedRoad);
-    const lastSlot = Math.floor(REACH_M / POI_SPACING);
-    for (let slot = 1; slot <= lastSlot; slot++) {
+    for (const slot of roadsideSlotsBetween(seed, 0, REACH_M)) {
       const stop = roadsideStop(seed, slot);
       if (!stop) continue;
       const { layout, roll } = stop;

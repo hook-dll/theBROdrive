@@ -931,7 +931,8 @@ export function kitCastDepthMaterial(): THREE.MeshDepthMaterial {
 
 
 // ---------------------------------------------------------------------------
-// Unified car style (`?carstyle=unified`, DEV only)
+// Unified car style (`?carstyle=unified`, DEV only). Its wheel atlas material is not:
+// every Soviet wheel set wears it (render/carmodel.ts `shareWheelMaterials`).
 // ---------------------------------------------------------------------------
 
 /**

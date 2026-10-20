@@ -26,7 +26,6 @@ import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { PoiProvider, desertPoiClearOfRoad, desertPoisBetween, poisBetween } from '../src/world/poi';
 import { MarketField } from '../src/world/market';
-import { POI_SPACING } from '../src/world/poislots';
 import { structureDef, type PoiStructureKind } from '../src/world/poistructures';
 import { RoadDistance } from '../src/world/roaddistance';
 import type { TrailerField } from '../src/vehicle/trailer';
@@ -111,10 +110,9 @@ let stops = 0;
 for (let chunk = 0; chunk < CHUNKS; chunk++) {
   const sStart = chunk * CHUNK_LENGTH;
   const sEnd = sStart + CHUNK_LENGTH;
-  const spacing = POI_SPACING;
   const pois = [
-    ...poisBetween(SEED, sStart, sEnd, spacing),
-    ...desertPoisBetween(SEED, sStart, sEnd, spacing).filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance)),
+    ...poisBetween(SEED, sStart, sEnd),
+    ...desertPoisBetween(SEED, sStart, sEnd).filter((poi) => desertPoiClearOfRoad(poi, road, roadDistance)),
   ];
   if (pois.length === 0) continue;
 

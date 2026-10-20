@@ -82,6 +82,42 @@ export interface WorldFixture {
   hold?(ctx: FixtureContext, dt: number, first: boolean): FixtureHoldResult | null;
   /** Per-frame animation (a lever swinging back, a door easing); omitted when static. */
   update?(dt: number): void;
+  /**
+   * A machine worked UP CLOSE (world/cardmachine.ts): F on it frames it in the camera
+   * and frees the cursor (player/machinefocus.ts), and from then on the cursor's ray is
+   * the eye ray `aim` is handed, a click is F, and a drag works `grab`/`drag`. Omitted
+   * for a fixture F works from where the player stands.
+   */
+  focus?(): FixtureFocus;
+  /** The machine is framed (true) or let go of (false); its prompts say "click", not F. */
+  setFocused?(focused: boolean, ctx: FixtureContext): void;
+  /**
+   * Mouse down while framed, with the cursor ray (as `aim`'s). True when a part takes
+   * the hand (a crank's knob): the drag then goes to `drag`, and the click is not a press.
+   */
+  grab?(originX: number, originZ: number, eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number): boolean;
+  /** The axle the held part turns round, ABSOLUTE metres: the drag is read round it on screen. */
+  pivot?(): { x: number; y: number; z: number };
+  /** The held part turned by `turn` radians, clockwise as the screen shows it; the sound, or null. */
+  drag?(turn: number): FoleyEvent | null;
+  /** The mouse let go of the held part; the sound it made, or null. */
+  release?(): FoleyEvent | null;
+  /** Mouse-wheel notches while framed (positive: the next card); the sound, or null. */
+  scroll?(notches: number): FoleyEvent | null;
+  /** The cursor to show over the part the last `aim` hit while framed, or null for the arrow. */
+  cursor?(): 'grab' | 'grabbing' | 'pointer' | null;
+}
+
+/** Where the camera stands to work a machine: ABSOLUTE metres and a field of view. */
+export interface FixtureFocus {
+  readonly eyeX: number;
+  readonly eyeY: number;
+  readonly eyeZ: number;
+  readonly lookX: number;
+  readonly lookY: number;
+  readonly lookZ: number;
+  /** Vertical field of view, degrees. */
+  readonly fov: number;
 }
 
 /** The fixtures live in the physics band, keyed by id. */

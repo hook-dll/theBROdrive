@@ -829,6 +829,8 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
+  /** Puts 100 coins in the pack. Dev only, absent in a production build. */
+  giveCoins?: () => void;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -2817,6 +2819,12 @@ export class MainMenu {
           let nextLake = 0;
           devButton('Jump to lake', () => {
             hooks.jumpToLake?.(nextLake++);
+            finish('resume');
+          });
+        }
+        if (import.meta.env.DEV && hooks.giveCoins) {
+          devButton('Get 100 coins', () => {
+            hooks.giveCoins?.();
             finish('resume');
           });
         }

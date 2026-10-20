@@ -1,44 +1,43 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER from '@dimforge/rapier3d-compat';
+import type { FoleyEvent } from '../audio/foley';
 import { hash01, pick } from '../core/rng';
-import { SurfaceType } from '../core/surfaces';
+import { itemPrice } from '../economy/economy';
 import type { GameWorld } from '../game/state';
-import type { Item, ShadeTint } from '../items/items';
+import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { STICKERS } from '../items/stickercatalog';
 import type { PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
+import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
+import type { FixtureContext, FixtureField } from './fixturefield';
 import type { Poi } from './poi';
 import { box, C } from './poi/kit';
-import { addStatic, yawRotation } from './props/scatter';
-import {
-  SIGN_PLANE,
-  signMaterial,
-  VENDING_COLUMNS,
-  VENDING_ROWS,
-  VENDING_SLOTS,
-  type MarketField,
-  type VendingMachine,
-} from './market';
 
 /**
- * The МАГАЗИН machines: where the small things a driver needs are bought.
+ * The SHOP machines: where the small things a driver needs are bought.
  *
- * One kind of machine, the same everywhere. Its window is four rows of three units; what
- * it holds is a pure function of the stop's seed, so the machine needs no saved stock of
- * its own: `vendingSold` records which slots were paid for, and those stay empty for
+ * A card machine (world/cardmachine.ts), the post's twin: the crank turns through a card
+ * for each thing still in it, the showcase beside the button holds the one the card
+ * names, and BUY takes its price from the coins in the pack and drops it into the
+ * tray. Short of coins, the button springs back with a rattle.
+ *
+ * What a machine holds is a pure function of the stop's seed, so it needs no saved stock
+ * of its own: `vendingSold` records which slots were paid for, and those stay empty for
  * good. A machine never restocks.
  *
  * Every machine draws from one short list (game-design2.md §8): one or two spray cans of
- * a random paint (the colour stands in the window), sun shades of a random tint, an air
+ * a random paint (the colour is on the card), sun shades of a random tint, an air
  * filter, a turbine, empty cans of 5, 10 or 20 litres, bubble gum and four or five
- * envelopes of random stickers. Not every machine has every kind, and slots past the
- * last ware stay empty. No fluid is sold: an empty can is filled at a stop's barrels
- * (world/barrels.ts) or from another can.
+ * envelopes of random stickers. Not every machine has every kind. No fluid is sold: an
+ * empty can is filled at a stop's barrels (world/barrels.ts) or from another can.
  *
  * Prices are not set here: the economy prices each item where the machine stands
  * (`itemPrice`, economy/economy.ts), so further down the road the same can costs more.
  */
+
+/** Most things one machine is stocked with. */
+const SHOP_SLOTS = 12;
 
 /** Domain tag for the vending rolls. */
 const VENDING_DOMAIN = 0x56454e32; // 'VEN2'
@@ -64,36 +63,6 @@ const PRODUCT_LOOK: Readonly<Record<Ware, { readonly colour: number; readonly si
 /** A pair of shades shows its lens colour in the window, as the item itself does. */
 const SHADE_LOOK: Readonly<Record<ShadeTint, number>> = { green: 0x416a42, yellow: 0xb78e32, red: 0x8b3934 };
 
-/** The machine's paint and its head board. */
-const BODY_COLOUR = C.fadedBlue;
-const TITLE = 'МАГАЗИН';
-
-// The cabinet, local metres: base centre at the origin, front facing -Z.
-const W = 0.9;
-const H = 1.9;
-const D = 0.75;
-const FRONT = -D / 2;
-/**
- * The window the goods stand in. The front faces local -Z, so a viewer's left is local
- * +X: the window stands on his left, the coin panel on his right, and a row fills from
- * his left (`WIN_X1` down).
- */
-const WIN_X0 = -0.16;
-const WIN_X1 = 0.4;
-const WIN_Y0 = 0.62;
-const WIN_Y1 = 1.58;
-const COL_W = (WIN_X1 - WIN_X0) / VENDING_COLUMNS;
-const ROW_H = (WIN_Y1 - WIN_Y0) / VENDING_ROWS;
-/** The tray a bought thing drops into: its ledge's centre and top, and its mouth's height. */
-const TRAY_X = 0.12;
-const TRAY_Z = FRONT - 0.1;
-const TRAY_TOP = 0.26;
-const TRAY_MOUTH_H = 0.3;
-
-/** The machine's key in `WorldState.vendingSold`. */
-export function vendingMachineId(poiIndex: number): string {
-  return `vend:${poiIndex}`;
-}
 
 function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
   const can = (capacity: number): Item => ({ type: 'fluid_can', id, fluid: null, capacity, litres: 0 });
@@ -148,9 +117,9 @@ function vendingWares(seed: number): Ware[] {
     sticker: count(22, 0.85, 4, 5),
   };
   const total = (): number => Object.values(counts).reduce((sum, n) => sum + n, 0);
-  while (total() > VENDING_SLOTS && counts.gum > 0) counts.gum--;
-  while (total() > VENDING_SLOTS && counts.cans > 1) counts.cans--;
-  while (total() > VENDING_SLOTS && counts.sticker > 4) counts.sticker--;
+  while (total() > SHOP_SLOTS && counts.gum > 0) counts.gum--;
+  while (total() > SHOP_SLOTS && counts.cans > 1) counts.cans--;
+  while (total() > SHOP_SLOTS && counts.sticker > 4) counts.sticker--;
   const wares: Ware[] = [];
   const add = (ware: Ware, n: number): void => {
     for (let i = 0; i < n; i++) wares.push(ware);
@@ -170,8 +139,8 @@ function vendingStock(
   world: GameWorld,
   poi: Poi,
 ): { readonly items: (Item | null)[]; readonly wares: (Ware | null)[] } {
-  const items = new Array<Item | null>(VENDING_SLOTS).fill(null);
-  const wares = new Array<Ware | null>(VENDING_SLOTS).fill(null);
+  const items = new Array<Item | null>(SHOP_SLOTS).fill(null);
+  const wares = new Array<Ware | null>(SHOP_SLOTS).fill(null);
   vendingWares(poi.variantSeed).forEach((ware, slot) => {
     items[slot] = makeWare(ware, world.generatedPartId('vend', poi.index, slot), poi.variantSeed, slot);
     wares[slot] = ware;
@@ -179,12 +148,32 @@ function vendingStock(
   return { items, wares };
 }
 
+const SHOP_LOOK = { title: 'SHOP', body: C.fadedBlue, buttonLabel: 'BUY', buttonColour: 0xb03a2e } as const;
+
+/** What the card says a ware is, and the colour of its band. */
+const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: string; readonly line: string }>> = {
+  spray: { band: '#8a3f6e', kind: 'PAINT', line: 'a spray can of this colour' },
+  shades: { band: '#6e5a2a', kind: 'SHADES', line: 'sun shades for the drive' },
+  air_filter: { band: '#2f4f7a', kind: 'PART', line: 'a new air filter for the engine' },
+  turbine: { band: '#2f4f7a', kind: 'PART', line: 'a standard turbine' },
+  can5: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
+  can10: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
+  can20: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
+  gum: { band: '#a2457a', kind: 'GUM', line: 'five chews — a bubble rights a car' },
+  sticker: { band: '#b0702a', kind: 'STICKER', line: 'sealed — a sticker you see once it is open' },
+};
+
+/** The showcase beside the button: a lit niche with a shelf, local metres. */
+const CASE_W = 0.28;
+const CASE_H = 0.24;
+const CASE_FRONT = -MACHINE_D / 2;
+
 /**
- * Builds a machine standing at absolute (`x`, `z`) on the sand, its front turned by `yaw`,
- * with the goods not yet sold in its window. In the physics band it is solid, its tray
- * holds what drops into it, and it joins the market's registry for the eye ray.
+ * Builds a machine standing at absolute (`x`, `z`) on the sand, its front turned by `yaw`.
+ * In the physics band it is solid and registers its fixture (id pushed to `registered`,
+ * for the chunk to forget). `disposers` gets the card materials.
  */
-export function buildVendingMachine(
+export function buildShop(
   ctx: ChunkContext,
   poi: Poi,
   x: number,
@@ -193,153 +182,133 @@ export function buildVendingMachine(
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
-  market: MarketField,
+  fixtures: FixtureField,
   registered: string[],
+  disposers: Array<() => void>,
 ): void {
-  const c = Math.cos(yaw);
-  const s = Math.sin(yaw);
-  // On the lowest of its four corners, a little sunk: upright on a slope, never on air.
-  let y = Infinity;
-  for (const [lx, lz] of [[-W / 2, FRONT], [W / 2, FRONT], [-W / 2, -FRONT], [W / 2, -FRONT]] as const) {
-    y = Math.min(y, ctx.terrain.heightAt(x + c * lx + s * lz, z - s * lx + c * lz, poi.s));
-  }
-  y -= 0.04;
-
-  const id = vendingMachineId(poi.index);
+  const parts = buildCardMachine(ctx, poi.s, x, z, yaw, SHOP_LOOK, group, bodies, colliders, disposers);
+  const id = shopId(poi.index);
   const { items, wares } = vendingStock(ctx.world, poi);
+
+  // The showcase: a frame, a pale back, a shelf, and every ware still in the machine
+  // standing on it, only the one on the card shown.
+  const root = parts.root;
+  box(root, [CASE_W + 0.04, CASE_H + 0.04, 0.05], [PANEL_X, PANEL_Y, CASE_FRONT - 0.02], C.darkMetal);
+  box(root, [CASE_W, CASE_H, 0.01], [PANEL_X, PANEL_Y, CASE_FRONT - 0.046], 0xbcb8aa);
+  const shelfY = PANEL_Y - CASE_H / 2 + 0.03;
+  box(root, [CASE_W, 0.012, 0.06], [PANEL_X, shelfY, CASE_FRONT - 0.08], C.metal);
+  const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(SHOP_SLOTS).fill(null);
   const sold = ctx.world.state.vendingSold[id] ?? [];
-
-  const root = new THREE.Group();
-  root.name = 'vending-machine';
-  root.position.set(x - ctx.originX, y, z - ctx.originZ);
-  root.rotation.y = yaw;
-  box(root, [W, H, D], [0, H / 2, 0], BODY_COLOUR);
-  box(root, [W + 0.04, 0.08, D + 0.04], [0, 0.04, 0], C.darkMetal);
-  box(root, [W + 0.04, 0.05, D + 0.04], [0, H + 0.025, 0], C.darkMetal);
-  // The window: a pale lit back, a frame and a shelf under each row.
-  box(root, [WIN_X1 - WIN_X0, WIN_Y1 - WIN_Y0, 0.02], [(WIN_X0 + WIN_X1) / 2, (WIN_Y0 + WIN_Y1) / 2, FRONT - 0.005], 0xbcb8aa);
-  const frameZ = FRONT - 0.025;
-  box(root, [WIN_X1 - WIN_X0 + 0.06, 0.03, 0.05], [(WIN_X0 + WIN_X1) / 2, WIN_Y1 + 0.015, frameZ], C.darkMetal);
-  box(root, [WIN_X1 - WIN_X0 + 0.06, 0.03, 0.05], [(WIN_X0 + WIN_X1) / 2, WIN_Y0 - 0.015, frameZ], C.darkMetal);
-  box(root, [0.03, WIN_Y1 - WIN_Y0, 0.05], [WIN_X0 - 0.015, (WIN_Y0 + WIN_Y1) / 2, frameZ], C.darkMetal);
-  box(root, [0.03, WIN_Y1 - WIN_Y0, 0.05], [WIN_X1 + 0.015, (WIN_Y0 + WIN_Y1) / 2, frameZ], C.darkMetal);
-  for (let row = 1; row < VENDING_ROWS; row++) {
-    box(root, [WIN_X1 - WIN_X0, 0.015, 0.06], [(WIN_X0 + WIN_X1) / 2, WIN_Y1 - row * ROW_H, FRONT - 0.03], C.metal);
-  }
-  // The coin panel: a slot and a column of buttons.
-  box(root, [0.17, 0.52, 0.03], [-0.29, 1.15, FRONT - 0.012], C.metal);
-  box(root, [0.035, 0.08, 0.012], [-0.29, 1.33, FRONT - 0.03], 0x111314);
-  for (let i = 0; i < 3; i++) box(root, [0.08, 0.04, 0.015], [-0.29, 1.18 - i * 0.075, FRONT - 0.03], C.darkMetal);
-  // The tray: a dark mouth tall enough for a 20 L can, and the ledge in front of it.
-  box(root, [0.5, TRAY_MOUTH_H, 0.02], [TRAY_X, TRAY_TOP + TRAY_MOUTH_H / 2, FRONT - 0.005], 0x16191a);
-  box(root, [0.5, 0.03, 0.2], [TRAY_X, TRAY_TOP - 0.015, TRAY_Z], C.darkMetal);
-  // The head board: МАГАЗИН.
-  const sign = new THREE.Mesh(SIGN_PLANE, signMaterial([TITLE], '#f1e7c8', '#26221c', 512, 128));
-  sign.scale.set(0.84, 0.21, 1);
-  sign.position.set(0, 1.74, FRONT - 0.006);
-  sign.rotation.y = Math.PI;
-  root.add(sign);
-
-  const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(VENDING_SLOTS).fill(null);
-  for (let slot = 0; slot < VENDING_SLOTS; slot++) {
+  for (let slot = 0; slot < SHOP_SLOTS; slot++) {
     const ware = wares[slot];
     const item = items[slot];
     if (!ware || !item || sold.includes(slot)) continue;
     const look = PRODUCT_LOOK[ware];
     const colour = item.type === 'spray_can' ? item.paint : item.type === 'sun_shades' ? SHADE_LOOK[item.tint] : look.colour;
-    const row = Math.floor(slot / VENDING_COLUMNS);
-    const column = slot % VENDING_COLUMNS;
-    const floor = WIN_Y1 - (row + 1) * ROW_H + 0.008;
-    products[slot] = box(
-      root,
-      look.size,
-      [WIN_X1 - (column + 0.5) * COL_W, floor + look.size[1] / 2, FRONT - 0.02 - look.size[2] / 2],
-      colour,
-    );
+    const product = box(root, look.size, [PANEL_X, shelfY + 0.006 + look.size[1] / 2, CASE_FRONT - 0.08], colour);
+    product.visible = false;
+    products[slot] = product;
   }
-  group.add(root);
 
-  if (!ctx.hasPhysics) return;
-  addStatic(
-    ctx, bodies, colliders, x, y + H / 2, z,
-    RAPIER.ColliderDesc.cuboid(W / 2, H / 2, D / 2),
-    SurfaceType.Concrete,
-    yawRotation(yaw),
-  );
-  addStatic(
-    ctx, bodies, colliders,
-    x + c * TRAY_X + s * TRAY_Z, y + TRAY_TOP - 0.015, z - s * TRAY_X + c * TRAY_Z,
-    RAPIER.ColliderDesc.cuboid(0.25, 0.015, 0.1),
-    SurfaceType.Concrete,
-    yawRotation(yaw),
-  );
-  const machine: VendingMachine = {
-    id,
-    km: poi.s / 1000,
-    x,
-    y,
-    z,
-    yaw,
-    stock: items,
-    products,
-  };
-  market.registerMachine(machine);
-  registered.push(id);
+  const machine = new ShopMachine(ctx.world, id, poi.s / 1000, items, wares, products, parts);
+  if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
-/** Where the eye ray meets a machine's front: its distance, and the window slot or -1. */
-export interface VendingAim {
-  distance: number;
-  slot: number;
+/** The machine's key in `WorldState.vendingSold`, and its fixture id. */
+function shopId(poiIndex: number): string {
+  return `vend:${poiIndex}`;
 }
 
-/**
- * Casts the eye ray (relative frame; `originX`/`originZ` the floating origin) at a
- * machine's front face. False when it misses or comes from behind; otherwise fills `out`.
- * Analytic, no allocation: the face is one plane in the machine's frame.
- */
-export function aimVending(
-  machine: VendingMachine,
-  originX: number,
-  originZ: number,
-  eyeX: number,
-  eyeY: number,
-  eyeZ: number,
-  dx: number,
-  dy: number,
-  dz: number,
-  maxDistance: number,
-  out: VendingAim,
-): boolean {
-  const c = Math.cos(machine.yaw);
-  const s = Math.sin(machine.yaw);
-  const rx = eyeX - (machine.x - originX);
-  const rz = eyeZ - (machine.z - originZ);
-  const oz = s * rx + c * rz;
-  const lz = s * dx + c * dz;
-  if (oz >= FRONT || lz <= 1e-6) return false;
-  const t = (FRONT - oz) / lz;
-  if (t > maxDistance) return false;
-  const hx = c * rx - s * rz + t * (c * dx - s * dz);
-  const hy = eyeY - machine.y + t * dy;
-  if (hx < -W / 2 || hx > W / 2 || hy < 0 || hy > H) return false;
-  out.distance = t;
-  out.slot = -1;
-  if (hx >= WIN_X0 && hx <= WIN_X1 && hy >= WIN_Y0 && hy <= WIN_Y1) {
-    const column = Math.min(VENDING_COLUMNS - 1, Math.floor((WIN_X1 - hx) / COL_W));
-    const row = Math.min(VENDING_ROWS - 1, Math.floor((WIN_Y1 - hy) / ROW_H));
-    out.slot = row * VENDING_COLUMNS + column;
+class ShopMachine extends CardMachine {
+  protected readonly title = 'SHOP';
+  /** The slots still for sale, in window order: the cards. */
+  private readonly available: number[];
+
+  constructor(
+    private readonly world: GameWorld,
+    id: string,
+    /** Kilometres from home: the price's argument. */
+    private readonly km: number,
+    private readonly items: readonly (Item | null)[],
+    private readonly wares: readonly (Ware | null)[],
+    private readonly products: readonly (THREE.Object3D | null)[],
+    parts: CardMachineParts,
+  ) {
+    super(id, parts);
+    const sold = world.state.vendingSold[id] ?? [];
+    this.available = [];
+    for (let slot = 0; slot < SHOP_SLOTS; slot++) {
+      if (items[slot] && !sold.includes(slot)) this.available.push(slot);
+    }
+    this.start();
   }
-  return true;
-}
 
-/** Where a bought thing is let fall: over the middle of the tray, ABSOLUTE metres. */
-export function vendingTrayPoint(machine: VendingMachine): { x: number; y: number; z: number } {
-  const c = Math.cos(machine.yaw);
-  const s = Math.sin(machine.yaw);
-  return {
-    x: machine.x + c * TRAY_X + s * TRAY_Z,
-    y: machine.y + TRAY_TOP + 0.2,
-    z: machine.z - s * TRAY_X + c * TRAY_Z,
-  };
+  protected cardCount(): number {
+    return this.available.length;
+  }
+
+  protected override onShown(index: number): void {
+    const showing = index >= 0 ? this.available[index] : undefined;
+    this.products.forEach((product, slot) => {
+      if (product) product.visible = slot === showing;
+    });
+  }
+
+  protected paintCard(g: CanvasRenderingContext2D, w: number, h: number, index: number): void {
+    const slot = this.available[index];
+    const item = slot === undefined ? null : this.items[slot];
+    const ware = slot === undefined ? null : this.wares[slot];
+    if (!item || !ware) {
+      paintCardFace(g, w, h, {
+        band: '#5a5a5a',
+        bandText: 'SOLD OUT',
+        corner: '',
+        headline: 'EMPTY',
+        lines: ['everything here has been bought', 'the next shop is down the road'],
+        footer: 'the machine never restocks',
+      });
+      return;
+    }
+    const card = WARE_CARD[ware];
+    const price = itemPrice(item, this.km);
+    paintCardFace(g, w, h, {
+      band: card.band,
+      bandText: card.kind,
+      corner: `${index + 1}/${this.available.length}`,
+      headline: itemLabel(item),
+      lines: [`${price} coin${price === 1 ? '' : 's'}`, card.line],
+      footer: '',
+    });
+    // The paint's own colour, as a swatch in the corner of the card.
+    const swatch = item.type === 'spray_can' ? item.paint : item.type === 'sun_shades' ? SHADE_LOOK[item.tint] : null;
+    if (swatch !== null) {
+      g.fillStyle = `#${swatch.toString(16).padStart(6, '0')}`;
+      g.fillRect(w * 0.74, h * 0.66, w * 0.2, h * 0.24);
+      g.strokeStyle = '#2a2620';
+      g.lineWidth = 3;
+      g.strokeRect(w * 0.74, h * 0.66, w * 0.2, h * 0.24);
+    }
+  }
+
+  private itemAt(index: number): { slot: number; item: Item } | null {
+    const slot = this.available[index];
+    const item = slot === undefined ? null : this.items[slot];
+    return slot === undefined || !item ? null : { slot, item };
+  }
+
+  protected pressButton(ctx: FixtureContext, index: number): FoleyEvent {
+    const at = this.itemAt(index);
+    if (!at) return this.refuse();
+    const price = itemPrice(at.item, this.km);
+    if (!ctx.spend(price)) return this.refuse();
+    this.world.apply({ t: 'vend_sold', machineId: this.id, slot: at.slot });
+    this.available.splice(index, 1);
+    const product = this.products[at.slot];
+    if (product) product.visible = false;
+    const tray = this.trayPoint(0, 1);
+    ctx.drop(at.item, tray.x, tray.y, tray.z);
+    this.swingChute(false);
+    this.cardsChanged();
+    return 'drop';
+  }
 }
