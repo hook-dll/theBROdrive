@@ -39,6 +39,25 @@ const SHOULDER_M = 2.5;
 const SHOULDER_SINK_M = 0.08;
 
 /**
+ * The runway strip's material, one for the session and never disposed. It is the road's
+ * finish with a polygon offset, and the strip's own vertex colours and UVs make it a
+ * program no other mesh uses: a per-build clone disposed with chunk 0 took that program
+ * with it, and the next build of the chunk linked it again mid-drive.
+ */
+let runwayMaterial: THREE.MeshStandardMaterial | null = null;
+function runwayStripMaterial(): THREE.MeshStandardMaterial {
+  if (!runwayMaterial) {
+    runwayMaterial = roadAsphaltMaterial().clone();
+    // The strip sits a few centimetres over the sand; the offset keeps its edge
+    // from stippling against the terrain where the two nearly meet.
+    runwayMaterial.polygonOffset = true;
+    runwayMaterial.polygonOffsetFactor = -2;
+    runwayMaterial.polygonOffsetUnits = -2;
+  }
+  return runwayMaterial;
+}
+
+/**
  * Colliders that mean "this is the plane".
  *
  * A tiny registry rather than a boolean because a handle is the only identity a
@@ -286,14 +305,7 @@ export class StartSiteProvider implements ChunkProvider {
       geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       geometry.setIndex(indices);
       geometry.computeVertexNormals();
-      const material = roadAsphaltMaterial().clone();
-      // The strip sits a few centimetres over the sand; the offset keeps its edge
-      // from stippling against the terrain where the two nearly meet.
-      material.polygonOffset = true;
-      material.polygonOffsetFactor = -2;
-      material.polygonOffsetUnits = -2;
-      mats.push(material);
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new THREE.Mesh(geometry, runwayStripMaterial());
       mesh.receiveShadow = true;
       group.add(mesh);
       geos.push(geometry);

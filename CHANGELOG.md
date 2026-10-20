@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The start site's runway strip no longer links a shader program mid-drive
+  (`src/story/sitebuild.ts`). Each build of chunk 0 cloned the road material for the strip
+  and disposed the clone with the chunk; the strip's vertex colours and UVs make a program
+  no other mesh uses, so the dispose freed it and the next build linked it again (seen as
+  program 43 freed, then 121 linked, after a jump away from the start). The strip now
+  shares one material for the session that is never disposed. Checked on New game, a jump
+  to km 14.6, a drive, a jump back to the start and away again: 0 programs freed or linked.
+
 - The «ПОЧТА» machine replaces the couriers (game-design2.md §7, §6.6; `src/world/post.ts`,
   `src/world/poststops.ts`, `src/contracts/offers.ts`, `src/world/poi.ts`).
   - The courier stop network stays as the POST network (`world/couriers.ts` →
