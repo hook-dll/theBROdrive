@@ -43,6 +43,7 @@ import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
 import { POI_SPACING, roadsideSlot, rollStructure, type PoiStock } from './poislots';
 import { laybyCourierLateral, laybyNear, laybyOuterAt, type Layby } from './layby';
+import type { FixtureField } from './fixturefield';
 
 const COURIER_MODELS = CAR_MODELS.filter((def) => def.paintStyle !== undefined);
 
@@ -1260,6 +1261,8 @@ export class PoiProvider implements ChunkProvider {
      * parking pocket takes the courier's place on the pad (dreams/dream.ts).
      */
     private readonly courierFreeStops: ReadonlySet<number>,
+    /** The streamed mechanical fixtures (world/fixturefield.ts): post, barrels, key boxes. */
+    private readonly fixtures: FixtureField,
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
@@ -1282,6 +1285,8 @@ export class PoiProvider implements ChunkProvider {
     const registeredCouriers: string[] = [];
     const registeredDancers: DancerHandle[] = [];
     const registeredMarket: string[] = [];
+    /** Ids of the world fixtures this chunk registered; forgotten with it. */
+    const registeredFixtures: string[] = [];
 
     for (const poi of [...pois, ...desert]) {
       buildPoi(
@@ -1333,6 +1338,7 @@ export class PoiProvider implements ChunkProvider {
         this.couriers.forget(registeredCouriers);
         this.dancers.forget(registeredDancers);
         this.market.forget(registeredMarket);
+        this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();
       },
     };

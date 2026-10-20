@@ -43,6 +43,7 @@ import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
 import { MarketField, marketProgramAnchor } from './world/market';
+import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
@@ -536,6 +537,8 @@ async function boot(): Promise<void> {
   const couriers = new CourierField();
   /** The vending machines and lot cars in the physics band (world/market.ts). */
   const market = new MarketField();
+  /** The streamed mechanical fixtures: post machines, barrels, key boxes (world/fixturefield.ts). */
+  const fixtures = new FixtureField();
   /** The parked plane's colliders, so the eye ray can tell the plane from scenery. */
   const boardable = new BoardableField();
   const birds = new BirdFlock(renderer.scene, road, terrain, world.seed, origin);
@@ -736,6 +739,7 @@ async function boot(): Promise<void> {
       dancers,
       market,
       dreamRouteValue ? dreamStops(dreamRouteValue) : new Set(),
+      fixtures,
     ),
   );
 
@@ -1386,6 +1390,7 @@ async function boot(): Promise<void> {
     (itemId) => race.winCoins(itemId),
     market,
     dreamTerminals,
+    fixtures,
   );
   interaction.attachPlayer(player);
 
@@ -2556,6 +2561,7 @@ async function boot(): Promise<void> {
     // rendered frame, as a driven car's do.
     wreckTrunks.syncVisuals(frameDt);
     couriers.syncVisuals(frameDt);
+    fixtures.update(frameDt);
     // The camera has moved for this frame: the ground cover's pages take their range,
     // and in the Clean style the pages whose every tuft is under a few pixels go too.
     streamer.syncLod(

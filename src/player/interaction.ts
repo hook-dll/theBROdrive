@@ -70,6 +70,7 @@ import { KIT_BENCH_NODE } from '../carkit/interior';
 import { coinsHeld, fuelPricePerLitre, itemPrice, spendCoins } from '../economy/economy';
 import type { MarketField, VendingMachine } from '../world/market';
 import { aimVending, PUMP_SLOT, vendingTrayPoint, type VendingAim } from '../world/vending';
+import type { FixtureContext, FixtureField } from '../world/fixturefield';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -166,7 +167,9 @@ type Target =
   /** A vending machine's front; `slot` is the window slot aimed at, or -1 off the window. */
   | { kind: 'vending'; machineId: string; slot: number }
   /** An `InteractionFixture`, by its index in the list the composition root gave. */
-  | { kind: 'fixture'; index: number };
+  | { kind: 'fixture'; index: number }
+  /** A streamed `WorldFixture` (world/fixturefield.ts), by id. */
+  | { kind: 'world-fixture'; id: string };
 
 /**
  * A fixed thing put in reach from outside the world catalogue — a dream's parcel
@@ -706,6 +709,23 @@ export class Interaction {
    * In memory only: a reload forgets the change, never more than one coin's worth.
    */
   private readonly pump = { machineId: '', credit: 0, litres: 0, coins: 0, dry: false };
+  /** What a world fixture may do to the player (world/fixturefield.ts); one object, read live. */
+  private readonly fixtureContext: FixtureContext = (() => {
+    const self = this;
+    return {
+      get world() { return self.world; },
+      get inventory() { return self.inventory; },
+      get held() { return self.inventory.held; },
+      coins: () => coinsHeld(self.world.state),
+      spend: (amount: number) => spendCoins(self.inventory, amount),
+      take: (item: Item) => self.inventory.add(item),
+      give: (itemId: string) => self.inventory.remove(itemId),
+      drop: (item: Item, x: number, y: number, z: number) => {
+        if (item.type === 'part') self.loose.spawn(item.part, x, y, z);
+        else self.loose.spawnItem(item, x, y, z);
+      },
+    };
+  })();
   /**
    * The delivery probe handed to contract kinds, reused in place: the prompt that
    * aims at a courier boot with a contract in hand rebuilds it every tick, and it
@@ -759,6 +779,8 @@ export class Interaction {
     private readonly market: MarketField,
     /** Fixed things in reach that are not world catalogue items; see `InteractionFixture`. */
     private readonly fixtures: readonly InteractionFixture[],
+    /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
+    private readonly worldFixtures: FixtureField,
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
     this.raycaster.layers.enable(KIT_PICK_LAYER);
@@ -931,6 +953,15 @@ export class Interaction {
     const aimedAt = resolved.target;
     if (aimedAt.kind === 'vending' && aimedAt.slot === PUMP_SLOT && (input.mountDown || input.usePrimary)) {
       this.pumpFuel(dt, aimedAt.machineId, mountPressed || primaryPressed);
+    }
+    // F held on a world fixture (a barrel's tap, a wheel being turned).
+    if (aimedAt.kind === 'world-fixture' && input.mountDown) {
+      const fixture = this.worldFixtures.get(aimedAt.id);
+      const held = fixture?.hold?.(this.fixtureContext, dt, mountPressed) ?? null;
+      if (held) {
+        if (held.sound) this.sound = held.sound;
+        if (held.continuous) this.continuous = held.continuous;
+      }
     }
     if (this.spentSponge !== null) {
       // Let go of it: dropped straight down a little ahead of the feet.
@@ -1691,6 +1722,10 @@ export class Interaction {
       const distance = this.fixtures[index]!.aim(eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
       if (distance <= RAY_RANGE) keep(distance, { kind: 'fixture', index });
     }
+    for (const fixture of this.worldFixtures.values()) {
+      const distance = fixture.aim(this.origin.x, this.origin.z, eyeX, eyeY, eyeZ, dx, dy, dz, RAY_RANGE);
+      if (distance <= RAY_RANGE) keep(distance, { kind: 'world-fixture', id: fixture.id });
+    }
 
     // The kit aim answers only when nothing else stands nearer in the ray (a loose part,
     // a trailer); the car's own entry and compartment targets never occlude it.
@@ -2284,6 +2319,7 @@ export class Interaction {
 
     if (t.kind === 'vending') return this.vendingPrompt(t.machineId, t.slot);
     if (t.kind === 'fixture') return this.fixtures[t.index]?.prompt() ?? null;
+    if (t.kind === 'world-fixture') return this.worldFixtures.get(t.id)?.prompt(this.fixtureContext) ?? null;
     const lot = this.lotCarAimed(resolved);
     if (lot) {
       const coins = coinsHeld(this.world.state);
@@ -2726,6 +2762,10 @@ export class Interaction {
 
     if (t.kind === 'fixture') {
       this.sound = this.fixtures[t.index]?.act() ?? null;
+      return;
+    }
+    if (t.kind === 'world-fixture') {
+      this.sound = this.worldFixtures.get(t.id)?.press(this.fixtureContext) ?? null;
       return;
     }
 
