@@ -1,17 +1,11 @@
 /**
- * The story site's chunk provider: the house, its yard, the airfield and the parked
- * plane, built as static scenery in chunk 0 alone.
+ * The airfield's chunk provider: the runway strip, its markings, a windsock and the
+ * parked plane, built as static scenery in the chunk that holds the runway's middle.
+ * Not streamed while `AIRFIELD` (airfield.ts) places nothing.
  *
- * It follows the homestead's own shape — a provider hard-wired to one chunk, over a
- * layout function shared with the car and item spawners (`site.ts`) — so the thing
- * the player spawns beside is the thing the provider built, and neither can drift.
- *
- * The building is a catalogue dwelling placed exactly the way `poi.ts` places every
- * other one: tilted onto its own fitted ground plane and sunk by that plane's
- * residual. The runway is a thin strip draped on `terrain.heightAt` (visual only —
- * the sand underneath is already solid), and the parked plane is a `LightPlane` with
- * one static box trimesh whose collider handle is registered in the `BoardableField`,
- * which is how `Interaction` offers boarding it.
+ * The runway is a thin strip draped on `terrain.heightAt` and collided as drawn, and the
+ * parked plane is a `LightPlane` with one static box trimesh whose collider handle is
+ * registered in the `BoardableField`, which is how `Interaction` offers boarding it.
  */
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
@@ -21,13 +15,11 @@ import { SurfaceType } from '../core/surfaces';
 import { ROAD_TILE_METRES } from '../render/roadtexture';
 import { roadAsphaltMaterial, roadAsphaltVertexColorAtStart } from '../world/roadmesh';
 import { geometryToTrimesh, poseMatrix } from '../world/poi';
-import { createStructureInstance } from '../world/poistructures';
 import type { ChunkContent, ChunkContext, ChunkProvider } from '../world/chunks';
+import { CHUNK_LENGTH } from '../world/ranges';
 import { createLightPlane } from './plane';
-import { runwaySurfaceY, storySite } from './site';
+import { runwaySurfaceY, type Airfield } from './airfield';
 
-/** Arclength the yard frame is measured from; mirrors `SITE_S` in site.ts. */
-const SITE_S = 116;
 /** Strip paint lifted this far above the draped surface so it never z-fights it. */
 const PAINT_LIFT_M = 0.012;
 /** Metres between the strip's rows along the runway: its height stations' own spacing. */
@@ -81,30 +73,6 @@ export class BoardableField {
   }
 }
 
-/** Accumulates axis-aligned boxes into one merged trimesh, as the homestead did. */
-class BoxAcc {
-  readonly verts: number[] = [];
-  readonly idx: number[] = [];
-
-  addBox(min: number[], max: number[]): void {
-    const [x0, y0, z0] = min as [number, number, number];
-    const [x1, y1, z1] = max as [number, number, number];
-    const b = this.verts.length / 3;
-    this.verts.push(
-      x0, y0, z0, x1, y0, z0, x1, y1, z0, x0, y1, z0,
-      x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
-    );
-    this.idx.push(
-      b + 4, b + 5, b + 6, b + 4, b + 6, b + 7,
-      b + 1, b + 0, b + 2, b + 0, b + 3, b + 2,
-      b + 5, b + 1, b + 6, b + 1, b + 2, b + 6,
-      b + 0, b + 4, b + 3, b + 4, b + 7, b + 3,
-      b + 2, b + 3, b + 6, b + 3, b + 7, b + 6,
-      b + 0, b + 1, b + 5, b + 0, b + 5, b + 4,
-    );
-  }
-}
-
 /** The plane's local collision boxes as one non-indexed triangle soup. */
 function boxesToGeometry(boxes: readonly (readonly [readonly number[], readonly number[]])[]): THREE.BufferGeometry {
   const verts: number[] = [];
@@ -129,15 +97,17 @@ function boxesToGeometry(boxes: readonly (readonly [readonly number[], readonly 
   return geometry;
 }
 
-export class StartSiteProvider implements ChunkProvider {
-  readonly id = 'start-site';
+export class AirfieldProvider implements ChunkProvider {
+  readonly id = 'airfield';
 
-  /** The parked plane's root, so the takeoff cutscene can hide it. */
   private planeGroup: THREE.Group | null = null;
   private planeDispose: (() => void) | null = null;
   private readonly planeHandles: number[] = [];
 
-  constructor(private readonly boardable: BoardableField) {}
+  constructor(
+    private readonly airfield: Airfield,
+    private readonly boardable: BoardableField,
+  ) {}
 
   /** Hides/shows the parked plane (the takeoff cutscene flies its own copy). */
   setParkedPlaneVisible(visible: boolean): void {
@@ -145,18 +115,17 @@ export class StartSiteProvider implements ChunkProvider {
   }
 
   build(ctx: ChunkContext): ChunkContent | null {
-    if (ctx.chunkIndex !== 0) return null;
+    if (ctx.chunkIndex !== Math.floor(this.airfield.runway.hintS / CHUNK_LENGTH)) return null;
 
-    const site = storySite(ctx.world.seed, ctx.road, ctx.terrain);
+    const site = this.airfield;
     const ox = ctx.originX;
     const oz = ctx.originZ;
     const group = new THREE.Group();
-    group.name = 'start-site';
+    group.name = 'airfield';
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const geos: THREE.BufferGeometry[] = [];
     const mats: THREE.Material[] = [];
-    const props = new BoxAcc();
 
     const mat = (
       color: number,
@@ -170,87 +139,6 @@ export class StartSiteProvider implements ChunkProvider {
       mats.push(material);
       return material;
     };
-
-    // --- The house: a catalogue dwelling, seated like every other building -----
-    const instance = createStructureInstance(site.house.structure);
-    instance.group.position.set(site.house.x - ox, site.house.seatY, site.house.z - oz);
-    instance.group.rotation.set(site.house.pitch, site.house.yaw, site.house.roll, 'YXZ');
-    instance.group.updateMatrixWorld(true);
-    group.add(instance.group);
-
-    if (ctx.hasPhysics) {
-      const matrix = poseMatrix(
-        site.house.x,
-        site.house.seatY,
-        site.house.z,
-        site.house.yaw,
-        site.house.roll,
-        site.house.pitch,
-        ox,
-        oz,
-      );
-      const trimesh = geometryToTrimesh(instance.solid, matrix);
-      if (trimesh.indices.length > 0) {
-        const collider = ctx.physics.addStaticTrimesh(trimesh.vertices, trimesh.indices, SurfaceType.Concrete);
-        colliders.push(collider);
-        const body = collider.parent();
-        if (body) bodies.push(body);
-      }
-    }
-
-    // --- Yard junk on the verge, in the house's own frame ---------------------
-    // (lx along the road, lz away from it; the front of the house is -Z.)
-    const yaw = site.house.yaw;
-    const toWorld = (lx: number, lz: number): [number, number] => [
-      site.house.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz,
-      site.house.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz,
-    ];
-    const halfX = instance.halfExtentX;
-    const halfZ = instance.halfExtentZ;
-    const drumMatA = mat(0x8b3a2a, { metalness: 0.5, roughness: 0.7 });
-    const drumMatB = mat(0x5a6b3a, { metalness: 0.5, roughness: 0.7 });
-    const tyreMat = mat(0x1a1a1a);
-    const tankMat = mat(0x6e7b6a, { metalness: 0.5, roughness: 0.7 });
-
-    const cylinder = (x: number, y: number, z: number, radius: number, height: number, material: THREE.Material): void => {
-      const geometry = new THREE.CylinderGeometry(radius, radius, height, 18);
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x - ox, y, z - oz);
-      mesh.castShadow = true;
-      group.add(mesh);
-      geos.push(geometry);
-      props.addBox([x - radius - ox, y - height / 2, z - radius - oz], [x + radius - ox, y + height / 2, z + radius - oz]);
-    };
-
-    const drumSpots: [number, number, THREE.Material][] = [
-      [halfX + 3.0, -(halfZ + 1.4), drumMatA],
-      [halfX + 3.6, -(halfZ + 1.9), drumMatB],
-      [halfX + 3.1, -(halfZ + 2.4), drumMatA],
-    ];
-    for (const [lx, lz, material] of drumSpots) {
-      const [x, z] = toWorld(lx, lz);
-      cylinder(x, ctx.terrain.heightAt(x, z, SITE_S) + 0.45, z, 0.32, 0.9, material);
-    }
-    {
-      const [x, z] = toWorld(halfX + 4.6, -(halfZ + 2.6));
-      const ground = ctx.terrain.heightAt(x, z, SITE_S);
-      for (let k = 0; k < 3; k++) cylinder(x, ground + 0.09 + k * 0.18, z, 0.35, 0.18, tyreMat);
-    }
-    {
-      const [x, z] = toWorld(-(halfX + 3.0), -(halfZ + 1.0));
-      cylinder(x, ctx.terrain.heightAt(x, z, SITE_S) + 1.1, z, 0.9, 2.2, tankMat);
-    }
-
-    if (ctx.hasPhysics && props.idx.length > 0) {
-      const collider = ctx.physics.addStaticTrimesh(
-        new Float32Array(props.verts),
-        new Uint32Array(props.idx),
-        SurfaceType.Concrete,
-      );
-      colliders.push(collider);
-      const body = collider.parent();
-      if (body) bodies.push(body);
-    }
 
     // --- The runway: a strip draped on the ground, with its markings ----------
     const runway = site.runway;

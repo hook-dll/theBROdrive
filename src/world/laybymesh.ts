@@ -144,7 +144,7 @@ export class LaybyMeshProvider implements ChunkProvider {
         widestWidth = outer - halfWidth;
         widest = r;
       }
-      roadLaneVertexColor(lane, layby.surface, s);
+      roadLaneVertexColor(lane, layby.surface);
       dust.copy(DUST_COLOUR).multiplyScalar(roadVertexColorGain());
       const mottle = 1 + MOTTLE * Math.sin(s / 9.7) * Math.sin(s / 3.3 + 1.3);
       for (let c = 0; c < COLUMNS; c++) {

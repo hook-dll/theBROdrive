@@ -14,11 +14,10 @@
  * a property of the seed, not a guarantee; over a long enough stretch every one must
  * actually appear, or some of the catalogue is content nobody will ever see.
  *
- * THE STORY SITE IS WHERE IT SAYS IT IS. The house is tilted onto its own fitted ground
- * plane at the authored setback, the player spawns on the yard OUTSIDE it, the car is
- * clear of its footprint, and the runway across the road is clear of both and carries
- * the parked plane at its threshold. Those are separate constants in separate files, and
- * nothing but this bench holds them together.
+ * THE START IS WHERE IT SAYS IT IS. A new game opens on post stop 0's lay-by: the car
+ * on the pad clear of the houses and the machines, the player on foot beside it facing
+ * the post, the finds on the pad. Those come from story/site.ts on top of a settlement
+ * the ordinary streams build, and nothing but this bench holds the two together.
  */
 
 import * as THREE from 'three';
@@ -40,7 +39,7 @@ import {
 } from '../src/world/poi';
 import { MarketField } from '../src/world/market';
 import { MAST_IDS, roadsideSlotOfIndex, roadsideSlotsBetween } from '../src/world/poislots';
-import { postS } from '../src/world/poststops';
+import { postS, START_POST_S } from '../src/world/poststops';
 import { laybyNear, laybyOuterAt } from '../src/world/layby';
 import {
   roadsideStop,
@@ -61,19 +60,11 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { createPoiVariant, mergePoiStatics } from '../src/world/poi-variants';
 import { fitGround } from '../src/world/footprint';
 import { carModelMeasure } from '../src/render/carmodel';
-import { BoardableField, StartSiteProvider } from '../src/story/sitebuild';
-import {
-  createStartingCar,
-  runwaySurfaceY,
-  spawnStartingItems,
-  storyKeepsClear,
-  storySite,
-} from '../src/story/site';
+import { createStartingCar, spawnStartingItems, storySite } from '../src/story/site';
 import { halfWidthAt } from '../src/world/roadprofile';
 import { installDocumentShim } from './domshim';
 
-// The story runway is laid in the road's own asphalt, which paints its maps on a 2D
-// canvas the first time it is asked for.
+// The road's asphalt paints its maps on a 2D canvas the first time it is asked for.
 installDocumentShim();
 
 const SEED = 1337;
@@ -91,14 +82,6 @@ const roadDistance = new RoadDistance(road);
 const MIN_VERGE_M = 10;
 /** The widest span the placement promises on top of it. */
 const MAX_VERGE_M = 22;
-/**
- * Worst residual the fitted ground plane may have before the compound's tilt is
- * hiding real terrain the plane failed to fit, not just the ordinary slope this
- * site is meant to absorb. `poi.ts`'s own catalogue measures 0.22-0.44 m across
- * every other building; this compound is larger (39 m along the road) than any of
- * them, so it is given headroom above that range rather than the same ceiling.
- */
-const MAX_RESIDUAL_M = 0.6;
 
 // --- 1. every building clears the road ---------------------------------------
 {
@@ -189,11 +172,11 @@ const MAX_RESIDUAL_M = 0.6;
   );
   console.log(`  ${seen.size}/${structureCount()} structures reachable; ${settlements} settlements, ${lone} lone stops`);
 
-  // THE SPACING RULE: the first settlement 1-1.5 km from the house, the next three
+  // THE SPACING RULE: the first settlement is the start, at `START_POST_S`, the next three
   // 2.5-4 km apart, every later one 2.5-8 km; no two roadside stops under 2.5 km apart.
   for (let seed = 1; seed <= 40; seed++) {
     const first = postS(seed, 0);
-    check(first >= 1000 && first <= 1500, `seed ${seed}: the first settlement is at ${first.toFixed(0)} m`);
+    check(first === START_POST_S, `seed ${seed}: the first settlement is at ${first.toFixed(0)} m`);
     for (let k = 1; k <= 400; k++) {
       const gap = postS(seed, k) - postS(seed, k - 1);
       const [lo, hi] = k <= 3 ? [2500, 4000] : [2500, 8000];
@@ -208,263 +191,119 @@ const MAX_RESIDUAL_M = 0.6;
   }
 }
 
-// --- 3. the story site holds together ----------------------------------------
+// --- 3. the start holds together ---------------------------------------------
 //
-// A new game opens on a random dwelling with the car and a scatter of finds beside
-// it, and an airfield across the road. Every one of those is a separate constant in
-// `src/story/site.ts`, and nothing but this bench holds them together: the house on
-// its fitted plane and the authored setback, the spawn OUTSIDE the building, the car
-// clear of it, the runway clear of the road and of the house, the plane sitting on the
-// strip, and the items on the yard rather than inside a wall.
+// A new game opens on post stop 0's lay-by. The settlement is the ordinary one; what
+// story/site.ts adds must stand in it without meeting it: the car on the pad between
+// the machines and clear of every house and service, the player beside it on the
+// ground and facing the post, and the finds on the pad, out of the car.
 {
-  const boardable = new BoardableField();
-  const provider = new StartSiteProvider(boardable);
-  const ctx = {
-    chunkIndex: 0,
-    sStart: 0,
-    sEnd: CHUNK_LENGTH,
-    road,
-    terrain,
-    world,
-    hasPhysics: false,
-    originX: 0,
-    originZ: 0,
-  } as unknown as ChunkContext;
-  const content = provider.build(ctx);
-  check(content !== null, 'the story site built nothing for chunk 0');
-
-  // World matrices first: the provider returns a detached group, so every mesh's
-  // `matrixWorld` is still identity and a bounds query would measure the site at the
-  // origin. That is exactly the kind of silently-plausible number this bench refuses.
-  content!.group.updateMatrixWorld(true);
-
-  const SITE_S = 116;
-  const site = storySite(SEED, road, terrain);
-  const spawn = site.spawn;
-  const car = createStartingCar(world, road, terrain);
-  const instance = createStructureInstance(site.house.structure);
-  const halfX = instance.halfExtentX;
-  const halfZ = instance.halfExtentZ;
-  const houseLateral = road.project(site.house.x, site.house.z, SITE_S).lateral;
-  const frontLat = houseLateral + halfZ;
-  const roadEdge = halfWidthAt(SEED, SITE_S);
-
-  // THE HOUSE BELONGS AT THE ROAD, inside the graded corridor and at the authored
-  // setback: the terrain is fitted to the road only within 30 m of it, and past that
-  // the landscape's long bands return and keep their slope.
-  check(
-    Math.abs(frontLat) < 30,
-    `the house front stands ${Math.abs(frontLat).toFixed(1)} m from the centreline, outside ` +
-      'the terrain corridor that is fitted to the road',
-  );
-  check(
-    Math.abs(frontLat) - roadEdge >= 9 - 0.05 && Math.abs(frontLat) - roadEdge <= 12 + 0.05,
-    `the house stands ${(Math.abs(frontLat) - roadEdge).toFixed(1)} m off the asphalt edge, ` +
-      'outside the authored 9-12 m setback',
-  );
-
-  // SEATED, not floating. The provider fits one plane under the footprint, tilts the
-  // building onto it and sinks it by the plane's own residual; re-fitting the same
-  // rectangle here reproduces the numbers the site itself used, so this checks the
-  // arithmetic rather than trusting it.
-  {
-    const plane = fitGround(terrain, site.house.x, site.house.z, site.house.yaw, halfX, halfZ, SITE_S, 5);
-    check(
-      plane.residual <= MAX_RESIDUAL_M,
-      `the house's fitted ground plane has a residual of ${plane.residual.toFixed(2)} m, past ` +
-        `the ${MAX_RESIDUAL_M} m this site is worth — the ground is too uneven for a building ` +
-        'this size to sit on one tilt',
-    );
-    const seatY = plane.centreY - plane.residual - 0.08;
-    check(
-      Math.abs(site.house.seatY - seatY) < 1e-6,
-      `the house is seated at y=${site.house.seatY.toFixed(3)} where the fitted plane puts it at ` +
-        `${seatY.toFixed(3)}`,
-    );
-    console.log(
-      `  story house ${structureDef(site.house.structure).id}: ${halfX.toFixed(1)}x${halfZ.toFixed(1)} m ` +
-        `half extents, residual ${plane.residual.toFixed(2)} m, grade ${(plane.grade * 100).toFixed(1)}%`,
-    );
-  }
-
-  // The building's own bounds as the provider built it, found by the structure marker
-  // the catalogue stamps on a dwelling's group — not the whole chunk group, which now
-  // also carries the airfield.
-  const houseObject = ((): THREE.Object3D | null => {
-    let found: THREE.Object3D | null = null;
-    content!.group.traverse((object) => {
-      if (object.userData.poiStructure === structureDef(site.house.structure).id) found = object;
-    });
-    return found;
-  })();
-  check(houseObject !== null, 'the story site did not place the chosen dwelling');
-  const houseBox = new THREE.Box3().setFromObject(houseObject as THREE.Object3D);
-  check(houseBox.containsPoint(new THREE.Vector3(site.house.x, site.house.seatY + 0.5, site.house.z)),
-    'the placed dwelling is not where the site says it is');
-
-  // Clearances are measured in the HOUSE'S OWN frame, not in a world-axis bounding
-  // box: the building is yawed with a small hash wobble, so its AABB's nearest face is
-  // a corner a metre nearer the road than the front wall, and a car correctly parked
-  // beside the wall would read as overlapping it.
-  const houseLocal = (x: number, z: number): [number, number] => {
-    const cos = Math.cos(site.house.yaw);
-    const sin = Math.sin(site.house.yaw);
-    const dx = x - site.house.x;
-    const dz = z - site.house.z;
-    return [dx * cos - dz * sin, dx * sin + dz * cos];
+  const inRect = (r: GroundRect, x: number, z: number, margin: number): boolean => {
+    const c = Math.cos(r.yaw);
+    const s = Math.sin(r.yaw);
+    const lx = c * (x - r.x) - s * (z - r.z);
+    const lz = s * (x - r.x) + c * (z - r.z);
+    return Math.abs(lx) < r.halfX + margin && Math.abs(lz) < r.halfZ + margin;
   };
+  for (let seed = 1; seed <= 12; seed++) {
+    const seedRoad = seed === SEED ? road : new Road(seed);
+    const seedTerrain = seed === SEED ? terrain : new Terrain(seed, seedRoad);
+    const seedWorld = seed === SEED ? world : new GameWorld(newWorldState(seed));
+    const site = storySite(seed, seedRoad, seedTerrain);
+    const { spawn, layby } = site;
+    const stop = roadsideStop(seed, 1);
+    check(stop !== null && stop.layout.settlement, `seed ${seed}: the start is not a settlement`);
+    if (!stop) continue;
+    const where = `seed ${seed} start`;
+    check(Math.abs(layby.s - START_POST_S) < 1e-6, `${where}: the lay-by is at ${layby.s.toFixed(0)} m`);
 
-  // The spawn is a FEET position OUTSIDE the building (the old homestead spawned
-  // inside its garage; this house has no interior), above the sand and not metres
-  // above it.
-  const [, spawnLocalZ] = houseLocal(spawn.x, spawn.z);
-  check(
-    spawnLocalZ < -halfZ - 0.3,
-    `the player spawns ${spawnLocalZ.toFixed(2)} m along the house's depth, inside its footprint`,
-  );
-  const groundAtSpawn = terrain.heightAt(spawn.x, spawn.z, SITE_S);
-  check(spawn.y > groundAtSpawn, `the player spawns ${(groundAtSpawn - spawn.y).toFixed(2)} m below the ground`);
-  check(
-    spawn.y - groundAtSpawn < 0.5,
-    `the player spawns ${(spawn.y - groundAtSpawn).toFixed(2)} m above the ground`,
-  );
-  check(Number.isFinite(spawn.x) && Number.isFinite(spawn.z), 'the spawn position is not a number');
-
-  // The car stands clear of the building's footprint, on the ground. It is parked
-  // along the runout, so its extent across the house's own depth is its half WIDTH.
-  const measure = carModelMeasure(car.modelId);
-  const carBox = new THREE.Box3().setFromCenterAndSize(
-    new THREE.Vector3(car.x, car.y + measure.halfExtents[1], car.z),
-    new THREE.Vector3(measure.halfExtents[0] * 2, measure.halfExtents[1] * 2, measure.halfExtents[2] * 2),
-  );
-  const [, carLocalZ] = houseLocal(car.x, car.z);
-  check(
-    carLocalZ + measure.halfExtents[0] < -halfZ - 0.2,
-    `the starter car's near flank is ${(carLocalZ + measure.halfExtents[0] + halfZ).toFixed(2)} m ` +
-      'past the house wall, overlapping the building footprint',
-  );
-  check(carBox.min.y > 0, `the car spawns below ground at y=${car.y}`);
-
-  // AND THE PLAYER FACES THE HOUSE, NOT THE PLANE. The plane is behind the shoulder
-  // deliberately; a spawn pointed at it would be the one thing the feature forbids.
-  const forwardX = Math.sin(spawn.yaw);
-  const forwardZ = Math.cos(spawn.yaw);
-  const toHouse = Math.hypot(site.house.x - spawn.x, site.house.z - spawn.z);
-  const toPlane = Math.hypot(site.plane.x - spawn.x, site.plane.z - spawn.z);
-  check(
-    (forwardX * (site.house.x - spawn.x) + forwardZ * (site.house.z - spawn.z)) / toHouse > 0.9,
-    'the player does not start facing the house',
-  );
-  check(
-    (forwardX * (site.plane.x - spawn.x) + forwardZ * (site.plane.z - spawn.z)) / toPlane < 0,
-    'the player starts pointed at the plane',
-  );
-
-  // The runway: inside the straight runout and past the terminus pad, clear of the
-  // asphalt by a verge, and on the opposite side of the road from the house.
-  const runway = site.runway;
-  const runwayStart = road.project(runway.x0, runway.z0, SITE_S);
-  const runwayEnd = road.project(
-    runway.x0 + runway.dx * runway.length,
-    runway.z0 + runway.dz * runway.length,
-    SITE_S,
-  );
-  check(runwayStart.s >= 25, `the runway starts at s=${runwayStart.s.toFixed(0)}, inside the terminus pad`);
-  check(runwayEnd.s <= 260, `the runway ends at s=${runwayEnd.s.toFixed(0)}, past the straight runout`);
-  check(
-    Math.abs(runwayStart.lateral) - runway.width / 2 >= roadEdge + 5,
-    `the runway's near edge is ${(Math.abs(runwayStart.lateral) - runway.width / 2 - roadEdge).toFixed(1)} m ` +
-      'off the asphalt edge, inside the verge',
-  );
-  check(
-    runwayStart.lateral > 0 && frontLat < 0,
-    'the runway and the house are on the same side of the road',
-  );
-  check(
-    runwayStart.lateral - runway.width / 2 - frontLat > 20,
-    `the runway's near edge and the house front are only ` +
-      `${(runwayStart.lateral - runway.width / 2 - frontLat).toFixed(1)} m apart`,
-  );
-
-  // The plane sits ON the runway: within the strip, at its start end, nose along it,
-  // wheels on the drawn surface.
-  const toPlaneX = site.plane.x - runway.x0;
-  const toPlaneZ = site.plane.z - runway.z0;
-  const planeAlong = toPlaneX * runway.dx + toPlaneZ * runway.dz;
-  const planeAcross = toPlaneX * -runway.dz + toPlaneZ * runway.dx;
-  check(planeAlong >= 0 && planeAlong <= runway.length, 'the plane is off the runway lengthwise');
-  check(Math.abs(planeAcross) <= runway.width / 2, 'the plane is off the runway sideways');
-  check(
-    planeAlong < 20,
-    `the plane parks ${planeAlong.toFixed(1)} m along the runway, not at the start end`,
-  );
-  // THE STRIP NEVER DIPS UNDER THE SAND: the sand's own chop would show through the
-  // tarmac and the rolling plane would sink into it.
-  {
-    let worst = Infinity;
-    for (let along = 0; along <= runway.length; along += 2) {
-      for (let across = -runway.width / 2; across <= runway.width / 2 + 1e-6; across += 1) {
-        const x = runway.x0 + runway.dx * along - runway.dz * across;
-        const z = runway.z0 + runway.dz * along + runway.dx * across;
-        worst = Math.min(worst, runwaySurfaceY(runway, x, z) - terrain.heightAt(x, z, runway.hintS));
-      }
+    // Everything a body could stand inside: the houses and the services.
+    const blocks: { name: string; rect: GroundRect }[] = stop.layout.houses.map((house) => ({
+      name: structureDef(house.structure).id,
+      rect: houseRect(seedRoad, house),
+    }));
+    for (const name of ['post', 'shop', 'barrels', 'lot', 'trailer'] as const) {
+      const at = stop.layout[name];
+      if (!at) continue;
+      const pose = spotPose(seedRoad, at);
+      const alongRoad = Math.abs(Math.sin(at.yaw)) < 0.5;
+      const [along, across] = SERVICE_HALF[name];
+      blocks.push({ name, rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across } });
     }
-    check(worst >= -0.02, `the runway surface dips ${(-worst).toFixed(2)} m under the sand`);
-  }
-  check(
-    Math.hypot(Math.sin(site.plane.yaw) - runway.dx, Math.cos(site.plane.yaw) - runway.dz) < 1e-6,
-    'the plane is not pointed along the runway',
-  );
+    const clearOf = (what: string, x: number, z: number, margin: number): void => {
+      for (const block of blocks) {
+        check(!inRect(block.rect, x, z, margin), `${where}: the ${what} stands in the ${block.name}`);
+      }
+    };
+    const onPad = (what: string, x: number, z: number, reachAlong: number, reachAcross: number): void => {
+      const at = seedRoad.project(x, z, layby.s);
+      const u = at.lateral * layby.side;
+      check(
+        at.s - reachAlong >= layby.sPadStart && at.s + reachAlong <= layby.sPadEnd &&
+          u - reachAcross >= layby.padInner - 0.05 && u + reachAcross <= layby.padOuter + 0.05,
+        `${where}: the ${what} is off the pad (s ${at.s.toFixed(1)}, u ${u.toFixed(2)})`,
+      );
+    };
 
-  // The starting items: 4-6 of them, on the yard and on the ground, out of the walls.
-  const spawned: { type: string; x: number; y: number; z: number }[] = [];
-  spawnStartingItems(
-    world,
-    {
-      spawnItem: (item: { type: string }, x: number, y: number, z: number) => {
-        spawned.push({ type: item.type, x, y, z });
-      },
-      spawnPart: () => {},
-      forget: () => {},
-    } as never,
-    road,
-    terrain,
-  );
-  check(
-    spawned.length >= 4 && spawned.length <= 6,
-    `the world scatters ${spawned.length} starting items, outside the authored 4-6`,
-  );
-  for (const item of spawned) {
-    const [itemLocalX, itemLocalZ] = houseLocal(item.x, item.z);
+    // The car: on the pad as a whole, on the ground, clear of houses and machines.
+    const car = createStartingCar(seedWorld, seedRoad, seedTerrain);
+    const [halfW, halfH, halfL] = carModelMeasure(car.modelId).halfExtents;
+    onPad('starter car', car.x, car.z, halfL, halfW);
+    for (const corner of [-1, 1]) {
+      const p = seedRoad.offsetPoint(layby.s + corner * halfL, layby.side * Math.abs(seedRoad.project(car.x, car.z, layby.s).lateral));
+      clearOf('starter car', p.x, p.z, halfW);
+    }
+    clearOf('starter car', car.x, car.z, halfW);
+    const groundAtCar = seedTerrain.heightAt(car.x, car.z, layby.s);
+    check(car.y > groundAtCar && car.y - groundAtCar < 1, `${where}: the car is ${(car.y - groundAtCar).toFixed(2)} m off the ground`);
+    check(halfH > 0, `${where}: the car has no height`);
+
+    // The player: on the ground beside the car, out of it, facing the post.
+    onPad('player', spawn.x, spawn.z, 0, 0);
+    clearOf('player', spawn.x, spawn.z, 0.3);
+    const carLocal = seedRoad.project(car.x, car.z, layby.s);
+    const spawnLocal = seedRoad.project(spawn.x, spawn.z, layby.s);
     check(
-      Math.abs(itemLocalZ) > halfZ + 0.35 || Math.abs(itemLocalX) > halfX + 0.35,
-      `the starting ${item.type} stands inside the house footprint`,
+      Math.abs(spawnLocal.lateral - carLocal.lateral) > halfW + 0.4 || Math.abs(spawnLocal.s - carLocal.s) > halfL + 0.4,
+      `${where}: the player spawns inside the car`,
     );
-    const ground = terrain.heightAt(item.x, item.z, SITE_S);
+    const groundAtSpawn = seedTerrain.heightAt(spawn.x, spawn.z, layby.s);
+    check(spawn.y > groundAtSpawn && spawn.y - groundAtSpawn < 0.5, `${where}: the player spawns ${(spawn.y - groundAtSpawn).toFixed(2)} m off the ground`);
+    const post = spotPose(seedRoad, stop.layout.post!);
+    const toPost = Math.hypot(post.x - spawn.x, post.z - spawn.z);
     check(
-      item.y > ground - 0.05 && item.y - ground < 1.5,
-      `the starting ${item.type} is ${(item.y - ground).toFixed(2)} m off the ground`,
+      (Math.sin(spawn.yaw) * (post.x - spawn.x) + Math.cos(spawn.yaw) * (post.z - spawn.z)) / toPost > 0.99,
+      `${where}: the player does not start facing the post`,
     );
+
+    // The finds: 2-4, on the pad, out of the car, on the ground.
+    const spawned: { type: string; x: number; y: number; z: number }[] = [];
+    spawnStartingItems(
+      seedWorld,
+      {
+        spawnItem: (item: { type: string }, x: number, y: number, z: number) => {
+          spawned.push({ type: item.type, x, y, z });
+        },
+        spawnPart: () => {},
+        forget: () => {},
+      } as never,
+      seedRoad,
+      seedTerrain,
+    );
+    check(spawned.length >= 2 && spawned.length <= 4, `${where}: ${spawned.length} starting items, outside the authored 2-4`);
+    for (const item of spawned) {
+      onPad(`starting ${item.type}`, item.x, item.z, 0, 0);
+      clearOf(`starting ${item.type}`, item.x, item.z, 0.2);
+      const at = seedRoad.project(item.x, item.z, layby.s);
+      check(
+        Math.abs(at.lateral - carLocal.lateral) > halfW + 0.2 || Math.abs(at.s - carLocal.s) > halfL + 0.2,
+        `${where}: the starting ${item.type} lies inside the car`,
+      );
+      const ground = seedTerrain.heightAt(item.x, item.z, layby.s);
+      check(item.y > ground - 0.05 && item.y - ground < 1.5, `${where}: the starting ${item.type} is ${(item.y - ground).toFixed(2)} m off the ground`);
+    }
   }
-  console.log(`  the ${spawned.length} starting finds stand on the yard, clear of the house`);
-
-  // The keep-clear the scatter and ground cover consult.
-  check(storyKeepsClear(SITE_S, -20), 'the house yard is not kept clear of scatter');
-  check(storyKeepsClear(SITE_S, 26), 'the airfield is not kept clear of scatter');
-  check(!storyKeepsClear(SITE_S, 300), 'the keep-clear reaches 300 m out to one side');
-  check(!storyKeepsClear(900, 26), 'the keep-clear reaches the far end of the road');
-
-  // The plane can be hidden for the cutscene, and disposal leaves nothing behind.
-  provider.setParkedPlaneVisible(false);
-  provider.setParkedPlaneVisible(true);
-  content!.dispose?.();
-
-  console.log(
-    `  story site: house ${Math.abs(frontLat).toFixed(1)} m from the centreline ` +
-      `(edge ${roadEdge.toFixed(1)} m + ${(Math.abs(frontLat) - roadEdge).toFixed(1)} m), ` +
-      `runway ${runway.width.toFixed(1)}x${runway.length.toFixed(0)} m at ${runwayStart.lateral.toFixed(0)} m ` +
-      `lat, plane ${planeAlong.toFixed(1)} m in`,
-  );
+  console.log(`  the start: car, player and finds on stop 0's pad, clear of its houses and machines, seeds 1-12`);
 }
 
 // --- 4. placing a building fits in the streaming budget ----------------------
@@ -592,10 +431,8 @@ const MAX_RESIDUAL_M = 0.6;
   const WALK_CHUNKS = 1500;
   const walkKm = (WALK_CHUNKS * CHUNK_LENGTH) / 1000;
   const provider = new PoiProvider(
-    { spawn: () => {}, forget: () => {} } as never,
     { register: () => {}, attachLids: () => {}, forget: () => {} } as never,
     roadDistance,
-    undefined as never,
     new MarketField(),
     { register: () => {}, forget: () => {} } as never,
   );

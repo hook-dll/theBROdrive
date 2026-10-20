@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+- The asphalt is a quiet dark mat with single pale stones in it instead of a speckle
+  over the whole surface: the chip-seal detail keeps only the stones that stand well
+  proud (`DETAIL_CHIP_FROM`/`TO` in `src/render/roadtexture.ts`, binder flat), the macro
+  tile keeps a third of its own chip grain (`COURSE_CHIP_TONE`) and less contrast
+  (`ROAD_TEXTURE_CONTRAST` 2 to 1.5), and the stones fade into the mat's tone between 8
+  and 30 m (`CHIP_FADE_*` in `src/render/roadlook.ts`), the way the desert's specks are
+  only seen near. Pours, bleaching, patches, seals, wheel tracks and the oil strip are
+  unchanged. Gravel lanes take the same detail. Compared in the road lab
+  (`/?road-lab&pick=paint|gravel|worst`) at noon.
+
+- The start is an ordinary settlement: post stop 0 stands at `START_POST_S` = 500 m
+  (`src/world/poststops.ts`), half a kilometre up from the turning circle, with its
+  houses, lay-by, POST and SHOP like every other stop, so the first contract is at the
+  start. A new game parks the Oka on the lay-by's parking line at the stop, between the
+  machines and clear of the places traffic parks, puts the player on foot beside it
+  facing the post, and lays the 2-4 keepsakes on the pad (`src/story/site.ts`). The
+  next stops follow at 2.5-4 km. The story house, its yard junk, the airfield and the
+  parked plane are gone from the world, and with them `storyKeepsClear`. The runway and
+  plane are kept, unplaced: `src/story/airfield.ts` (`AIRFIELD = null`, `airfieldAt`,
+  `runwaySurfaceY`) and `AirfieldProvider` (`src/story/sitebuild.ts`); main streams it
+  and wires boarding to the takeoff and the ending only when one is placed, so the
+  ending is unreachable for now. An old save keeps its car and position, but every
+  settlement has moved 0.5-1 km nearer the start. `tools/poi-placement.ts`
+  checks the new start over seeds 1-12 (and builds `PoiProvider` with its current
+  arguments again).
+
+- A new game is clear: no haze, wind, dust or storm until the player has first driven
+  15 km past the start, post stop 0 (`CLEAR_START_M`, `weatherBeginS` in
+  `src/world/weather.ts`). The weather schedule's clock starts at that moment
+  (`WorldState.weatherFromS`, the played second it began, set once by the `weather_begin`
+  delta), so the first episode ramps in from its start instead of being joined halfway.
+  From then on it rotates as before: ten-minute slots, one in four clear, the rest an
+  episode filling 50-80% of its slot (heat 21% of slots, haze and wind 15% each, storm 13%,
+  haboob 11%). An old save without the field keeps its schedule from zero if its furthest
+  point is already past the gate, and starts clear otherwise. `__bro.weather.force` works
+  before the gate too. The aero and autopilot benches stay on the schedule from zero.
+
+- The road looks the same on every kilometre: gravel lanes, dust on worn asphalt, hole
+  floors, the graded windrow and ghost lines on gravel use one fixed gravel colour
+  (`ROAD_GRAVEL_LINEAR` in `src/world/roadmesh.ts`, the opening palette's `#9c7652`)
+  instead of the regional desert palette, which ran from near-black on basalt to pink.
+  Lay-bys follow (`roadLaneVertexColor` lost its `s`).
+
+- The postcard from home is gone: a new game starts with the coins only. The item, its
+  two painted faces, the read/flip view and the dev spawn entry are removed, and with
+  them `src/i18n/` (its note was the only translated string, so `?lang=` is gone too).
+  An old save's postcard, or the `letter` before it, is dropped on load
+  (`isRemovedLegacyItem`).
+
 - POI spacing: the first settlement (post, shop, sometimes a car for sale) stands 1-1.5 km
   from the house, the next three 2.5-4 km apart, every later one 2.5-8 km
   (`src/world/poststops.ts`). Roadside slots now follow the post network

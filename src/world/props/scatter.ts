@@ -17,7 +17,6 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
 import { ROAD_HALF_WIDTH } from '../road';
-import { storyKeepsClear } from '../../story/site';
 import { laybyKeepsClear } from '../layby';
 import { mesaFieldOf } from '../mesas';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
@@ -340,10 +339,6 @@ export class ScatterProvider implements ChunkProvider {
           // Jitter within the cell, then re-check the corridor/max bounds.
           const s = centreS + (hash01(seed, TAG_SCATTER, cs, cl, 1) - 0.5) * CELL_S;
           const lateral = centreL + (hash01(seed, TAG_SCATTER, cs, cl, 2) - 0.5) * CELL_L;
-          // The story house yard and the airfield are kept clear: a cactus through
-          // the runway or a boulder on the car's spot is the one patch of desert the
-          // player always sees, so it is authored rather than scattered.
-          if (storyKeepsClear(s, lateral)) break cell;
           const absLateral = Math.abs(lateral);
           if (absLateral < MIN_LAT || absLateral > MAX_LAT) break cell;
           // The exact near edge, now that `s` is known. `MIN_LAT` above is the cheap
@@ -433,9 +428,8 @@ export class ScatterProvider implements ChunkProvider {
     if (ctx.hasPhysics && groundCoverActive()) {
       const covers = groundCoverForms();
       // One plant, from its own rolls: the same keep-clears as the scatter (no tufts
-      // through a yard, a strip or a lay-by), and none on rock.
+      // through a lay-by), and none on rock.
       const place = (s: number, lateral: number, id: number, formRoll: number, scaleRoll: number, yaw: number): void => {
-        if (storyKeepsClear(s, lateral)) return;
         if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) return;
         const p = ctx.road.offsetPoint(s, lateral);
         if (mesas.blocks(p.x, p.z, MESA_SCATTER_CLEARANCE_M)) return;

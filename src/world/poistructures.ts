@@ -8,8 +8,7 @@ import { MAST_IDS } from './poislots';
 
 /**
  * Every building the world scatters: the two masts built from the POI kit, then the
- * fifty exterior-only dwellings. The story house is one of these dwellings, placed on its
- * own by src/story/sitebuild.ts rather than by the road's POI stream.
+ * fifty exterior-only dwellings.
  *
  * Both kinds come out as the same `VariantInstance`, so placement, colliders and loot
  * never ask which kind they are standing next to.

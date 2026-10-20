@@ -56,6 +56,13 @@ const TRACK_OIL = 0.4;
 /** Half-width of a seam's dark joint, metres, and how dark it goes. */
 const SEAM_JOINT_HALF = 0.03;
 const SEAM_JOINT_DARKEN = 0.35;
+/**
+ * The chips are near detail: whole stones under the car, gone into the mat's flat tone
+ * by this far, metres — the way the desert's specks are only seen near. A sparse pale
+ * stone further out is a pixel that sparkles as the car moves.
+ */
+const CHIP_FADE_FROM_M = 8;
+const CHIP_FADE_TO_M = 30;
 
 /** Per-vertex values that switch every feature off, for geometries that carry none. */
 export const ROAD_LOOK_DEFAULTS: Readonly<Record<string, readonly number[]>> = {
@@ -115,7 +122,8 @@ const SURFACE_FRAGMENT = `
 	if ( cleanStyle.z <= 0.0 ) {
 		vec3 roadChips = texture2D( roadDetail, vMapUv * ${f(ROAD_DETAIL_REPEAT)} ).rgb * ${f(ROAD_DETAIL_ENCODE)};
 		float roadBare = smoothstep( 0.07, 0.13, dot( sampledDiffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) );
-		diffuseColor.rgb *= mix( vec3( 1.0 ), roadChips, roadBare );
+		float roadNear = 1.0 - smoothstep( ${f(CHIP_FADE_FROM_M)}, ${f(CHIP_FADE_TO_M)}, length( vViewPosition ) );
+		diffuseColor.rgb *= mix( vec3( 1.0 ), roadChips, roadBare * roadNear );
 	}
 	#endif`;
 

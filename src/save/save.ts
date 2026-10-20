@@ -38,6 +38,7 @@ import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehi
 import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
+import { weatherBeginS } from '../world/weather';
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -605,6 +606,7 @@ export function migrateState(raw: unknown): WorldState {
     // is correct for those.
     dayIndex: Math.max(0, Math.floor(numOr(obj.dayIndex, defaults.dayIndex))),
     recordS: numOr(obj.recordS, defaults.recordS),
+    weatherFromS: migrateWeatherFromS(obj.weatherFromS, seed, numOr(obj.recordS, defaults.recordS)),
     // A save written before settings existed has no field here; sanitizeSettings
     // accepts anything (including undefined) and yields a valid Settings. Desktop
     // presentation for a missing frame height: a save's settings never reach a phone's
@@ -623,6 +625,17 @@ export function migrateState(raw: unknown): WorldState {
     vendingSold: migrateVendingSold(obj.vendingSold),
     barrelLitres: migrateBarrelLitres(obj.barrelLitres),
   };
+}
+
+/**
+ * Played second the weather schedule began. A save from before the clear start has no
+ * field: one already past the gate keeps the schedule it was driving under (from zero),
+ * any other starts on clear sky like a new game.
+ */
+function migrateWeatherFromS(value: unknown, seed: number, recordS: number): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  if (value === null) return null;
+  return recordS >= weatherBeginS(seed) ? 0 : null;
 }
 
 /**
@@ -996,12 +1009,13 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
  * with the mechanic; converting it to an unrelated item would invent progress.
  * The wrench never had an action of its own and was taken out of the loot. Diesel
  * went with every diesel engine: its cans, and any part that is no longer in the
- * catalogue (the fuel tanks too, now the body's own), are dropped.
+ * catalogue (the fuel tanks too, now the body's own), are dropped. So is the postcard
+ * from home (and the folded `letter` it replaced): the prototype's start item.
  */
 function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
   const obj = raw as Record<string, unknown>;
-  if (obj.type === 'hand_winch') return true;
+  if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter') return true;
   if (obj.type === 'tool' && obj.tool === 'wrench') return true;
   if ((obj.type === 'fluid_can' && obj.fluid === 'diesel') || (obj.type === 'fuel_can' && obj.fuel === 'diesel')) {
     return true;
@@ -1182,11 +1196,6 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'football', id: obj.id };
     case 'pocket_watch':
       return { type: 'pocket_watch', id: obj.id };
-    case 'letter':
-      // The folded note of the first story release is the same message on a card now,
-      // so an old save's sheet loads as the postcard, under its own id.
-    case 'postcard':
-      return { type: 'postcard', id: obj.id };
     case 'coin': {
       const value = Math.trunc(numOr(obj.value, 0));
       if (value < 1) throw new Error(`Save data is malformed: coin at ${where} has no value`);

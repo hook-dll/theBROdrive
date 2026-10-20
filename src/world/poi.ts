@@ -348,15 +348,11 @@ export function geometryToTrimesh(
  *
  * "Toward the road" is not the road's heading. A building sits off to one side, so the
  * direction it should face is the one that turns its front — authored as -Z — toward the
- * centreline, which is its own lateral offset reversed. The sign convention matches the
- * story house's front (`src/story/site.ts`), which faces the same way for the same reason.
- * A small hash wobble keeps a row of them from looking stamped out.
- *
- * Exported because the story house (src/story/site.ts) is oriented by the same rule. A
- * roadside stop's houses carry the same turn as a yaw relative to the road
- * (world/settlement.ts).
+ * centreline, which is its own lateral offset reversed. A small hash wobble keeps a row
+ * of them from looking stamped out. A roadside stop's houses carry the same turn as a yaw
+ * relative to the road (world/settlement.ts).
  */
-export function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
+function faceRoadYaw(heading: number, lateral: number, variantSeed: number): number {
   const outward = heading + (lateral >= 0 ? -Math.PI / 2 : Math.PI / 2);
   return outward + Math.PI + (hash01(variantSeed, 7) - 0.5) * 0.16;
 }

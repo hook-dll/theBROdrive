@@ -209,19 +209,6 @@ export interface PocketWatchItem {
 }
 
 /**
- * The card the player starts with: a printed postcard from home, its message on one
- * face and a photograph of the house by the sea on the other.
- *
- * It carries no state of its own. The words are the `postcard.message` string (i18n/strings.ts)
- * and the card is drawn from it at build time, so the item is only a reason for the
- * pack to hold a piece of card that E raises to the eye and turns over.
- */
-export interface PostcardItem {
-  readonly type: 'postcard';
-  readonly id: string;
-}
-
-/**
  * A race prize. Coins STACK: one meeting another — picked up into a pack that holds
  * one, or taken from a cell while holding one — becomes a single coin carrying the
  * sum, so `value` is what it is worth and a pile never costs more than one slot.
@@ -341,7 +328,6 @@ export type Item =
   | PhotographItem
   | FootballItem
   | PocketWatchItem
-  | PostcardItem
   | CoinItem
   | ContractCargoItem
   | StickerEnvelopeItem;
@@ -447,8 +433,6 @@ export function itemLabel(item: Item): string {
       return 'football';
     case 'pocket_watch':
       return 'pocket watch';
-    case 'postcard':
-      return 'postcard from home';
     case 'coin':
       return item.value === 1 ? 'coin' : `coin · ${item.value}`;
     case 'contract_cargo': {
@@ -509,9 +493,6 @@ export function itemMass(item: Item): number {
       return 0.43;
     case 'pocket_watch':
       return 0.12;
-    case 'postcard':
-      // One printed card, and you carry that without noticing.
-      return 0.008;
     case 'coin':
       return 0.008 * item.value;
     case 'contract_cargo':

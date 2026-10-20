@@ -7,8 +7,8 @@
  * `update(dt)` hands the eye, the look-at and the field of view back to the caller,
  * which passes them to `CameraRig.updateScripted`. The scene stays the game's.
  *
- * WHAT IT DOES NOT OWN. The runway's geometry and heights belong to the site builder
- * (`story/site.ts`): the roll follows `runwaySurfaceY`, so the tyres are on whatever
+ * WHAT IT DOES NOT OWN. The runway's geometry and heights belong to the airfield
+ * (`story/airfield.ts`): the roll follows `runwaySurfaceY`, so the tyres are on whatever
  * strip was actually drawn, and its length sizes the roll.
  *
  * THE FRAME. The site is described in ABSOLUTE metres (the road, the terrain and the
@@ -24,7 +24,7 @@ import type { PropellerVoice } from '../audio/storyaudio';
 import type { WorldOrigin } from '../world/origin';
 import type { Terrain } from '../world/terrain';
 import { createLightPlane, type LightPlane } from './plane';
-import { runwaySurfaceY, type StorySite } from './site';
+import { runwaySurfaceY, type Airfield } from './airfield';
 import type { StoryOverlay } from './overlay';
 
 /** Engine start and prop spin-up before the brakes come off, seconds. */
@@ -123,7 +123,7 @@ export class TakeoffCutscene {
   private readonly world: THREE.Object3D;
   private readonly origin: WorldOrigin;
   private readonly terrain: Terrain;
-  private readonly site: StorySite;
+  private readonly site: Airfield;
   private readonly audio: GameAudio;
   private readonly overlay: StoryOverlay;
   private readonly propeller: PropellerVoice;
@@ -165,7 +165,7 @@ export class TakeoffCutscene {
 
   constructor(opts: {
     scene: THREE.Object3D;
-    site: StorySite;
+    site: Airfield;
     terrain: Terrain;
     origin: WorldOrigin;
     audio: GameAudio;

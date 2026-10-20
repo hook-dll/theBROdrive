@@ -516,7 +516,6 @@ export type DevSpawnItemRequest =
   | { readonly type: 'camera' }
   | { readonly type: 'football' }
   | { readonly type: 'pocket_watch' }
-  | { readonly type: 'postcard' }
   | { readonly type: 'sticker_envelope'; readonly stickerKind: StickerKind };
 
 function driveLayout(rearDriveBias: number): DriveLayout {
@@ -3020,7 +3019,6 @@ export class MainMenu {
           },
           { label: 'football', detail: 'walk or sprint into it', request: { type: 'football' } },
           { label: 'pocket watch', detail: 'E wind +4 h', request: { type: 'pocket_watch' } },
-          { label: 'postcard from home', detail: 'E read · E flip · E put away', request: { type: 'postcard' } },
           { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
           { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
           { label: 'red sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'red' } },

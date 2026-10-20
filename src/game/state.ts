@@ -309,6 +309,12 @@ export interface WorldState {
   playedSeconds: number;
   /** Furthest arclength ever reached, for the personal-record monument. */
   recordS: number;
+  /**
+   * `playedSeconds` when the weather schedule began: the first time `recordS` reached
+   * `CLEAR_START_M` past the start (world/weather.ts). `null` until then, and the sky
+   * stays clear.
+   */
+  weatherFromS: number | null;
   /** Player preferences; defaulted on load so old saves keep working. */
   settings: Settings;
   player: PlayerState;
@@ -431,6 +437,8 @@ export type WorldDelta =
   | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'wearable'; shades: SunShadesItem | null }
   | { t: 'record'; s: number }
+  /** The weather schedule begins now (world/weather.ts `CLEAR_START_M`). */
+  | { t: 'weather_begin'; playedSeconds: number }
   /** A vending machine slot paid for and dispensed (world/vending.ts). */
   | { t: 'vend_sold'; machineId: string; slot: number }
   /** A barrel's tap ran into a can (world/barrels.ts): what is left in the barrel. */
@@ -461,6 +469,7 @@ export function newWorldState(seed: number): WorldState {
     playedSeconds: 0,
     dayIndex: 0,
     recordS: 0,
+    weatherFromS: null,
     settings: DEFAULT_SETTINGS,
     player: {
       x: 0,
@@ -920,6 +929,10 @@ export class GameWorld {
       case 'record':
         // Monotonic: the personal-record marker must never move backwards.
         if (delta.s > s.recordS) s.recordS = delta.s;
+        break;
+      case 'weather_begin':
+        // Once: the schedule's origin is fixed for the rest of the game.
+        if (s.weatherFromS === null) s.weatherFromS = delta.playedSeconds;
         break;
     }
 

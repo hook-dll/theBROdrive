@@ -74,6 +74,12 @@ const BASE_TONE = 190;
  */
 const COURSE_RANGE = 26;
 /**
+ * Share of `COURSE_RANGE` the macro tile's chip terraces keep. The stones are the
+ * detail map's (`paintDetail`); the macro tile's job is the pour, the bleaching, the
+ * patches and the seals, and its own chip grain on top read as noise.
+ */
+const COURSE_CHIP_TONE = 0.35;
+/**
  * Octaves of the wearing course, as (lattice cells, gain, transposed). Chosen against
  * the 2.3 cm texel: 64 cells is 16 px (37 cm) and carries how a pour was mixed, 128 is
  * 8 px (18 cm) and is the octave the chips are cut from, 256 is 4 px and 512 is 2 px —
@@ -273,7 +279,7 @@ function wearingCourse(x: number, y: number, out: { tone: number; height: number
   // the binder is aggregate, and aggregate is pale.
   const relief = RAVEL_RELIEF + (1 - RAVEL_RELIEF) * ravel;
   out.tone =
-    (chip - 0.5) * COURSE_RANGE * relief + coarse * COURSE_RANGE * 0.35 * (0.6 + 0.4 * ravel) +
+    (chip - 0.5) * COURSE_RANGE * COURSE_CHIP_TONE * relief + coarse * COURSE_RANGE * 0.35 * (0.6 + 0.4 * ravel) +
     (ravel - 0.5) * RAVEL_TONE;
   // The relief keeps little of the coarse octave: a 24 cm swell in the surface is a
   // road profile, and the road profile is already drawn by the mesh, in metres.
@@ -557,9 +563,17 @@ const CHIP_LATTICES: readonly { readonly lattice: GradientLattice; readonly gain
 const STONE_LATTICE = buildLattice(64, 0x5bd1e995, DETAIL_SIZE);
 const SPREAD_LATTICE = buildLattice(16, 0x68e31da4, DETAIL_SIZE);
 /** Relative albedos before the mean is divided out: binder, grey chip, pale chip. */
-const DETAIL_BINDER = 0.55;
-const DETAIL_GREY_CHIP = 1;
-const DETAIL_PALE_CHIP = 2.3;
+const DETAIL_BINDER = 1;
+const DETAIL_GREY_CHIP = 1.6;
+const DETAIL_PALE_CHIP = 2.6;
+/**
+ * Where the chip field stands proud enough to be a stone. Sparse on purpose: the road
+ * is a dark, quiet mat with single pale stones in it — the sand's own vocabulary of
+ * sparse specks, turned light on dark — rather than a speckle over the whole surface,
+ * which read as photographed aggregate against the flat-painted desert.
+ */
+const DETAIL_CHIP_FROM = 0.36;
+const DETAIL_CHIP_TO = 0.42;
 /** The detail map stores a third of the multiplier, so a pale chip at 2.7 still fits. */
 export const ROAD_DETAIL_ENCODE = 3;
 
@@ -577,9 +591,9 @@ function paintDetail(): HTMLCanvasElement {
       for (const octave of CHIP_LATTICES) {
         field += octave.gain * wrapPerlin(octave.lattice, x, y, octave.transposed);
       }
-      // A chip is where the field stands well proud, about a third of the surface; the
+      // A chip is where the field stands well proud, a sparse few in the binder; the
       // riser is a texel or so, the stone's rounded edge and all the sampling allows.
-      const chip = smoothstep(0.12, 0.26, field);
+      const chip = smoothstep(DETAIL_CHIP_FROM, DETAIL_CHIP_TO, field);
       const pale = smoothstep(0.15, 0.35, wrapPerlin(STONE_LATTICE, x, y, true));
       const stone = DETAIL_GREY_CHIP + (DETAIL_PALE_CHIP - DETAIL_GREY_CHIP) * pale;
       const v = DETAIL_BINDER + (stone - DETAIL_BINDER) * chip;
@@ -636,7 +650,7 @@ function meanLuminance(data: Uint8ClampedArray): number {
  * power, which puts that contrast back in the albedo, and the road as a whole is
  * darkened a little by ROAD_DISPLAY_SCALE. Matched by screenshot at noon against HEAD.
  */
-const ROAD_TEXTURE_CONTRAST = 2;
+const ROAD_TEXTURE_CONTRAST = 1.5;
 /**
  * 0.78, down from 0.85 (owner, 2026-10-16): the road is the subject and has to stand
  * off the pale sand and shoulder by its value as well as its texture, in the Clean style

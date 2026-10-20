@@ -36,7 +36,7 @@ import type { Road } from './road';
 const HOME_LAKE_S = 1_500;
 /**
  * Which side and how far out the home lake sits — far enough out that the drive to it
- * is a decision, and off the corridor the story site is authored in.
+ * is a decision, and off the corridor of the opening drive.
  */
 const HOME_LAKE_LATERAL = 620;
 

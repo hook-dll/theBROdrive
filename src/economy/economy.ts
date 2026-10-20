@@ -167,8 +167,7 @@ const CAR_PRICE_DEFAULT = 60;
 /**
  * What a МАГАЗИН machine at `km` asks for this item: its base price × the km index,
  * rounded, never under one coin. A part is priced by kind and scaled down by its
- * wear; a can by its size. Items no machine sells (the postcard, contract cargo,
- * coins) price at 0.
+ * wear; a can by its size. Items no machine sells (contract cargo, coins) price at 0.
  */
 export function itemPrice(item: Item, km: number): number {
   const base = itemBasePrice(item);

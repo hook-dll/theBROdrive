@@ -65,10 +65,9 @@ const LANE_OPEN = 0.9;
 /**
  * The first kilometre is never widened.
  *
- * The story site (`src/story/site.ts`) is authored against a two-lane road — the house
- * setback, the yard and the airfield verge all read the asphalt edge — and the runout is
- * dead straight by construction. A widening rolled onto cell 0 would put the house a
- * lane's width short of where it was placed.
+ * The start settlement (stop 0, 500 m) and the turning circle behind it lie in it, and
+ * the runout is dead straight by construction: the opening drive is the plain two-lane
+ * road the start was tuned on.
  */
 const HOME_NARROW_M = 1_000;
 

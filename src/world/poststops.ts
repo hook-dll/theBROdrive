@@ -3,8 +3,9 @@ import { ROAD_LENGTH } from './road';
 
 /**
  * THE POST NETWORK: the settlements down the road, each with its «ПОЧТА» machine
- * (world/post.ts) and its shop. Stop 0 stands 1-1.5 km from the house, so the first
- * contract is a short walk of the drive away; stops 1-3 follow at 2.5-4 km each, and
+ * (world/post.ts) and its shop. Stop 0 IS THE START: a new game opens on its lay-by
+ * (story/site.ts), `START_POST_S` up the road from the turning circle at the road's end
+ * (world/terminus.ts). Stops 1-3 follow at 2.5-4 km each, and
  * every later one at 2.5-8 km. The sequence is monotonic along the road: stop `index`
  * hands out its offers (contracts/offers.ts) and signs cargo from any lower index.
  *
@@ -15,8 +16,8 @@ import { ROAD_LENGTH } from './road';
  *
  * The draws keep the courier domain the network was born with.
  */
-const FIRST_POST_MIN_M = 1_000;
-const FIRST_POST_SPAN_M = 500;
+/** Arclength of stop 0, the start settlement: half a kilometre on from the turning circle. */
+export const START_POST_S = 500;
 /** Stops 1 to `EARLY_GAPS` follow at the short gap. */
 const EARLY_GAPS = 3;
 const EARLY_GAP_MIN_M = 2_500;
@@ -49,10 +50,10 @@ interface PostTable {
 
 const tables = new Map<number, PostTable>();
 
-/** Gap from stop `index - 1` to stop `index`; stop 0's is from the house. */
+/** Gap from stop `index - 1` to stop `index`; stop 0's is from the road's start. */
 function gapBefore(seed: number, index: number): number {
+  if (index === 0) return START_POST_S;
   const roll = hash01(seed, POST_DOMAIN, index, 0);
-  if (index === 0) return FIRST_POST_MIN_M + roll * FIRST_POST_SPAN_M;
   if (index <= EARLY_GAPS) return EARLY_GAP_MIN_M + roll * EARLY_GAP_SPAN_M;
   return GAP_MIN_M + roll * GAP_SPAN_M;
 }

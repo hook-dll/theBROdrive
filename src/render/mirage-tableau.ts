@@ -214,17 +214,16 @@ export function palmGeometry(variant = 0): THREE.BufferGeometry {
 }
 
 /** One palm-card triangle in unit-height card space, its paint as an sRGB hex. */
-export type PalmCardTriangle = (
+type PalmCardTriangle = (
   ax: number, ay: number, bx: number, by: number, cx: number, cy: number, hex: number, z: number,
 ) => void;
 
 /**
- * The palm card's triangles, `palmGeometry`'s single source: the ending's grove and the
- * postcard's picture both paint these, so the palms on the card are the palms on the
- * beach. `z` is the card-depth the geometry spreads the crown over; a flat painter
- * draws in ascending `z` to get the same front and back.
+ * The palm card's triangles, `palmGeometry`'s single source for the ending's grove. `z`
+ * is the card-depth the geometry spreads the crown over; a flat painter draws in
+ * ascending `z` to get the same front and back.
  */
-export function drawPalmCard(variant: number, triangle: PalmCardTriangle): void {
+function drawPalmCard(variant: number, triangle: PalmCardTriangle): void {
   const form = PALM_FORMS[Math.abs(Math.round(variant)) % PALM_FORMS.length]!;
   const barkLit = 0xd0a271;
   const barkShade = 0x946c45;

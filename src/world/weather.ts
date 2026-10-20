@@ -1,5 +1,6 @@
 import { hash01, hashUnit3 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
+import { postS } from './poststops';
 
 /**
  * WEATHER: the state of the air around the player, as a function of the game clock.
@@ -16,10 +17,11 @@ import { SurfaceType } from '../core/surfaces';
  * HOW IT IS SCHEDULED. The clock is cut into fixed SLOTS of `SLOT_S` seconds. Each
  * slot owns at most one EPISODE — a small authored timeline of one kind of weather,
  * with its own harbinger, peak and clearance — jittered inside the slot. That makes
- * the state a pure function of `(seed, clock)`: nothing to save, a loaded game shows
- * the weather it would have had, and any moment can be asked about in O(1). The same
- * lattice-and-jitter shape as the road's variety director (world/director.ts), for
- * the same reasons.
+ * the state a pure function of `(seed, clock)`: nothing to save but the clock's origin,
+ * a loaded game shows the weather it would have had, and any moment can be asked about
+ * in O(1). The same lattice-and-jitter shape as the road's variety director
+ * (world/director.ts), for the same reasons. The clock starts only once the player has
+ * driven `CLEAR_START_M` past the start; until then the sky is clear.
  *
  * PACE. A slot is ten minutes of play (ten game hours at the default clock). An episode
  * fills 50-80% of it, and a quarter of the slots hold none at all, so about half of a
@@ -150,6 +152,20 @@ export const FRONT_FAR_M = 9000;
 
 /** Seconds of play per slot. */
 export const WEATHER_SLOT_S = 600;
+/**
+ * Metres past the start the player must first drive before the schedule begins. A new
+ * game opens on clear sky: the first storm should be something met on the road, not the
+ * weather the start is found in. The schedule's clock starts when this is first reached
+ * (`WorldState.weatherFromS`), so its first episode ramps in rather than being joined
+ * halfway through.
+ */
+export const CLEAR_START_M = 15_000;
+
+/** Furthest arclength that begins the schedule: `CLEAR_START_M` past the start, post stop 0. */
+export function weatherBeginS(seed: number): number {
+  return postS(seed, 0) + CLEAR_START_M;
+}
+
 /** An episode fills this share of its slot. */
 const EPISODE_MIN = 0.5;
 const EPISODE_MAX = 0.8;
@@ -458,7 +474,10 @@ function clockNoise(seed: number, tag: number, x: number): number {
  * play, saved with the game — not the day clock: the day length is a player setting,
  * and weather that ran two and a half times slower on a one-hour day would be a
  * different game. `dt` is the render frame's own delta. (`atX`, `atZ`) is the
- * listener, absolute world metres: where `windMps` is sampled.
+ * listener, absolute world metres: where `windMps` is sampled. `scheduleFromS` is the
+ * played second the schedule began at (see `CLEAR_START_M`); `null` is clear sky. The
+ * schedule is read at `clockS - scheduleFromS`; gusts, lightning and a forced episode
+ * stay on `clockS`, which never jumps when the schedule begins.
  *
  * The schedule is already smooth; the only smoothing applied here is a short lag that
  * turns a clock JUMP (a dev time change, a load) into a quick fade instead of a cut.
@@ -469,6 +488,7 @@ export function updateWeather(
   dt: number,
   atX: number,
   atZ: number,
+  scheduleFromS: number | null,
 ): WeatherFrame {
   const jumped = Number.isFinite(lastClock) && Math.abs(clockS - lastClock) > 30;
   lastClock = clockS;
@@ -483,8 +503,13 @@ export function updateWeather(
     sampleEpisode(kind, p, target);
     slot = Math.floor(override.start / WEATHER_SLOT_S);
     if (override.hold === null && p >= 1) override = null;
+  } else if (scheduleFromS === null) {
+    sampleEpisode('clear', 0, target);
+    kind = 'clear';
+    progress = 0;
+    slot = 0;
   } else {
-    const at = weatherAt(seed, clockS, target);
+    const at = weatherAt(seed, clockS - scheduleFromS, target);
     kind = at.kind;
     progress = at.progress;
     slot = at.slot;

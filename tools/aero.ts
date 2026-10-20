@@ -374,7 +374,7 @@ interface GustSeries {
  * the mean wind at that speed, as a car on a road at right angles to it.
  */
 function gustSeries(seed: number, kind: 'wind' | 'haboob', hold: number, speedMps: number): GustSeries {
-  updateWeather(seed, 0, GUST_DT, 0, 0);
+  updateWeather(seed, 0, GUST_DT, 0, 0, 0);
   forceWeather(kind, hold, 1e6);
   const n = Math.round(GUST_SECONDS / GUST_DT);
   const along = new Float64Array(n);
@@ -387,7 +387,7 @@ function gustSeries(seed: number, kind: 'wind' | 'haboob', hold: number, speedMp
   // Ten seconds for the channels' fade-in, then the record.
   for (let i = -Math.round(10 / GUST_DT); i < n; i++) {
     const t = 10 + i * GUST_DT;
-    updateWeather(seed, t, GUST_DT, x, z);
+    updateWeather(seed, t, GUST_DT, x, z, 0);
     windAt(x, z, out);
     if (i >= 0) {
       along[i] = out.x * weather.windX + out.z * weather.windZ;

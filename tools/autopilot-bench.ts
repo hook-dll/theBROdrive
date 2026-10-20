@@ -199,7 +199,7 @@ const HABOOB_HOLD = 0.45;
 const blowAt = { x: 0, y: 0, z: 0 };
 function blowAcross(rig: Rig, clockS: number, s: number, side: number): void {
   const at = rig.vehicle.absoluteTranslation(blowAt);
-  updateWeather(rig.road.seed, clockS, FIXED_DT, at.x, at.z);
+  updateWeather(rig.road.seed, clockS, FIXED_DT, at.x, at.z, 0);
   const heading = rig.road.sampleAt(s).heading;
   weather.windX = -side * Math.cos(heading);
   weather.windZ = side * Math.sin(heading);
@@ -209,14 +209,14 @@ function blowAcross(rig: Rig, clockS: number, s: number, side: number): void {
 /** Still air again: a 'clear' frame, written at once (see `forceWeather`). */
 function calm(rig: Rig): void {
   forceWeather('clear', 0.5);
-  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0, 0);
   forceWeather(null);
 }
 
 async function measureMode(mode: AutopilotMode, modelId = MODEL_ID, crosswind = 0): Promise<DriveMetrics> {
   const rig = await makeRig(START_S, ROUTE_METRES, modelId);
   if (crosswind !== 0) {
-    updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+    updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0, 0);
     forceWeather('haboob', HABOOB_HOLD, 1e6);
   }
   rig.autopilot.setMode(mode);
@@ -351,7 +351,7 @@ async function checkCrosswind(): Promise<void> {
  */
 async function checkShelter(): Promise<void> {
   const rig = await makeRig(START_S, ROUTE_METRES, MODEL_ID);
-  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0);
+  updateWeather(rig.road.seed, 0, FIXED_DT, 0, 0, 0);
   forceWeather('haboob', HABOOB_HOLD, 1e6);
   rig.autopilot.setMode('hurried');
   rig.autopilot.setEngaged(true);
@@ -361,7 +361,7 @@ async function checkShelter(): Promise<void> {
   const steps = Math.round(60 / FIXED_DT);
   for (let i = 0; i < steps; i++) {
     rig.vehicle.absoluteTranslation(at);
-    updateWeather(rig.road.seed, i * FIXED_DT, FIXED_DT, at.x, at.z);
+    updateWeather(rig.road.seed, i * FIXED_DT, FIXED_DT, at.x, at.z, 0);
     step(rig);
     const p = rig.road.project(rig.vehicle.absoluteTranslation(at).x, at.z, s);
     s = p.s;

@@ -93,7 +93,8 @@ import {
   STATE_LOAD_RADIUS_M,
   STATE_UNLOAD_RADIUS_M,
 } from './world/ranges';
-import { BoardableField, StartSiteProvider } from './story/sitebuild';
+import { AirfieldProvider, BoardableField } from './story/sitebuild';
+import { AIRFIELD, airfieldAt } from './story/airfield';
 import { createStartingCar, spawnStartingItems, START_COINS, storySite } from './story/site';
 import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
@@ -110,7 +111,7 @@ import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
-import { updateWeather, weather, windAt } from './world/weather';
+import { updateWeather, weather, weatherBeginS, windAt } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
@@ -611,8 +612,10 @@ async function boot(): Promise<void> {
   streamer.register(new LaybyMeshProvider());
   // Every lay-by's signpost: the stop's name and the stops either way (world/signposts.ts).
   streamer.register(new SignpostProvider());
-  const startSite = new StartSiteProvider(boardable);
-  streamer.register(startSite);
+  // The airfield and its plane, where one is placed (story/airfield.ts: none is today).
+  const airfield = AIRFIELD ? airfieldAt(world.seed, road, terrain, AIRFIELD) : null;
+  const airfieldSite = airfield ? new AirfieldProvider(airfield, boardable) : null;
+  if (airfieldSite) streamer.register(airfieldSite);
   streamer.register(new TerminusPadProvider());
   streamer.register(new ScatterProvider(debris, groundCover));
   streamer.register(new PoleProvider(roadDistance));
@@ -998,8 +1001,7 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The player starts holding the postcard from home and a few coins.
-    inventory.add({ type: 'postcard', id: world.generatedPartId('story_item', 0, 0) });
+    // The player starts with a few coins.
     inventory.add({ type: 'coin', id: world.generatedPartId('story_item', 0, 1), value: START_COINS });
   }
 
@@ -1501,11 +1503,6 @@ async function boot(): Promise<void> {
   let stickerHintActive = false;
   let torchlightActive = false;
   let cameraActive = false;
-  /**
-   * The postcard is read by E: raised to the eyes with its message side toward the
-   * player, turned over by E again to the photograph, and put away by a third.
-   */
-  let postcardView: 'down' | 'text' | 'photo' = 'down';
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
   /** 0..1 while an E-key watch action accelerates four in-game hours; 1 is idle. */
@@ -1878,7 +1875,6 @@ async function boot(): Promise<void> {
     if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
     if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
-    if (driving !== null || dying || heldAfterSelection?.type !== 'postcard') postcardView = 'down';
     if (driving === null && !dying && !medicineActive && useHeld && heldAfterSelection !== null) {
       if (heldAfterSelection.type === 'medicine') {
         // Health and inventory change in one turn before the autosave microtask.
@@ -1907,9 +1903,6 @@ async function boot(): Promise<void> {
       ) {
         watchFastForwardProgress = 0;
         hud.setToast('watch shaken — winding four hours forward');
-      } else if (heldAfterSelection.type === 'postcard') {
-        // One key, three faces of the same card: read it, turn it over, put it away.
-        postcardView = postcardView === 'down' ? 'text' : postcardView === 'text' ? 'photo' : 'down';
       }
     }
     if (!medicineActive && useHeld && heldAfterSelection?.type === 'sun_shades') {
@@ -2044,24 +2037,23 @@ async function boot(): Promise<void> {
     actionable = !machineFocus.working && interacted.actionable;
     boot = interacted.boot;
     machineFocus.updateCursor();
-    if (interacted.board && story === null && !dying) {
+    if (interacted.board && airfield && airfieldSite && story === null && !dying) {
       // Boarding is an ending: a reload from here on must land on the title screen, not
       // resume beside a plane that has already gone.
       clearResumeSlot();
       story = new TakeoffCutscene({
         scene: renderer.scene,
-        site: storySite(world.seed, road, terrain),
+        site: airfield,
         terrain,
         origin,
         audio,
         overlay: storyOverlay,
       });
-      startSite.setParkedPlaneVisible(false);
+      airfieldSite.setParkedPlaneVisible(false);
       autopilot.setEngaged(false);
       binocularsActive = false;
       torchlightActive = false;
       cameraActive = false;
-      postcardView = 'down';
       gumActive = false;
       prompt = null;
       actionable = false;
@@ -2252,6 +2244,9 @@ async function boot(): Promise<void> {
     if (recordTimer >= RECORD_INTERVAL) {
       recordTimer = 0;
       if (activeS > s.recordS) world.apply({ t: 'record', s: activeS });
+      if (s.weatherFromS === null && s.recordS >= weatherBeginS(world.seed)) {
+        world.apply({ t: 'weather_begin', playedSeconds: s.playedSeconds });
+      }
       // Trailers have no delta of their own for motion — a towed one moves every
       // tick — so their poses ride the same cadence as the record marker.
       trailerField.pushTransforms();
@@ -2479,9 +2474,10 @@ async function boot(): Promise<void> {
     const cam = renderer.camera.position;
     frameProfiler?.begin('sky');
     // Weather first: the sky, the fog, the lights and the ground all read it this
-    // frame (world/weather.ts). A function of played time, so it needs no saving. The
-    // camera is where the wind's gusts are heard; each car samples its own.
-    updateWeather(world.seed, s.playedSeconds, frameDt, cam.x + origin.x, cam.z + origin.z);
+    // frame (world/weather.ts). A function of played time from the moment the schedule
+    // began, clear before it. The camera is where the wind's gusts are heard; each car
+    // samples its own.
+    updateWeather(world.seed, s.playedSeconds, frameDt, cam.x + origin.x, cam.z + origin.z, s.weatherFromS);
     // Every dust colour follows the sand the road has reached (render/desertdust.ts),
     // and so do the ground's broad patches (world/terrainmesh.ts).
     setDesertDustArclength(activeS);
@@ -2939,7 +2935,6 @@ async function boot(): Promise<void> {
       dayFactor: sky.dayFactor,
       watchActionProgress:
         watchFastForwardProgress < 1 ? watchFastForwardProgress : -1,
-      postcardView: held?.type === 'postcard' ? postcardView : 'down',
     });
 
     // GPU timer queries measure only render submission. The one startup PMREM bake
@@ -3188,7 +3183,6 @@ async function boot(): Promise<void> {
     const shouldRestorePointerLock = restorePointerLock && input.pointerLocked;
     if (document.pointerLockElement !== null) document.exitPointerLock();
     paused = true;
-    postcardView = 'down';
     loop.stop();
     // Silence everything behind the overlay, radio included: the loop is stopped,
     // so nothing would update the voices and they would hold their last value. The pad

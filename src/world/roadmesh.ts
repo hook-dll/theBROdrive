@@ -441,9 +441,9 @@ let markingModeAtS = Number.NaN;
 let markingModeValue = MarkingMode.Normal;
 
 /**
- * Static albedos, pre-converted to the linear working colour space. Sand, rock and
- * gravel are palette-driven (see `desertPaletteAt`), so only the sealed-lane
- * surfaces remain here.
+ * Static albedos, pre-converted to the linear working colour space. The road is the
+ * one thing that looks the same on every kilometre: the desert's palette cycles, the
+ * road's surfaces do not.
  */
 const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
   [SurfaceType.Asphalt]: new THREE.Color(SURFACES[SurfaceType.Asphalt].color),
@@ -452,18 +452,13 @@ const SURFACE_LINEAR: Partial<Record<SurfaceType, THREE.Color>> = {
 };
 
 /**
- * Palette scratch colours, updated once per arclength row and reused across the
- * row's vertices so no palette lookup allocates. Gravel tints weathered asphalt
- * and is a gravel district's own lane.
+ * Road gravel: a gravel district's lane, the dust on weathered asphalt, a hole's floor
+ * and the graded windrow. The opening palette's gravel (`desertPaletteAt(0).gravel`),
+ * fixed: taken from the regional palette it ran from near-black (basalt) to pink.
  */
-const gravelLinear = new THREE.Color();
+const ROAD_GRAVEL_LINEAR = new THREE.Color(0x9c7652);
 /** Chalky, sun-dulled paint. Fresh white is what made the markings look printed. */
 const PAINT_LINEAR = new THREE.Color(PAINT_COLOR);
-/**
- * Base colour a ghost line is mixed from, for the one case the marking pass has no
- * `SURFACE_LINEAR` entry: gravel, whose colour comes from the regional palette.
- */
-const paintBase = new THREE.Color();
 /** Shoulder scratch: the row's sand and stone, and one vertex's colour. */
 const shoulderSand = new THREE.Color();
 const shoulderStone = new THREE.Color();
@@ -573,14 +568,11 @@ export function roadAsphaltVertexColorAtStart(out: THREE.Color): THREE.Color {
 }
 
 /**
- * The road ribbon's undecorated lane colour for `surface` at arclength `s`, texture
- * gain included: the sealed surfaces' static albedo, or the regional palette's gravel
- * for a gravel road, exactly as the ribbon's row at `s` starts from (lay-bys).
+ * The road ribbon's undecorated lane colour for `surface`, texture gain included,
+ * exactly as the ribbon's rows start from (lay-bys).
  */
-export function roadLaneVertexColor(out: THREE.Color, surface: SurfaceType, s: number): THREE.Color {
-  const base = SURFACE_LINEAR[surface];
-  if (base) out.copy(base);
-  else out.setHex(desertPaletteAt(s).gravel);
+export function roadLaneVertexColor(out: THREE.Color, surface: SurfaceType): THREE.Color {
+  out.copy(SURFACE_LINEAR[surface] ?? ROAD_GRAVEL_LINEAR);
   return out.multiplyScalar(roadVertexColorGain());
 }
 
@@ -776,12 +768,11 @@ export class RoadMeshProvider implements ChunkProvider {
       const halfWidth = road.halfWidthAt(s);
       const cond = roadConditionAt(this.seed, s);
       const style = SHOULDER_STYLE[cond.surface] ?? DEFAULT_SHOULDER_STYLE;
-      const palette = desertPaletteAt(s);
-      shoulderSand.setHex(palette.sand);
+      shoulderSand.setHex(desertPaletteAt(s).sand);
       if (style.stone > 0) {
         shoulderStone.copy(SHOULDER_STONE_LINEAR).multiplyScalar(style.stone / luminance(SHOULDER_STONE_LINEAR));
       } else {
-        shoulderStone.setHex(palette.gravel).multiplyScalar(SHOULDER_WINDROW_TONE);
+        shoulderStone.copy(ROAD_GRAVEL_LINEAR).multiplyScalar(SHOULDER_WINDROW_TONE);
       }
       // A worn road's verge has less grit showing and a narrower fringe.
       const wear = Math.max(cond.decay, cond.sandCover);
@@ -1036,11 +1027,6 @@ export class RoadMeshProvider implements ChunkProvider {
         const halfWidth = road.halfWidthAt(s);
         const cond = roadConditionAt(this.seed, s);
         const laneBase = SURFACE_LINEAR[cond.surface] ?? null;
-        // Palette colour is a function of arclength alone: sample once per row, so
-        // neighbouring chunks share the seam row and a rebuild is identical.
-        const palette = desertPaletteAt(s);
-        gravelLinear.setHex(palette.gravel);
-
         // The asphalt course this row lies on, and the seam near it (see SEAM_REACH_M).
         const baseAlbedo = COURSE_BASE_ALBEDO[cond.surface];
         let seamD = 1;
@@ -1094,8 +1080,8 @@ export class RoadMeshProvider implements ChunkProvider {
           uvs[vi * 2 + 1] = textureVStart + (s - sStart) / ROAD_TILE_METRES;
 
           const a = Math.abs(lateral);
-          color.copy(laneBase ?? gravelLinear);
-          this.weather(color, gravelLinear, laneBase ? SHOULDER_STONE_LINEAR : gravelLinear, s, lateral, a, halfWidth, cond.decay);
+          color.copy(laneBase ?? ROAD_GRAVEL_LINEAR);
+          this.weather(color, ROAD_GRAVEL_LINEAR, laneBase ? SHOULDER_STONE_LINEAR : ROAD_GRAVEL_LINEAR, s, lateral, a, halfWidth, cond.decay);
           // How much of this vertex is bare asphalt, for the course shade and tracks.
           let bare = 1;
           // Repair and rubber go on AFTER the weathering, in the order the road got
@@ -1147,7 +1133,7 @@ export class RoadMeshProvider implements ChunkProvider {
         const sB = sStart + ((si + 1) * (sEnd - sStart)) / (sCount - 1);
         const tint = this.field.eventTint(eventS[e]!);
         if (tint === RoadEventTint.Hole) {
-          eventTintColor.setHex(desertPaletteAt(sA).gravel).multiplyScalar(HOLE_SHADE * textureGain);
+          eventTintColor.copy(ROAD_GRAVEL_LINEAR).multiplyScalar(HOLE_SHADE * textureGain);
         } else if (tint === RoadEventTint.Patch) {
           eventTintColor.copy(PATCH_LINEAR).multiplyScalar(textureGain);
         }
@@ -1582,7 +1568,7 @@ export class RoadMeshProvider implements ChunkProvider {
           // One chalky crown stripe, solid, at a coverage far under a fresh coat.
           // Emitted OUTSIDE the `condition.markings` gate on purpose: that gate is
           // the road's own rule, and this event exists precisely to break it.
-          const base = laneBase ?? paintBase.setHex(desertPaletteAt(s).gravel);
+          const base = laneBase ?? ROAD_GRAVEL_LINEAR;
           color.lerpColors(base, PAINT_LINEAR, GHOST_COVERAGE);
           this.emitMarkingQuad(
             road, 0, 0, s, s1, MARKING_HALF_WIDTH, eventS, e0, e1,

@@ -353,7 +353,7 @@ function characterDistrictOf(seed: number, k: number): number {
 /**
  * The material of district 0, for every seed: the garage opening is sealed asphalt
  * and the chain starts from it. Exported so the start-of-road builders (the terminus
- * pad, the story site's runway) can ask without a seed.
+ * pad, the airfield's runway) can ask without a seed.
  */
 export const ROAD_START_SURFACE = SurfaceType.Asphalt;
 
