@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- POI spacing: the first settlement (post, shop, sometimes a car for sale) stands 1-1.5 km
+  from the house, the next three 2.5-4 km apart, every later one 2.5-8 km
+  (`src/world/poststops.ts`). Roadside slots now follow the post network
+  (`src/world/poislots.ts`): slot 2k+1 is post k, slot 2k+2 a lone house in a gap of 5 km or
+  more, never within 2.5 km of a settlement. Desert POIs keep their own lattice
+  (`desertPoiSpacingMetres`). Roadside `Poi.index` moved to a new base, so an old save's
+  looted flags no longer name the wrong stop.
+- POST and SHOP are one card machine (`src/world/cardmachine.ts`), bigger and deeper, with
+  English labels. F frames it in the camera and frees the cursor
+  (`src/player/machinefocus.ts`); nothing is written on screen while it is worked. The
+  side crank is dragged round with the mouse, without a stop: each quarter turn drops the
+  next card in a split-flap window (the wheel turns it too). One button gives into one
+  tray; the post's tray also takes cargo in. The post gives any of its four offers at any
+  time, with no licence and no "free your hands first", and replaces a taken offer with
+  the slot's next round (`nextOffer`), so it never runs dry. The shop shows the carded
+  ware in a showcase and takes its price from the pack. Licences (`licenceFor`) removed.
+- A car for sale is locked until bought: no door, bonnet, boot, flap or compartment
+  answers the aim.
+- Fixtures' moving parts (key box lever, drawer, coin and key; barrel tap) write their
+  matrices: the chunk froze them, so they never moved on screen.
+- Dev pause menu: "Get 100 coins".
+
 - The start site's runway strip no longer links a shader program mid-drive
   (`src/story/sitebuild.ts`). Each build of chunk 0 cloned the road material for the strip
   and disposed the clone with the chunk; the strip's vertex colours and UVs make a program
@@ -9,6 +31,13 @@
   program 43 freed, then 121 linked, after a jump away from the start). The strip now
   shares one material for the session that is never disposed. Checked on New game, a jump
   to km 14.6, a drive, a jump back to the start and away again: 0 programs freed or linked.
+
+- Soviet wheel sets are drawn in the Standard atlas material (`makeUnifiedAtlasMaterial`,
+  until now only behind the DEV `?carstyle=unified`), not in the FBX pack's Phong: the
+  atlas cells make the tyre rubber and the rim painted steel, lit like the rest of the car
+  (`shareWheelMaterials`, `src/render/carmodel.ts`). Phong is gone from the game: its two
+  programs became two Standard ones, 105 programs at boot as before, none linked over a
+  minute's drive.
 
 - The «ПОЧТА» machine replaces the couriers (game-design2.md §7, §6.6; `src/world/post.ts`,
   `src/world/poststops.ts`, `src/contracts/offers.ts`, `src/world/poi.ts`).
