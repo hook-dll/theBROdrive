@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+- Dev: a raw-handling experiment in the pause menu's developer box: a `Raw handling`
+  switch and five 0..1 levers, applied as they move and kept per browser
+  (`bro.rawHandling`). It touches only the car the player drives from the driver's seat;
+  off, every read takes today's constant, so the handling is unchanged. The levers
+  (vehicletuning.ts `RAW_HANDLING`): key assist fade (the keyboard's tyre-peak cap gives
+  way to the whole lock from 40 km/h, all of it by 100 km/h at 1), steering speed (at-speed
+  wind-up and return down to a third, rack doubled, no release delay at 1), rear breakaway
+  (the rear axle's past-peak plateau down to 0.5, front unchanged), less yaw inertia (the
+  yaw box gain 2.55 → 1.4, pitch unchanged; the chassis tensor is rebuilt live) and bump
+  feel (contact patch 0.16 → 0.04 m, load filter 25 → 8 ms). Defaults when switched on:
+  0.3, 0.5, 0.5, 0.5, 0.5.
+
+- Money is rubles and kopecks, held in a purse instead of coin items
+  (`src/economy/economy.ts`, `src/render/purse.ts`, `src/ui/purse.ts`). Every amount is
+  integer kopecks (`PlayerState.money`, the `money` delta) and reads `3р 50коп` on cards,
+  plates and boards. The purse (монетница) is the Vyborg pocket coin holder with six
+  tubes, 1, 5, 10 kopecks and 1, 2, 5 rubles, each showing the coins the balance comes to.
+  It shows in the top-right corner on foot within 10 m of a POST, a SHOP or a lot car's
+  key box; working one of them seats the 3D purse in the machine's slot, and the machine
+  debits it there (short: nothing given, the SHOP card says so) or pays a delivery into
+  it. The key box is now worked up close too: its lever takes the whole price at once.
+  Police fines come straight out of the purse. New prices: petrol cans 50коп + 40коп a
+  litre, gum 15коп, spray 1р 20коп, shades 3р, stickers 50коп, filter 2р 50коп, radiator
+  9р, gearbox 18р, turbine 30р, engine 35р; deliveries 3р to 11р; cars 25р to 150р
+  (Oka 30р); start 4р 50коп; fines and race wins a ruble per old coin.
+- Whatever a machine gives — cargo, haul papers, goods, sticker envelopes — lies in its
+  tray, never in the hand, and the camera steps back from the machine as it drops. The
+  POST's tray is painted `▼ HAND CARGO IN HERE ▼`, and worked with cargo for here the
+  window shows a HAND-IN card first (`PUT THE PARCEL IN THE TRAY` and its pay, or why the
+  tray will not take it).
+- Saves are version 3: coin items anywhere (pack, ground, boots, cabins, post stock) turn
+  into purse money at a ruble a coin, and lot cars take the new prices.
+
+- Every lay-by's signpost is painted like a licence plate of its region
+  (`src/world/signplates.ts`): a dark header strip spelling the desert's name, a pale
+  field with the desert's emblem (mesa, dunes, rising sun, power line, saguaros, palms,
+  crescent moon and stars, volcano), a ground band and a frame. The tones are the
+  desert's own sand hue at fixed lightnesses, so every stop in one desert wears the same
+  plate and the next desert's differs; a dark desert gets the plate turned over, pale
+  letters on a dark field. Letters carry a halo of the field's tone to read over the
+  emblem. Each of the 28 deserts in `src/world/gradient.ts` has a `name` and an
+  `emblem`, and `desertAt(s)` answers the desert a stretch of road belongs to (the
+  nearer one across a blend). Behind the first stop the board no longer says "Home": it
+  paints the turning circle as a ring, `← ◯ 0.5 km` (`RING_GLYPH`), a heavy doughnut
+  drawn on the canvas rather than a letter O. The board, its backing and its posts no
+  longer z-fight: the board stands 2.5 cm before the backing and the posts 2 cm behind
+  it, where their fronts used to be flush with its face (`BOARD_STANDOFF`, `POST_GAP` in
+  `src/world/signposts.ts`). The backing wears the plate's frame colour. Every board
+  still shares the market sign's one program.
+
+- The start settlement's lay-by is always on the right of the road, the power poles'
+  side (`roadsideSlot` in `src/world/poislots.ts`, slot 1); every other stop still rolls
+  its side.
+
 - The asphalt is a quiet dark mat with single pale stones in it instead of a speckle
   over the whole surface: the chip-seal detail keeps only the stones that stand well
   proud (`DETAIL_CHIP_FROM`/`TO` in `src/render/roadtexture.ts`, binder flat), the macro

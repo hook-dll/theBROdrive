@@ -59,6 +59,7 @@ import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
+import type { RawHandlingTuning } from '../vehicle/vehicletuning';
 import { TitleRoom, type RoomItem, type RoomSpot } from './titleroom';
 
 /** The Compute rows' buttons, lightest first; see `ComputeLevel`. */
@@ -505,6 +506,74 @@ const DEV_FLUIDS: readonly { readonly fluid: FluidKind; readonly capacity: numbe
   { fluid: 'oil', capacity: 5 },
 ];
 
+/** The dev raw-handling hook: the live levers, and a setter that applies and keeps them. */
+export interface RawHandlingControl {
+  readonly values: Readonly<RawHandlingTuning>;
+  set(patch: Partial<RawHandlingTuning>): void;
+}
+
+/** The raw-handling levers the dev box shows, in order: see vehicletuning.ts `RAW_HANDLING`. */
+const RAW_HANDLING_LEVERS: readonly {
+  readonly key: Exclude<keyof RawHandlingTuning, 'enabled'>;
+  readonly label: string;
+}[] = [
+  { key: 'assistFade', label: 'Key assist fade' },
+  { key: 'steerSpeed', label: 'Steering speed' },
+  { key: 'rearBreakaway', label: 'Rear breakaway' },
+  { key: 'yawInertia', label: 'Less yaw inertia' },
+  { key: 'bumpFeel', label: 'Bump feel' },
+];
+
+/**
+ * The dev box's raw-handling block: a switch and five 0..1 levers, each applied the
+ * moment it moves so the next drive step reads it. The levers stay live while the
+ * switch is off, so a setting can be dialled in before it is tried.
+ */
+function rawHandlingBlock(control: RawHandlingControl): HTMLElement {
+  const block = el('div', 'menu-dev-raw');
+  const toggle = button('menu-button', '');
+  const paintToggle = (): void => {
+    toggle.textContent = `Raw handling: ${control.values.enabled ? 'on' : 'off'}`;
+  };
+  toggle.addEventListener('click', () => {
+    control.set({ enabled: !control.values.enabled });
+    paintToggle();
+  });
+  paintToggle();
+  block.appendChild(toggle);
+  for (const lever of RAW_HANDLING_LEVERS) {
+    const field = el('div', 'menu-field');
+    const head = el('div', 'menu-field-head');
+    const id = `dev-raw-${lever.key}`;
+    const label = el('label', 'menu-label');
+    label.textContent = lever.label;
+    label.setAttribute('for', id);
+    const chip = el('output', 'menu-chip');
+    head.append(label, chip);
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.id = id;
+    slider.className = 'menu-slider';
+    slider.min = '0';
+    slider.max = '1';
+    slider.step = '0.05';
+    const paint = (): void => {
+      const value = control.values[lever.key];
+      slider.value = String(value);
+      chip.textContent = value.toFixed(2);
+      slider.style.setProperty('--fill', `${value * 100}%`);
+    };
+    slider.addEventListener('input', () => {
+      control.set({ [lever.key]: slider.valueAsNumber });
+      paint();
+    });
+    paint();
+    field.append(head, slider);
+    block.appendChild(field);
+  }
+  return block;
+}
+
 export type DevSpawnItemRequest =
   | { readonly type: 'fluid_can'; readonly fluid: FluidKind; readonly capacity: number }
   | { readonly type: 'spray_can'; readonly paint: number }
@@ -828,8 +897,13 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
-  /** Puts 100 coins in the pack. Dev only, absent in a production build. */
-  giveCoins?: () => void;
+  /** Puts 100 rubles in the purse. Dev only, absent in a production build. */
+  giveMoney?: () => void;
+  /**
+   * The raw-handling experiment (vehicletuning.ts `RAW_HANDLING`): a switch and five
+   * levers in the dev box. Dev only, absent in a production build.
+   */
+  rawHandling?: RawHandlingControl;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -2821,17 +2895,21 @@ export class MainMenu {
             finish('resume');
           });
         }
-        if (import.meta.env.DEV && hooks.giveCoins) {
-          devButton('Get 100 coins', () => {
-            hooks.giveCoins?.();
+        if (import.meta.env.DEV && hooks.giveMoney) {
+          devButton('Get 100р', () => {
+            hooks.giveMoney?.();
             finish('resume');
           });
         }
-        if (import.meta.env.DEV && devTools.length > 0) {
+        // The raw-handling experiment sits under the buttons: a switch and five levers
+        // that apply as they move, so the menu stays where it is.
+        const rawBlock = import.meta.env.DEV && hooks.rawHandling ? rawHandlingBlock(hooks.rawHandling) : null;
+        if (import.meta.env.DEV && (devTools.length > 0 || rawBlock)) {
           const dev = el('section', 'menu-dev');
           const grid = el('div', 'menu-dev-grid');
           grid.append(...devTools);
           dev.append(text(`Developer build · seed ${info.seed}`, 'menu-eyebrow'), grid);
+          if (rawBlock) dev.appendChild(rawBlock);
           panel.appendChild(dev);
         }
 

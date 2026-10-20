@@ -24,7 +24,7 @@ import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
 import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type ContractCargoItem, type Item } from '../items/items';
-import { giveCoins } from '../economy/economy';
+import { credit, formatMoney, RUB } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
 import type { Interaction } from '../player/interaction';
@@ -37,7 +37,12 @@ import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import type { VistaMesh } from '../render/vista';
-import { TYRE_MODEL } from '../vehicle/vehicletuning';
+import {
+  RAW_HANDLING,
+  RAW_HANDLING_DEFAULTS,
+  TYRE_MODEL,
+  type RawHandlingTuning,
+} from '../vehicle/vehicletuning';
 import { carModel } from '../vehicle/carmodels';
 import {
   TRAILER_HALF_LENGTH,
@@ -46,7 +51,7 @@ import {
 } from '../vehicle/trailer';
 import type { Vehicle } from '../vehicle/vehicle';
 import type { Hud } from '../ui/hud';
-import type { DevSpawnItemRequest } from '../ui/menu';
+import type { DevSpawnItemRequest, RawHandlingControl } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
 import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
@@ -145,8 +150,10 @@ export interface DevTools {
   seatInNearestCar(): void;
   /** Puts the player on the road side of one lake site. */
   jumpToLake(index: number): void;
-  /** Puts 100 coins in the pack. */
-  giveCoins(): void;
+  /** Puts 100 rubles in the purse. */
+  giveMoney(): void;
+  /** The raw-handling switch and levers (vehicletuning.ts `RAW_HANDLING`), kept per browser. */
+  readonly rawHandling: RawHandlingControl;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
   updateLakeSeek(activeS: number): void;
 }
@@ -156,6 +163,35 @@ export interface DevTools {
  * right-hand lane on an ordinary two-lane road.
  */
 const DEV_JUMP_LATERAL = -1.9;
+
+/** Where this browser keeps the raw-handling switch and levers. */
+const RAW_HANDLING_STORAGE_KEY = 'bro.rawHandling';
+
+/**
+ * Puts the stored raw-handling switch and levers into `RAW_HANDLING`. A missing,
+ * unreadable or partial record leaves each missing field at its default; a lever is
+ * clamped to 0..1.
+ */
+function loadRawHandling(): void {
+  let stored: unknown = null;
+  try {
+    const raw = localStorage.getItem(RAW_HANDLING_STORAGE_KEY);
+    stored = raw === null ? null : JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (typeof stored !== 'object' || stored === null) return;
+  const record = stored as Partial<Record<keyof RawHandlingTuning, unknown>>;
+  if (typeof record.enabled === 'boolean') RAW_HANDLING.enabled = record.enabled;
+  for (const key of ['assistFade', 'steerSpeed', 'rearBreakaway', 'yawInertia', 'bumpFeel'] as const) {
+    const value = record[key];
+    RAW_HANDLING[key] =
+      typeof value === 'number' && Number.isFinite(value)
+        ? Math.min(1, Math.max(0, value))
+        : RAW_HANDLING_DEFAULTS[key];
+  }
+}
+
 
 /**
  * Builds the dev surface and installs the `window.__bro` console handle.
@@ -322,18 +358,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);
   };
 
-  /**
-   * The dev purse behind `PauseHooks.giveCoins`: 100 coins onto the pile in the pack, or
-   * at the player's feet when the pack has no room for a pile.
-   */
-  const devGiveCoins = (): void => {
-    const amount = 100;
-    const leftover = giveCoins(ctx.inventory, amount, ctx.world.runtimePartId());
-    if (leftover) {
-      const eye = ctx.camera.eyePosition;
-      ctx.loose.spawnItem(leftover, eye.x + ctx.origin.x, eye.y - 1.2, eye.z + ctx.origin.z);
-    }
-    ctx.hud.setToast(leftover ? `${amount} coins at your feet — the pack is full` : `+${amount} coins`);
+  /** The dev money behind `PauseHooks.giveMoney`: 100 rubles into the purse. */
+  const devGiveMoney = (): void => {
+    const amount = 100 * RUB;
+    credit(ctx.world, amount);
+    ctx.hud.setToast(`+${formatMoney(amount)} in the purse`);
   };
 
   /**
@@ -792,6 +821,19 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.beginDeathSequence();
   };
 
+  loadRawHandling();
+  const rawHandling: RawHandlingControl = {
+    values: RAW_HANDLING,
+    set: (patch) => {
+      Object.assign(RAW_HANDLING, patch);
+      try {
+        localStorage.setItem(RAW_HANDLING_STORAGE_KEY, JSON.stringify(RAW_HANDLING));
+      } catch {
+        // Storage disabled or full: the levers still hold for this session.
+      }
+    },
+  };
+
   return {
     spawnVehicle: devSpawnVehicle,
     spawnTrailer: devSpawnTrailer,
@@ -800,7 +842,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     flipVehicle: devFlipVehicle,
     seatInNearestCar: devSeatInNearestCar,
     jumpToLake: devJumpToLake,
-    giveCoins: devGiveCoins,
+    giveMoney: devGiveMoney,
     updateLakeSeek,
+    rawHandling,
   };
 }

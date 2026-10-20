@@ -10,7 +10,7 @@
  *
  * NOTHING IS SCORED ON THE WAY but the fragile radio's condition: knocks to the car
  * it rides in and drops to the ground wear it down, and the delivery pays that share
- * of its coins (economy/economy.ts `deliveryPay`). The other thing remembered on the
+ * of its pay (economy/economy.ts `deliveryPay`). The other thing remembered on the
  * item is whether it has left its source post (`progress.started`), which the
  * rival race reads.
  *

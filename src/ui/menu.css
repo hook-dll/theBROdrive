@@ -1062,6 +1062,28 @@
   letter-spacing: 0.06em;
 }
 
+/* Raw handling: a switch and five compact sliders under the buttons. */
+.menu-dev-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-dev-raw .menu-button {
+  justify-content: flex-start;
+  min-height: 34px;
+  font-size: var(--m-size-sm);
+  letter-spacing: 0.06em;
+}
+
+.menu-dev-raw .menu-field {
+  gap: 4px;
+}
+
+.menu-dev-raw .menu-label {
+  font-size: var(--m-size-sm);
+}
+
 /* ------------------------------------------------------------------ *
  *  Settings: section rail, pane, one hint line                       *
  * ------------------------------------------------------------------ */

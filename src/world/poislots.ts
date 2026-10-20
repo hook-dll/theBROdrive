@@ -30,6 +30,8 @@ const POI_DOMAIN = 0x504f4931; // 'POI1'
  * when the slots stopped being a fixed lattice: an index from before names another stop.
  */
 const ROADSIDE_INDEX_BASE = 70_000_000;
+/** Slot of post stop 0, the start settlement. */
+const START_SLOT = 1;
 
 /** The post stop a slot is (or follows, for a gap slot). */
 export function slotPost(slot: number): number {
@@ -194,7 +196,9 @@ export function roadsideSlot(seed: number, slot: number): RoadsideSlot | null {
     slot,
     index: ROADSIDE_INDEX_BASE + slot,
     s,
-    side: hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1,
+    // The start (post 0) is on the right, the power poles' side (world/props/poles.ts):
+    // the player begins beside the road the game drives, not across it.
+    side: slot === START_SLOT || hash01(seed, POI_DOMAIN, slot, 2) < 0.5 ? -1 : 1,
     verge: VARIANT_SETBACK_MIN_M + hash01(seed, POI_DOMAIN, slot, 3) * VARIANT_SETBACK_SPAN_M,
     structure,
     variantSeed: hash(seed, POI_DOMAIN, slot, 4),

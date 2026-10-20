@@ -58,7 +58,7 @@ export function signMaterial(lines: readonly string[], bg: string, fg: string, w
 
 /**
  * A board's material painted fresh, the same shape as `signMaterial`'s, NOT cached: for
- * text that is never painted twice (a stop's own signpost), owned and disposed —
+ * text that is never painted twice (a stop's own post plate), owned and disposed —
  * material and map — by whoever built it.
  */
 export function paintSign(lines: readonly string[], bg: string, fg: string, width = 512, height = 256): THREE.MeshStandardMaterial {

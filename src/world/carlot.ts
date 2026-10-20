@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
 import type { CarState } from '../game/state';
-import { carPrice } from '../economy/economy';
+import { carPrice, formatMoney, RUB } from '../economy/economy';
 import { oilCapacity, variant } from '../parts/registry';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
@@ -20,8 +20,8 @@ import { emptyCabin } from '../vehicle/cabin';
  * Which settlements have a lot is their layout's (world/settlement.ts); which model
  * stands on it is a pure function of the seed, the stop and its km band. The car itself
  * is a real car in world state from the moment its chunk enters the physics band
- * (`car_add`), carrying `lotPrice` until it is bought: coins fed into the key box add up
- * in `lotPaid` (`lot_pay`), and taking the key from its drawer is `car_buy`. Nobody sits
+ * (`car_add`), carrying `lotPrice` until it is bought: its key box takes the price out of
+ * the purse into `lotPaid` (`lot_pay`), and taking the key from its drawer is `car_buy`. Nobody sits
  * in it before that. Car prices are flat (`carPrice`); what changes down the road is
  * which models stand on the lots: dearer ones further on, the foreign cars only past
  * `FOREIGN_FROM_KM`.
@@ -31,9 +31,9 @@ const LOT_DOMAIN = 0x4c4f5431; // 'LOT1'
 
 /** Kilometres per lot band: the model on a lot is drawn per band. */
 const LOT_BAND_KM = 50;
-/** The dearest car a lot at home asks, coins, and how that ceiling rises per km. */
-const LOT_PRICE_BASE = 40;
-const LOT_PRICE_PER_KM = 0.5;
+/** The dearest car a lot at home asks, kopecks, and how that ceiling rises per km. */
+const LOT_PRICE_BASE = 50 * RUB;
+const LOT_PRICE_PER_KM = 62.5;
 /** The foreign cars stand on lots only this far from home. */
 const FOREIGN_FROM_KM = 300;
 const FOREIGN: Readonly<Record<string, true>> = { kit_nexia: true, kit_espero: true, kit_astraf: true, kit_vectraa: true };
@@ -130,7 +130,7 @@ export function buildLotSign(
   box(root, [0.68, 0.46, 0.03], [0, 1.2, -0.02], C.white);
   const board = new THREE.Mesh(
     SIGN_PLANE,
-    signMaterial(['FOR SALE', def.label, `${carPrice(def.id)} coins`], '#f2e6c4', '#7a1f12', 512, 340),
+    signMaterial(['FOR SALE', def.label, formatMoney(carPrice(def.id))], '#f2e6c4', '#7a1f12', 512, 340),
   );
   board.scale.set(0.64, 0.42, 1);
   board.position.set(0, 1.2, 0);

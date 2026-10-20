@@ -143,8 +143,8 @@ export interface PostStock {
   /** The offer standing in each slot: always one, whichever round the slot is at. */
   readonly offers: readonly ContractCargoItem[];
   /**
-   * Things a save from the courier days left in the courier's boot (an envelope, a coin,
-   * a stashed part): the machine gives them back through its tray.
+   * Things a save from the courier days left in the courier's boot (an envelope, a
+   * stashed part): the machine gives them back through its tray.
    */
   readonly strays: readonly Item[];
 }

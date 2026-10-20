@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SurfaceType } from '../core/surfaces';
 import { freezeStaticSubtree, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
+import { desertAt } from './gradient';
 import { laybysBetween, type Layby } from './layby';
-import { paintSign, SIGN_PLANE } from './market';
+import { SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
 import { box, C } from './poi/kit';
 import { addStatic } from './props/scatter';
+import { paintPlate, plateStyle, RING_GLYPH } from './signplates';
 
 /**
  * SIGNPOSTS: every lay-by's board, naming the stop and the stops either way.
@@ -15,19 +17,39 @@ import { addStatic } from './props/scatter';
  * the stop's own name (world/placenames.ts); below it the neighbouring stops with a
  * lay-by, behind and ahead, each with its arrow and its road distance. The arrows are
  * as a driver sees them from the road looking at the board: on a stop LEFT of travel
- * the road ahead runs off to his right, on one RIGHT of travel to his left. The first
- * stop's «behind» is home, where the road begins.
+ * the road ahead runs off to his right, on one RIGHT of travel to his left. Behind the
+ * first stop there is no stop, only the turning circle where the road begins: the
+ * board paints it as a ring (`RING_GLYPH`).
  *
- * The board's text is the stop's alone, so its material is painted per board
- * (`paintSign`) and disposed with the chunk; its program is the market sign's, which
- * `marketProgramAnchor` links at boot, and the posts are kit boxes. Colliders on the
- * posts only, in the physics band.
+ * The board is its region's plate (world/signplates.ts): every stop in one desert wears
+ * the same design under the desert's name, the next desert another. Its text is the
+ * stop's alone, so its material is painted per board and disposed with the chunk; every
+ * board has one shape (a map, no shadows), the market sign's, whose program
+ * `marketProgramAnchor` links at boot, and the backing and posts are kit boxes.
+ * Colliders on the posts only, in the physics band.
  */
 
 /** Board above the pad, metres: width, height, and its centre's height. */
 const BOARD_W = 2.6;
 const BOARD_H = 1.3;
 const BOARD_Y = 2.05;
+/** The backing box behind the board: its depth, and its rim round the board, metres. */
+const BACKING_DEPTH = 0.04;
+const BACKING_RIM = 0.05;
+/**
+ * Air between the board's face and the backing's front, and between the backing's back
+ * and the posts' fronts, metres. Each is five times the depth buffer's step at 80 m
+ * (about 5 mm with the 0.08 m near plane and 24 bits), so no two faces of the sign are
+ * ever close enough to fight. The posts used to stand flush with the backing's front
+ * and the board 1 cm before it, and both flickered from the road.
+ */
+const BOARD_STANDOFF = 0.025;
+const POST_GAP = 0.02;
+/** Post section, metres, and its centre's depth behind the board, the board's face at 0. */
+const POST_SIZE = 0.1;
+const POST_Z = -(BOARD_STANDOFF + BACKING_DEPTH + POST_GAP + POST_SIZE / 2);
+/** Posts' x either side of the board's centre, metres. */
+const POST_X = BOARD_W * 0.38;
 /** Past the pad's outer edge, metres: on the sand between the pad and the building. */
 const OUT_M = 1.0;
 /** Along the pad from its start, metres. */
@@ -51,11 +73,14 @@ function neighbour(seed: number, l: Layby, dir: 1 | -1): Layby | null {
   return best;
 }
 
-/** The board's three lines: the stop, then the two directions as the driver reads them. */
+/**
+ * The board's three lines: the stop, then the two directions as the driver reads them.
+ * Behind the first stop the road's start, as `RING_GLYPH` and its distance.
+ */
 export function signpostLines(seed: number, l: Layby): [string, string, string] {
   const back = neighbour(seed, l, -1);
   const ahead = neighbour(seed, l, 1);
-  const backText = back ? `${placeNameAt(seed, back.s)} · ${kmText(l.s - back.s)}` : `Home · ${kmText(l.s)}`;
+  const backText = back ? `${placeNameAt(seed, back.s)} · ${kmText(l.s - back.s)}` : `${RING_GLYPH} ${kmText(l.s)}`;
   const aheadText = ahead ? `${placeNameAt(seed, ahead.s)} · ${kmText(ahead.s - l.s)}` : 'End of the road';
   // Left of travel: ahead is on the driver's right as he faces the board.
   const [left, right] = l.side > 0 ? [backText, aheadText] : [aheadText, backText];
@@ -91,11 +116,17 @@ export class SignpostProvider implements ChunkProvider {
       root.position.set(point.x - ctx.originX, ground, point.z - ctx.originZ);
       root.rotation.y = yaw;
       const postH = BOARD_Y + BOARD_H / 2;
-      for (const x of [-BOARD_W * 0.38, BOARD_W * 0.38]) {
-        box(root, [0.1, postH + 0.3, 0.1], [x, (postH - 0.3) / 2, -0.06], C.darkMetal);
+      for (const x of [-POST_X, POST_X]) {
+        box(root, [POST_SIZE, postH + 0.3, POST_SIZE], [x, (postH - 0.3) / 2, POST_Z], C.darkMetal);
       }
-      box(root, [BOARD_W + 0.1, BOARD_H + 0.1, 0.04], [0, BOARD_Y, -0.03], C.white);
-      const material = paintSign(signpostLines(ctx.world.seed, l), '#1f5b3a', '#f2ecd8', 1024, 512);
+      const desert = desertAt(l.s);
+      box(
+        root,
+        [BOARD_W + BACKING_RIM * 2, BOARD_H + BACKING_RIM * 2, BACKING_DEPTH],
+        [0, BOARD_Y, -BOARD_STANDOFF - BACKING_DEPTH / 2],
+        plateStyle(desert).frameHex,
+      );
+      const material = paintPlate(desert, signpostLines(ctx.world.seed, l));
       materials.push(material);
       const board = new THREE.Mesh(SIGN_PLANE, material);
       board.scale.set(BOARD_W, BOARD_H, 1);
@@ -106,16 +137,16 @@ export class SignpostProvider implements ChunkProvider {
       if (ctx.hasPhysics) {
         const cos = Math.cos(yaw);
         const sin = Math.sin(yaw);
-        for (const x of [-BOARD_W * 0.38, BOARD_W * 0.38]) {
+        for (const x of [-POST_X, POST_X]) {
           // The post's local offset, turned into the world by the board's yaw.
           addStatic(
             ctx,
             bodies,
             colliders,
-            point.x + x * cos - 0.06 * sin,
+            point.x + x * cos + POST_Z * sin,
             ground + postH / 2,
-            point.z - x * sin - 0.06 * cos,
-            RAPIER.ColliderDesc.cuboid(0.05, postH / 2, 0.05),
+            point.z - x * sin + POST_Z * cos,
+            RAPIER.ColliderDesc.cuboid(POST_SIZE / 2, postH / 2, POST_SIZE / 2),
             SurfaceType.Concrete,
           );
         }

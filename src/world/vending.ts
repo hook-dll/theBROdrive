@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { hash01, pick } from '../core/rng';
-import { itemPrice } from '../economy/economy';
+import { formatMoney, itemPrice } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { STICKERS } from '../items/stickercatalog';
@@ -19,8 +19,9 @@ import { box, C } from './poi/kit';
  *
  * A card machine (world/cardmachine.ts), the post's twin: the crank turns through a card
  * for each thing still in it, the showcase beside the button holds the one the card
- * names, and BUY takes its price from the coins in the pack and drops it into the
- * tray. Short of coins, the button springs back with a rattle.
+ * names, and BUY takes its price from the purse sitting in the machine's slot and drops
+ * it into the tray. Short, the button springs back with a rattle, nothing drops, and the
+ * card says the purse is short.
  *
  * What a machine holds is a pure function of the stop's seed, so it needs no saved stock
  * of its own: `vendingSold` records which slots were paid for, and those stay empty for
@@ -223,6 +224,8 @@ class ShopMachine extends CardMachine {
   protected readonly title = 'SHOP';
   /** The slots still for sale, in window order: the cards. */
   private readonly available: number[];
+  /** The slot whose BUY the purse was too short for, painted on its card until it turns. */
+  private short: number | null = null;
 
   constructor(
     private readonly world: GameWorld,
@@ -249,6 +252,7 @@ class ShopMachine extends CardMachine {
 
   protected override onShown(index: number): void {
     const showing = index >= 0 ? this.available[index] : undefined;
+    if (showing !== this.short) this.short = null;
     this.products.forEach((product, slot) => {
       if (product) product.visible = slot === showing;
     });
@@ -276,7 +280,10 @@ class ShopMachine extends CardMachine {
       bandText: card.kind,
       corner: `${index + 1}/${this.available.length}`,
       headline: itemLabel(item),
-      lines: [`${price} coin${price === 1 ? '' : 's'}`, card.line],
+      lines: [
+        formatMoney(price),
+        slot === this.short ? 'NOT ENOUGH IN THE PURSE' : card.line,
+      ],
       footer: '',
     });
     // The paint's own colour, as a swatch in the corner of the card.
@@ -300,15 +307,19 @@ class ShopMachine extends CardMachine {
     const at = this.itemAt(index);
     if (!at) return this.refuse();
     const price = itemPrice(at.item, this.km);
-    if (!ctx.spend(price)) return this.refuse();
+    if (!ctx.debit(price)) {
+      // The card says why, painted afresh in place.
+      this.short = at.slot;
+      this.cardsChanged();
+      return this.refuse();
+    }
+    this.short = null;
     this.world.apply({ t: 'vend_sold', machineId: this.id, slot: at.slot });
     this.available.splice(index, 1);
     const product = this.products[at.slot];
     if (product) product.visible = false;
-    const tray = this.trayPoint(0, 1);
-    ctx.drop(at.item, tray.x, tray.y, tray.z);
-    this.swingChute(false);
     this.cardsChanged();
+    this.give(ctx, [at.item]);
     return 'drop';
   }
 }

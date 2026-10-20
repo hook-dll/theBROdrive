@@ -24,23 +24,37 @@ export interface FixtureContext {
   readonly inventory: Inventory;
   /** The item in the hands, or null. */
   readonly held: Item | null;
-  /** Coins in the pack. */
-  coins(): number;
-  /** Takes `amount` coins from the pack; false (and nothing taken) when short. */
-  spend(amount: number): boolean;
-  /** Puts an item in the hands; false when they are full. */
-  take(item: Item): boolean;
+  /**
+   * The purse's balance in kopecks while it sits in the slot of the machine being
+   * worked (player/machinefocus.ts), or null when it is not inserted anywhere.
+   */
+  purse(): number | null;
+  /**
+   * Takes `kopecks` from the inserted purse; false, and nothing taken, when it is not
+   * inserted or holds less.
+   */
+  debit(kopecks: number): boolean;
+  /** Pays `kopecks` into the purse (economy/economy.ts `credit`). */
+  credit(kopecks: number): void;
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;
-  /** Lets a real loose item fall at an ABSOLUTE world point (a tray, a drawer). */
+  /**
+   * Lets a real loose item fall at an ABSOLUTE world point: what a machine gives always
+   * lies in its tray or drawer for the player to pick up, never in the hands.
+   */
   drop(item: Item, x: number, y: number, z: number): void;
+  /**
+   * Lets go of the machine being worked (player/machinefocus.ts): the camera steps back
+   * so the player sees what fell into the tray, and the purse comes out of its slot.
+   */
+  stepBack(): void;
   /**
    * The delivery-time world at post `postIndex`, its haul place at ABSOLUTE (`x`, `z`)
    * (contracts/types.ts). Reused in place: valid only for the call that asked.
    */
   probe(postIndex: number, x: number, z: number): DeliveryProbe;
-  /** Coins a race win adds for handing contract `contractId` in now (contracts/race.ts). */
-  raceCoins(contractId: string): number;
+  /** Kopecks a race win adds for handing contract `contractId` in now (contracts/race.ts). */
+  racePay(contractId: string): number;
   /**
    * Opens the rotary dial (ui/dial.ts) for `pin` with the game held still; `opened` runs
    * once the right number is dialled, never on a hang-up.
@@ -92,6 +106,12 @@ export interface WorldFixture {
   /** The machine is framed (true) or let go of (false); its prompts say "click", not F. */
   setFocused?(focused: boolean, ctx: FixtureContext): void;
   /**
+   * A money machine's purse slot (POST, SHOP, key box): where the purse seats while the
+   * machine is worked up close. Its presence is what makes the fixture a money machine:
+   * the purse shows on the HUD near one (main.ts). Omitted for every other fixture.
+   */
+  purseSeat?(): PurseSeat;
+  /**
    * Mouse down while framed, with the cursor ray (as `aim`'s). True when a part takes
    * the hand (a crank's knob): the drag then goes to `drag`, and the click is not a press.
    */
@@ -120,6 +140,19 @@ export interface FixtureFocus {
   readonly fov: number;
 }
 
+/**
+ * Where the purse sits in a machine's slot (render/purse.ts): its centre, ABSOLUTE metres,
+ * the yaw that turns the purse's face (local +Z) out of the slot, and a scale on the
+ * purse's own size for a small slot.
+ */
+export interface PurseSeat {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly scale: number;
+}
+
 /** The fixtures live in the physics band, keyed by id. */
 export class FixtureField {
   private readonly fixtures = new Map<string, WorldFixture>();
@@ -139,6 +172,15 @@ export class FixtureField {
 
   values(): IterableIterator<WorldFixture> {
     return this.fixtures.values();
+  }
+
+  /** A money machine's purse slot (`WorldFixture.purseSeat`) stands within `radius` of ABSOLUTE (`x`, `z`). */
+  moneyMachineWithin(x: number, z: number, radius: number): boolean {
+    for (const fixture of this.fixtures.values()) {
+      const seat = fixture.purseSeat?.();
+      if (seat && (seat.x - x) ** 2 + (seat.z - z) ** 2 <= radius * radius) return true;
+    }
+    return false;
   }
 
   update(dt: number): void {

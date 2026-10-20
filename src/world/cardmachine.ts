@@ -2,8 +2,10 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
+import type { Item } from '../items/items';
+import { PURSE_SEAT_D, PURSE_SEAT_H, PURSE_SEAT_W } from '../render/purse';
 import type { ChunkContext } from './chunks';
-import { rayBox, type FixtureContext, type FixtureFocus, type WorldFixture } from './fixturefield';
+import { rayBox, type FixtureContext, type FixtureFocus, type PurseSeat, type WorldFixture } from './fixturefield';
 import { paintSign, SIGN_PLANE, signMaterial } from './market';
 import { box, C, cylinder } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
@@ -20,9 +22,14 @@ import { addStatic, yawRotation } from './props/scatter';
  *    there under it. Turned back, the cards come round the other way. The mouse wheel
  *    turns it a click at a time too, and a click on the crank is one card on.
  *  - the BUTTON under the window takes what the card offers (the post's TAKE, the
- *    shop's BUY): it drops out of the chute into the TRAY.
+ *    shop's BUY): it drops out of the chute into the TRAY, and the machine lets go of
+ *    the player (`stepBack`) so he sees it lying there and picks it up. Nothing a
+ *    machine gives goes to the hand.
  *  - the TRAY is the machine's one opening: what it gives lies in it, and what it takes
  *    (a post's cargo) is put into it.
+ *  - the PURSE SLOT over the window: framed, the machine takes the purse into it
+ *    (render/purse.ts, `purseSeat`), and what it sells is debited from it there; short,
+ *    the button rattles and gives nothing.
  *
  * The cards are painted on two canvases in turn, so a machine owns two sign-shaped
  * materials (the program `marketProgramAnchor` links at boot) and repaints them in place;
@@ -63,6 +70,10 @@ const BUTTON_Y = 0.98;
 export const PANEL_X = 0.2;
 export const PANEL_Y = 0.98;
 
+/** The purse slot: a recess in the face between the card window and the board. */
+const PURSE_SLOT_Y = 1.71;
+const PURSE_SLOT_MARGIN = 0.015;
+
 /** The trough standing out of the front at the bottom, and the chute mouth above it. */
 const TRAY_W = 0.72;
 const TRAY_D = 0.36;
@@ -72,6 +83,9 @@ const TRAY_Z = FRONT - TRAY_D / 2;
 const MOUTH_W = TRAY_W - 0.1;
 const MOUTH_H = 0.3;
 const MOUTH_Y = TRAY_FLOOR + 0.04 + MOUTH_H / 2;
+
+/** The tray's painted label, over the chute mouth and under the button and the panel. */
+const TRAY_LABEL_Y = 0.8;
 
 /** Timelines, seconds. */
 const FLIP_S = 0.26;
@@ -104,6 +118,8 @@ export interface CardMachineLook {
   readonly body: number;
   readonly buttonLabel: string;
   readonly buttonColour: number;
+  /** Painted over the chute mouth, when the tray takes something in (the post's cargo). */
+  readonly trayLabel?: string;
 }
 
 /** The moving and repainted parts the builder hands the machine. */
@@ -168,6 +184,15 @@ export function buildCardMachine(
   board.position.set(0, BOARD_Y, FRONT - 0.006);
   board.rotation.y = Math.PI;
   root.add(board);
+
+  // The purse slot: a dark recess in a steel frame, the purse seated in it while worked.
+  const slotW = PURSE_SEAT_W + PURSE_SLOT_MARGIN * 2;
+  const slotH = PURSE_SEAT_H + PURSE_SLOT_MARGIN * 2;
+  box(root, [slotW, slotH, 0.012], [0, PURSE_SLOT_Y, FRONT - 0.006], 0x111314);
+  box(root, [slotW + 0.03, 0.015, 0.03], [0, PURSE_SLOT_Y + slotH / 2 + 0.0075, FRONT - 0.015], C.darkMetal);
+  box(root, [slotW + 0.03, 0.015, 0.03], [0, PURSE_SLOT_Y - slotH / 2 - 0.0075, FRONT - 0.015], C.darkMetal);
+  box(root, [0.015, slotH, 0.03], [slotW / 2 + 0.0075, PURSE_SLOT_Y, FRONT - 0.015], C.darkMetal);
+  box(root, [0.015, slotH, 0.03], [-slotW / 2 - 0.0075, PURSE_SLOT_Y, FRONT - 0.015], C.darkMetal);
 
   // The card window: a dark back, a frame standing proud of it, and the hinge across.
   box(root, [CARD_W + 0.02, CARD_H + 0.02, 0.01], [0, CARD_Y, FRONT - 0.005], 0x111314);
@@ -245,6 +270,14 @@ export function buildCardMachine(
   box(root, [0.025, TRAY_WALL, TRAY_D], [-TRAY_W / 2, TRAY_FLOOR + TRAY_WALL / 2, TRAY_Z], look.body);
   box(root, [TRAY_W + 0.025, 0.07, 0.025], [0, TRAY_FLOOR + 0.035, FRONT - TRAY_D], look.body);
   box(root, [TRAY_W + 0.04, TRAY_FLOOR - 0.03, TRAY_D], [0, (TRAY_FLOOR - 0.03) / 2, TRAY_Z], look.body);
+  // The tray's label: what goes in, and where.
+  if (look.trayLabel) {
+    const label = new THREE.Mesh(SIGN_PLANE, signMaterial([look.trayLabel], '#f2ecd8', '#7a1f12', 512, 64));
+    label.scale.set(0.5, 0.0625, 1);
+    label.position.set(0, TRAY_LABEL_Y, FRONT - 0.003);
+    label.rotation.y = Math.PI;
+    root.add(label);
+  }
 
   group.add(root);
 
@@ -292,6 +325,7 @@ export abstract class CardMachine implements WorldFixture {
   private chuteIn = false;
   private refuseT = 0;
   private readonly focusPose: FixtureFocus;
+  private readonly seat: PurseSeat;
 
   constructor(readonly id: string, protected readonly parts: CardMachineParts) {
     const c = Math.cos(parts.yaw);
@@ -304,6 +338,13 @@ export abstract class CardMachine implements WorldFixture {
     const [eyeX, eyeY, eyeZ] = abs(FOCUS_EYE);
     const [lookX, lookY, lookZ] = abs(FOCUS_LOOK);
     this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
+    // Seated proud of the recess, its face out of the front (-Z local).
+    const [seatX, seatY, seatZ] = abs([0, PURSE_SLOT_Y, FRONT - PURSE_SEAT_D / 2 + 0.006]);
+    this.seat = { x: seatX, y: seatY, z: seatZ, yaw: parts.yaw + Math.PI, scale: 1 };
+  }
+
+  purseSeat(): PurseSeat {
+    return this.seat;
   }
 
   /** Cards the crank turns through now. */
@@ -340,10 +381,24 @@ export abstract class CardMachine implements WorldFixture {
     this.flips.push(this.selected);
   }
 
-  /** The button springs back with a rattle: it will not do it now (short of coins). */
+  /** The button springs back with a rattle: it will not do it now (the purse is short). */
   protected refuse(): FoleyEvent {
     this.refuseT = REFUSE_S;
     return 'refused';
+  }
+
+  /**
+   * Drops `items` out of the chute into the tray, spread across it, and lets go of the
+   * player: the camera steps back so he sees them lying there and picks them up.
+   */
+  protected give(ctx: FixtureContext, items: readonly Item[]): void {
+    if (items.length === 0) return;
+    items.forEach((item, k) => {
+      const at = this.trayPoint(k, items.length);
+      ctx.drop(item, at.x, at.y, at.z);
+    });
+    this.swingChute(false);
+    ctx.stepBack();
   }
 
   /** Swings the chute's flap: out for something given, in for something taken. */
@@ -382,9 +437,11 @@ export abstract class CardMachine implements WorldFixture {
   }
 
   setFocused(focused: boolean, ctx: FixtureContext): void {
-    if (focused && !this.focused) this.onFocused(ctx);
+    const was = this.focused;
+    // Set first: what `onFocused` gives may let go of the machine again at once.
     this.focused = focused;
     if (!focused) this.release();
+    else if (!was) this.onFocused(ctx);
   }
 
   /** The cursor or eye ray in the machine's frame, or null when it misses the plane. */

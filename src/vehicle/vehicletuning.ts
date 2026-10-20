@@ -1946,6 +1946,63 @@ export const LOAD_BOOT_BEHIND_REAR_AXLE = 0.5;
 /** A flatbed's payload rides further forward over its axle than a car's hold does. */
 export const LOAD_BED_BEHIND_REAR_AXLE = 0.25;
 
+/* ---------------------------------------------------------------------------
+ * RAW HANDLING: a dev experiment, off by default, for a car that is less safe at
+ * speed. Pause menu > developer box; persisted by app/devtools.ts.
+ *
+ * Five levers, each 0..1, every one a straight blend from today's constant (0) to the
+ * raw end (1). The vehicle reads them only for the car the player drives
+ * (`Vehicle.setRawHandling`) and only while `enabled` is set; otherwise every read
+ * site takes today's constant untouched, so 'off' is today's handling to the bit.
+ *
+ *   assistFade     the keyboard's tyre-peak cap (`STEER_ASSIST_SLIP_MARGIN`) gives way
+ *                  to the whole lock, linearly from RAW_ASSIST_FADE_FROM_KMH to
+ *                  RAW_ASSIST_FADE_TO_KMH: at 1 a whole hold at 100 km/h is the lock
+ *   steerSpeed     at-speed wind-up and return time constants (`KEY_STEER_WIND_S`,
+ *                  `KEY_STEER_RETURN_S`) down to a third, the rack (`steerRackSpeed`)
+ *                  doubled, and the release delay (`KEY_STEER_RELEASE_S`) gone
+ *   rearBreakaway  the REAR axle's past-peak plateau down to RAW_REAR_PLATEAU; the
+ *                  front keeps its own, so the tail lets go and the nose does not
+ *   yawInertia     the box gain on YAW only (`INERTIA_PITCH_YAW_GAIN`) down to
+ *                  RAW_YAW_GAIN; pitch keeps its gain, it is a separate tensor term
+ *   bumpFeel       less filtering between the ground and the grip: the contact patch's
+ *                  envelope (`CONTACT_PATCH_M`) and the load low-pass (`WHEEL_LOAD_TAU`)
+ *                  down to RAW_CONTACT_PATCH_M and RAW_WHEEL_LOAD_TAU
+ * ------------------------------------------------------------------------- */
+export interface RawHandlingTuning {
+  enabled: boolean;
+  assistFade: number;
+  steerSpeed: number;
+  rearBreakaway: number;
+  yawInertia: number;
+  bumpFeel: number;
+}
+/** 'On' at these is a noticeably rawer car that is still drivable on keys. */
+export const RAW_HANDLING_DEFAULTS: Readonly<RawHandlingTuning> = {
+  enabled: false,
+  assistFade: 0.3,
+  steerSpeed: 0.5,
+  rearBreakaway: 0.5,
+  yawInertia: 0.5,
+  bumpFeel: 0.5,
+};
+/** The live levers, written by the pause menu and read by `Vehicle` every step. */
+export const RAW_HANDLING: RawHandlingTuning = { ...RAW_HANDLING_DEFAULTS };
+export const RAW_ASSIST_FADE_FROM_KMH = 40;
+export const RAW_ASSIST_FADE_TO_KMH = 100;
+/** Wind-up and return time constants at steerSpeed 1, as a share of today's. */
+export const RAW_STEER_TIME_SCALE = 1 / 3;
+/** Rack speed at steerSpeed 1, as a multiple of the profile's. */
+export const RAW_RACK_SCALE = 2;
+export const RAW_REAR_PLATEAU = 0.5;
+export const RAW_YAW_GAIN = 1.4;
+export const RAW_CONTACT_PATCH_M = 0.04;
+export const RAW_WHEEL_LOAD_TAU = 0.008;
+/** Today's value at t = 0 exactly, the raw one at t = 1. */
+export function rawBlend(today: number, raw: number, t: number): number {
+  return today + (raw - today) * t;
+}
+
 
 export function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;

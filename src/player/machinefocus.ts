@@ -19,7 +19,11 @@ const WHEEL_NOTCH = 1;
  *  - a press on a part that takes the hand (`WorldFixture.grab`, the crank) drags it
  *    instead, until the button is let go; the wheel turns it a click at a time;
  *  - Escape, the right button or a step away (a movement key) let go of it, and the
- *    camera eases back to the eyes.
+ *    camera eases back to the eyes; so does the machine itself once it has dropped
+ *    something into its tray (`FixtureContext.stepBack`).
+ *
+ * A money machine (`WorldFixture.purseSeat`) takes the purse into its slot for as long as
+ * it is framed (`onFramed`; main.ts seats render/purse.ts), and gives it back on leaving.
  *
  * Nothing pauses: the world runs on while the player works the machine.
  */
@@ -90,8 +94,10 @@ export class MachineFocus {
     this.input.setCursorFree(true);
     if (document.pointerLockElement !== null) document.exitPointerLock();
     document.body.classList.add('is-machine-focus');
-    fixture.setFocused?.(true, this.context());
+    // Framed first, so the purse is in its slot when the machine is told; last, because
+    // what the machine gives on being framed may let go of it again at once.
     this.onFramed(fixtureId);
+    fixture.setFocused?.(true, this.context());
   }
 
   /** Lets go of the machine; `relock` asks for the pointer back (only from a user gesture). */

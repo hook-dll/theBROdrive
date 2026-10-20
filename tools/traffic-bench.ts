@@ -806,7 +806,7 @@ check(
     race.observe(item, 'hand', layby.s - 2200);
     const playerS = layby.s + 150;
     if (side === -1) {
-      race.winCoins(item.id);
+      race.winPay(item.id);
       race.playerDelivered(item.id);
     }
     type RivalCar = {

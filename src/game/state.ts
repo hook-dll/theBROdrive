@@ -168,13 +168,15 @@ export interface CarState {
    */
   papers?: boolean;
   /**
-   * Coins a car standing on a lot asks (world/carlot.ts), flat across the road. Present
+   * Kopecks a car standing on a lot asks (world/carlot.ts), flat across the road. Present
    * only while it is for sale: nobody drives it off before `car_buy` clears it.
    */
   lotPrice?: number;
   /**
-   * Coins already fed into this lot car's key box (world/keybox.ts), toward `lotPrice`.
-   * Kept so a reload never eats them; `car_buy` clears it with the price.
+   * Kopecks already paid into this lot car's key box (world/keybox.ts), toward
+   * `lotPrice`: the whole price once its lever has taken it from the purse, or what a
+   * save from the coin days had fed in. Kept so a reload never eats it; `car_buy` clears
+   * it with the price.
    */
   lotPaid?: number;
 }
@@ -212,6 +214,11 @@ export interface PlayerState {
   wornSunShades: SunShadesItem | null;
   /** The police's view of him; see `PoliceRecord`. */
   police: PoliceRecord;
+  /**
+   * The purse's balance, KOPECKS (economy/economy.ts). The purse is not an item: it is
+   * always carried, and money machines take it into their slot to debit or pay it.
+   */
+  money: number;
 }
 
 /**
@@ -286,8 +293,10 @@ export type TrailerLoadKind = 'pipes' | 'beams';
  * apart (save/save.ts). A save without the field is version 1.
  *  - 2: the bonnet lost the fuel tank's cell; four cells (engine, turbine, radiator, air
  *    filter), where a version 1 bonnet had the tank fourth and the filter fifth.
+ *  - 3: money is kopecks in the purse (`PlayerState.money`); before it, coin items
+ *    were the money and lot prices were coins.
  */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface WorldState {
   readonly seed: number;
@@ -445,8 +454,10 @@ export type WorldDelta =
   | { t: 'barrel_litres'; barrelId: string; litres: number }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
-  /** Coins fed into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `coins`. */
-  | { t: 'lot_pay'; carId: string; coins: number }
+  /** Kopecks paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `kopecks`. */
+  | { t: 'lot_pay'; carId: string; kopecks: number }
+  /** The purse's balance is now `kopecks` (economy/economy.ts `debit`, `credit`). */
+  | { t: 'money'; kopecks: number }
   /** The police's escalation level and when it cools (world/police.ts); not a save trigger. */
   | { t: 'police_heat'; heat: number; heatUntil: number };
 
@@ -485,6 +496,7 @@ export function newWorldState(seed: number): WorldState {
       carriedSelected: 0,
       wornSunShades: null,
       police: { heat: 0, heatUntil: 0 },
+      money: 0,
     },
     cars: {},
     courierStorage: {},
@@ -877,7 +889,11 @@ export class GameWorld {
       }
       case 'lot_pay': {
         const car = s.cars[delta.carId];
-        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.coins);
+        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.kopecks);
+        break;
+      }
+      case 'money': {
+        s.player.money = Math.max(0, Math.round(delta.kopecks));
         break;
       }
       case 'police_heat':

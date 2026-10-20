@@ -31,8 +31,8 @@
  * teddy passengers is one) not on the car's waybill — carried in the pack, or past the
  * body's contract slots in the boot (`contractSlotsFor`) — per contract; all of it times
  * `1 + heat`. A clean check
- * costs nothing. The fine comes out of the coins in the pack, as far as they go. The
- * pack's `inventory` delta and the `police_heat` delta are not save triggers behind the
+ * costs nothing. The fine comes straight out of the purse (no machine needed), as far as
+ * it goes. The `money` delta and the `police_heat` delta are not save triggers behind the
  * wheel, so what the stop took is saved with the next exit (save.ts). A stop paid in full
  * clears the heat; an unpaid rest adds a level.
  *
@@ -44,10 +44,10 @@
  */
 
 import { hash01 } from '../core/rng';
-import { coinsHeld, contractSlotsFor, spendCoins } from '../economy/economy';
+import { contractSlotsFor, debit, formatMoney, moneyHeld, RUB } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { POLICE_HEAT_MAX } from '../game/state';
-import { contractsAmong, type Inventory } from '../items/items';
+import { contractsAmong } from '../items/items';
 import type { CarPaint } from '../vehicle/carpaint';
 import type { Vehicle } from '../vehicle/vehicle';
 import { laybysBetween, shoulderPullOff, type Layby } from './layby';
@@ -179,15 +179,15 @@ const CLEAR_AWAY_M = 300;
 /** A level of heat lasts this much played time, seconds; each escalation restarts it. */
 const HEAT_COOL_S = 20 * 60;
 
-/** Fines in coins, before `1 + heat`. */
-const FINE_SPEEDING_BASE = 2;
-/** ...plus one per this many km/h over the limit, rounded up. */
+/** Fines in kopecks, before `1 + heat`. */
+const FINE_SPEEDING_BASE = 2 * RUB;
+/** ...plus a ruble per this many km/h over the limit, rounded up. */
 const FINE_SPEEDING_STEP_KMH = 10;
-const FINE_ACCIDENT = 6;
-const FINE_NO_PAPERS = 6;
-const FINE_UNDECLARED = 4;
+const FINE_ACCIDENT = 6 * RUB;
+const FINE_NO_PAPERS = 6 * RUB;
+const FINE_UNDECLARED = 4 * RUB;
 /** A wanted driver stopped at last answers for the flight. */
-const FINE_EVADING = 5;
+const FINE_EVADING = 5 * RUB;
 
 const POST_SALT = 0x504f5354;
 const CHECK_SALT = 0x43484b31;
@@ -318,7 +318,6 @@ export class PolicePatrol {
     private readonly world: GameWorld,
     private readonly road: DriveRoad,
     private readonly host: PoliceHost,
-    private readonly inventory: Inventory,
     private readonly notify: (text: string) => void,
   ) {
     this.impactsSeen = host.playerImpacts;
@@ -378,9 +377,9 @@ export class PolicePatrol {
     } else {
       const account = result.items.join(' · ');
       if (result.paid >= result.fine) {
-        this.notify(`police: fined ${result.fine} coin${result.fine === 1 ? '' : 's'} — ${account}`);
+        this.notify(`police: fined ${formatMoney(result.fine)} — ${account}`);
       } else {
-        this.notify(`police: fined ${result.fine}, paid ${result.paid} — ${account}; the rest goes on your record`);
+        this.notify(`police: fined ${formatMoney(result.fine)}, paid ${formatMoney(result.paid)} — ${account}; the rest goes on your record`);
       }
     }
     return result;
@@ -760,7 +759,7 @@ export class PolicePatrol {
 
   /**
    * The officer's check of the car he stopped and of the pack: the offences, the fine at
-   * `1 + heat`, and what the pack's coins paid of it. Heat: cleared by a stop paid in
+   * `1 + heat`, and what the purse paid of it. Heat: cleared by a stop paid in
    * full, one level up for a rest left unpaid.
    */
   private inspect(chase: Chase): PoliceStopResult {
@@ -769,7 +768,7 @@ export class PolicePatrol {
     let fine = 0;
     const speeding = chase.grounds.speedingKmh;
     if (speeding !== null) {
-      fine += FINE_SPEEDING_BASE + Math.ceil((speeding - SPEED_LIMIT_KMH) / FINE_SPEEDING_STEP_KMH);
+      fine += FINE_SPEEDING_BASE + RUB * Math.ceil((speeding - SPEED_LIMIT_KMH) / FINE_SPEEDING_STEP_KMH);
       items.push(`speeding ${Math.round(speeding)} km/h`);
     }
     // A flight he is stopped for at last is fined only when it escalated (he is wanted):
@@ -804,8 +803,8 @@ export class PolicePatrol {
       fine *= 1 + heat;
       items.push(`×${1 + heat} wanted`);
     }
-    const paid = Math.min(fine, coinsHeld(state));
-    if (paid > 0) spendCoins(this.inventory, paid);
+    const paid = Math.min(fine, moneyHeld(this.world));
+    debit(this.world, paid);
     if (paid < fine) this.setHeat(heat + 1);
     else if (heat > 0) this.setHeat(0);
     return { fine, paid, items };

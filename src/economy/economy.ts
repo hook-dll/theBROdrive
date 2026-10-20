@@ -2,21 +2,26 @@
  * The money of the drive: what a delivery pays, what a thing costs and how many
  * contracts a car carries.
  *
- * The coin item (`CoinItem`, items/items.ts) is the currency and the pack is the
- * purse: coins stack into one pile there, and `Inventory.spendCoins` takes from it.
- * Everything in this file is a pure function of its arguments and the saved state, so
- * a prompt and the action behind it can never disagree about a price.
+ * Money is rubles and kopecks, and every amount in the game is an integer number of
+ * KOPECKS: the balance, the prices, the pay. It is held in the purse (`PlayerState.money`),
+ * which is not an item: it goes into a money machine's slot when the machine is worked
+ * (render/purse.ts) and the machine debits or pays it there (`debit`, `credit`).
+ * Everything else in this file is a pure function of its arguments and the saved state,
+ * so a card and the action behind it can never disagree about a price.
  *
  * Pay and vending prices rise with the distance from home on a saturating curve,
  * `kmIndex`, about ×3 at most. Car prices do not.
  */
 
-import type { WorldState } from '../game/state';
+import type { GameWorld } from '../game/state';
 import type { ContractKind } from '../contracts/types';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
-import type { ContractCargoItem, Inventory, Item } from '../items/items';
+import type { ContractCargoItem, Item } from '../items/items';
 import { variant, type PartKind } from '../parts/registry';
 import { postStop } from '../world/poststops';
+
+/** Kopecks in a ruble: every price below is written as rubles times this. */
+export const RUB = 100;
 
 /** How quickly pay and prices saturate with distance, km. */
 const KM_INDEX_SCALE_KM = 150;
@@ -30,35 +35,74 @@ export function kmIndex(km: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Coins
+// Money and the purse
 // ---------------------------------------------------------------------------
 
-/** Coins in the player's pack. The pile is one stack (`Inventory.add`). */
-export function coinsHeld(state: WorldState): number {
-  let total = 0;
-  for (const item of state.player.carried) if (item.type === 'coin') total += item.value;
-  return total;
+/**
+ * The purse's six tubes, kopecks, in the order they stand in the case: 1, 5 and 10
+ * kopecks, 1, 2 and 5 rubles.
+ */
+export const PURSE_DENOMINATIONS: readonly number[] = [1, 5, 10, RUB, 2 * RUB, 5 * RUB];
+
+/**
+ * Each `PURSE_DENOMINATIONS` coin's diameter, millimetres (the Russian coins of 1997):
+ * the purse's tubes are sized to them, so the 5-ruble tube is the widest.
+ */
+export const PURSE_COIN_MM: readonly number[] = [15.5, 18.5, 17.5, 20.5, 23, 25];
+
+/**
+ * How many coins of each `PURSE_DENOMINATIONS` tube `kopecks` is, greedy from the
+ * largest: the fewest coins that make the sum. The purse shows exactly this.
+ */
+export function purseCoins(kopecks: number): number[] {
+  let rest = Math.max(0, Math.round(kopecks));
+  const counts = new Array<number>(PURSE_DENOMINATIONS.length).fill(0);
+  for (let i = PURSE_DENOMINATIONS.length - 1; i >= 0; i--) {
+    const coin = PURSE_DENOMINATIONS[i]!;
+    counts[i] = Math.floor(rest / coin);
+    rest -= counts[i]! * coin;
+  }
+  return counts;
+}
+
+/** A tube's coin as its pusher reads: `5коп`, `2р`. */
+export function denominationLabel(kopecks: number): string {
+  return kopecks >= RUB ? `${kopecks / RUB}р` : `${kopecks}коп`;
 }
 
 /**
- * Takes `n` coins out of the pack. False, and nothing taken, when the pack holds
- * fewer. The pack is authoritative in-session, so this goes through `Inventory` and
- * its listener mirrors the change into state.
+ * An amount as it is painted everywhere: `3р 50коп`, with a zero part left out
+ * (`50коп`, `4р`); nothing at all reads `0коп`.
  */
-export function spendCoins(inventory: Inventory, n: number): boolean {
-  return inventory.spendCoins(Math.round(n));
+export function formatMoney(kopecks: number): string {
+  const total = Math.max(0, Math.round(kopecks));
+  const rub = Math.floor(total / RUB);
+  const kop = total % RUB;
+  if (rub === 0) return `${kop}коп`;
+  return kop === 0 ? `${rub}р` : `${rub}р ${kop}коп`;
+}
+
+/** The purse's balance, kopecks. */
+export function moneyHeld(world: GameWorld): number {
+  return world.state.player.money;
 }
 
 /**
- * Puts `n` coins into the pack, onto the pile already carried or into a free slot.
- * Returns the coin item when the pack had no room for it, so the caller can leave it
- * where it was earned (a courier's boot cell, the ground); null when it went in.
+ * Takes `kopecks` out of the purse. False, and nothing taken, when it holds less: a
+ * machine short of its price gives nothing.
  */
-export function giveCoins(inventory: Inventory, n: number, id: string): Item | null {
-  const value = Math.round(n);
-  if (value < 1) return null;
-  const coin: Item = { type: 'coin', id, value };
-  return inventory.add(coin) ? null : coin;
+export function debit(world: GameWorld, kopecks: number): boolean {
+  const amount = Math.max(0, Math.round(kopecks));
+  const balance = world.state.player.money;
+  if (balance < amount) return false;
+  if (amount > 0) world.apply({ t: 'money', kopecks: balance - amount });
+  return true;
+}
+
+/** Puts `kopecks` into the purse. */
+export function credit(world: GameWorld, kopecks: number): void {
+  const amount = Math.max(0, Math.round(kopecks));
+  if (amount > 0) world.apply({ t: 'money', kopecks: world.state.player.money + amount });
 }
 
 // ---------------------------------------------------------------------------
@@ -66,30 +110,30 @@ export function giveCoins(inventory: Inventory, n: number, id: string): Item | n
 // ---------------------------------------------------------------------------
 
 /**
- * Base pay of one delivery by kind, coins at home (km index 1). Per delivery, not
- * per km. A nine-kilometre hop burns about half a litre in the Oka (0.6 coin of
- * petrol, `PRICE_TABLE`), so a parcel leaves three coins or so towards oil, filters
- * and the next car; the bigger kinds pay for the bigger car they need.
+ * Base pay of one delivery by kind, kopecks at home (km index 1). Per delivery, not
+ * per km. A nine-kilometre hop burns about half a litre in the Oka (20 kopecks of
+ * petrol, `PRICE_TABLE`), so a parcel leaves most of its three rubles towards oil,
+ * filters and the next car; the bigger kinds pay for the bigger car they need.
  */
 export const DELIVERY_BASE_PAY: Readonly<Record<ContractKind, number>> = {
-  parcel: 4,
-  heavy_crate: 6,
-  fragile_radio: 7,
-  trailer_equipment: 10,
-  oversize: 12,
-  towing: 10,
-  car_transfer: 10,
-  teddy_passengers: 4,
+  parcel: 3 * RUB,
+  heavy_crate: 5 * RUB,
+  fragile_radio: 6 * RUB,
+  trailer_equipment: 9 * RUB,
+  oversize: 11 * RUB,
+  towing: 9 * RUB,
+  car_transfer: 9 * RUB,
+  teddy_passengers: 3 * RUB,
 };
 
 /** Each passenger of a party past the first adds this share of the kind's base pay. */
 const EXTRA_PASSENGER_SHARE = 0.5;
 
 /**
- * Coins one delivery pays: base by kind × the SOURCE post stop's km index × the
+ * Kopecks one delivery pays: base by kind × the SOURCE post stop's km index × the
  * delivery's quality (0..1; a fragile radio's condition, a passenger party's ride,
  * 1 for every other kind), and for a party of `passengers` teddies half the base again
- * for each past the first. Never below one coin: a delivered contract always pays
+ * for each past the first. Never below one kopeck: a delivered contract always pays
  * something.
  */
 export function deliveryPay(kind: ContractKind, sourceKm: number, quality: number, passengers = 1): number {
@@ -117,57 +161,69 @@ export function contractPay(seed: number, item: ContractCargoItem): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Base prices at home, coins. The МАГАЗИН machines multiply by `kmIndex` of where they
+ * Base prices at home, kopecks. The SHOP machines multiply by `kmIndex` of where they
  * stand (`itemPrice`); cars are priced flat (`carPrice`).
  */
 export const PRICE_TABLE = {
-  /** An empty can: a coin, plus a little for every litre it holds. Fluids are not sold. */
-  can: 1,
-  canPerLitre: 0.1,
+  /**
+   * A can: fifty kopecks for the can and forty for every litre it holds, the price of
+   * the petrol it is for. Fluids are not sold: it is filled at a barrel.
+   */
+  can: 50,
+  canPerLitre: 40,
   /** Parts by kind, new. A worn part sells for less (`itemPrice`). */
-  part: { engine: 30, gearbox: 15, radiator: 8, turbine: 25, air_filter: 3 } as Readonly<Record<PartKind, number>>,
-  bubble_gum: 1,
-  spray_can: 3,
-  sun_shades: 4,
-  sticker_envelope: 4,
-  /** Cars by model id, flat (never × km index). Unlisted models: `CAR_PRICE_DEFAULT`. */
+  part: {
+    engine: 35 * RUB,
+    gearbox: 18 * RUB,
+    radiator: 9 * RUB,
+    turbine: 30 * RUB,
+    air_filter: 2 * RUB + 50,
+  } as Readonly<Record<PartKind, number>>,
+  bubble_gum: 15,
+  spray_can: RUB + 20,
+  sun_shades: 3 * RUB,
+  sticker_envelope: 50,
+  /**
+   * Cars by model id, flat (never × km index): the coin table of the coin days × 1.25 in
+   * whole rubles, 25 to 150, with the Oka at 30. Unlisted models: `CAR_PRICE_DEFAULT`.
+   */
   car: {
-    kit_vaz1111: 20,
-    kit_vaz2101: 30,
-    kit_vaz2103: 32,
-    kit_vaz2105: 34,
-    kit_vaz2106: 36,
-    kit_vaz2107: 38,
-    kit_azlk2141: 42,
-    kit_vaz2108: 44,
-    kit_vaz2109: 46,
-    kit_vaz21099: 48,
-    kit_gaz24: 50,
-    kit_vaz2115: 54,
-    kit_vaz2110: 55,
-    kit_vaz2112: 58,
-    kit_gaz31029: 60,
-    kit_vaz2121: 62,
-    kit_vaz2102: 60,
-    kit_vaz2104: 65,
-    kit_vaz2111: 75,
-    kit_uaz469: 80,
-    kit_uaz469_police: 80,
-    kit_vaz2131: 90,
-    kit_nexia: 90,
-    kit_astraf: 100,
-    kit_vectraa: 105,
-    kit_espero: 110,
-    kit_uaz2206: 120,
+    kit_vaz1111: 30 * RUB,
+    kit_vaz2101: 38 * RUB,
+    kit_vaz2103: 40 * RUB,
+    kit_vaz2105: 43 * RUB,
+    kit_vaz2106: 45 * RUB,
+    kit_vaz2107: 48 * RUB,
+    kit_azlk2141: 53 * RUB,
+    kit_vaz2108: 55 * RUB,
+    kit_vaz2109: 58 * RUB,
+    kit_vaz21099: 60 * RUB,
+    kit_gaz24: 63 * RUB,
+    kit_vaz2115: 68 * RUB,
+    kit_vaz2110: 69 * RUB,
+    kit_vaz2112: 73 * RUB,
+    kit_gaz31029: 75 * RUB,
+    kit_vaz2121: 78 * RUB,
+    kit_vaz2102: 75 * RUB,
+    kit_vaz2104: 81 * RUB,
+    kit_vaz2111: 94 * RUB,
+    kit_uaz469: 100 * RUB,
+    kit_uaz469_police: 100 * RUB,
+    kit_vaz2131: 113 * RUB,
+    kit_nexia: 113 * RUB,
+    kit_astraf: 125 * RUB,
+    kit_vectraa: 131 * RUB,
+    kit_espero: 138 * RUB,
+    kit_uaz2206: 150 * RUB,
   } as Readonly<Record<string, number>>,
 } as const;
 
-const CAR_PRICE_DEFAULT = 60;
+const CAR_PRICE_DEFAULT = 75 * RUB;
 
 /**
- * What a МАГАЗИН machine at `km` asks for this item: its base price × the km index,
- * rounded, never under one coin. A part is priced by kind and scaled down by its
- * wear; a can by its size. Items no machine sells (contract cargo, coins) price at 0.
+ * What a SHOP machine at `km` asks for this item: its base price × the km index,
+ * rounded to the kopeck, never under one. A part is priced by kind and scaled down by
+ * its wear; a can by its size. Items no machine sells (contract cargo) price at 0.
  */
 export function itemPrice(item: Item, km: number): number {
   const base = itemBasePrice(item);
@@ -196,7 +252,7 @@ function itemBasePrice(item: Item): number {
   }
 }
 
-/** A car's price, coins. Flat across the road: a car is a car wherever it stands. */
+/** A car's price, kopecks. Flat across the road: a car is a car wherever it stands. */
 export function carPrice(modelId: string): number {
   return PRICE_TABLE.car[modelId] ?? CAR_PRICE_DEFAULT;
 }

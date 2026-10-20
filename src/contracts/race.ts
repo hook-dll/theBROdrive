@@ -8,7 +8,7 @@
  * Whoever hands the cargo in at the finish first wins; a rival "hands in" by pulling
  * into the post's lay-by, standing beside the post for `HAND_IN_S` — a parcel
  * dropped in the slot from the window, not the player's walk to it — and pulling back out.
- * The delivery always pays its sticker; winning adds one coin per leg (`winCoins`).
+ * The delivery always pays its sticker; winning adds a ruble per leg (`winPay`).
  * Slice rules: no save (a reload forgets the race).
  *
  * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `ROAD_PHYSICS_REACH_M` (world/ranges.ts) either
@@ -40,6 +40,7 @@
  * after `FINISHING_MAX_S` whatever is left goes back to the stream as it is.
  */
 import { hash, hash01 } from '../core/rng';
+import { formatMoney, RUB } from '../economy/economy';
 import { shouldShelter } from '../vehicle/weatherpace';
 import { contractIdOf, type ContractCargoItem } from '../items/items';
 import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
@@ -184,7 +185,7 @@ interface Race {
   decided: boolean;
   /** Seconds since it was decided; see FINISHING_MAX_S. */
   decidedFor: number;
-  /** Posts to the finish, 1 or 2: also the coins a win pays. */
+  /** Posts to the finish, 1 or 2: also the rubles a win pays. */
   readonly legs: 1 | 2;
 }
 
@@ -246,12 +247,12 @@ export class RivalRace {
   }
 
   /**
-   * Coins the player wins by handing `itemId` in now: the race's legs while no rival
-   * has handed in, else 0. Asked by the delivery before `playerDelivered` ends it.
+   * Kopecks the player wins by handing `itemId` in now: a ruble per leg of the race while
+   * no rival has handed in, else 0. Asked by the delivery before `playerDelivered` ends it.
    */
-  winCoins(itemId: string): number {
+  winPay(itemId: string): number {
     const race = this.race;
-    return race !== null && race.itemId === itemId && race.delivered === 0 ? race.legs : 0;
+    return race !== null && race.itemId === itemId && race.delivered === 0 ? race.legs * RUB : 0;
   }
 
   /** The player handed `itemId` in: the race is decided by how many rivals already did. */
@@ -262,7 +263,7 @@ export class RivalRace {
     race.finishers++;
     this.end(
       place === 1
-        ? `race won — ${race.legs === 1 ? 'a coin' : 'two coins'} more in the pay`
+        ? `race won — ${formatMoney(race.legs * RUB)} more in the pay`
         : `race lost — you delivered ${ordinal(place)}`,
     );
   }

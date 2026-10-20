@@ -208,17 +208,6 @@ export interface PocketWatchItem {
   readonly id: string;
 }
 
-/**
- * A race prize. Coins STACK: one meeting another — picked up into a pack that holds
- * one, or taken from a cell while holding one — becomes a single coin carrying the
- * sum, so `value` is what it is worth and a pile never costs more than one slot.
- */
-export interface CoinItem {
-  readonly type: 'coin';
-  readonly id: string;
-  readonly value: number;
-}
-
 export type { StickerKind } from './stickercatalog';
 
 /** A contract cargo's own look when it is not its kind's box; see `ContractCargoItem.shape`. */
@@ -244,7 +233,7 @@ export interface ContractCargoItem {
   /**
    * A race offer: how many posts on its destination is, 1 or 2. The cargo is
    * signed only from there on, three rivals carry the same thing there, and the
-   * player handing in first wins this many coins. Absent on an ordinary trip.
+   * player handing in first wins a ruble a leg (contracts/race.ts). Absent on an ordinary trip.
    */
   raceLegs?: 1 | 2;
   /**
@@ -328,7 +317,6 @@ export type Item =
   | PhotographItem
   | FootballItem
   | PocketWatchItem
-  | CoinItem
   | ContractCargoItem
   | StickerEnvelopeItem;
 
@@ -374,8 +362,8 @@ export function isHaulKind(kind: ContractKind): boolean {
 
 /**
  * The short title a post's display shows before the cargo's name, so the four offers
- * read at a glance: a sticker run, a race to the next post (a coin to the winner),
- * a race two posts on (two coins), and a haul with a trailer or a car in tow.
+ * read at a glance: a sticker run, a race to the next post (a ruble to the winner),
+ * a race two posts on (two rubles), and a haul with a trailer or a car in tow.
  */
 export function contractTier(item: ContractCargoItem): string {
   if (item.raceLegs === 1) return 'race · 1 stop';
@@ -433,8 +421,6 @@ export function itemLabel(item: Item): string {
       return 'football';
     case 'pocket_watch':
       return 'pocket watch';
-    case 'coin':
-      return item.value === 1 ? 'coin' : `coin · ${item.value}`;
     case 'contract_cargo': {
       // A knocked radio says how much of its pay it still carries.
       const condition = item.progress?.condition;
@@ -493,8 +479,6 @@ export function itemMass(item: Item): number {
       return 0.43;
     case 'pocket_watch':
       return 0.12;
-    case 'coin':
-      return 0.008 * item.value;
     case 'contract_cargo':
       // A heavy crate carries its own mass; every other contract is a parcel.
       return item.massKg ?? 12;
@@ -575,28 +559,13 @@ export class Inventory {
    * picked up when your hands are otherwise empty, however heavy it is. Engines run
    * 118-402 kg against a 95 kg limit, so without this you could never carry an engine
    * to the car and the game would be unfinishable. Hauling one is deliberately
-   * miserable instead — `carriedMass` saturates the movement penalty. The coin purse
-   * does not count as something in your hands: money is always carried, and a heavy
-   * crate or an engine must still be liftable with it.
-   *
-   * A coin joining a pack that already holds one merges into it (see `CoinItem`),
-   * so it never needs a free slot.
+   * miserable instead — `carriedMass` saturates the movement penalty.
    */
   add(item: Item): boolean {
-    if (item.type === 'coin') {
-      const index = this.items.findIndex((held) => held.type === 'coin');
-      const pile = this.items[index];
-      if (pile?.type === 'coin') {
-        this.items[index] = { ...pile, value: pile.value + item.value };
-        this.listener?.();
-        return true;
-      }
-    }
     if (this.items.length >= INVENTORY_ITEM_LIMIT) return false;
     const mass = itemMass(item);
-    const handsEmpty = this.items.every((held) => held.type === 'coin');
-    // A coin weighs grams: it goes into any pack with a free slot, however loaded.
-    const exempt = item.type === 'coin' || (handsEmpty && mass > this.massLimit);
+    const handsEmpty = this.items.length === 0;
+    const exempt = handsEmpty && mass > this.massLimit;
     if (!exempt && this.carriedMass + mass > this.massLimit) return false;
     this.items.push(item);
     this.listener?.();
@@ -611,21 +580,6 @@ export class Inventory {
     if (this.selected >= this.items.length) this.selected = Math.max(0, this.items.length - 1);
     this.listener?.();
     return removed ?? null;
-  }
-
-  /**
-   * Takes `n` coins off the pile in the pack. False, and nothing taken, when the pack
-   * holds fewer; a pile spent to nothing leaves the pack.
-   */
-  spendCoins(n: number): boolean {
-    if (n <= 0) return true;
-    const index = this.items.findIndex((held) => held.type === 'coin');
-    const pile = this.items[index];
-    if (pile?.type !== 'coin' || pile.value < n) return false;
-    if (pile.value === n) return this.remove(pile.id) !== null;
-    this.items[index] = { ...pile, value: pile.value - n };
-    this.listener?.();
-    return true;
   }
 
   find(id: string): Item | null {

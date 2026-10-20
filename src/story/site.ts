@@ -25,6 +25,7 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { CarState, GameWorld } from '../game/state';
 import type { LoosePartField } from '../parts/loose';
 import { emptyCabin } from '../vehicle/cabin';
+import { RUB } from '../economy/economy';
 
 /** Domain tag for every roll this file takes; never collides with another system's. */
 const STORY_TAG = 0x53545331; // 'STS1'
@@ -97,8 +98,8 @@ export function storySite(seed: number, road: Road, terrain: Terrain): StorySite
 /** The car every new drive starts in. */
 const START_CAR_MODEL_ID = 'kit_vaz1111';
 
-/** Coins in the pack at the start: a litre or two of petrol, nothing more. */
-export const START_COINS = 5;
+/** Kopecks in the purse at the start: four rubles fifty, a few litres of petrol and a can. */
+export const START_MONEY = 4 * RUB + 50;
 
 /**
  * Builds the starter car: the VAZ-1111 Oka, the cheapest car on the road, every

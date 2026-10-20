@@ -928,6 +928,25 @@ body.is-machine-focus .hud-crosshair {
   transform-origin: center;
 }
 
+/*
+ * The purse (hud.ts `setPurse`, drawn by ui/purse.ts): an image in the top-right corner,
+ * up only on foot near a money machine. Its canvas is drawn at twice this size.
+ */
+.hud-purse {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  width: 220px;
+  height: 110px;
+  pointer-events: none;
+}
+
+.hud-purse canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 @media (pointer: coarse) {
   /* Mobile retains its old compact footprint; the requested increase is desktop-only. */
   .hud-driving {
@@ -941,6 +960,11 @@ body.is-machine-focus .hud-crosshair {
     right: calc(12px + env(safe-area-inset-right));
     width: 64px;
     height: 64px;
+  }
+
+  .hud-purse {
+    width: 160px;
+    height: 80px;
   }
 }
 

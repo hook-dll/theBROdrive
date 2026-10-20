@@ -60,7 +60,7 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
-import { coinsHeld, spendCoins } from '../economy/economy';
+import { credit, debit, formatMoney } from '../economy/economy';
 import type { FixtureContext, FixtureField } from '../world/fixturefield';
 
 /** How far the eye ray reaches for picking. */
@@ -366,6 +366,8 @@ export interface InteractionHooks {
   toast(text: string): void;
   /** F on a machine worked up close (`WorldFixture.focus`): frame it (player/machinefocus.ts). */
   focus(fixtureId: string): void;
+  /** Let go of the machine worked up close: the camera steps back from it. */
+  stepBack(): void;
 }
 
 /** The bar action available where the player stands; see `towAction`. */
@@ -666,14 +668,15 @@ export class Interaction {
       get world() { return self.world; },
       get inventory() { return self.inventory; },
       get held() { return self.inventory.held; },
-      coins: () => coinsHeld(self.world.state),
-      spend: (amount: number) => spendCoins(self.inventory, amount),
-      take: (item: Item) => self.inventory.add(item),
+      purse: () => (self.focusedFixture !== null ? self.world.state.player.money : null),
+      debit: (kopecks: number) => self.focusedFixture !== null && debit(self.world, kopecks),
+      credit: (kopecks: number) => credit(self.world, kopecks),
       give: (itemId: string) => self.inventory.remove(itemId),
       drop: (item: Item, x: number, y: number, z: number) => {
         if (item.type === 'part') self.loose.spawn(item.part, x, y, z);
         else self.loose.spawnItem(item, x, y, z);
       },
+      stepBack: () => self.hooks.stepBack(),
       probe: (postIndex: number, x: number, z: number) => {
         const probe = self.deliveryProbeValue;
         probe.targetPostIndex = postIndex;
@@ -682,7 +685,7 @@ export class Interaction {
         probe.drivingCarId = self.world.state.player.drivingCarId;
         return probe;
       },
-      raceCoins: (contractId: string) => self.raceCoins(contractId),
+      racePay: (contractId: string) => self.racePay(contractId),
       dial: (pin: string, opened: () => void) => self.hooks.dial(pin, opened),
       toast: (text: string) => self.hooks.toast(text),
     };
@@ -732,8 +735,8 @@ export class Interaction {
     private readonly origin: WorldOrigin,
     /** Colliders that mean "this is the parked plane"; boarding is offered here. */
     private readonly boardable: BoardableField,
-    /** Coins a race win pays for handing this contract in now; see `RivalRace.winCoins`. */
-    private readonly raceCoins: (contractId: string) => number,
+    /** Kopecks a race win pays for handing this contract in now; see `RivalRace.winPay`. */
+    private readonly racePay: (contractId: string) => number,
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,
     /** What the composition root does for a fixture: the PIN dial, a HUD toast. */
@@ -2063,8 +2066,8 @@ export class Interaction {
     const lot = this.lotCarAimed(resolved);
     if (lot) {
       const paid = lot.lotPaid ?? 0;
-      const owing = paid > 0 ? ` · ${paid} paid` : '';
-      return `${carModel(lot.modelId).label} for sale — ${lot.lotPrice} coins${owing} · pay at the key box`;
+      const owing = paid > 0 ? ` · ${formatMoney(paid)} paid` : '';
+      return `${carModel(lot.modelId).label} for sale — ${formatMoney(lot.lotPrice ?? 0)}${owing} · pay at the key box`;
     }
 
 
@@ -2726,7 +2729,7 @@ export class Interaction {
     const cabin = car.cabin;
     const takeAt = resolved.kitPlace >= 0 ? resolved.kitPlace : seatTaken(cabin, seat) ? cabinIndex(takePlace(cabin, seat)!) : -1;
     if (takeAt >= 0 && cabin[takeAt]) {
-      if (this.inventory.contents.length >= INVENTORY_ITEM_LIMIT && cabin[takeAt]!.type !== 'coin') {
+      if (this.inventory.contents.length >= INVENTORY_ITEM_LIMIT) {
         return { kind: 'refuse', why: 'your hands are full' };
       }
       return { kind: 'take', place: takeAt };

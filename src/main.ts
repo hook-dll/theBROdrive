@@ -41,6 +41,7 @@ import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
+import { PurseModel } from './render/purse';
 import { MarketField, marketProgramAnchor } from './world/market';
 import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
@@ -95,7 +96,7 @@ import {
 } from './world/ranges';
 import { AirfieldProvider, BoardableField } from './story/sitebuild';
 import { AIRFIELD, airfieldAt } from './story/airfield';
-import { createStartingCar, spawnStartingItems, START_COINS, storySite } from './story/site';
+import { createStartingCar, spawnStartingItems, START_MONEY, storySite } from './story/site';
 import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
@@ -205,6 +206,8 @@ const MIRROR_HAND_PITCH = 0.5;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
+/** On foot within this many metres of a money machine's purse slot, the purse shows on the HUD. */
+const PURSE_HUD_RADIUS_M = 10;
 /** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
 const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
@@ -508,6 +511,10 @@ async function boot(): Promise<void> {
     mirrorProgramAnchor(),
     marketProgramAnchor(),
   );
+  // The one purse (render/purse.ts): hidden until a money machine takes it into its slot,
+  // and in the scene from boot, so its programs link with the rest.
+  const purse = new PurseModel();
+  renderer.scene.add(purse.root);
   // Far traffic draws as one instance per model; built now so its hidden anchor links the
   // shared far-car program behind the loading cover (render/farcars.ts).
   const farCars = new FarCarField(renderer.scene);
@@ -865,7 +872,7 @@ async function boot(): Promise<void> {
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
   /** Police posts, chases and stops; see world/police.ts. */
-  const police = new PolicePatrol(world, road, traffic, inventory, (text) => hud.setToast(text));
+  const police = new PolicePatrol(world, road, traffic, (text) => hud.setToast(text));
   /** Reused receiver for the chasing police car's position; see `PolicePatrol.sirenAt`. */
   const sirenPoint = { x: 0, y: 0, z: 0 };
   const NO_RIVALS: readonly number[] = [];
@@ -1001,8 +1008,8 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The player starts with a few coins.
-    inventory.add({ type: 'coin', id: world.generatedPartId('story_item', 0, 1), value: START_COINS });
+    // The player starts with a little money in the purse.
+    world.apply({ t: 'money', kopecks: START_MONEY });
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -1219,7 +1226,7 @@ async function boot(): Promise<void> {
     },
     origin,
     boardable,
-    (contractId) => race.winCoins(contractId),
+    (contractId) => race.winPay(contractId),
     fixtures,
     {
       // The dial holds the game still, as the pause does; deferred out of the fixed step
@@ -1243,6 +1250,8 @@ async function boot(): Promise<void> {
       },
       toast: (text) => hud.setToast(text),
       focus: (fixtureId) => machineFocus.enter(fixtureId),
+      // A machine that dropped something in its tray lets go, so the player sees it.
+      stepBack: () => machineFocus.leave(true),
     },
   );
   interaction.attachPlayer(player);
@@ -1254,7 +1263,11 @@ async function boot(): Promise<void> {
     fixtures,
     origin,
     () => interaction.fixtureCtx,
-    (fixtureId) => interaction.setFocusedFixture(fixtureId),
+    (fixtureId) => {
+      interaction.setFocusedFixture(fixtureId);
+      // A money machine framed takes the purse into its slot; let go of, it gives it back.
+      purse.seat(fixtureId === null ? null : fixtures.get(fixtureId)?.purseSeat?.() ?? null);
+    },
   );
 
   const saveName = (state: typeof world.state): string => {
@@ -1641,7 +1654,12 @@ async function boot(): Promise<void> {
     // remember to call in. `computeStats` is a couple of dozen reads, `refreshLoad`
     // returns immediately when the total has not moved, and a live set is a handful
     // of cars, so one unconditional call is both cheaper and impossible to forget.
-    for (const vehicle of vehicles.values()) vehicle.refreshLoad();
+    // The dev raw-handling levers (vehicletuning.ts `RAW_HANDLING`) apply to the car the
+    // player drives from the driver's seat and to nothing else.
+    for (const vehicle of vehicles.values()) {
+      vehicle.setRawHandling(vehicle === controlled);
+      vehicle.refreshLoad();
+    }
     syncPackMass(driving);
 
     // Precise control is a preference, so M edits settings rather than a local flag:
@@ -2900,6 +2918,14 @@ async function boot(): Promise<void> {
       inventory.carriedMass,
       inventory.massLimit,
     );
+    // The purse: seated in the machine being worked, else on the HUD while the player is
+    // on foot near a money machine (POST, SHOP, a lot car's key box).
+    purse.update(s.player.money, origin.x, origin.z);
+    const purseNear = s.player.drivingCarId === null
+      && !machineFocus.working
+      && story === null
+      && fixtures.moneyMachineWithin(camera.eyePosition.x + origin.x, camera.eyePosition.z + origin.z, PURSE_HUD_RADIUS_M);
+    hud.setPurse(purseNear ? s.player.money : null);
     const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
 
@@ -3167,7 +3193,8 @@ async function boot(): Promise<void> {
     flipVehicle: devTools?.flipVehicle,
     seatInNearestCar: devTools?.seatInNearestCar,
     jumpToLake: devTools?.jumpToLake,
-    giveCoins: devTools?.giveCoins,
+    giveMoney: devTools?.giveMoney,
+    rawHandling: devTools?.rawHandling,
   };
 
   /**

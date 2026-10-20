@@ -15,6 +15,7 @@ import type {
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
+import { carPrice, RUB } from '../economy/economy';
 import {
   CAMERA_FRAME_LIMIT,
   SPONGE_CAPACITY_MAX,
@@ -167,8 +168,9 @@ export function installVehicleAutosave(
       case 'trailer_cargo':
       case 'sticker_place':
       case 'inventory':
-      // A purchase (world/vending.ts, world/carlot.ts): the coins and what they bought.
+      // A purchase (world/vending.ts, world/keybox.ts): the money and what it bought.
       case 'vend_sold':
+      case 'lot_pay':
       case 'car_buy':
         if (world.state.player.drivingCarId) return;
         break;
@@ -510,6 +512,10 @@ export function migrateState(raw: unknown): WorldState {
     ),
     wornSunShades: wornItem,
     police: migratePoliceRecord(playerRaw.police),
+    // A save from the coin days carries its coins instead (`legacyCoinKopecks`).
+    money: version < 3
+      ? legacyCoinKopecks(carriedRaw, looseItemsRaw, carsRaw, courierStorageRaw)
+      : Math.max(0, Math.round(numOr(playerRaw.money, 0))),
   };
 
   const cars: Record<string, CarState> = {};
@@ -908,10 +914,13 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // Bought or started in: the player's papers. A lot car still for sale keeps its price.
   if (raw.papers === true) car.papers = true;
   if (typeof raw.lotPrice === 'number' && Number.isFinite(raw.lotPrice) && raw.lotPrice > 0) {
-    car.lotPrice = Math.round(raw.lotPrice);
-    // Coins already in its key box; a save from before the key boxes has none.
+    // A save from the coin days priced in coins: the lot asks the model's price in
+    // kopecks now, and what was fed into its box counts a ruble a coin.
+    const coins = version < 3;
+    car.lotPrice = coins ? carPrice(car.modelId) : Math.round(raw.lotPrice);
+    // Already in its key box; a save from before the key boxes has none.
     if (typeof raw.lotPaid === 'number' && Number.isFinite(raw.lotPaid) && raw.lotPaid > 0) {
-      car.lotPaid = Math.min(car.lotPrice, Math.round(raw.lotPaid));
+      car.lotPaid = Math.min(car.lotPrice, Math.round(raw.lotPaid * (coins ? RUB : 1)));
     }
   }
   // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
@@ -1015,7 +1024,9 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
 function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
   const obj = raw as Record<string, unknown>;
-  if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter') return true;
+  // The coin item went with the purse: its value is counted into the balance first
+  // (`legacyCoinKopecks`).
+  if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter' || obj.type === 'coin') return true;
   if (obj.type === 'tool' && obj.tool === 'wrench') return true;
   if ((obj.type === 'fluid_can' && obj.fluid === 'diesel') || (obj.type === 'fuel_can' && obj.fuel === 'diesel')) {
     return true;
@@ -1025,6 +1036,39 @@ function isRemovedLegacyItem(raw: unknown): boolean {
     return typeof variantId === 'string' && !hasVariant(LEGACY_VARIANT_IDS[variantId] ?? variantId);
   }
   return false;
+}
+
+/**
+ * The coin days' money, kopecks: every coin item of a version 2 save, wherever it lay —
+ * the pack, the ground, a boot, a cabin, a post's stock — at a ruble a coin, for the
+ * purse. The coins themselves are then dropped (`isRemovedLegacyItem`).
+ */
+function legacyCoinKopecks(
+  carried: readonly unknown[],
+  looseItems: Record<string, unknown>,
+  cars: Record<string, unknown>,
+  courierStorage: Record<string, unknown>,
+): number {
+  let coins = 0;
+  const count = (raw: unknown): void => {
+    if (typeof raw !== 'object' || raw === null) return;
+    const obj = raw as Record<string, unknown>;
+    if (obj.type === 'coin') coins += Math.max(0, Math.trunc(numOr(obj.value, 0)));
+  };
+  const countAll = (raw: unknown): void => {
+    if (Array.isArray(raw)) for (const item of raw) count(item);
+  };
+  countAll(carried);
+  for (const loose of Object.values(looseItems)) {
+    if (typeof loose === 'object' && loose !== null) count((loose as Record<string, unknown>).item);
+  }
+  for (const car of Object.values(cars)) {
+    if (typeof car !== 'object' || car === null) continue;
+    countAll((car as Record<string, unknown>).storage);
+    countAll((car as Record<string, unknown>).cabin);
+  }
+  for (const cells of Object.values(courierStorage)) countAll(cells);
+  return coins * RUB;
 }
 
 /**
@@ -1196,11 +1240,6 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'football', id: obj.id };
     case 'pocket_watch':
       return { type: 'pocket_watch', id: obj.id };
-    case 'coin': {
-      const value = Math.trunc(numOr(obj.value, 0));
-      if (value < 1) throw new Error(`Save data is malformed: coin at ${where} has no value`);
-      return { type: 'coin', id: obj.id, value };
-    }
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
       // A kind dropped from the catalogue comes back as an ordinary parcel, keeping

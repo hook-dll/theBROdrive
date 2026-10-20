@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
+import { formatMoney } from '../economy/economy';
 import type { CarState, GameWorld } from '../game/state';
+import { PURSE_SEAT_D, PURSE_SEAT_H, PURSE_SEAT_W } from '../render/purse';
 import { carModel } from '../vehicle/carmodels';
 import type { ChunkContext } from './chunks';
-import { rayBox, type FixtureContext, type FixtureField, type FixtureHoldResult, type WorldFixture } from './fixturefield';
+import { rayBox, type FixtureContext, type FixtureField, type FixtureFocus, type PurseSeat, type WorldFixture } from './fixturefield';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
 import { box, C } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
@@ -13,19 +15,21 @@ import { addStatic, yawRotation } from './props/scatter';
 /**
  * The key box beside a lot car (world/carlot.ts): how a car is bought, by hand.
  *
- * A painted steel box on a post, its face to the buyer, with three working parts, each
- * aimed on its own:
- *  - the COIN SLOT: F held feeds coins from the pack one by one, faster as the hand
- *    gets going, until the car's price is in (`lot_pay`, kept in `CarState.lotPaid`, so a
- *    reload never eats them). A little window beside it fills as the coins stack.
- *  - the LEVER: F pulls it. Short of the price it jams and springs back; paid, it goes
- *    all the way down, a key on its tag drops inside and the drawer slides out with it.
- *  - the KEY DRAWER: F takes the key: the car is bought (`car_buy`), its price board comes
- *    down (`MarketField.carSold`) and the drawer slides shut again, empty.
+ * A painted steel box on a post, its face to the buyer, worked up close like the card
+ * machines (player/machinefocus.ts): F frames it, and the box takes the purse into the
+ * PURSE SLOT on its face (render/purse.ts). Then:
+ *  - the LEVER: a click pulls it. It takes what is still owed of the car's price out of
+ *    the purse at once (`lot_pay`, kept in `CarState.lotPaid`, so a reload never eats
+ *    it). Short of it, it jams, rattles and springs back, and nothing is taken. Paid, it
+ *    goes all the way down, a key on its tag drops inside and the drawer slides out.
+ *  - the KEY DRAWER: a click takes the key: the car is bought (`car_buy`), its price
+ *    board comes down (`MarketField.carSold`), the drawer slides shut again, empty, and
+ *    the box lets go of the player.
  *
- * The key on its tag is only seen, never carried: taking it IS the purchase. Whether the
- * key has dropped is the box's own in-memory state; a rebuilt box has it back inside,
- * and the paid lever simply drops it again.
+ * The price is painted on the plate over the slot. The key on its tag is only seen, never
+ * carried: taking it IS the purchase. Whether the key has dropped is the box's own
+ * in-memory state; a rebuilt box has it back inside, and the paid lever simply drops it
+ * again without taking anything.
  *
  * Built of POI kit boxes (flat materials) and one `signMaterial` board, whose programs
  * `marketProgramAnchor` links at boot: no new shader programs.
@@ -38,8 +42,9 @@ const BODY_D = 0.16;
 const BODY_Y = 1.12;
 const FRONT = BODY_D / 2;
 
-const SLOT_X = -0.08;
-const SLOT_Y = 1.15;
+/** The purse slot on the face, and how small the purse sits in it. */
+const PURSE_Y = 1.12;
+const PURSE_SCALE = 0.7;
 
 const LEVER_X = BODY_W / 2 + 0.015;
 const LEVER_Y = 1.17;
@@ -51,17 +56,6 @@ const DRAWER_Y = 1.0;
 /** How far the drawer slides out with a key in it, metres. */
 const DRAWER_OUT = 0.11;
 
-/** The coins window: its bottom and height. */
-const TUBE_X = 0.08;
-const TUBE_Y0 = 1.0;
-const TUBE_H = 0.16;
-
-/** Feeding: a pause after the first coin, then coins per second rising with the hold. */
-const FEED_DELAY_S = 0.35;
-const FEED_RATE_START = 4;
-const FEED_RATE_GAIN = 6;
-const FEED_RATE_MAX = 18;
-
 /** The pull's timeline, seconds from the press. */
 const PULL_DOWN_S = 0.3;
 const KEY_FALL_S = 0.25;
@@ -69,20 +63,24 @@ const DRAWER_START_S = PULL_DOWN_S + KEY_FALL_S;
 const DRAWER_SLIDE_S = 0.35;
 const LEVER_RETURN_S = 0.65;
 const JAM_S = 0.45;
-const COIN_SLIDE_S = 0.09;
 
 /** The key's place in the drawer frame: dropped from inside the box onto the tray. */
 const KEY_TOP_Y = 0.2;
 const KEY_REST_Y = -0.022;
 const KEY_Z = -0.065;
 
-type Part = 'body' | 'slot' | 'lever' | 'drawer';
+/** The camera's place to work the box, local metres: in front, a little to the lever's side. */
+const FOCUS_EYE: readonly [number, number, number] = [0.22, 1.3, 0.78];
+const FOCUS_LOOK: readonly [number, number, number] = [0.02, 1.1, 0];
+const FOCUS_FOV = 40;
+
+type Part = 'body' | 'lever' | 'drawer';
 type Phase = 'idle' | 'dropping' | 'ready' | 'taken';
 
 /**
  * Builds the key box for lot car `carId` on a post at ABSOLUTE (`x`, `y`, `z`), `y` the
  * ground under it, its face turned by `yaw` (the face is local +Z: face the buyer's
- * side). `price` is painted on the box; the coins that count are `CarState.lotPrice`.
+ * side). `price` (kopecks) is painted on the box; what counts is `CarState.lotPrice`.
  * In the physics band it is solid and registered as a world fixture (its id pushed to
  * `registered`, for the chunk to `fixtures.forget`); beyond it, it is only seen.
  */
@@ -110,23 +108,18 @@ export function buildKeyBox(
   box(root, [0.07, BODY_Y - BODY_H / 2 + 0.04, 0.07], [0, (BODY_Y - BODY_H / 2 + 0.04) / 2, -0.03], C.darkMetal);
   box(root, [BODY_W, BODY_H, BODY_D], [0, BODY_Y, 0], C.fadedGreen);
   box(root, [BODY_W + 0.04, 0.03, BODY_D + 0.04], [0, BODY_Y + BODY_H / 2 + 0.015, 0], C.darkMetal);
-  // The plate over the slot.
-  const plate = new THREE.Mesh(SIGN_PLANE, signMaterial(['CAR KEY', `${price} coins`], '#f2e6c4', '#26221c', 256, 128));
+  // The plate over the slot, with the price.
+  const plate = new THREE.Mesh(SIGN_PLANE, signMaterial(['CAR KEY', formatMoney(price)], '#f2e6c4', '#26221c', 256, 128));
   plate.scale.set(0.24, 0.075, 1);
   plate.position.set(0, BODY_Y + BODY_H / 2 - 0.05, FRONT + 0.002);
   root.add(plate);
-  // The coin slot: a steel escutcheon and its dark slit.
-  box(root, [0.07, 0.08, 0.012], [SLOT_X, SLOT_Y, FRONT + 0.006], C.metal);
-  box(root, [0.009, 0.05, 0.006], [SLOT_X, SLOT_Y, FRONT + 0.013], 0x111314);
-  // The coins window: a dark slit that fills from the bottom as the price goes in.
-  box(root, [0.034, TUBE_H + 0.012, 0.006], [TUBE_X, TUBE_Y0 + TUBE_H / 2, FRONT + 0.003], C.darkMetal);
-  const fill = box(root, [0.022, 1, 0.004], [TUBE_X, TUBE_Y0, FRONT + 0.007], C.ochre);
+  // The purse slot: a steel escutcheon and its dark recess.
+  const slotW = PURSE_SEAT_W * PURSE_SCALE + 0.02;
+  const slotH = PURSE_SEAT_H * PURSE_SCALE + 0.02;
+  box(root, [slotW + 0.016, slotH + 0.016, 0.008], [0, PURSE_Y, FRONT + 0.004], C.metal);
+  box(root, [slotW, slotH, 0.006], [0, PURSE_Y, FRONT + 0.006], 0x111314);
   // The drawer's mouth, dark behind the drawer front.
   box(root, [0.22, 0.08, 0.004], [0, DRAWER_Y, FRONT + 0.001], 0x16191a);
-
-  // A coin on its way in: shown edge-on in front of the slit for a moment per coin.
-  const coin = box(root, [0.004, 0.028, 0.028], [SLOT_X, SLOT_Y, FRONT + 0.03], C.ochre);
-  coin.visible = false;
 
   // The lever: a hub on the box's right flank and an arm with a red knob, swinging
   // about local X toward the buyer.
@@ -160,10 +153,7 @@ export function buildKeyBox(
   drawer.add(key);
 
   group.add(root);
-  if (!ctx.hasPhysics) {
-    setFill(fill, ctx.world.state.cars[carId] ?? null);
-    return;
-  }
+  if (!ctx.hasPhysics) return;
 
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
@@ -180,20 +170,8 @@ export function buildKeyBox(
     SurfaceType.Concrete,
   );
 
-  const fixture = new KeyBox(ctx.world, market, carId, x, y - 0.04, z, yaw, lever, drawer, key, coin, fill);
+  const fixture = new KeyBox(ctx.world, market, carId, x, y - 0.04, z, yaw, lever, drawer, key);
   registered.push(fixtures.register(fixture));
-}
-
-/** Scales the coins window's fill to what is paid of the price (full once sold). */
-function setFill(fill: THREE.Mesh, car: CarState | null): void {
-  const price = car?.lotPrice;
-  const share = !car ? 0 : price === undefined ? 1 : Math.min(1, (car.lotPaid ?? 0) / price);
-  const h = Math.max(0.0005, share * TUBE_H);
-  fill.scale.y = h;
-  fill.position.y = TUBE_Y0 + h / 2;
-  fill.visible = share > 0;
-  // The chunk froze its matrices when it was placed (world/chunks.ts `freezeStaticSubtree`).
-  fill.updateMatrix();
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -205,18 +183,15 @@ class KeyBox implements WorldFixture {
   /** The part the last `aim` hit. */
   private part: Part | null = null;
   private phase: Phase;
+  private focused = false;
   /** Seconds into the pull (`dropping`), or into the drawer closing (`taken`). */
   private clock = 0;
   /** Seconds left of a jammed pull's rattle. */
   private jam = 0;
   /** How far the drawer stands out, metres: the drawer aim follows it. */
   private drawerOut = 0;
-  /** Seconds left of the coin sliding into the slot. */
-  private coinT = 0;
-  /** The hold's feeding: seconds to the next coin, seconds held, and a dry-pack flag. */
-  private feedWait = 0;
-  private feedRun = 0;
-  private dry = false;
+  private readonly focusPose: FixtureFocus;
+  private readonly seat: PurseSeat;
 
   constructor(
     private readonly world: GameWorld,
@@ -230,18 +205,40 @@ class KeyBox implements WorldFixture {
     private readonly lever: THREE.Object3D,
     private readonly drawer: THREE.Object3D,
     private readonly key: THREE.Object3D,
-    private readonly coin: THREE.Object3D,
-    private readonly fill: THREE.Mesh,
   ) {
     this.id = `keybox:${carId}`;
     const car = world.state.cars[carId];
     this.phase = car && car.lotPrice === undefined ? 'taken' : 'idle';
     this.clock = DRAWER_SLIDE_S;
-    setFill(fill, car ?? null);
+    const c = Math.cos(yaw);
+    const s = Math.sin(yaw);
+    const abs = (p: readonly [number, number, number]): [number, number, number] => [
+      x + c * p[0] + s * p[2],
+      y + p[1],
+      z - s * p[0] + c * p[2],
+    ];
+    const [eyeX, eyeY, eyeZ] = abs(FOCUS_EYE);
+    const [lookX, lookY, lookZ] = abs(FOCUS_LOOK);
+    this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
+    // Seated in the recess, its face out of the box's face (+Z local, as the purse's own).
+    const [seatX, seatY, seatZ] = abs([0, PURSE_Y, FRONT + (PURSE_SEAT_D * PURSE_SCALE) / 2 - 0.002]);
+    this.seat = { x: seatX, y: seatY, z: seatZ, yaw, scale: PURSE_SCALE };
   }
 
   private car(): CarState | null {
     return this.world.state.cars[this.carId] ?? null;
+  }
+
+  focus(): FixtureFocus {
+    return this.focusPose;
+  }
+
+  setFocused(focused: boolean): void {
+    this.focused = focused;
+  }
+
+  purseSeat(): PurseSeat {
+    return this.seat;
   }
 
   aim(
@@ -268,12 +265,7 @@ class KeyBox implements WorldFixture {
     // The parts stand proud of the body, so a ray at one meets it first.
     let best = rayBox(ox, oy, oz, lx, dy, lz, 0, BODY_Y, 0, BODY_W / 2, BODY_H / 2, BODY_D / 2);
     let part: Part = 'body';
-    let t = rayBox(ox, oy, oz, lx, dy, lz, SLOT_X, SLOT_Y, FRONT + 0.02, 0.055, 0.055, 0.03);
-    if (t < best) {
-      best = t;
-      part = 'slot';
-    }
-    t = rayBox(ox, oy, oz, lx, dy, lz, LEVER_X + 0.02, LEVER_Y + 0.08, 0.06, 0.04, 0.16, 0.12);
+    let t = rayBox(ox, oy, oz, lx, dy, lz, LEVER_X + 0.02, LEVER_Y + 0.08, 0.06, 0.04, 0.16, 0.12);
     if (t < best) {
       best = t;
       part = 'lever';
@@ -288,50 +280,37 @@ class KeyBox implements WorldFixture {
     return best > range ? Infinity : best;
   }
 
-  prompt(ctx: FixtureContext): string | null {
+  prompt(): string | null {
+    // Worked up close it says nothing: the plate, the lever and the drawer are the text.
+    if (this.focused || this.part === null) return null;
     const car = this.car();
     if (!car) return null;
-    const price = car.lotPrice;
-    if (price === undefined || this.phase === 'taken') return 'key box — empty';
-    const paid = car.lotPaid ?? 0;
-    const label = carModel(car.modelId).label;
-    switch (this.part) {
-      case 'slot': {
-        if (this.phase !== 'idle') return 'coin slot — the key is in the drawer';
-        if (paid >= price) return `${label} paid — pull the lever`;
-        const coins = ctx.coins();
-        return coins > 0
-          ? `[hold F] feed coins — ${paid}/${price} paid · ${coins} in pack`
-          : `coin slot — ${paid}/${price} paid · no coins`;
-      }
-      case 'lever':
-        if (this.phase !== 'idle') return 'lever — the key is down';
-        return paid >= price ? '[F] pull the lever' : `[F] pull the lever — ${price - paid} coins short`;
-      case 'drawer':
-        return this.phase === 'ready' ? `[F] take the key — ${label}` : 'key drawer — empty';
-      case 'body':
-        return `key box — ${label} · ${paid}/${price} paid`;
-      default:
-        return null;
-    }
+    if (car.lotPrice === undefined || this.phase === 'taken') return 'key box — empty';
+    return `[F] key box — ${carModel(car.modelId).label}`;
   }
 
   press(ctx: FixtureContext): FoleyEvent | null {
     const car = this.car();
     if (!car || car.lotPrice === undefined) return this.part === null || this.part === 'body' ? null : 'refused';
     switch (this.part) {
-      case 'slot':
-        // The first coin goes in on the press; `hold` feeds the rest.
-        this.dry = false;
-        return this.feed(ctx, car);
-      case 'lever':
-        if (this.phase !== 'idle' || (car.lotPaid ?? 0) < car.lotPrice) {
+      case 'lever': {
+        if (this.phase !== 'idle') {
           this.jam = JAM_S;
           return 'refused';
         }
+        // What is still owed comes out of the purse in one go, or nothing does.
+        const owed = car.lotPrice - (car.lotPaid ?? 0);
+        if (owed > 0) {
+          if (!ctx.debit(owed)) {
+            this.jam = JAM_S;
+            return 'refused';
+          }
+          this.world.apply({ t: 'lot_pay', carId: this.carId, kopecks: owed });
+        }
         this.phase = 'dropping';
         this.clock = 0;
-        return 'mount';
+        return owed > 0 ? 'coin' : 'mount';
+      }
       case 'drawer':
         if (this.phase !== 'ready') return 'refused';
         this.world.apply({ t: 'car_buy', carId: this.carId });
@@ -339,51 +318,18 @@ class KeyBox implements WorldFixture {
         this.phase = 'taken';
         this.clock = 0;
         this.key.visible = false;
+        ctx.stepBack();
         return 'pickup';
       default:
         return null;
     }
   }
 
-  hold(ctx: FixtureContext, dt: number, first: boolean): FixtureHoldResult | null {
-    if (this.part !== 'slot') return null;
-    if (first) {
-      this.feedWait = FEED_DELAY_S;
-      this.feedRun = 0;
-      return null;
-    }
-    this.feedRun += dt;
-    this.feedWait -= dt;
-    if (this.feedWait > 0 || this.dry) return null;
-    const car = this.car();
-    if (!car || car.lotPrice === undefined || (car.lotPaid ?? 0) >= car.lotPrice) return null;
-    this.feedWait += 1 / Math.min(FEED_RATE_MAX, FEED_RATE_START + this.feedRun * FEED_RATE_GAIN);
-    const sound = this.feed(ctx, car);
-    return { sound, continuous: null };
-  }
-
-  /** One coin from the pack into the slot; the sound it makes. */
-  private feed(ctx: FixtureContext, car: CarState): FoleyEvent {
-    const price = car.lotPrice ?? 0;
-    if ((car.lotPaid ?? 0) >= price) return 'refused';
-    if (!ctx.spend(1)) {
-      this.dry = true;
-      return 'refused';
-    }
-    this.world.apply({ t: 'lot_pay', carId: this.carId, coins: 1 });
-    this.coinT = COIN_SLIDE_S;
-    setFill(this.fill, car);
-    return 'coin';
+  cursor(): 'pointer' | null {
+    return this.part === 'lever' || this.part === 'drawer' ? 'pointer' : null;
   }
 
   update(dt: number): void {
-    // The coin edging into the slit.
-    if (this.coinT > 0) {
-      this.coinT = Math.max(0, this.coinT - dt);
-      this.coin.visible = this.coinT > 0;
-      this.coin.position.z = FRONT + 0.008 + 0.03 * (this.coinT / COIN_SLIDE_S);
-    }
-
     let lever = 0;
     let drawer = 0;
     if (this.phase === 'dropping') {
@@ -420,7 +366,6 @@ class KeyBox implements WorldFixture {
     this.drawer.position.z = FRONT + drawer;
     // The chunk froze every matrix when it was placed (world/chunks.ts
     // `freezeStaticSubtree`): what moves writes its own.
-    this.coin.updateMatrix();
     this.key.updateMatrix();
     this.lever.updateMatrix();
     this.drawer.updateMatrix();

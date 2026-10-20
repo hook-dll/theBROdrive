@@ -5,6 +5,11 @@ import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
 import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
+import { drawPurse } from './purse';
+
+/** The purse image's canvas, pixels: twice its CSS size (hud.css `.hud-purse`), for sharp edges. */
+const PURSE_PX_W = 440;
+const PURSE_PX_H = 220;
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -413,6 +418,10 @@ export class Hud {
   private damageStrength = -1;
   private deathFade = -1;
   private gumBubbleProgress = -1;
+  /** The purse image in the top-right corner (`setPurse`), and the balance it shows (-1 hidden). */
+  private readonly purseEl: HTMLElement;
+  private readonly purseCanvas: HTMLCanvasElement;
+  private purseShown = -1;
 
   private tachDeg = -1;
   private speedDeg = -1;
@@ -571,6 +580,11 @@ export class Hud {
     this.rideEl = ride.svg;
     this.rideDot = ride.dot;
     this.ridePulse = ride.pulse;
+    this.purseEl = el('div', 'hud-purse is-hidden');
+    this.purseCanvas = document.createElement('canvas');
+    this.purseCanvas.width = PURSE_PX_W;
+    this.purseCanvas.height = PURSE_PX_H;
+    this.purseEl.append(this.purseCanvas);
 
     this.tops = [
       this.crosshairEl,
@@ -582,6 +596,7 @@ export class Hud {
       this.raceEl,
       this.gumBubbleEl,
       this.rideEl,
+      this.purseEl,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
@@ -1368,6 +1383,18 @@ export class Hud {
     this.invMassEl.classList.toggle('is-alarm', carriedMass > massLimit * MASS_ALARM_FRACTION);
   }
 
+  /**
+   * The purse in the top-right corner holding `kopecks` (ui/purse.ts), or null to hide
+   * it: main.ts shows it on foot near a money machine, and hides it while one holds it.
+   * Repainted only when the balance changes.
+   */
+  setPurse(kopecks: number | null): void {
+    this.setVisible(this.purseEl, kopecks !== null);
+    if (kopecks === null || kopecks === this.purseShown) return;
+    this.purseShown = kopecks;
+    const g = this.purseCanvas.getContext('2d');
+    if (g) drawPurse(g, PURSE_PX_W, PURSE_PX_H, kopecks);
+  }
 
   /**
    * One composited DOM circle, deliberately cheaper than transparent geometry in
