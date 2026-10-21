@@ -111,12 +111,14 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     turn (unwinding, or countersteering a slide) runs up to 1 + KEYS_OVERSTEER_SHARE
  *     times the rate, by the recent peak lateral acceleration (held and decaying at
  *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction).
- *  4. AT SPEED IT SLOWS: winding the rim away from centre (not countersteering, rule 3)
- *     runs at (KEYS_SPEED_REF_MPS / speed)² of the rate above that speed. The lateral
- *     acceleration a rim angle asks for grows with the square of speed, so this keeps
- *     what a tap of a given length does to the car the same at any speed: at 90 km/h
- *     the unscaled 720°/s put a single 60 Hz frame (0.75° at the road wheels) at
- *     ~0.35 g, past what a lane correction wants, and a 100 ms tap at ~2 g.
+ *  4. AT SPEED THE GEARING SLOWS, the rim untouched: above KEYS_SPEED_REF_MPS the
+ *     road wheels take (KEYS_SPEED_REF_MPS / speed)² of the angle the rim asks for, as
+ *     active steering does. The lateral acceleration a road-wheel angle asks for grows
+ *     with the square of speed, so a tap of a given length does the same to the car at
+ *     any speed, full rim is ~1.6 g of kinematic demand (just past the tyres) at every
+ *     speed, and winding and return stay in the same 720:990 proportion. Scaling the
+ *     rim's RATE instead was tried and read as a cast-iron wheel that snapped back. As
+ *     the tail lets go (`tailOut`) the gearing goes back to 1:1, so a slide can be caught.
  *  5. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
  *  6. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
  *     / `steerLock`), and the rack speed (`steerRackSpeed`) still applies after.

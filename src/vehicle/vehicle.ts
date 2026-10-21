@@ -1115,6 +1115,8 @@ export class Vehicle implements Rebasable {
    */
   private keysRimRad = 0;
   private keysPeakG = 0;
+  /** Road-wheel share of what the rim asks for (KEYBOARD STEERING rule 4); 1 off the keys. */
+  private keysGearing = 1;
   /** Scratch for the chassis' angular velocity in `updateSteering`. */
   private readonly keysAngvel = { x: 0, y: 0, z: 0 };
   /**
@@ -1677,9 +1679,12 @@ export class Vehicle implements Rebasable {
    * With no hand on the wheel the rim turns with the tyres, so a released key shows the
    * wheel unwinding under its own aligning moment — the point being that the driver is
    * looking at the steering, not at the key.
+   *
+   * The keys' speed gearing (`keysGearing`, KEYBOARD STEERING rule 4) sits between the
+   * rim and the rack, so the rim is the rack over it.
    */
   get steeringFraction(): number {
-    return this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0;
+    return this.model.steerLock > 0 ? this.steerCommand / (this.model.steerLock * this.keysGearing) : 0;
   }
 
   /**
@@ -1959,6 +1964,7 @@ export class Vehicle implements Rebasable {
     this.steerAngle = 0;
     this.keysRimRad = 0;
     this.keysPeakG = 0;
+    this.keysGearing = 1;
     this.bumpSteerAngle = 0;
     this.sustainedImbalance = 0;
     this.frontRollRad = 0;
@@ -5462,29 +5468,27 @@ export class Vehicle implements Rebasable {
         rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
-        if (turn !== 0 && key === -turn) {
-          // Against the turn: unwinding or countersteering, never slowed by speed.
+        if (turn !== 0 && key === turn && Math.sign(rim) === turn) {
+          rate = KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * absG);
+        } else if (turn !== 0 && key === -turn) {
           rate = KEYS_OUT_RATE_RAD_S * (1 + KEYS_OVERSTEER_SHARE * this.keysPeakG);
         } else {
-          rate =
-            turn !== 0 && key === turn && Math.sign(rim) === turn
-              ? KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * absG)
-              : KEYS_OUT_RATE_RAD_S;
-          // Away from centre, the rate falls with the square of speed (rule 4).
-          const speed = Math.abs(fwd);
-          if (Math.sign(key) !== -Math.sign(rim) && speed > KEYS_SPEED_REF_MPS) {
-            const share = KEYS_SPEED_REF_MPS / speed;
-            rate *= share * share;
-          }
+          rate = KEYS_OUT_RATE_RAD_S;
         }
       }
       const reach = rate * dt;
       this.keysRimRad = rim + clamp(want - rim, -reach, reach);
       handsOff = steer === 0 && !input.steerBothHeld && this.keysRimRad === 0;
-      target = clamp(this.keysRimRad / ratio, -lock, lock);
+      // Above the reference speed the road wheels take (ref / speed)² of the rim's share
+      // of lock (rule 4), given back as the tail lets go so a slide can be caught.
+      const speed = Math.abs(fwd);
+      const share = speed > KEYS_SPEED_REF_MPS ? KEYS_SPEED_REF_MPS / speed : 1;
+      this.keysGearing = share * share + (1 - share * share) * tailOut;
+      target = clamp((this.keysRimRad / ratio) * this.keysGearing, -lock, lock);
     } else {
       this.keysRimRad = 0;
       this.keysPeakG = 0;
+      this.keysGearing = 1;
       if (input.steerMode === 'analogAssist') {
         const side = steer > 0 ? -1 : 1;
         const share = Math.abs(steer);
