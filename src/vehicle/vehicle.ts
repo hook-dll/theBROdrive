@@ -227,6 +227,7 @@ import {
   KEYS_IN_RATE_RAD_S,
   KEYS_OUT_RATE_RAD_S,
   KEYS_OVERSTEER_SHARE,
+  KEYS_SPEED_REF_MPS,
   KEYS_UNDERSTEER_SHARE,
   ABS_MIN_KMH,
   ABS_MIN_SCALE,
@@ -5461,12 +5462,20 @@ export class Vehicle implements Rebasable {
         rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
-        if (turn !== 0 && key === turn && Math.sign(rim) === turn) {
-          rate = KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * absG);
-        } else if (turn !== 0 && key === -turn) {
+        if (turn !== 0 && key === -turn) {
+          // Against the turn: unwinding or countersteering, never slowed by speed.
           rate = KEYS_OUT_RATE_RAD_S * (1 + KEYS_OVERSTEER_SHARE * this.keysPeakG);
         } else {
-          rate = KEYS_OUT_RATE_RAD_S;
+          rate =
+            turn !== 0 && key === turn && Math.sign(rim) === turn
+              ? KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * absG)
+              : KEYS_OUT_RATE_RAD_S;
+          // Away from centre, the rate falls with the square of speed (rule 4).
+          const speed = Math.abs(fwd);
+          if (Math.sign(key) !== -Math.sign(rim) && speed > KEYS_SPEED_REF_MPS) {
+            const share = KEYS_SPEED_REF_MPS / speed;
+            rate *= share * share;
+          }
         }
       }
       const reach = rate * dt;

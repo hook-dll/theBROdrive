@@ -111,8 +111,14 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     turn (unwinding, or countersteering a slide) runs up to 1 + KEYS_OVERSTEER_SHARE
  *     times the rate, by the recent peak lateral acceleration (held and decaying at
  *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction).
- *  4. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
- *  5. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
+ *  4. AT SPEED IT SLOWS: winding the rim away from centre (not countersteering, rule 3)
+ *     runs at (KEYS_SPEED_REF_MPS / speed)² of the rate above that speed. The lateral
+ *     acceleration a rim angle asks for grows with the square of speed, so this keeps
+ *     what a tap of a given length does to the car the same at any speed: at 90 km/h
+ *     the unscaled 720°/s put a single 60 Hz frame (0.75° at the road wheels) at
+ *     ~0.35 g, past what a lane correction wants, and a 100 ms tap at ~2 g.
+ *  5. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
+ *  6. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
  *     / `steerLock`), and the rack speed (`steerRackSpeed`) still applies after.
  * ------------------------------------------------------------------------- */
 /** A held key's rim rate, 720°/s (BeamNG's 1.6 × 450°): lock in about 0.67 s. */
@@ -125,6 +131,11 @@ export const KEYS_UNDERSTEER_SHARE = 0.7;
 export const KEYS_OVERSTEER_SHARE = 0.7;
 /** The recent-peak lateral acceleration decays at this many g a second (BeamNG 3). */
 export const KEYS_G_DECAY_PER_S = 3;
+/**
+ * Speed below which a held key winds at the full rate (rule 4): 30 km/h, where a 100 ms
+ * tap asks for ~0.2 g, the feel the scaling then holds at every higher speed.
+ */
+export const KEYS_SPEED_REF_MPS = 30 / 3.6;
 /* ---------------------------------------------------------------------------
  * DRIVER AIDS on the player's car, each a setting and off by default (`Settings.abs`,
  * `Settings.tractionControl`). Both work like

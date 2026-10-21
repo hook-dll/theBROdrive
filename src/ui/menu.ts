@@ -2001,7 +2001,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Off',
           icon: 'keys',
-          hint: 'A and D turn the steering wheel at a steady rate for as long as you hold them, a little slower when the car is near the limit of grip and quicker when you steer against a turn. Let go and the wheel goes straight back to centre.',
+          hint: 'A and D turn the steering wheel at a steady rate for as long as you hold them, slower the faster you drive, a little slower when the car is near the limit of grip and quicker when you steer against a turn. Let go and the wheel goes straight back to centre.',
           active: () => !settings.mouseDriving,
           pick: () => {
             settings.mouseDriving = false;
