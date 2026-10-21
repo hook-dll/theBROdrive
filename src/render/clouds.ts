@@ -438,10 +438,18 @@ function blobAttributes(slots: readonly number[]): Record<string, THREE.BufferAt
   };
 }
 
-/** An instanced geometry over shared blob attributes, with its own cloud list. */
+/**
+ * An instanced geometry over shared blob attributes, with its own cloud list. `all` is
+ * the frame's whole list; the attribute holds what is drawn: all of it for the shadow
+ * map (`commitList`), only what a camera can see for the sky (`cullList`).
+ */
 interface CloudList {
   readonly geometry: THREE.InstancedBufferGeometry;
   readonly cloud: THREE.InstancedBufferAttribute;
+  /** Per cloud: x, z from the mesh's origin, index, grow (the attribute's layout). */
+  readonly all: Float32Array;
+  /** Per cloud: its bounding sphere's centre height and radius, metres. */
+  readonly bounds: Float32Array;
   count: number;
 }
 
@@ -455,26 +463,64 @@ function cloudList(attributes: Record<string, THREE.BufferAttribute>): CloudList
   // Never culled (the meshes are), and never measured: a bounding sphere here would be one
   // icosphere's, which says nothing about where the clouds are.
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
-  return { geometry, cloud, count: 0 };
+  return { geometry, cloud, all: new Float32Array(LIST_CAPACITY * 4), bounds: new Float32Array(LIST_CAPACITY * 2), count: 0 };
 }
 
-function pushCloud(list: CloudList, x: number, z: number, index: number, grow: number): void {
+function pushCloud(list: CloudList, set: CloudSet, x: number, z: number, index: number, grow: number): void {
   const o = list.count * 4;
-  const array = list.cloud.array as Float32Array;
-  array[o] = x;
-  array[o + 1] = z;
-  array[o + 2] = index;
-  array[o + 3] = grow;
+  const all = list.all;
+  all[o] = x;
+  all[o + 1] = z;
+  all[o + 2] = index;
+  all[o + 3] = grow;
+  // The body stands from its base up `top`, and reaches `reach` across; the corners'
+  // lumps push out by up to LUMP of a lobe.
+  const halfTop = set.top[index]! * grow * 0.5;
+  list.bounds[list.count * 2] = set.base[index]! + halfTop;
+  list.bounds[list.count * 2 + 1] = Math.hypot(set.reach[index]! * grow, halfTop) * (1 + LUMP);
   list.count++;
 }
 
-function commitList(list: CloudList): void {
-  list.geometry.instanceCount = list.count;
-  if (list.count === 0) return;
+function upload(list: CloudList, count: number): void {
+  list.geometry.instanceCount = count;
+  if (count === 0) return;
   list.cloud.clearUpdateRanges();
-  list.cloud.addUpdateRange(0, list.count * 4);
+  list.cloud.addUpdateRange(0, count * 4);
   list.cloud.needsUpdate = true;
 }
+
+/** The whole list drawn: the shadow map's lists. */
+function commitList(list: CloudList): void {
+  (list.cloud.array as Float32Array).set(list.all.subarray(0, list.count * 4));
+  upload(list, list.count);
+}
+
+/**
+ * Only the clouds inside the side planes of `frustum` drawn, for a mesh at (`ox`, `oz`).
+ * Near and far are not tested: the clouds stand kilometres past the far plane and write
+ * a depth of their own (`CLIP_GLSL`).
+ */
+function cullList(list: CloudList, frustum: THREE.Frustum, ox: number, oz: number): void {
+  const target = list.cloud.array as Float32Array;
+  const planes = frustum.planes;
+  let drawn = 0;
+  for (let i = 0; i < list.count; i++) {
+    const o = i * 4;
+    _centre.set(list.all[o]! + ox, list.bounds[i * 2]!, list.all[o + 1]! + oz);
+    const radius = list.bounds[i * 2 + 1]!;
+    if (
+      planes[0]!.distanceToPoint(_centre) < -radius || planes[1]!.distanceToPoint(_centre) < -radius ||
+      planes[2]!.distanceToPoint(_centre) < -radius || planes[3]!.distanceToPoint(_centre) < -radius
+    ) continue;
+    target.set(list.all.subarray(o, o + 4), drawn * 4);
+    drawn++;
+  }
+  upload(list, drawn);
+}
+
+const _centre = new THREE.Vector3();
+const _frustum = new THREE.Frustum();
+const _viewProjection = new THREE.Matrix4();
 
 function fullscreenTriangle(): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
@@ -743,11 +789,9 @@ export class CloudLayer {
         const dx = wrapDelta(set.x[i]! + shift[2 * deck]!, eyeX);
         const dz = wrapDelta(set.z[i]! + shift[2 * deck + 1]!, eyeZ);
         if (Math.hypot(dx, dz) - set.reach[i]! * grow > this.ringRadius) continue;
-        pushCloud(set.compact[i] === 1 ? this.smallSky : this.bigSky, dx, dz, i, grow);
+        pushCloud(set.compact[i] === 1 ? this.smallSky : this.bigSky, set, dx, dz, i, grow);
       }
     }
-    commitList(this.smallSky);
-    commitList(this.bigSky);
 
     // The shadows: every cloud whose slide along the sun can reach the map. The map's
     // centre is snapped to its texels in the FIELD, where the clouds stand still, so a
@@ -777,7 +821,7 @@ export class CloudLayer {
         const lift = set.base[i]! + set.top[i]! * grow * 0.5;
         const pad = half + set.reach[i]! * grow + set.top[i]! * grow * 0.5 * Math.max(Math.abs(slope.x), Math.abs(slope.y));
         if (Math.abs(x - lift * slope.x - mapX) > pad || Math.abs(z - lift * slope.y - mapZ) > pad) continue;
-        pushCloud(set.compact[i] === 1 ? this.smallShadow : this.bigShadow, x - eyeX, z - eyeZ, i, grow);
+        pushCloud(set.compact[i] === 1 ? this.smallShadow : this.bigShadow, set, x - eyeX, z - eyeZ, i, grow);
       }
       // The map's centre in scene metres, where the ground and the pass both read it.
       const centreX = mapX - pan.x;
@@ -787,6 +831,23 @@ export class CloudLayer {
     }
     commitList(this.smallShadow);
     commitList(this.bigShadow);
+  }
+
+  /**
+   * Before every render of the scene the clouds are in (`Scene.onBeforeRender`, render/
+   * sky.ts), with that render's camera: the sky lists down to the clouds the camera can
+   * see. The list held every cloud round the eye, so the scene pass drew the whole ring
+   * of them behind and beside the view, about 300 000 triangles, and so did each live
+   * mirror (render/carmirrors.ts), whose view is a few degrees of it. Here, before the
+   * render projects its objects, so the attribute uploads in the same render.
+   */
+  cullFor(camera: THREE.Camera): void {
+    if (!this.root.visible) return;
+    _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_viewProjection, camera.coordinateSystem);
+    const origin = this.skyMeshes[0]!.position;
+    cullList(this.smallSky, _frustum, origin.x, origin.z);
+    cullList(this.bigSky, _frustum, origin.x, origin.z);
   }
 
   /**

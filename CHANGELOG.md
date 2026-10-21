@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- CLOUDS DRAWN ONLY WHERE THE CAMERA LOOKS. The sky's two cloud draws held every cloud
+  round the eye, the whole 26 km ring, and every render of the scene drew them all: the
+  frame and each live mirror, whose view is a few degrees of sky. Before each render
+  (`Scene.onBeforeRender`) the lists are cut to the clouds inside that camera's side
+  planes (`CloudLayer.cullFor`; near and far untested, the clouds keep their own depth).
+  Cabin at km 3, seed `flick`: 2.46 M → 1.72 M triangles a frame, the mirrors' passes
+  1.40 M → 0.80 M; the picture the same within the heat shimmer's own frame-to-frame
+  change.
 - THE FIRST NEST ON A TELEGRAPH POLE NO LONGER LINKS A PROGRAM MID-DRIVE. A pole
   with an anomaly is a plain mesh, and its fittings (tarp and rope, nest, transformer
   can, loudspeaker) are drawn on materials nothing else draws plain; the first nest in

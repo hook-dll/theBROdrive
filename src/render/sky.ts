@@ -1064,6 +1064,9 @@ export class Sky {
       fog,
     });
     scene.add(this.clouds.root);
+    // Every render of this scene (the frame, each live mirror, a photograph) draws only
+    // the clouds its own camera sees (`CloudLayer.cullFor`).
+    scene.onBeforeRender = (_renderer, _scene, camera) => this.clouds.cullFor(camera);
     const domeMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
@@ -1777,6 +1780,7 @@ export class Sky {
   dispose(): void {
     this.scene.remove(this.root);
     this.scene.remove(this.clouds.root);
+    this.scene.onBeforeRender = () => {};
     this.scene.remove(this.sunLight);
     this.scene.remove(this.sunLight.target);
     this.scene.remove(this.sunNearLight);
