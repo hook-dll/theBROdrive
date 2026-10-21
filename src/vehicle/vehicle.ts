@@ -231,6 +231,7 @@ import {
   KEYS_RETURN_TAU_S,
   KEYS_SPEED_REF_MPS,
   KEYS_UNDERSTEER_SHARE,
+  keysStabilityG,
   ABS_MIN_KMH,
   ABS_MIN_SCALE,
   ABS_RECOVER_S,
@@ -5473,10 +5474,12 @@ export class Vehicle implements Rebasable {
         if (!input.steerBothHeld && Math.abs(rim) < KEYS_RETURN_SETTLE_RAD) rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
+        // The stabilisation only near the limit (rule 2–3): its g ramps in from
+        // KEYS_STABILITY_FROM_G to full at KEYS_STABILITY_FULL_G.
         if (turn !== 0 && key === turn && Math.sign(rim) === turn) {
-          rate = KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * absG);
+          rate = KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * keysStabilityG(absG));
         } else if (turn !== 0 && key === -turn) {
-          rate = KEYS_OUT_RATE_RAD_S * (1 + KEYS_OVERSTEER_SHARE * this.keysPeakG);
+          rate = KEYS_OUT_RATE_RAD_S * (1 + KEYS_OVERSTEER_SHARE * keysStabilityG(this.keysPeakG));
         } else {
           rate = KEYS_OUT_RATE_RAD_S;
         }
@@ -5484,12 +5487,27 @@ export class Vehicle implements Rebasable {
       const reach = rate * dt;
       this.keysRimRad = rim + clamp(want - rim, -reach, reach);
       handsOff = steer === 0 && !input.steerBothHeld && this.keysRimRad === 0;
-      // Above the reference speed the road wheels take (ref / speed)² of the rim's share
-      // of lock (rule 4), given back as the tail lets go so a slide can be caught.
+      // THE RIM-TO-ROAD-WHEEL CURVE (rule 4), in shares of lock: the slope at centre is
+      // the speed gearing (ref / speed)², and the curve steepens as s³ to put full rim
+      // at the front tyres' peak — the kinematic angle of the tightest circle their grip
+      // holds plus their peak slip angle — so a tap stays fine and a held key reaches
+      // the limit. As the tail lets go it all gives way to 1:1, so a slide can be caught.
       const speed = Math.abs(fwd);
-      const share = speed > KEYS_SPEED_REF_MPS ? KEYS_SPEED_REF_MPS / speed : 1;
-      this.keysGearing = share * share + (1 - share * share) * tailOut;
-      target = clamp((this.keysRimRad / ratio) * this.keysGearing, -lock, lock);
+      const ref = speed > KEYS_SPEED_REF_MPS ? KEYS_SPEED_REF_MPS / speed : 1;
+      const centreSlope = ref * ref;
+      let full = centreSlope;
+      if (load > 0 && speed > KEYS_SPEED_REF_MPS) {
+        const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
+        const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
+        const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (speed * speed));
+        full = clamp((kinematic + tyrePeak) / lock, centreSlope, 1);
+      }
+      const s = Math.min(Math.abs(this.keysRimRad) / STEERING_WHEEL_HALF_LOCK_RAD, 1);
+      const curved = centreSlope * s + (full - centreSlope) * s * s * s;
+      const wheelShare = curved + (s - curved) * tailOut;
+      // The rim over the rack, for the readouts (`steeringFraction`).
+      this.keysGearing = s > 0 ? wheelShare / s : centreSlope + (1 - centreSlope) * tailOut;
+      target = clamp(Math.sign(this.keysRimRad) * wheelShare * lock, -lock, lock);
     } else {
       this.keysRimRad = 0;
       this.keysPeakG = 0;

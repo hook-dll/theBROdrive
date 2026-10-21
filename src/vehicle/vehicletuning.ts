@@ -105,20 +105,28 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     (`InputFrame.steerBothHeld`). The touch wheel's deflection is a target position,
  *     a share of the lock, reached at the same rates.
  *  2. NEAR THE LIMIT IT SLOWS. Winding further into a turn the car is already making,
- *     the rate falls by KEYS_UNDERSTEER_SHARE of the lateral acceleration in g: at 0.8 g
- *     less than half, so the last degrees before the front lets go are fine steps.
+ *     the rate falls by KEYS_UNDERSTEER_SHARE of the lateral acceleration in g, but
+ *     only near the limit (`keysStabilityG`: nothing below KEYS_STABILITY_FROM_G, full
+ *     from KEYS_STABILITY_FULL_G): at 0.9 g about a third of the rate, so the last
+ *     degrees before the front lets go are fine steps. Below it a real driver's hands
+ *     are as free one way as the other, and a slowdown from 0 g read as a wheel that
+ *     pulled to straight.
  *  3. AGAINST THE TURN IT QUICKENS: a key turning the rim toward the outside of the
  *     turn (unwinding, or countersteering a slide) runs up to 1 + KEYS_OVERSTEER_SHARE
  *     times the rate, by the recent peak lateral acceleration (held and decaying at
- *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction).
- *  4. AT SPEED THE GEARING SLOWS, the rim untouched: above KEYS_SPEED_REF_MPS the
- *     road wheels take (KEYS_SPEED_REF_MPS / speed)² of the angle the rim asks for, as
- *     active steering does. The lateral acceleration a road-wheel angle asks for grows
- *     with the square of speed, so a tap of a given length does the same to the car at
- *     any speed, full rim is ~1.6 g of kinematic demand (just past the tyres) at every
- *     speed, and winding and return keep their proportion on the road wheels. Scaling the
- *     rim's RATE instead was tried and read as a cast-iron wheel that snapped back. As
- *     the tail lets go (`tailOut`) the gearing goes back to 1:1, so a slide can be caught.
+ *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction),
+ *     ramped in near the limit the same way.
+ *  4. AT SPEED THE RIM-TO-ROAD-WHEEL CURVE, the rim untouched: in shares of lock, the
+ *     road wheels take c·s + (f − c)·s³ of the rim's share s. The slope at centre c is
+ *     (KEYS_SPEED_REF_MPS / speed)² above that speed, as active steering does: the
+ *     lateral acceleration a road-wheel angle asks for grows with the square of speed,
+ *     so a tap (under ~200 ms, s under ~0.3) does the same to the car at any speed.
+ *     Full rim f is the front tyres' peak: the kinematic angle of the tightest circle
+ *     their grip holds plus their peak slip angle (with STEER_ASSIST_SLIP_MARGIN, as the
+ *     pad's assist), so a held key reaches the limit in ~0.6 s and never past it. A
+ *     linear (ref / speed)² stopped full rim short of the tyres' slip angle and a held
+ *     key never turned the car; scaling the rim's RATE read as a cast-iron wheel. As
+ *     the tail lets go (`tailOut`) the curve gives way to 1:1, so a slide can be caught.
  *  5. LET GO, the rim eases back to centre like a real one under its caster: a constant
  *     share of what is left each moment (KEYS_RETURN_TAU_S), never quicker than
  *     KEYS_IN_RATE_RAD_S, and settled at centre inside KEYS_RETURN_SETTLE_RAD. A linear
@@ -135,6 +143,15 @@ export const KEYS_IN_RATE_RAD_S = (990 * Math.PI) / 180;
 export const KEYS_RETURN_TAU_S = 0.25;
 /** Inside this rim angle a released rim is at centre and the hands are off: 2°. */
 export const KEYS_RETURN_SETTLE_RAD = (2 * Math.PI) / 180;
+/** The stabilisation (rules 2–3) starts at this lateral acceleration, g. */
+export const KEYS_STABILITY_FROM_G = 0.5;
+/** And is at full strength from this one, g: the tyres' limit. */
+export const KEYS_STABILITY_FULL_G = 0.9;
+/** The lateral acceleration the stabilisation acts on: 0 below KEYS_STABILITY_FROM_G. */
+export function keysStabilityG(g: number): number {
+  const ramp = (g - KEYS_STABILITY_FROM_G) / (KEYS_STABILITY_FULL_G - KEYS_STABILITY_FROM_G);
+  return g * (ramp < 0 ? 0 : ramp > 1 ? 1 : ramp);
+}
 /** The share of the turn-in rate lateral acceleration takes away, per g (BeamNG 0.7). */
 export const KEYS_UNDERSTEER_SHARE = 0.7;
 /** The share added to the rate against the turn, per g of recent peak (BeamNG 0.7). */
