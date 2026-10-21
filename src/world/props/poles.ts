@@ -33,7 +33,7 @@ import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { deformIcosahedron, matDeadStick } from './forms';
-import { POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
+import { plainPoleMaterial, POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
 import { addStatic, leanRotation } from './scatter';
 
 // ---------------------------------------------------------------------------
@@ -605,7 +605,7 @@ function addAnomalyMeshes(poleGroup: THREE.Group, pose: PolePose): void {
 }
 
 function addPoleMeshes(poleGroup: THREE.Group, pose: PolePose): void {
-  const mesh = new THREE.Mesh(pose.fitted ? pose.design.full : pose.design.mast, poleMaterial());
+  const mesh = new THREE.Mesh(pose.fitted ? pose.design.full : pose.design.mast, plainPoleMaterial());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   poleGroup.add(mesh);
@@ -819,7 +819,7 @@ export class PoleProvider implements ChunkProvider {
       group.add(new THREE.LineSegments(wireGeometry, retroWireMaterial()));
     } else if (wireCount > 0) {
       wireGeometry = wires.geometry();
-      group.add(new THREE.Mesh(wireGeometry, poleMaterial()));
+      group.add(new THREE.Mesh(wireGeometry, plainPoleMaterial()));
     }
 
     return {
@@ -835,9 +835,13 @@ export class PoleProvider implements ChunkProvider {
 }
 
 /**
- * Compiles the instanced pole program at boot. A chunk's pole bodies are InstancedMeshes,
- * a different program from a plain Mesh, and linking it on first draw would hitch on
- * Windows. The anchor is never drawn: its group stays invisible.
+ * Compiles the pole programs at boot. A chunk's pole bodies are InstancedMeshes, a
+ * different program from a plain Mesh, and linking it on first draw would hitch on
+ * Windows. A pole with an anomaly is a plain Mesh, and what hangs on it (tarp and rope,
+ * nest, transformer can or loudspeaker) is drawn on materials nothing else draws plain:
+ * without these the first nest in view linked its program mid-drive (measured: 17 ms on
+ * the Mac, seed `flick`, 160 s into a drive). The anchors are never drawn: their group
+ * stays invisible. Each copies the shadow flags of the mesh it stands for.
  */
 export function poleProgramAnchor(): THREE.Object3D {
   const group = new THREE.Group();
@@ -849,6 +853,17 @@ export function poleProgramAnchor(): THREE.Object3D {
   const anchor = new THREE.InstancedMesh(geometry, poleMaterial(), 1);
   anchor.castShadow = true;
   anchor.receiveShadow = true;
-  group.add(anchor);
+  const plain = new THREE.Mesh(geometry, plainPoleMaterial());
+  plain.castShadow = true;
+  plain.receiveShadow = true;
+  group.add(
+    anchor,
+    plain,
+    new THREE.Mesh(tarpWrap(), matTarp),
+    new THREE.Mesh(tarpRope(), matRope),
+    new THREE.Mesh(stickNest(), matDeadStick),
+    new THREE.Mesh(transformerCan(), matGear),
+    new THREE.Mesh(loudspeaker(), matGear),
+  );
   return group;
 }

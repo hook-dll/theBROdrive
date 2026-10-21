@@ -947,6 +947,12 @@ function carClearGlassMaterial(): THREE.MeshStandardMaterial {
     opacity: 0.28,
     depthWrite: false,
     side: THREE.DoubleSide,
+    // One pass for both sides. Three draws a transparent double-sided material as two,
+    // back faces then front, flipping `side` with `needsUpdate`, which looked every car's
+    // glass program up again twice a pass, the mirrors' passes included. The panes are
+    // one tint, so the order two of them blend in is all that changes: 88 pixels over
+    // the noise floor of 3 Mpx, from behind a car looking through its rear and front windows.
+    forceSinglePass: true,
   });
   return clearGlassMaterial;
 }

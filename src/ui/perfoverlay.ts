@@ -16,7 +16,11 @@
  *   yellow line    the GPU's own time for the frame, where the browser exposes a timer
  *                  query (not on most macOS browsers, nor on Android).
  *   cyan line      the budget the presentation is aiming at (cap or display rate).
- *   red ticks      long tasks (> 50 ms) the browser reported on the main thread.
+ *   red ticks      long tasks (> 50 ms) the browser reported on the main thread. Where
+ *                  the browser has Long Animation Frames (Chromium), each one is also
+ *                  logged with the scripts that ran in it (`[perf] long frame`), which
+ *                  says WHO the long task was: a frame callback, a worker's message, a
+ *                  timer, an input handler, with its function and source position.
  *
  * The header names the LIMIT over the last second: GPU when its time fills the
  * interval, CPU (with its biggest section) when main-thread work does, the cap when
@@ -85,6 +89,50 @@ function heapMemory(): { used: number; limit: number } | null {
   return null;
 }
 
+/** The Long Animation Frames entry (Chromium 123+); not in TypeScript's DOM lib yet. */
+interface LongAnimationFrame extends PerformanceEntry {
+  /** The part of the frame past 50 ms in its longest tasks: zero when no long task. */
+  readonly blockingDuration: number;
+  readonly scripts: readonly {
+    /** e.g. `FrameRequestCallback`, `DedicatedWorkerGlobalScope.onmessage`, `TimerHandler:setTimeout`. */
+    readonly invoker: string;
+    readonly sourceURL: string;
+    readonly sourceFunctionName: string;
+    readonly sourceCharPosition: number;
+    readonly duration: number;
+    readonly forcedStyleAndLayoutDuration: number;
+  }[];
+}
+
+/** A script under this many milliseconds is left out of a long frame's line. */
+const LONG_FRAME_SCRIPT_MS = 5;
+
+/**
+ * One console line per frame that held a long task: how long it blocked, and every
+ * script over `LONG_FRAME_SCRIPT_MS` in it, longest first. Time no script accounts for
+ * was the browser's own (garbage collection, a shader link, style and layout).
+ */
+function logLongFrame(entry: LongAnimationFrame): void {
+  if (entry.blockingDuration <= 0) return;
+  let scripted = 0;
+  const scripts = entry.scripts
+    .filter((script) => {
+      scripted += script.duration;
+      return script.duration >= LONG_FRAME_SCRIPT_MS;
+    })
+    .sort((a, b) => b.duration - a.duration)
+    .map((script) => {
+      const where = `${script.sourceURL.split('/').pop() || '?'}:${script.sourceCharPosition}`;
+      const layout = script.forcedStyleAndLayoutDuration >= 1 ? `, layout ${Math.round(script.forcedStyleAndLayoutDuration)}` : '';
+      return `${Math.round(script.duration)} ms ${script.invoker} ${script.sourceFunctionName || '(anonymous)'} @ ${where}${layout}`;
+    });
+  console.debug(
+    `[perf] long frame at ${(entry.startTime / 1000).toFixed(1)} s: ${Math.round(entry.duration)} ms, ` +
+      `${Math.round(entry.blockingDuration)} ms blocking, ${Math.round(entry.duration - scripted)} ms outside scripts` +
+      (scripts.length > 0 ? `\n[perf]   ${scripts.join('\n[perf]   ')}` : ''),
+  );
+}
+
 export class PerfOverlay {
   private readonly canvas: HTMLCanvasElement;
   private readonly g: CanvasRenderingContext2D;
@@ -99,6 +147,7 @@ export class PerfOverlay {
   private pendingLongTasks = 0;
   private longTasksTotal = 0;
   private observer: PerformanceObserver | null = null;
+  private frameObserver: PerformanceObserver | null = null;
   private on = false;
 
   constructor(
@@ -146,6 +195,15 @@ export class PerfOverlay {
     } else if (!on && this.observer !== null) {
       this.observer.disconnect();
       this.observer = null;
+    }
+    if (on && this.frameObserver === null && PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame')) {
+      this.frameObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) logLongFrame(entry as LongAnimationFrame);
+      });
+      this.frameObserver.observe({ type: 'long-animation-frame' });
+    } else if (!on && this.frameObserver !== null) {
+      this.frameObserver.disconnect();
+      this.frameObserver = null;
     }
   }
 

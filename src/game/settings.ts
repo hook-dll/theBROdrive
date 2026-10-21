@@ -316,7 +316,7 @@ export const GRASS_MODES: readonly GrassMode[] = ['full', 'light', 'off'];
 
 /**
  * The picture's art direction (render/cleanstyle.ts). Standard is the game as tuned;
- * Clean is calm and temporally stable: a flat road, no film grain, no specks of
+ * Clean is calm and temporally stable: a flat road, no specks of
  * scatter, faceted surfaces in a few steps of light and crisp near shadows. A taste,
  * not a cost, so every rung defaults to Standard and a preset puts it back there.
  */

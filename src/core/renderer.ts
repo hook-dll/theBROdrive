@@ -10,7 +10,6 @@ import {
   createHeatMirageUniforms,
   DEFAULT_EYE_HEIGHT_M,
   DEFAULT_HEAT_MIRAGE,
-  HAZE_CLOCK_PERIOD_S,
   HAZE_FRAGMENT,
   HAZE_VERTEX,
   writeHeatMirageUniforms,
@@ -496,7 +495,7 @@ export class Renderer {
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
-    // pass for the display transform, authored colour, restrained film grain, ink and
+    // pass for the display transform, authored colour, ink and
     // FXAA. Acceptable suppresses only the haze warp; standard and blessing sample the
     // depth so nearby geometry never inherits a horizon-shaped screen mask.
     //
@@ -519,8 +518,8 @@ export class Renderer {
     this.hazeMaterial = new THREE.ShaderMaterial({
       vertexShader: HAZE_VERTEX,
       fragmentShader: HAZE_FRAGMENT,
-      // Page-lifetime, like the rung itself: the retro finish replaces the film grain
-      // with an ordered dither (render/hazeshader.ts).
+      // Page-lifetime, like the rung itself: the retro finish's ordered dither onto a
+      // short palette (render/hazeshader.ts).
       defines: retroActive() ? { RETRO: '', RETRO_LEVELS: RETRO_LEVELS.toFixed(1) } : {},
       // Drawn to the canvas, so Three's output encode is sRGB: `toDisplay` in the shader
       // applies the tone curve, then that encode (`linearToOutputTexel`).
@@ -530,7 +529,6 @@ export class Renderer {
         tDiffuse: { value: this.hazeTarget.texture },
         tDepth: { value: this.hazeTarget.depthTexture },
         uResolution: { value: new THREE.Vector2(1, 1) },
-        uTime: { value: 0 },
         uStrength: { value: 0 },
         uMirage: { value: 0 },
         uHazePhase: { value: new THREE.Vector2() },
@@ -548,7 +546,6 @@ export class Renderer {
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
         uFxaa: { value: fxaa && quality !== 'retro' ? 1 : 0 },
-        uGrainOff: { value: 0 },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
@@ -972,8 +969,7 @@ export class Renderer {
     this.renderer.info.reset();
     // Real time, not game time: the strata climb at a flicker rate the eye knows,
     // which a time-scaled or paused game clock would slow or freeze. The phases are
-    // integrated here in doubles and wrapped (see advanceHazePhase), and the clock
-    // the grain reads is wrapped at a whole number of its own cycles, so no uniform
+    // integrated here in doubles and wrapped (see advanceHazePhase), so no uniform
     // grows with uptime and the float32 the shader holds never loses the pattern.
     const nowS = performance.now() * 0.001;
     const dt = this.hazeClockS < 0 ? 0 : Math.min(0.1, Math.max(0, nowS - this.hazeClockS));
@@ -983,7 +979,6 @@ export class Renderer {
       advanceHazePhase(phase.x, dt, this.hazeBroadRiseHz),
       advanceHazePhase(phase.y, dt, this.hazeFineRiseHz),
     );
-    this.hazeMaterial.uniforms.uTime.value = nowS % HAZE_CLOCK_PERIOD_S;
     this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY(camera);
     this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
       this.hazeMinimumEyeHeight,
@@ -1381,13 +1376,11 @@ export class Renderer {
 
   /**
    * `Settings.style`. Clean is uniforms only (render/cleanstyle.ts): the lit chunks'
-   * switches, the small-scatter cull and the pass's grain, so nothing recompiles and
-   * no target changes.
+   * switches and the small-scatter cull, so nothing recompiles and no target changes.
    */
   setStyle(style: VisualStyle): void {
     const clean = style === 'clean';
     setCleanStyle(clean);
-    this.hazeMaterial.uniforms.uGrainOff.value = clean ? 1 : 0;
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */

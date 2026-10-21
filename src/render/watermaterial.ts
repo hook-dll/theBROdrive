@@ -121,6 +121,12 @@ export function createWaterMaterial(): WaterMaterial {
     // well. `lakewater.ts` fades it out over that band rather than letting it fill the
     // screen, but the sheet has to be there for the fade to be what ends it.
     side: THREE.DoubleSide,
+    // ONE PASS for both sides. Three draws a transparent double-sided material twice,
+    // back faces then front, flipping `side` and `needsUpdate` between them, and that
+    // looked the program up again for every lake mesh twice in every pass, the mirrors'
+    // included. A sheet seen from one side at a time has one face under each pixel, so
+    // the order of the two passes changed nothing on it.
+    forceSinglePass: true,
   });
   material.normalScale.set(0.5, 0.5);
 

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- THE FIRST NEST ON A TELEGRAPH POLE NO LONGER LINKS A PROGRAM MID-DRIVE. A pole
+  with an anomaly is a plain mesh, and its fittings (tarp and rope, nest, transformer
+  can, loudspeaker) are drawn on materials nothing else draws plain; the first nest in
+  view linked the plain `matDeadStick` program in the frame (17 ms on the Mac, hundreds
+  on ANGLE/D3D11; seed `flick`, km 3, hurried, 160 s in). `poleProgramAnchor` now holds
+  the plain pole and every fitting from boot: the same drive links nothing.
+- Performance overlay: where the browser has Long Animation Frames (Chromium), every
+  frame that held a long task is logged as `[perf] long frame` with the scripts that ran
+  in it, longest first (invoker, function, source position, forced layout), and the
+  time no script accounts for (garbage collection, a shader link, style and layout).
+  The red tick says a long task happened; this line says whose it was.
+- NO MORE PROGRAM LOOKUPS EVERY FRAME. Three looked a material's program up again
+  (about 8 µs each) whenever one material switched between kinds of mesh in a pass, and
+  twice per draw for a transparent double-sided material, which it draws as two passes
+  flipping `side` with `needsUpdate`: 36 lookups a frame in the cabin at km 3 (seed
+  `flick`), the mirrors' passes included. The plain pole meshes (an anomaly's pole, the
+  wires) get their own `plainPoleMaterial`; the lake water, the mirage cards and the
+  clear car glass draw both sides in one pass (`forceSinglePass`; a sheet or a card has
+  one face under each pixel, and two panes of one tint differ only in blend order: 88
+  pixels over the noise floor of 3 Mpx). 36 → 0 lookups; `renderer.render()` 2.75 →
+  2.35 ms, the two mirror passes 0.50 → 0.38 ms; no program linked mid-drive.
+- NO FILM GRAIN. The finishing pass no longer adds its 12 Hz grain over the picture
+  (render/hazeshader.ts), in either style; the retro rung keeps its ordered dither. The
+  pass's clock (`uTime`) and the Clean style's `uGrainOff` existed only for it and are gone.
+
 - The autopilot and its benches on the new physics. FRANTIC'S GRIP RESERVE 0.72 → 0.68,
   its own margin measured on the playground lap (rally 2105, the 25% downhill 320 m
   sweeper at 165-177 km/h): 0.72 spun 14 m off the road, 0.70 ran 0.36 m wide, 0.68 and

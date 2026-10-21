@@ -11,11 +11,10 @@ import * as THREE from 'three';
  *     road in every surface, the sites' wall and floor patterns read their map's mean
  *     colour (`applyCleanSurface`), and the desert loses its ink stipple
  *     (render/comic.ts). Vertex colours, markings and strata stay.
- *  2. The finishing pass draws no film grain (core/renderer.ts `setStyle`).
- *  3. Small scatter shrinks away once it would be under `CLEAN_CULL_GONE_PX` tall, and
+ *  2. Small scatter shrinks away once it would be under `CLEAN_CULL_GONE_PX` tall, and
  *     the batch pages wholly past that line are not drawn (`applyCleanCull`,
  *     world/props/instancebatch.ts `syncLod`).
- *  4. Lit surfaces take the face normal of their triangle and the sun's light in a few
+ *  3. Lit surfaces take the face normal of their triangle and the sun's light in a few
  *     steps (render/lightshader.ts `installCleanStyle`).
  *  The near shadow cascade is read the same soft way in both styles: Clean once read it
  *  with one hardware tap, and the owner saw a hard, stair-stepped car shadow (2026-10-16).
@@ -23,9 +22,8 @@ import * as THREE from 'three';
  * NONE OF IT IS A PROGRAM VARIANT. Every part is GLSL that both styles compile — in
  * the shared chunks, installed before anything compiles, or in a patch a material
  * always carries — behind a branch on a uniform every fragment agrees on. Switching
- * style writes two small vectors and one uniform of the post pass; no program is
- * linked, no material key changes, and Standard runs exactly the arithmetic it ran
- * before, plus the untaken branches.
+ * style writes two small vectors; no program is linked, no material key changes, and
+ * Standard runs exactly the arithmetic it ran before, plus the untaken branches.
  *
  * The uniform values are PLAIN OBJECTS on purpose, as in render/airfog.ts:
  * `UniformsUtils.clone` copies a three vector per material but passes a plain object

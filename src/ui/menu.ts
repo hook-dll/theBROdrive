@@ -1749,14 +1749,14 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Clean',
           icon: 'gfx1',
-          hint: 'Calm and steady: flat asphalt, no film grain, no specks of scatter, faceted shapes '
+          hint: 'Calm and steady: flat asphalt, no specks of scatter, faceted shapes '
             + 'in a few steps of light, crisp shadows near the car. Easier on tired eyes. Costs nothing.',
           style: 'clean' as const,
         },
         {
           label: 'Standard',
           icon: 'gfx3',
-          hint: 'The game as tuned: textured asphalt, film grain, smooth shading and soft shadows.',
+          hint: 'The game as tuned: textured asphalt, smooth shading and soft shadows.',
           style: 'standard' as const,
         },
       ].map(({ style, ...option }) => ({

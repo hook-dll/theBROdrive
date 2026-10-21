@@ -1111,11 +1111,27 @@ let material: THREE.MeshStandardMaterial | null = null;
  * each ruled out by turning them off in the running game.
  */
 export function poleMaterial(): THREE.MeshStandardMaterial {
-  material ??= applyComicShading(
+  material ??= makePoleMaterial();
+  return material;
+}
+
+let plainMaterial: THREE.MeshStandardMaterial | null = null;
+/**
+ * `poleMaterial` for the plain meshes: an anomaly's pole and a chunk's wires. Three keeps
+ * one current program per material object, and one material drawn by the instanced pole
+ * bodies and by plain meshes in the same pass looked its program up again at every
+ * switch, six times a frame. The same material twice, so each keeps its program.
+ */
+export function plainPoleMaterial(): THREE.MeshStandardMaterial {
+  plainMaterial ??= makePoleMaterial();
+  return plainMaterial;
+}
+
+function makePoleMaterial(): THREE.MeshStandardMaterial {
+  return applyComicShading(
     new THREE.MeshStandardMaterial({ name: 'pole-body', vertexColors: true, roughness: 0.8, metalness: 0 }),
     { contourStrength: 0, stippleStrength: 0, lightingStrength: 0 },
   );
-  return material;
 }
 
 function geometryOf(plan: Plan, fittings: boolean): { geometry: THREE.BufferGeometry; draw: Draw } {

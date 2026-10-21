@@ -435,6 +435,10 @@ export function cardMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
+    // One pass for both sides: three's two-pass draw of a transparent double-sided
+    // material flips `side` with `needsUpdate` and looks the program up again twice a
+    // pass per mesh. A card is a flat plane, one face under each pixel either way.
+    forceSinglePass: true,
     transparent: true,
     opacity: 0,
     depthWrite: true,

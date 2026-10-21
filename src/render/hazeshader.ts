@@ -212,11 +212,6 @@ export const DEFAULT_EYE_HEIGHT_M = 1.6;
  * sees a number below 256 — see `advanceHazePhase`.
  */
 export const HAZE_PHASE_PERIOD = 256;
-/**
- * Period of the pass's own clock, seconds. The grain seed steps at 12 Hz through 64
- * frames, and 1600 s is exactly 300 of those cycles, so the wrap is invisible.
- */
-export const HAZE_CLOCK_PERIOD_S = 1600;
 
 export interface HeatMirageParameters {
   readonly scaleHeightM: number;
@@ -396,7 +391,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform sampler2D tDiffuse;
   uniform sampler2D tDepth;
   uniform vec2 uResolution;
-  uniform float uTime;
   uniform float uStrength;
   uniform float uMirage;
   uniform float uDaylight;
@@ -425,9 +419,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uInkStrength;
   uniform float uInkThreshold;
   uniform float uFxaa;
-  // The Clean style (render/cleanstyle.ts) draws no grain: 1 skips it. Zero, the value
-  // a pass built without it reads, is Standard.
-  uniform float uGrainOff;
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
@@ -585,7 +576,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * the sRGB encode. The scene target is linear HDR (core/renderer.ts
    * \`sceneTargetType\`), and this pass is where the picture is mapped to the display,
    * ONCE, after the haze, the mirage, the dust and the veils have worked on radiance.
-   * Everything after it — the grade, the ink, the grain — works on the encoded picture
+   * Everything after it — the grade, the ink, the retro dither — works on the encoded picture
    * the eye sees, and FXAA and the ink measure their steps through it (\`fxaaLuma\`,
    * \`inkEdge\`).
    *
@@ -1047,7 +1038,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
 
     // Everything from here on is colour, not refraction. tools/haze-probe.ts reads the
     // SOURCE COORDINATE this pass sampled out of a coordinate-coded image, and any
-    // colour operation — grade, grain, the lenses — would corrupt that measurement, so
+    // colour operation — grade, dither, the lenses — would corrupt that measurement, so
     // it compiles the real pass with this one define and the rest skipped.
     #ifndef HAZE_MEASURE_SOURCE
 
@@ -1128,15 +1119,10 @@ export const HAZE_FRAGMENT = /* glsl */ `
       color.rgb = mix(color.rgb, color.rgb * 0.34, ink);
     }
 
-    // Sub-code-value film grain: visible as texture in broad flat areas, never as
-    // snow. The seed advances at 12 Hz rather than every display frame so a high
-    // refresh-rate panel does not turn this tiny texture into rapid scintillation.
     #ifdef RETRO
-    // The retro rung's grain is an ORDERED dither onto a short palette instead: at a
-    // few hundred lines a random grain is snow that crawls, while a fixed 4x4 Bayer
-    // pattern stays put on the screen and turns every gradient — the sky, the sand
-    // falling away into fog — into the stepped bands of a period framebuffer. It is
-    // also cheaper than the grain it replaces.
+    // The retro rung's ORDERED dither onto a short palette: a fixed 4x4 Bayer pattern
+    // stays put on the screen and turns every gradient — the sky, the sand falling away
+    // into fog — into the stepped bands of a period framebuffer.
     vec2 cell = mod(floor(gl_FragCoord.xy), 4.0);
     vec2 cellLow = mod(cell, 2.0);
     vec2 cellHigh = floor(cell * 0.5);
@@ -1145,17 +1131,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
       + mod(2.0 * cellHigh.x + 3.0 * cellHigh.y, 4.0)
     ) / 16.0;
     color.rgb = clamp(floor(color.rgb * RETRO_LEVELS + bayer) / RETRO_LEVELS, 0.0, 1.0);
-    #else
-    if (uGrainOff < 0.5) {
-      float grainFrame = mod(floor(uTime * 12.0), 64.0);
-      vec2 grainPixel = gl_FragCoord.xy + vec2(grainFrame * 17.0, grainFrame * 43.0);
-      float grain =
-        fract(52.9829189 * fract(dot(grainPixel, vec2(0.06711056, 0.00583715)))) - 0.5;
-      float grainLum = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
-      float grainMask =
-        smoothstep(0.015, 0.12, grainLum) * (1.0 - smoothstep(0.72, 1.0, grainLum));
-      color.rgb = clamp(color.rgb + grain * grainMask * 0.08, 0.0, 1.0);
-    }
     #endif
 
     // Worn shades are a coloured-glass transmission curve, not a flat alpha wash:

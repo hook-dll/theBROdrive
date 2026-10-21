@@ -663,6 +663,10 @@ draws (body, glass front and back, wheels, the two mirror faces in view), chase 
 `renderer.render()` 2.9 → 1.5 ms (cabin) and 3.0 → 1.4 ms (chase), the start car alone
 1.2–1.4 → 1.1 ms.
 
+Since 2026-10-21 the clear glass is one draw, not a front and a back one: it is drawn in
+a single pass (`forceSinglePass`, render/carmodel.ts `carClearGlassMaterial`), so three
+no longer flips its side and looks its program up again twice per pass.
+
 ## Wheels: the Soviet pack's sets
 
 A kit car is shod from `DISTINCT_SOVIET_WHEEL_SETS` (carmodels.ts: the pack's six wheel
