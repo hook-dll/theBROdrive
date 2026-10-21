@@ -227,6 +227,8 @@ import {
   KEYS_IN_RATE_RAD_S,
   KEYS_OUT_RATE_RAD_S,
   KEYS_OVERSTEER_SHARE,
+  KEYS_RETURN_SETTLE_RAD,
+  KEYS_RETURN_TAU_S,
   KEYS_SPEED_REF_MPS,
   KEYS_UNDERSTEER_SHARE,
   ABS_MIN_KMH,
@@ -5348,8 +5350,8 @@ export class Vehicle implements Rebasable {
    *
    * THE KEYS move a steering-wheel position (KEYBOARD STEERING in vehicletuning.ts):
    * a held key at a constant rate, slower winding into a turn near the limit and
-   * quicker against it, by the lateral acceleration; let go, straight back to centre.
-   * The rack target is the rim over the steering ratio.
+   * quicker against it, by the lateral acceleration; let go, it eases back to centre.
+   * The rack target is the rim over the steering ratio and the speed gearing.
    *
    * THE MOUSE (mouse driving, core/input.ts) is a rim angle the player put there, sent
    * `direct`: the rack is held at it, so nothing here — no assist, no caster return —
@@ -5447,7 +5449,7 @@ export class Vehicle implements Rebasable {
     let handsOff = steer === 0 && input.steerMode !== 'direct';
     if (input.steerMode === 'keys') {
       // KEYBOARD STEERING (vehicletuning.ts): the rim is a position moved at constant
-      // rates, slower winding into a turn near the limit, quicker against it, straight
+      // rates, slower winding into a turn near the limit, quicker against it, easing
       // back to centre when let go. The rim is signed like the rack, positive to the
       // left; input is positive right.
       const ratio = STEERING_WHEEL_HALF_LOCK_RAD / lock;
@@ -5463,9 +5465,12 @@ export class Vehicle implements Rebasable {
       let want: number;
       let rate: number;
       if (steer === 0) {
-        // Both keys down hold the rim; none brings it back to centre.
+        // Both keys down hold the rim; none lets it ease back to centre: a share of what
+        // is left each step (KEYS_RETURN_TAU_S), never quicker than KEYS_IN_RATE_RAD_S,
+        // and settled once inside KEYS_RETURN_SETTLE_RAD so the hands come off.
         want = input.steerBothHeld ? rim : 0;
-        rate = KEYS_IN_RATE_RAD_S;
+        rate = Math.min(KEYS_IN_RATE_RAD_S, (Math.abs(rim) * (1 - Math.exp(-dt / KEYS_RETURN_TAU_S))) / dt);
+        if (!input.steerBothHeld && Math.abs(rim) < KEYS_RETURN_SETTLE_RAD) rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
         if (turn !== 0 && key === turn && Math.sign(rim) === turn) {

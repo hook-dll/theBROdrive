@@ -93,8 +93,8 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  * KEYBOARD STEERING (`SteerMode` 'keys'), after BeamNG.drive's keyboard filter ("Key",
  * `lua/vehicle/input.lua`; the idea and the figures, not its code): the steering WHEEL
  * is a position that a held key moves at a constant rate, with no ramp-up, and that a
- * released key brings straight back to centre at a quicker constant rate, at any speed.
- * Nothing in it is a physical model of hands or of the caster: the input is a
+ * released key lets ease back to centre (rule 5), at any speed. Nothing in it is a
+ * physical model of hands or of the caster: the input is a
  * predictable machine and the danger comes from the car. It replaced HANDS ON WHEEL
  * (a ramped hand rate, and a release that spun the rim toward where the front tyres'
  * travel took it, slowly in town and into a countersteer of its own in a slide), which
@@ -116,17 +116,25 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     active steering does. The lateral acceleration a road-wheel angle asks for grows
  *     with the square of speed, so a tap of a given length does the same to the car at
  *     any speed, full rim is ~1.6 g of kinematic demand (just past the tyres) at every
- *     speed, and winding and return stay in the same 720:990 proportion. Scaling the
+ *     speed, and winding and return keep their proportion on the road wheels. Scaling the
  *     rim's RATE instead was tried and read as a cast-iron wheel that snapped back. As
  *     the tail lets go (`tailOut`) the gearing goes back to 1:1, so a slide can be caught.
- *  5. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
+ *  5. LET GO, the rim eases back to centre like a real one under its caster: a constant
+ *     share of what is left each moment (KEYS_RETURN_TAU_S), never quicker than
+ *     KEYS_IN_RATE_RAD_S, and settled at centre inside KEYS_RETURN_SETTLE_RAD. A linear
+ *     990°/s took back a tap's few degrees in a few milliseconds, so every correction
+ *     was undone the moment the key came up, and the car read as a roly-poly toy.
  *  6. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
  *     / `steerLock`), and the rack speed (`steerRackSpeed`) still applies after.
  * ------------------------------------------------------------------------- */
 /** A held key's rim rate, 720°/s (BeamNG's 1.6 × 450°): lock in about 0.67 s. */
 export const KEYS_OUT_RATE_RAD_S = (720 * Math.PI) / 180;
-/** A released key's return to centre, 990°/s (BeamNG's 2.2 × 450°): from lock in 0.5 s. */
+/** The cap on a released rim's return, 990°/s (BeamNG's 2.2 × 450°): from lock in ~0.5 s. */
 export const KEYS_IN_RATE_RAD_S = (990 * Math.PI) / 180;
+/** Time constant of a released rim's return: ~95% of the way back in 0.75 s. */
+export const KEYS_RETURN_TAU_S = 0.25;
+/** Inside this rim angle a released rim is at centre and the hands are off: 2°. */
+export const KEYS_RETURN_SETTLE_RAD = (2 * Math.PI) / 180;
 /** The share of the turn-in rate lateral acceleration takes away, per g (BeamNG 0.7). */
 export const KEYS_UNDERSTEER_SHARE = 0.7;
 /** The share added to the rate against the turn, per g of recent peak (BeamNG 0.7). */
