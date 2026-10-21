@@ -28,17 +28,22 @@
   The limit now applies to the boot only; a bonnet cell takes what its slot kind takes.
 
 - The car the player drives is a real car now, not a safe one. The steering keys are
-  hands on the steering wheel (vehicletuning.ts HANDS ON WHEEL): a held key turns the
-  rim at 420°/s, ramping up over 0.1 s, the opposite key turns it back through the same
-  ramp, both keys together hold it where it is, and the road wheels follow through the
-  car's own ratio (970° lock to lock over its lock: 12.8:1 to 18.6:1) up to the lock.
-  Let go, the caster spins the rim back toward centre at |angle| / 0.25 s scaled by
-  speed up to 100 km/h (at most 720°/s, never past centre, hardly at all at a crawl,
-  nothing backwards). Nothing in it knows where the tyres' grip is: hold a key too long
-  and the front ploughs or the tail goes. It replaces the keyboard assist that wound a
-  hold toward the front tyres' peak slip angle (`KEY_STEER_*`, its wind-up, return,
-  release delay and past-peak wind-up, all removed). The pad and the precise-control
-  wheel keep their own steering, assist included. The car also reads four figures of
+  hands on the steering wheel (vehicletuning.ts HANDS ON WHEEL), and the wheel goes
+  where the caster takes it: the angle at which the front wheels roll along the front
+  axle's own travel, straight ahead running straight and the countersteer in a slide
+  (faded to straight under 10 km/h and backwards, smoothed over 50 ms). A held key
+  turns the rim toward that angle at 900°/s (ramp 0.05 s), the self-aligning torque
+  helping the hands, and away from it at 420°/s (ramp 0.1 s); both keys together hold
+  it where it is, and the road wheels follow through the car's own ratio (970° lock to
+  lock over its lock: 12.8:1 to 18.6:1) up to the lock. Let go, the caster spins the
+  rim to that angle at |offset| / 0.25 s scaled by speed up to 100 km/h (at most
+  720°/s, never past it, hardly at all at a crawl), so a rear-drive car let go of in a
+  slide catches itself and a quick key can catch it too. Nothing in it knows where the
+  tyres' grip is: hold a key too long and the front ploughs or the tail goes. It
+  replaces the keyboard assist that wound a hold toward the front tyres' peak slip
+  angle (`KEY_STEER_*`, its wind-up, return, release delay and past-peak wind-up, all
+  removed). The pad and the precise-control wheel keep their own steering, assist
+  included. The car also reads four figures of
   its own (`PLAYER_*`): rack speed ×1.5, the rear axle's past-peak plateau at most 0.7
   (a dry tyre's low end; the front keeps its own), yaw inertia on the plain box (gain
   1.0 for 2.55; pitch unchanged) and an 8 ms tyre-load filter for 25 ms, so bumps

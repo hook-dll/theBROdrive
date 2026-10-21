@@ -213,7 +213,11 @@ import {
   tyreTemperatureGrip,
   tyreVerticalRate,
   unsprungMass,
-  HANDS_CENTRE_RAD,
+  HANDS_ALIGN_FULL_KMH,
+  HANDS_ALIGN_RAMP_S,
+  HANDS_ALIGN_RATE_RAD_S,
+  HANDS_ALIGN_SMOOTH_S,
+  HANDS_SETTLE_RAD,
   HANDS_RAMP_S,
   HANDS_RETURN_MAX_RAD_S,
   HANDS_RETURN_REF_KMH,
@@ -1082,12 +1086,16 @@ export class Vehicle implements Rebasable {
   private steerCommand = 0;
   private steerAngle = 0;
   /**
-   * HANDS ON WHEEL (`SteerMode` 'keys', vehicletuning.ts): the steering wheel's angle,
+   * HANDS ON WHEEL (`SteerMode` 'keys', vehicletuning.ts): whether the rack is in hand
+   * (a key down, or the rim still coming back after one), the steering wheel's angle,
    * radians at the rim and positive to the left like the rack, and how fast the hands
-   * are turning it. Both zero whenever the hands are off it or the keys are not in use.
+   * are turning it; the last two are zero with the hands off. `handsAlignRad` is where
+   * the caster takes the rim, smoothed (`HANDS_ALIGN_SMOOTH_S`).
    */
+  private handsOnRim = false;
   private handsWheelRad = 0;
   private handsWheelRate = 0;
+  private handsAlignRad = 0;
   /**
    * The player drives this car from the driver's seat, so it reads THE PLAYER'S CAR
    * figures (vehicletuning.ts `PLAYER_*`) in place of the catalogue's: see
@@ -1914,6 +1922,8 @@ export class Vehicle implements Rebasable {
     this.steerAngle = 0;
     this.handsWheelRad = 0;
     this.handsWheelRate = 0;
+    this.handsAlignRad = 0;
+    this.handsOnRim = false;
     this.bumpSteerAngle = 0;
     this.sustainedImbalance = 0;
     this.frontRollRad = 0;
@@ -5375,9 +5385,10 @@ export class Vehicle implements Rebasable {
    * axle, that is the TRAVEL angle: no side force at all, and no aligning moment.
    *
    * THE KEYS are hands on the steering wheel (HANDS ON WHEEL in vehicletuning.ts): a
-   * held key turns the rim at a hand's rate, the rack target is the rim over the
-   * steering ratio, and let go the caster spins the rim back toward centre. Nothing in
-   * it reads the tyres, so a key held too long is too much wheel.
+   * held key turns the rim at a hand's rate, quicker toward where the caster takes it
+   * (the travel angle at the rim: straight ahead, or the countersteer in a slide), the
+   * rack target is the rim over the steering ratio, and let go the caster spins the rim
+   * there. Nothing in it reads the tyres' grip, so a key held too long is too much wheel.
    *
    * THE PAD'S ASSIST. A stick with the assist on is a position against a reach: the
    * front tyres' own peak (`sidePeakTan`, their brush peak at their current load) plus
@@ -5390,10 +5401,10 @@ export class Vehicle implements Rebasable {
    * peak. Backwards or airborne there is nothing to measure and the reach is the lock.
    *
    * HANDS ON AND OFF. No hand on the wheel — a stick at exactly 0, or the keys up with
-   * the rim back at centre — leaves the rack free: the tyres swing toward their travel
-   * angle on their aligning moment (`STEER_FREE_TAU_S`), never past it, and the rim
-   * follows them. A hand on the wheel moves the rack at the rack speed, and only the
-   * backlash window is left to the moment.
+   * the rim come round to where the caster takes it — leaves the rack free: the tyres
+   * swing toward their travel angle on their aligning moment (`STEER_FREE_TAU_S`), never
+   * past it, and the rim follows them. A hand on the wheel moves the rack at the rack
+   * speed, and only the backlash window is left to the moment.
    *
    * The negation converts our basis into Rapier's steering sign. Forward is +Z and the
    * axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle yaws the
@@ -5471,40 +5482,72 @@ export class Vehicle implements Rebasable {
     let handsOff = steer === 0 && input.steerMode !== 'direct';
     if (input.steerMode === 'keys') {
       // HANDS ON WHEEL (vehicletuning.ts): the keys turn a steering wheel at the hands'
-      // rate and the road wheels follow through the ratio; let go, the caster brings it
-      // back toward centre. Nothing here reads the tyres: the risk is holding too long.
-      // The wheel is signed like the rack, positive to the left; input is positive right.
+      // rate and the road wheels follow through the ratio; let go, the caster spins it
+      // to where the front wheels roll along their own travel. Nothing here reads the
+      // tyres' grip: the risk is holding too long. The rim is signed like the rack,
+      // positive to the left; input is positive right.
       const ratio = STEERING_WHEEL_HALF_LOCK_RAD / lock;
+      // WHERE THE CASTER TAKES THE RIM: the travel angle (`centre`, zero front slip) at
+      // the rim — straight ahead running straight, the countersteer in a slide — faded
+      // to centre near a standstill and backwards, and smoothed (`HANDS_ALIGN_*`).
+      const alignShare = clamp((fwd * 3.6) / HANDS_ALIGN_FULL_KMH, 0, 1);
+      const alignRaw =
+        alignShare * clamp(centre * ratio, -STEERING_WHEEL_HALF_LOCK_RAD, STEERING_WHEEL_HALF_LOCK_RAD);
+      this.handsAlignRad += (alignRaw - this.handsAlignRad) * (dt / (HANDS_ALIGN_SMOOTH_S + dt));
+      const align = this.handsAlignRad;
       // Both keys down is both hands on the rim, holding it: steer is 0, but held.
       const gripped = steer !== 0 || input.steerBothHeld;
       if (gripped) {
         // Taken from rest, the hands grip the wheel where the tyres left it.
-        if (this.handsWheelRad === 0 && this.handsWheelRate === 0) this.handsWheelRad = this.steerCommand * ratio;
-        const ramp = (HANDS_WHEEL_RATE_RAD_S / HANDS_RAMP_S) * dt;
-        this.handsWheelRate += clamp(-steer * HANDS_WHEEL_RATE_RAD_S - this.handsWheelRate, -ramp, ramp);
+        if (!this.handsOnRim) {
+          this.handsOnRim = true;
+          this.handsWheelRad = this.steerCommand * ratio;
+          this.handsWheelRate = 0;
+        }
+        // Toward where the caster takes the rim, the self-aligning torque turns it with
+        // the hands and they go fast (`HANDS_ALIGN_RATE_RAD_S`): that is a countersteer,
+        // or straightening up. Away from it, against the torque, a hand's own rate.
+        const toAlign = align - this.handsWheelRad;
+        const want = -steer * (-steer * toAlign > 0 ? HANDS_ALIGN_RATE_RAD_S : HANDS_WHEEL_RATE_RAD_S);
+        const change = want - this.handsWheelRate;
+        // A change of hand speed toward it is helped the same way, which also slows the
+        // fast hands at once when they pass it. Both keys held keep the hands' own ramp.
+        const ramp =
+          steer !== 0 && change * toAlign > 0
+            ? (HANDS_ALIGN_RATE_RAD_S / HANDS_ALIGN_RAMP_S) * dt
+            : (HANDS_WHEEL_RATE_RAD_S / HANDS_RAMP_S) * dt;
+        this.handsWheelRate += clamp(change, -ramp, ramp);
         const turned = this.handsWheelRad + this.handsWheelRate * dt;
         this.handsWheelRad = clamp(turned, -STEERING_WHEEL_HALF_LOCK_RAD, STEERING_WHEEL_HALF_LOCK_RAD);
         // Against the stop the hands are still, so a reversal starts from rest.
         if (this.handsWheelRad !== turned) this.handsWheelRate = 0;
-      } else {
-        // Let go: the self-aligning torque spins the wheel back, harder with speed, as
-        // an exponential approach that cannot pass centre; inside the column's friction
-        // band it is centre.
+      } else if (this.handsOnRim) {
+        // Let go: the self-aligning torque spins the rim toward where the caster takes
+        // it, harder with speed, as an exponential approach that cannot pass it. Inside
+        // the column's friction band of it the hands are off, and the tyres swing the
+        // rack on their own aligning moment (`STEER_FREE_TAU_S`), toward the same place.
         this.handsWheelRate = 0;
         const speedShare = clamp((fwd * 3.6) / HANDS_RETURN_REF_KMH, 0, 1);
-        const angle = Math.abs(this.handsWheelRad);
+        const gap = align - this.handsWheelRad;
         const back = Math.min(
-          -angle * Math.expm1((-speedShare / HANDS_RETURN_TAU_S) * dt),
+          -Math.abs(gap) * Math.expm1((-speedShare / HANDS_RETURN_TAU_S) * dt),
           HANDS_RETURN_MAX_RAD_S * dt,
         );
-        const left = angle - back;
-        this.handsWheelRad = left <= HANDS_CENTRE_RAD ? 0 : Math.sign(this.handsWheelRad) * left;
+        const left = Math.abs(gap) - back;
+        if (left <= HANDS_SETTLE_RAD) {
+          this.handsOnRim = false;
+          this.handsWheelRad = 0;
+        } else {
+          this.handsWheelRad = align - Math.sign(gap) * left;
+        }
       }
-      handsOff = !gripped && this.handsWheelRad === 0;
+      handsOff = !this.handsOnRim;
       target = clamp(this.handsWheelRad / ratio, -lock, lock);
     } else {
       this.handsWheelRad = 0;
       this.handsWheelRate = 0;
+      this.handsAlignRad = 0;
+      this.handsOnRim = false;
       if (input.steerMode === 'analogAssist') {
         const side = steer > 0 ? -1 : 1;
         const share = Math.abs(steer);

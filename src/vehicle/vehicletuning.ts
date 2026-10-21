@@ -95,16 +95,26 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  * every car safe at speed, which is what the owner did not want.
  *
  *  1. The hands turn the WHEEL at HANDS_WHEEL_RATE_RAD_S, reached over HANDS_RAMP_S,
- *     and the opposite key turns it back at the same rate through the same ramp. Both
- *     keys down is both hands holding the rim where it is (`InputFrame.steerBothHeld`).
- *     The touch wheel's deflection is a share of the hands' rate.
+ *     and the opposite key turns it back. Both keys down is both hands holding the rim
+ *     where it is (`InputFrame.steerBothHeld`). The touch wheel's deflection is a share
+ *     of the hands' rate.
  *  2. The road wheels follow through the steering ratio, the authored rim travel over
  *     the car's own lock (`STEERING_WHEEL_HALF_LOCK_RAD` / `steerLock`: 12.8:1 to
  *     18.6:1 across the catalogue, 16:1 on a Zhiguli), so the drawn wheel is the
  *     hands' wheel and the rim stops where the road wheels reach their lock.
- *  3. Let go, the caster's self-aligning torque spins the wheel back toward centre:
- *     faster the further it is turned and the faster the car goes, never past centre.
- *  4. The rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`) still applies after.
+ *  3. WHERE THE CASTER TAKES THE RIM (`HANDS_ALIGN_*`): the self-aligning torque turns
+ *     the front wheels until they roll along the front axle's own travel, where their
+ *     slip angle and so the torque are gone. Running straight that is straight ahead;
+ *     with the tail out the front axle travels toward the outside of the turn and it
+ *     is the countersteer. That is how a rear-drive car catches itself through a
+ *     driver's loose hands, and it needs no slide detection: it is where the wheel goes.
+ *  4. Let go, the torque spins the rim there: faster the further off it is and the
+ *     faster the car goes, never past it (THE RETURN).
+ *  5. A key turning the rim TOWARD it has the torque with the hands, and the rim spins
+ *     at HANDS_ALIGN_RATE_RAD_S: a fast countersteer, or a quick straightening up. A key
+ *     turning it away works against the torque at the hands' own rate. So winding a car
+ *     into a bend is deliberate and catching it is quick, as with a real wheel.
+ *  6. The rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`) still applies after.
  * ------------------------------------------------------------------------- */
 /**
  * How fast hands turn a steering wheel, at the rim: 420°/s. A quick hand-over-hand
@@ -122,27 +132,48 @@ export const HANDS_WHEEL_RATE_RAD_S = (420 * Math.PI) / 180;
  */
 export const HANDS_RAMP_S = 0.1;
 /**
+ * The hands with the self-aligning torque behind them, at the rim: 900°/s, two and a
+ * half turns a second, a rally driver's flick of countersteer and about what a wheel
+ * spinning back through loose fingers does on its own. 56°/s at the road wheels
+ * through 16:1, inside every profile's rack speed on the player's car (90-150°/s), so
+ * from straight to 5° of countersteer is about 0.11 s against 0.24 s at the hands'
+ * own rate. Reached over HANDS_ALIGN_RAMP_S, 0.05 s: the torque is already pulling the
+ * rim that way, the arms only have to follow it.
+ */
+export const HANDS_ALIGN_RATE_RAD_S = (900 * Math.PI) / 180;
+export const HANDS_ALIGN_RAMP_S = 0.05;
+/**
+ * Where the caster takes the rim is read off the front tyres' travel, which carries the
+ * suspension's step-to-step jitter; a 50 ms low-pass takes that out and lags a slide by
+ * three steps. Under HANDS_ALIGN_FULL_KMH it fades linearly to straight ahead, and
+ * backwards it is straight ahead: at a crawl the car follows its wheels, so their
+ * travel is wherever they already point and says nothing about where the rim goes.
+ */
+export const HANDS_ALIGN_SMOOTH_S = 0.05;
+export const HANDS_ALIGN_FULL_KMH = 10;
+/**
  * THE RETURN. The self-aligning torque is the side force times the caster and
  * pneumatic trail, and the side force a turned wheel makes grows with speed; the
  * column's own friction holds the rim where it is at a standstill. So released, the
- * rim comes back at |angle| / HANDS_RETURN_TAU_S scaled by the forward speed over
- * HANDS_RETURN_REF_KMH (capped at 1 above it, nothing going backwards, where caster
- * pushes toward the lock rather than away from it): at 100 km/h a quarter-second
- * time constant, a real car's wheel spinning back through loose hands out of a bend;
- * at 25 km/h a whole second; at a crawl it hardly moves. The approach is exponential,
- * so it never overshoots centre, and at most HANDS_RETURN_MAX_RAD_S, a wheel spinning
- * free about two turns a second, from far round.
+ * rim comes back toward where the caster takes it at |offset| / HANDS_RETURN_TAU_S
+ * scaled by the forward speed over HANDS_RETURN_REF_KMH (capped at 1 above it, nothing
+ * going backwards, where caster pushes toward the lock rather than away from it): at
+ * 100 km/h a quarter-second time constant, a real car's wheel spinning back through
+ * loose hands out of a bend; at 25 km/h a whole second; at a crawl it hardly moves.
+ * The approach is exponential, so it never overshoots, and at most
+ * HANDS_RETURN_MAX_RAD_S, a wheel spinning free about two turns a second, from far off.
  */
 export const HANDS_RETURN_TAU_S = 0.25;
 export const HANDS_RETURN_REF_KMH = 100;
 export const HANDS_RETURN_MAX_RAD_S = (720 * Math.PI) / 180;
 /**
  * The column's friction band at the rim, 1°: a wheel spinning back slows into it and
- * stops, and inside it the wheel counts as centred and the hands as off it (the tyres
- * then swing it as they do with no key down, `STEER_FREE_TAU_S`). Without it the
- * exponential return would never quite arrive. 1° at the rim is 0.06° at the road.
+ * stops, and inside it of where the caster takes it the hands are off the wheel (the
+ * tyres then swing the rack on their own aligning moment toward the same place, as with
+ * no key down, `STEER_FREE_TAU_S`). Without it the exponential return would never
+ * quite arrive. 1° at the rim is 0.06° at the road.
  */
-export const HANDS_CENTRE_RAD = Math.PI / 180;
+export const HANDS_SETTLE_RAD = Math.PI / 180;
 
 /* ---------------------------------------------------------------------------
  * THE PLAYER'S CAR: four figures the car the player drives from the driver's seat, with
