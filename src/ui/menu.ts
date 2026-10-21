@@ -2001,7 +2001,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Off',
           icon: 'keys',
-          hint: 'A and D turn the steering wheel for as long as you hold them: a tap is a small correction, a hold gathers speed. The faster you drive, the gentler it turns and the sooner it stops at what the tyres can take. Let go and the wheel eases back to centre.',
+          hint: 'A and D turn the steering wheel for as long as you hold them: a tap is a small correction, a hold gathers speed. The faster you drive, the gentler a press turns it. Let go and the wheel eases back to centre.',
           active: () => !settings.mouseDriving,
           pick: () => {
             settings.mouseDriving = false;

@@ -101,39 +101,25 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *  1. A HELD KEY GATHERS SPEED like a hand: the rim starts at KEYS_START_RATE_RAD_S and
  *     reaches KEYS_OUT_RATE_RAD_S, linearly, KEYS_RAMP_S into the press, so a tap is a
  *     few degrees of rim and a hold sweeps on quickly. Above KEYS_RATE_REF_MPS all of it
- *     falls as KEYS_RATE_REF_MPS / speed, because the turn a degree of road wheel asks
- *     for grows with speed: one to one and unscaled, a 60 ms tap at 120 km/h was 0.3 g
- *     and a 220 ms hold spun the car (tools/tap-response.ts). Scaled, an 80 ms tap is
- *     ~0.1 g at 60–150 km/h. Scaling the ROAD WHEELS down with speed instead (a
- *     (30 km/h / v)² ratio and a progressive curve) read as a viscous wheel, and a
- *     constant slow rim with a snap return as a cast-iron one.
+ *     falls as KEYS_RATE_REF_MPS / speed: the hands of a driver whose wheel grows heavy
+ *     with speed (the tyres' aligning moment), making the same small correction. One to
+ *     one and unscaled, a 60 ms tap at 120 km/h was 0.3 g (tools/tap-response.ts);
+ *     scaled, an 80 ms tap is ~0.1 g at 60–150 km/h. Scaling the ROAD WHEELS down with
+ *     speed instead (a (30 km/h / v)² ratio and a progressive curve) read as a viscous
+ *     wheel, and a constant slow rim with a snap return as a cast-iron one.
  *     The opposite key turns the rim back the same way, its own press ramping afresh.
  *     Both keys down hold the rim where it is (`InputFrame.steerBothHeld`). The touch
  *     wheel's deflection is a target position, a share of the lock, reached the same way.
- *  2. AT SPEED THE RIM STOPS AT THE GRIP ANGLE: KEYS_LIMIT_SHARE of the kinematic angle
- *     of the tightest circle the front tyres' grip holds, `atan(L · a / v²)`, which is
- *     the whole lock below ~30 km/h. A held key reaches it in ~0.3 s and the car turns
- *     at 0.7–0.9 g at 60–150 km/h without spinning; without it a 0.3–0.45 s hold spun
- *     the car at 90 km/h and up. As the tail lets go (`tailOut`) the stop opens to the
- *     lock, so a slide can be caught.
- *  3. NEAR THE LIMIT IT SLOWS. Winding further into a turn the car is already making,
- *     the rate falls by KEYS_UNDERSTEER_SHARE of the lateral acceleration in g, but
- *     only near the limit (`keysStabilityG`: nothing below KEYS_STABILITY_FROM_G, full
- *     from KEYS_STABILITY_FULL_G): at 0.9 g about a third of the rate, so the last
- *     degrees before the front lets go are fine steps. Below it a real driver's hands
- *     are as free one way as the other, and a slowdown from 0 g read as a wheel that
- *     pulled to straight.
- *  4. AGAINST THE TURN IT QUICKENS: a key turning the rim toward the outside of the
- *     turn (unwinding, or countersteering a slide) runs up to 1 + KEYS_OVERSTEER_SHARE
- *     times the rate, by the recent peak lateral acceleration (held and decaying at
- *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction),
- *     ramped in near the limit the same way.
- *  5. LET GO, the rim eases back to centre like a real one under its caster: a constant
+ *     Nothing stops the rim short of the lock and nothing slows or quickens it by what
+ *     the car is doing: a stop at the grip angle and BeamNG's understeer/oversteer rate
+ *     shares were tried and read as the game interfering. A held key at speed asks for
+ *     more than the tyres have, and the car answers as it would.
+ *  2. LET GO, the rim eases back to centre like a real one under its caster: a constant
  *     share of what is left each moment (KEYS_RETURN_TAU_S), never quicker than
  *     KEYS_IN_RATE_RAD_S, and settled at centre inside KEYS_RETURN_SETTLE_RAD. A linear
  *     990°/s took back a tap's few degrees in a few milliseconds, so every correction
  *     was undone the moment the key came up, and the car read as a roly-poly toy.
- *  6. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
+ *  3. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
  *     / `steerLock`), and the rack speed (`steerRackSpeed`) still applies after.
  * ------------------------------------------------------------------------- */
 /** A held key's rim rate once the press has gathered speed, 720°/s (BeamNG's 1.6 × 450°). */
@@ -142,38 +128,18 @@ export const KEYS_OUT_RATE_RAD_S = (720 * Math.PI) / 180;
 export const KEYS_START_RATE_RAD_S = (120 * Math.PI) / 180;
 /** Seconds into a press at which the rim reaches KEYS_OUT_RATE_RAD_S. */
 export const KEYS_RAMP_S = 0.3;
-/** Speed above which the whole press rate falls as this over the speed (rule 1): 30 km/h. */
-export const KEYS_RATE_REF_MPS = 30 / 3.6;
 /**
- * The rim's stop at speed as a share of the kinematic grip angle (rule 2), measured on
- * a 0.7 s hold with the throttle lifted (tools/tap-response.ts). 1.0: the VAZ-2101 and
- * the GAZ-24 hold ~0.7 g at 90–150 km/h, the VAZ-2108 to 110 km/h, its tail stepping
- * out from 120 (a lifted front-driver's own oversteer, 0.9 does not cure it at 150).
- * 1.15 put the 2101 at 0.8–0.9 g with its tyres just sliding at 150; 1.3 let the tail go
- * at 120–150.
+ * Speed above which the whole press rate falls as this over the speed (rule 1): 45 km/h.
+ * At 30 km/h an 80 ms tap was 0.07–0.03 g at 90–150 km/h, which the owner found too
+ * sheltered; 45 km/h lets the same tap bite half as hard again.
  */
-export const KEYS_LIMIT_SHARE = 1.0;
+export const KEYS_RATE_REF_MPS = 45 / 3.6;
 /** The cap on a released rim's return, 990°/s (BeamNG's 2.2 × 450°): from lock in ~0.5 s. */
 export const KEYS_IN_RATE_RAD_S = (990 * Math.PI) / 180;
 /** Time constant of a released rim's return: ~95% of the way back in 0.75 s. */
 export const KEYS_RETURN_TAU_S = 0.25;
 /** Inside this rim angle a released rim is at centre and the hands are off: 2°. */
 export const KEYS_RETURN_SETTLE_RAD = (2 * Math.PI) / 180;
-/** The stabilisation (rules 2–3) starts at this lateral acceleration, g. */
-export const KEYS_STABILITY_FROM_G = 0.5;
-/** And is at full strength from this one, g: the tyres' limit. */
-export const KEYS_STABILITY_FULL_G = 0.9;
-/** The lateral acceleration the stabilisation acts on: 0 below KEYS_STABILITY_FROM_G. */
-export function keysStabilityG(g: number): number {
-  const ramp = (g - KEYS_STABILITY_FROM_G) / (KEYS_STABILITY_FULL_G - KEYS_STABILITY_FROM_G);
-  return g * (ramp < 0 ? 0 : ramp > 1 ? 1 : ramp);
-}
-/** The share of the turn-in rate lateral acceleration takes away, per g (BeamNG 0.7). */
-export const KEYS_UNDERSTEER_SHARE = 0.7;
-/** The share added to the rate against the turn, per g of recent peak (BeamNG 0.7). */
-export const KEYS_OVERSTEER_SHARE = 0.7;
-/** The recent-peak lateral acceleration decays at this many g a second (BeamNG 3). */
-export const KEYS_G_DECAY_PER_S = 3;
 /* ---------------------------------------------------------------------------
  * DRIVER AIDS on the player's car, each a setting and off by default (`Settings.abs`,
  * `Settings.tractionControl`). Both work like

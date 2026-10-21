@@ -223,18 +223,13 @@ import {
   tyreTemperatureGrip,
   tyreVerticalRate,
   unsprungMass,
-  KEYS_G_DECAY_PER_S,
   KEYS_IN_RATE_RAD_S,
   KEYS_OUT_RATE_RAD_S,
-  KEYS_OVERSTEER_SHARE,
   KEYS_RETURN_SETTLE_RAD,
   KEYS_RETURN_TAU_S,
   KEYS_RAMP_S,
   KEYS_START_RATE_RAD_S,
-  KEYS_LIMIT_SHARE,
   KEYS_RATE_REF_MPS,
-  KEYS_UNDERSTEER_SHARE,
-  keysStabilityG,
   ABS_MIN_KMH,
   ABS_MIN_SCALE,
   ABS_RECOVER_S,
@@ -1115,16 +1110,12 @@ export class Vehicle implements Rebasable {
   private steerAngle = 0;
   /**
    * KEYBOARD STEERING (`SteerMode` 'keys', vehicletuning.ts): the steering wheel's angle,
-   * radians at the rim and positive to the left like the rack, and the recent peak of
-   * the lateral acceleration in g (`KEYS_G_DECAY_PER_S`).
+   * radians at the rim and positive to the left like the rack.
    */
   private keysRimRad = 0;
-  private keysPeakG = 0;
   /** Seconds the current steering key has been held, and which way it points (−1/0/1). */
   private keysPressS = 0;
   private keysPressKey = 0;
-  /** Scratch for the chassis' angular velocity in `updateSteering`. */
-  private readonly keysAngvel = { x: 0, y: 0, z: 0 };
   /**
    * The player drives this car from the driver's seat with their own hands, which is
    * what turns the driver aids on (ABS, traction control): see `setPlayerDriven`.
@@ -1945,7 +1936,6 @@ export class Vehicle implements Rebasable {
     this.beamAxles = [];
     this.steerAngle = 0;
     this.keysRimRad = 0;
-    this.keysPeakG = 0;
     this.keysPressS = 0;
     this.keysPressKey = 0;
     this.bumpSteerAngle = 0;
@@ -5428,18 +5418,11 @@ export class Vehicle implements Rebasable {
     let handsOff = steer === 0 && input.steerMode !== 'direct';
     if (input.steerMode === 'keys') {
       // KEYBOARD STEERING (vehicletuning.ts): the rim is a position a held key moves,
-      // from a slow start up to its full rate, slower winding into a turn near the
-      // limit, quicker against it, easing back to centre when let go. The rim is signed
-      // like the rack, positive to the left; input is positive right.
+      // from a slow start up to its full rate, slower the faster the car goes, easing
+      // back to centre when let go. The rim is signed like the rack, positive to the
+      // left; input is positive right.
       const ratio = STEERING_WHEEL_HALF_LOCK_RAD / lock;
-      // The lateral acceleration, in g, positive turning left: the yaw rate (positive
-      // about +Y is a left turn, as the rack is) times the ground speed.
-      const yaw = this.chassisBody.angvel(this.keysAngvel).y;
-      const lateralG = (yaw * Math.hypot(this.stepStartLinvel.x, this.stepStartLinvel.z)) / GRAVITY;
-      const absG = Math.min(Math.abs(lateralG), 1);
-      this.keysPeakG = Math.max(absG, this.keysPeakG - KEYS_G_DECAY_PER_S * dt);
       const rim = this.keysRimRad;
-      const turn = Math.sign(lateralG);
       const key = Math.sign(-steer);
       let want: number;
       let rate: number;
@@ -5458,29 +5441,12 @@ export class Vehicle implements Rebasable {
         if (!input.steerBothHeld && Math.abs(rim) < KEYS_RETURN_SETTLE_RAD) rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
-        // At speed the rim stops at the grip angle (rule 2). As the tail lets go the stop
-        // opens to the lock on the countersteer side only (against the yaw), so a slide
-        // can be caught but a key held into it cannot wind the car round.
-        const speed = Math.abs(fwd);
-        if (load > 0 && staticLoad > 0 && speed > 1) {
-          const gripAccel = (capacity * GRAVITY) / staticLoad;
-          const gripAngle = Math.atan((this.wheelbaseM * gripAccel) / (speed * speed)) * KEYS_LIMIT_SHARE;
-          let stop = STEERING_WHEEL_HALF_LOCK_RAD * Math.min(1, gripAngle / lock);
-          if (turn !== 0 && Math.sign(want) === -turn) stop += (STEERING_WHEEL_HALF_LOCK_RAD - stop) * tailOut;
-          want = clamp(want, -stop, stop);
-        }
         // A press gathers speed (rule 1): KEYS_START_RATE_RAD_S up to the full rate,
         // linearly over KEYS_RAMP_S, all of it falling as KEYS_RATE_REF_MPS / speed.
         const gathered = Math.min(this.keysPressS / KEYS_RAMP_S, 1);
         rate = KEYS_START_RATE_RAD_S + (KEYS_OUT_RATE_RAD_S - KEYS_START_RATE_RAD_S) * gathered;
+        const speed = Math.abs(fwd);
         if (speed > KEYS_RATE_REF_MPS) rate *= KEYS_RATE_REF_MPS / speed;
-        // The stabilisation only near the limit (rules 3–4): its g ramps in from
-        // KEYS_STABILITY_FROM_G to full at KEYS_STABILITY_FULL_G.
-        if (turn !== 0 && key === turn && Math.sign(rim) === turn) {
-          rate *= 1 - KEYS_UNDERSTEER_SHARE * keysStabilityG(absG);
-        } else if (turn !== 0 && key === -turn) {
-          rate *= 1 + KEYS_OVERSTEER_SHARE * keysStabilityG(this.keysPeakG);
-        }
       }
       const reach = rate * dt;
       this.keysRimRad = rim + clamp(want - rim, -reach, reach);
@@ -5488,7 +5454,6 @@ export class Vehicle implements Rebasable {
       target = clamp(this.keysRimRad / ratio, -lock, lock);
     } else {
       this.keysRimRad = 0;
-      this.keysPeakG = 0;
       this.keysPressS = 0;
       this.keysPressKey = 0;
       if (input.steerMode === 'analogAssist') {

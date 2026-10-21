@@ -152,11 +152,15 @@ for (const r of results) {
   }
 }
 
-// AND A LONGER TAP MUST DO MORE, all the way up. A response that is not monotonic in tap
-// length cannot be learned, whatever its absolute size.
-for (let i = 1; i < results.length; i++) {
-  const previousResult = results[i - 1]!;
-  const current = results[i]!;
+// AND A LONGER TAP MUST DO MORE, through the correction range. A response that is not
+// monotonic in tap length cannot be learned, whatever its absolute size. Past
+// CORRECTION_MAX_S a hold at speed is allowed to ask for more than the tyres have: the
+// car slides or spins, and the free wheel's swing then is not the hands' response.
+const CORRECTION_MAX_S = 0.22;
+const corrections = results.filter((r) => r.tapS <= CORRECTION_MAX_S);
+for (let i = 1; i < corrections.length; i++) {
+  const previousResult = corrections[i - 1]!;
+  const current = corrections[i]!;
   if (current.steerDeg < previousResult.steerDeg * 0.98) {
     failures.push(
       `the response is not monotonic: ${Math.round(previousResult.tapS * 1000)} ms gives ` +
@@ -169,9 +173,9 @@ for (let i = 1; i < results.length; i++) {
 // AND THERE MUST BE NO CLIFF: no single step of the sweep may multiply the response by
 // more than three, or the finest correction available to the player lands on the wrong
 // side of a discontinuity. Ratios are around 1.3-1.9 when the chain is healthy.
-for (let i = 1; i < results.length; i++) {
-  const previousResult = results[i - 1]!;
-  const current = results[i]!;
+for (let i = 1; i < corrections.length; i++) {
+  const previousResult = corrections[i - 1]!;
+  const current = corrections[i]!;
   if (previousResult.steerDeg > 0.1 && current.steerDeg > previousResult.steerDeg * 3) {
     failures.push(
       `cliff between ${Math.round(previousResult.tapS * 1000)} ms and ` +
