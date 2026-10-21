@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Keyboard steering after BeamNG's keyboard filter (owner; the idea and figures of its
+  `lua/vehicle/input.lua` "Key" filter, not its code). The steering wheel is a position
+  a held key moves at a constant 720°/s with no ramp-up; winding further into a turn
+  the car is already making it slows by 0.7 × the lateral acceleration in g; a key
+  against the turn quickens it by up to 0.7 × the recent peak (decaying 3 g/s); let go,
+  it returns to centre at 990°/s at any speed. Removed: HANDS ON WHEEL (the 420°/s
+  ramped hands, the 1400°/s hands toward the caster's angle, the release toward that
+  angle that took a second at 25 km/h and steered a slide by itself, `HANDS_*`), and the
+  countersteer assist setting it needed. Pedals, ABS and traction control unchanged.
+
 - Keyboard pedals in two stages, quicker hands in a slide, and three driver aids
   (owner). PEDALS (`KEY_PEDAL_RAMPS`): a held throttle key goes to 0.5 in 0.12 s and to
   the floor by 0.72 s (was 1.0 in 0.25 s); a held brake key goes to the car's own

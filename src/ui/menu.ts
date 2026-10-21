@@ -2001,7 +2001,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'Off',
           icon: 'keys',
-          hint: 'A and D are your hands on the wheel: hold one and the wheel keeps turning, as far as the lock if you let it. Let go and the wheel comes back by itself, briskly at speed and hardly at all when crawling.',
+          hint: 'A and D turn the steering wheel at a steady rate for as long as you hold them, a little slower when the car is near the limit of grip and quicker when you steer against a turn. Let go and the wheel goes straight back to centre.',
           active: () => !settings.mouseDriving,
           pick: () => {
             settings.mouseDriving = false;
@@ -2024,7 +2024,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     const aids = [
       ['ABS', 'abs', 'The brake is yours alone: hold it too hard and the wheels lock.', 'The brake eases off by itself while a wheel locks, so a held brake key stops the car and still steers.'],
       ['Traction control', 'tractionControl', 'The throttle is yours alone: too much and the driven wheels spin.', 'The throttle eases off by itself while the driven wheels spin, so the car pulls instead of sliding.'],
-      ['Countersteer assist', 'countersteerAssist', 'Catching a slide is up to your hands on the wheel.', 'In a slide, holding the key toward the countersteer puts the wheel exactly where it catches the car, and keeps it there.'],
     ] as const;
     for (const [title, key, offHint, onHint] of aids) {
       pane.appendChild(
@@ -2625,7 +2624,6 @@ export class MainMenu {
         bouncyCars: base.bouncyCars,
         abs: base.abs,
         tractionControl: base.tractionControl,
-        countersteerAssist: base.countersteerAssist,
         dashboardSize: base.dashboardSize,
         virtualDashboard: base.virtualDashboard,
         viewDistance: base.viewDistance,
@@ -2664,7 +2662,6 @@ export class MainMenu {
           bouncyCars: settings.bouncyCars,
           abs: settings.abs,
           tractionControl: settings.tractionControl,
-          countersteerAssist: settings.countersteerAssist,
           dashboardSize: settings.dashboardSize,
           virtualDashboard: settings.virtualDashboard,
           viewDistance: settings.viewDistance,

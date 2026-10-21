@@ -102,8 +102,8 @@ async function tap(tapS: number): Promise<TapResult> {
     if (g > latG) latG = g;
     // The vehicle's private steering-wheel angle, read for the report.
     const vehicle: object = rig.vehicle;
-    if ('handsWheelRad' in vehicle && typeof vehicle.handsWheelRad === 'number') {
-      rimDeg = Math.max(rimDeg, Math.abs(vehicle.handsWheelRad) * DEG);
+    if ('keysRimRad' in vehicle && typeof vehicle.keysRimRad === 'number') {
+      rimDeg = Math.max(rimDeg, Math.abs(vehicle.keysRimRad) * DEG);
     }
   }
   rig.vehicle.dispose();

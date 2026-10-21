@@ -14,12 +14,12 @@ import { STEERING_WHEEL_HALF_LOCK_RAD } from '../vehicle/vehicletuning';
 /**
  * What `InputFrame.steer` means, decided by the device that produced it.
  *
- *   keys          a keyboard or touch DIRECTION: -1, 0 or 1 from the keys, the touch
- *                 wheel's deflection from the thumb. Not a position: it is hands turning
- *                 the steering wheel, so how long a key is down is how much wheel
- *                 (`Vehicle.updateSteering`, HANDS ON WHEEL in vehicletuning.ts), and
- *                 let go the caster brings the wheel back. Both keys down is 0 here and
- *                 `steerBothHeld`: both hands holding the wheel where it is.
+ *   keys          a keyboard or touch request: -1, 0 or 1 from the keys, the touch
+ *                 wheel's deflection from the thumb. The steering wheel moves toward
+ *                 that share of lock at a constant rate, so how long a key is down is how
+ *                 much wheel (`Vehicle.updateSteering`, KEYBOARD STEERING in
+ *                 vehicletuning.ts), and let go it returns to centre. Both keys down is 0
+ *                 here and `steerBothHeld`: the wheel held where it is.
  *   analogAssist  a position (a pad stick) read against the tyres' peak at speed,
  *                 proportionally: the stick's edge is the peak.
  *   analog        a position read against the whole steering lock.

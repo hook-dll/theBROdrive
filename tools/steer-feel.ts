@@ -16,7 +16,7 @@
  *    settles at, 60 and 100 km/h.
  * 3. RELEASE: from that hold at 60 km/h the key comes up. Time for the rack to come
  *    back to a tenth of its held angle, and for the yaw rate to fall to a tenth: the
- *    caster spins the wheel back (`HANDS_RETURN_TAU_S`), then the tyres' aligning moment.
+ *    wheel returns to centre (`KEYS_IN_RATE_RAD_S`), then the tyres' aligning moment.
  * 4. YAW KICK: straight at 70 km/h, the body is given 1.2 rad/s of yaw (a clipped kerb,
  *    a shove) and either nobody touches the keys (`hands off`) or a keyboard driver
  *    steers back to the original heading with the keys alone (`keys`). Peak heading

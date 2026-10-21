@@ -35,10 +35,10 @@ export const GRAVITY = 9.81;
 // Steering tuning.
 //
 // The driver's hands set a RACK TARGET, and the tyres decide the rest:
-//  1. The steering keys are a pair of hands on the steering wheel (HANDS ON WHEEL
-//     below): a held key turns the rim, the road wheels follow through the steering
-//     ratio, and let go the caster brings the rim back. Nothing in it knows where the
-//     tyres' grip is. A pad stick is a position: with the steering assist on, a share
+//  1. The steering keys move a steering-wheel position (KEYBOARD STEERING below): a
+//     held key at a constant rate, the road wheels following through the steering
+//     ratio, and let go it returns to centre. A pad stick is a position: with the
+//     steering assist on, a share
 //     of the angle that puts the front axle at its own peak slip angle
 //     (`STEER_ASSIST_SLIP_MARGIN`), measured from where it is travelling; with it off,
 //     the whole lock. Autonomy commands a rack angle directly.
@@ -59,7 +59,7 @@ export const GRAVITY = 9.81;
  *
  * It replaces a pair of rates blended by a speed table (2.0 rad/s parked, 0.5 at
  * 100 km/h). The high-speed one was there to keep a held key from asking for too much
- * angle too fast; the keys now turn the rim at a hand's rate (`HANDS_WHEEL_RATE_RAD_S`)
+ * angle too fast; the keys now move the rim at their own rate (`KEYS_OUT_RATE_RAD_S`)
  * and the pad's assist asks for a few degrees at speed, and the parked one was faster
  * than anyone turns a wheel.
  */
@@ -87,101 +87,45 @@ export const STEER_RACK_SPEED_RAD_S = (60 * Math.PI) / 180;
 export const STEER_ASSIST_SLIP_MARGIN = 0.1;
 
 /* ---------------------------------------------------------------------------
- * HANDS ON WHEEL (`SteerMode` 'keys'): a held steering key is a pair of hands turning
- * the steering wheel, and nothing in the path knows where the tyres' grip is. The risk
- * is holding the key too long, as it is holding a real wheel over too far. It replaced
- * a keyboard assist that wound a "hold" toward the front tyres' peak slip angle, with
- * its own wind-up, return and release timings and a past-the-peak wind-up: that made
- * every car safe at speed, which is what the owner did not want.
+ * KEYBOARD STEERING (`SteerMode` 'keys'), after BeamNG.drive's keyboard filter ("Key",
+ * `lua/vehicle/input.lua`; the idea and the figures, not its code): the steering WHEEL
+ * is a position that a held key moves at a constant rate, with no ramp-up, and that a
+ * released key brings straight back to centre at a quicker constant rate, at any speed.
+ * Nothing in it is a physical model of hands or of the caster: the input is a
+ * predictable machine and the danger comes from the car. It replaced HANDS ON WHEEL
+ * (a ramped hand rate, and a release that spun the rim toward where the front tyres'
+ * travel took it, slowly in town and into a countersteer of its own in a slide), which
+ * the owner found strange to drive.
  *
- *  1. The hands turn the WHEEL at HANDS_WHEEL_RATE_RAD_S, reached over HANDS_RAMP_S,
- *     and the opposite key turns it back. Both keys down is both hands holding the rim
- *     where it is (`InputFrame.steerBothHeld`). The touch wheel's deflection is a share
- *     of the hands' rate.
- *  2. The road wheels follow through the steering ratio, the authored rim travel over
- *     the car's own lock (`STEERING_WHEEL_HALF_LOCK_RAD` / `steerLock`: 12.8:1 to
- *     18.6:1 across the catalogue, 16:1 on a Zhiguli), so the drawn wheel is the
- *     hands' wheel and the rim stops where the road wheels reach their lock.
- *  3. WHERE THE CASTER TAKES THE RIM (`HANDS_ALIGN_*`): the self-aligning torque turns
- *     the front wheels until they roll along the front axle's own travel, where their
- *     slip angle and so the torque are gone. Running straight that is straight ahead;
- *     with the tail out the front axle travels toward the outside of the turn and it
- *     is the countersteer. That is how a rear-drive car catches itself through a
- *     driver's loose hands, and it needs no slide detection: it is where the wheel goes.
- *  4. Let go, the torque spins the rim there: faster the further off it is and the
- *     faster the car goes, never past it (THE RETURN).
- *  5. A key turning the rim TOWARD it has the torque with the hands, and the rim spins
- *     at HANDS_ALIGN_RATE_RAD_S: a fast countersteer, or a quick straightening up. A key
- *     turning it away works against the torque at the hands' own rate. So winding a car
- *     into a bend is deliberate and catching it is quick, as with a real wheel.
- *  6. The rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`) still applies after.
+ *  1. A held key moves the rim toward that side's lock at KEYS_OUT_RATE_RAD_S; the
+ *     opposite key turns it back the same way. Both keys down hold the rim where it is
+ *     (`InputFrame.steerBothHeld`). The touch wheel's deflection is a target position,
+ *     a share of the lock, reached at the same rates.
+ *  2. NEAR THE LIMIT IT SLOWS. Winding further into a turn the car is already making,
+ *     the rate falls by KEYS_UNDERSTEER_SHARE of the lateral acceleration in g: at 0.8 g
+ *     less than half, so the last degrees before the front lets go are fine steps.
+ *  3. AGAINST THE TURN IT QUICKENS: a key turning the rim toward the outside of the
+ *     turn (unwinding, or countersteering a slide) runs up to 1 + KEYS_OVERSTEER_SHARE
+ *     times the rate, by the recent peak lateral acceleration (held and decaying at
+ *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction).
+ *  4. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
+ *  5. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
+ *     / `steerLock`), and the rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`)
+ *     still applies after.
  * ------------------------------------------------------------------------- */
-/**
- * How fast hands turn a steering wheel, at the rim: 420°/s. A quick hand-over-hand
- * turn is about a full turn a second and a deliberate one half that; 420 is the brisk
- * middle, about 26°/s at the road wheels through 16:1, so from straight to a full
- * motorway lane change (2-3° of road wheel) is a tenth of a second and full lock is
- * just over a second.
- */
-export const HANDS_WHEEL_RATE_RAD_S = (420 * Math.PI) / 180;
-/**
- * The hands' ramp from still to that rate, 0.1 s: the rim has mass and the arms have to
- * get going. A one-frame tap moves the rim under a degree, a 0.1 s tap about 20° (1.3°
- * at the road wheels): a nudge, not a lurch. A reversal decelerates and comes back
- * through the same ramp, 0.2 s from one full rate to the other.
- */
-export const HANDS_RAMP_S = 0.1;
-/**
- * The hands with the self-aligning torque behind them, at the rim: 1400°/s, nearly four
- * turns a second, a rally driver's flick of countersteer with the wheel already spinning
- * that way through the fingers. 87°/s at the road wheels through 16:1, at or inside
- * every profile's rack speed on the player's car (90-150°/s; the rack caps the quicker
- * 12.8:1 cars), so from straight to 20° of countersteer is about 0.25 s, where 900°/s
- * took 0.4 s and the slide grew 30-40° more of yaw meanwhile. Reached over
- * HANDS_ALIGN_RAMP_S, 0.03 s: the torque is already pulling the rim that way, the arms
- * only have to follow it.
- */
-export const HANDS_ALIGN_RATE_RAD_S = (1400 * Math.PI) / 180;
-export const HANDS_ALIGN_RAMP_S = 0.03;
-/**
- * Where the caster takes the rim is read off the front tyres' travel, which carries the
- * suspension's step-to-step jitter; a 50 ms low-pass takes that out and lags a slide by
- * three steps. Under HANDS_ALIGN_FULL_KMH it fades linearly to straight ahead, and
- * backwards it is straight ahead: at a crawl the car follows its wheels, so their
- * travel is wherever they already point and says nothing about where the rim goes.
- */
-export const HANDS_ALIGN_SMOOTH_S = 0.05;
-export const HANDS_ALIGN_FULL_KMH = 10;
-/**
- * THE RETURN. The self-aligning torque is the side force times the caster and
- * pneumatic trail, and the side force a turned wheel makes grows with speed; the
- * column's own friction holds the rim where it is at a standstill. So released, the
- * rim comes back toward where the caster takes it at |offset| / HANDS_RETURN_TAU_S
- * scaled by the forward speed over HANDS_RETURN_REF_KMH (capped at 1 above it, nothing
- * going backwards, where caster pushes toward the lock rather than away from it): at
- * 100 km/h a quarter-second time constant, a real car's wheel spinning back through
- * loose hands out of a bend; at 25 km/h a whole second; at a crawl it hardly moves.
- * The approach is exponential, so it never overshoots, and at most
- * HANDS_RETURN_MAX_RAD_S, a wheel spinning free about two turns a second, from far off.
- */
-export const HANDS_RETURN_TAU_S = 0.25;
-export const HANDS_RETURN_REF_KMH = 100;
-export const HANDS_RETURN_MAX_RAD_S = (720 * Math.PI) / 180;
-/**
- * THE RETURN IN A SLIDE. The aligning torque comes from the front tyres' slip and load,
- * not from the road speed, and with the tail out the front axle is travelling well off
- * where the wheels point: the torque is at its strongest whatever the speed. Scaled by
- * speed alone, a slide at 50 km/h let go spun the rim back at half the rate of one at
- * 100, and the slides that happen are mostly at 40-60. So while the rear axle is past
- * its peak (`tailOut`, 0..1) the return blends toward a 0.13 s time constant and a
- * 1200°/s cap at any speed above HANDS_ALIGN_FULL_KMH: let go, and a rear-drive car
- * catches itself through loose hands as quickly as a real one.
- */
-export const HANDS_SLIDE_RETURN_TAU_S = 0.13;
-export const HANDS_SLIDE_RETURN_MAX_RAD_S = (1200 * Math.PI) / 180;
+/** A held key's rim rate, 720°/s (BeamNG's 1.6 × 450°): lock in about 0.67 s. */
+export const KEYS_OUT_RATE_RAD_S = (720 * Math.PI) / 180;
+/** A released key's return to centre, 990°/s (BeamNG's 2.2 × 450°): from lock in 0.5 s. */
+export const KEYS_IN_RATE_RAD_S = (990 * Math.PI) / 180;
+/** The share of the turn-in rate lateral acceleration takes away, per g (BeamNG 0.7). */
+export const KEYS_UNDERSTEER_SHARE = 0.7;
+/** The share added to the rate against the turn, per g of recent peak (BeamNG 0.7). */
+export const KEYS_OVERSTEER_SHARE = 0.7;
+/** The recent-peak lateral acceleration decays at this many g a second (BeamNG 3). */
+export const KEYS_G_DECAY_PER_S = 3;
 /* ---------------------------------------------------------------------------
  * DRIVER AIDS on the player's car, each a setting and off by default (`Settings.abs`,
- * `Settings.tractionControl`, `Settings.countersteerAssist`). The first two work like
+ * `Settings.tractionControl`). Both work like
  * the autopilot's threshold braking (`modulateBrake`): the pedal is scaled down step by
  * step while the wheels are past their grip and given back over a moment once they
  * roll, so the driver's foot stays the ceiling and the aid only takes away.
@@ -203,14 +147,6 @@ export const TCS_REF_MPS = 3;
 export const TCS_RELEASE = 0.75;
 export const TCS_MIN_SCALE = 0.15;
 export const TCS_RECOVER_S = 0.3;
-/**
- * The column's friction band at the rim, 1°: a wheel spinning back slows into it and
- * stops, and inside it of where the caster takes it the hands are off the wheel (the
- * tyres then swing the rack on their own aligning moment toward the same place, as with
- * no key down, `STEER_FREE_TAU_S`). Without it the exponential return would never
- * quite arrive. 1° at the rim is 0.06° at the road.
- */
-export const HANDS_SETTLE_RAD = Math.PI / 180;
 
 /* ---------------------------------------------------------------------------
  * THE PLAYER'S CAR: four figures the car the player drives from the driver's seat, with

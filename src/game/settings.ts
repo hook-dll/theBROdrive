@@ -609,12 +609,10 @@ export interface Settings {
    * Driver aids on the player's own car, all off by default: these cars had none, and
    * the drive is meant to be driven (vehicle/vehicletuning.ts, DRIVER AIDS).
    * `abs` eases the brake while a wheel locks; `tractionControl` eases the throttle
-   * while the driven wheels spin; `countersteerAssist` puts the rim exactly at the
-   * countersteer while the steering key is held that way in a slide.
+   * while the driven wheels spin.
    */
   abs: boolean;
   tractionControl: boolean;
-  countersteerAssist: boolean;
   /**
    * Size of the driving dashboard, 1 = the default (what was 140% of the authored
    * cluster before 0.20). Applied on top of the presentation's own scale (desktop and
@@ -735,7 +733,6 @@ export const DEFAULT_SETTINGS: Settings = {
   bouncyCars: false,
   abs: false,
   tractionControl: false,
-  countersteerAssist: false,
   dashboardSize: 1,
   virtualDashboard: false,
   // 16 km of desert and a 24-car stream; High is for a processor with room beyond them.
@@ -1013,7 +1010,6 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     bouncyCars: obj.bouncyCars === true,
     abs: obj.abs === true,
     tractionControl: obj.tractionControl === true,
-    countersteerAssist: obj.countersteerAssist === true,
     // Snapped to the slider's step, clamped to its range; missing means the default. A
     // save from before 0.20 has `dashboardScale` against the authored cluster instead.
     dashboardSize: (() => {

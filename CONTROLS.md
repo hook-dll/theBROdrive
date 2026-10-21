@@ -147,12 +147,12 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 
 `InputFrame.steerMode` says what `steer` means (`SteerMode` in `src/core/input.ts`):
 
-- **Keyboard (and the touch wheel): hands on the wheel** (HANDS ON WHEEL in
-  `src/vehicle/vehicletuning.ts`). A held A/D turns the steering wheel at a hand's rate,
-  as far as the lock if it is held that long; the road wheels follow through the
-  steering ratio. Let go and the caster brings the wheel back to where the front wheels
-  roll along their own travel, briskly at speed and hardly at all when crawling. Both
-  keys down hold the wheel where it is.
+- **Keyboard (and the touch wheel): a steering-wheel position** (KEYBOARD STEERING in
+  `src/vehicle/vehicletuning.ts`, after BeamNG's keyboard filter). A held A/D turns the
+  steering wheel at a constant 720°/s, slower winding further into a turn near the
+  limit of grip and quicker against a turn; the road wheels follow through the steering
+  ratio. Let go and the wheel returns to centre at 990°/s at any speed. Both keys down
+  hold the wheel where it is.
 - **Mouse driving** (`M` while driving; Settings → Controls → **Mouse driving**). Off
   by default; the setting persists, and leaving the car keeps it for next time. On foot
   `M` does nothing and the mouse looks as always. While it is on and the player drives
