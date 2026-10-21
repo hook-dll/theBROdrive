@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- THE CHASE CAMERA IS WHERE YOU LEFT IT AFTER THE CABIN VIEW. C into the seat and back
+  used to bring the arm back from the seat's heading, level, springing out of the cabin.
+  Now `showCabin` keeps the arm's angle round the car (as an offset from the car's
+  heading, so a car that turned meanwhile keeps it), its pitch and the look-idle timer
+  of its automatic return, and `showChase` puts them back with the eye placed on the arm
+  at once. The zoom was already kept.
 - CLOUDS DRAWN ONLY WHERE THE CAMERA LOOKS. The sky's two cloud draws held every cloud
   round the eye, the whole 26 km ring, and every render of the scene drew them all: the
   frame and each live mirror, whose view is a few degrees of sky. Before each render

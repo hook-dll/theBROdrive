@@ -378,6 +378,17 @@ export class CameraRig {
   private recenterYaw = 0;
   /** Seconds since the last chase-camera horizontal look input. */
   private chaseLookIdle = 0;
+  /**
+   * The chase arm as it was left for the cabin view (`showCabin`), put back by
+   * `showChase`: its heading as an offset from the car, which may have turned meanwhile,
+   * its pitch, and how long the player had left it alone (the automatic return keeps
+   * counting from there).
+   */
+  private chaseYawOffset = 0;
+  private chasePitch = 0;
+  private chaseLookIdleKept = 0;
+  /** Set by `showChase`: the next frame places the chase eye on its arm instead of springing it out of the seat. */
+  private snapChaseEye = false;
   /** Cabin view heading relative to the car: where the driver has turned his head. */
   private cabinYawOffset = 0;
   /** Seconds since the player last turned the head in the cabin view. */
@@ -627,20 +638,41 @@ export class CameraRig {
   /**
    * C switches the driving views: the follow arm and the driver's seat. Entering the
    * cabin aims it down the car (`showCabin`), because a seat's view left pointing
-   * wherever the chase arm happened to be reads as the car having spun.
+   * wherever the chase arm happened to be reads as the car having spun. Leaving it puts
+   * the arm back where it was (`showChase`).
    */
   cycleDriving(): void {
     if (this._mode === 'chase') this.showCabin();
-    else this._mode = 'chase';
+    else this.showChase();
   }
 
   /** Switches to the cabin view looking straight ahead, unless it is already showing. */
   showCabin(): void {
     if (this._mode === 'cabin') return;
+    if (!this.onFoot) {
+      this.chaseYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
+      this.chasePitch = this.pitch;
+      this.chaseLookIdleKept = this.chaseLookIdle;
+    }
     this._mode = 'cabin';
     this.cabinYawOffset = 0;
     this.pitch = 0;
     this.yawValue = this.vehicleYaw;
+  }
+
+  /**
+   * Back to the chase view, the arm where `showCabin` left it: the same angle round the
+   * car and pitch, the same zoom (which the cabin never touches), and the eye placed on
+   * it at once rather than flying out of the seat.
+   */
+  private showChase(): void {
+    this._mode = 'chase';
+    if (this.onFoot) return;
+    this.yawValue = wrapAngle(this.vehicleYaw + this.chaseYawOffset);
+    this.pitch = this.chasePitch;
+    this.chaseLookIdle = this.chaseLookIdleKept;
+    this.recentering = false;
+    this.snapChaseEye = true;
   }
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {
@@ -815,7 +847,7 @@ export class CameraRig {
     // The cabin eye springs NEITHER: it is the driver's head in his seat, rigid with the
     // car, and any lag would slide it about the cabin.
     const k = 1 - Math.exp(-SPRING_OMEGA * d);
-    if (mode === 'cabin') {
+    if (mode === 'cabin' || (mode === 'chase' && this.snapChaseEye)) {
       this.eye.copy(_vA);
       this.lookAt.copy(_vB);
     } else {
@@ -823,6 +855,7 @@ export class CameraRig {
       if (mode === 'chase') this.lookAt.copy(_vB);
       else this.lookAt.lerp(_vB, k);
     }
+    this.snapChaseEye = false;
 
     _mA.lookAt(this.eye, this.lookAt, mode === 'cabin' ? _cabinUp : _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
