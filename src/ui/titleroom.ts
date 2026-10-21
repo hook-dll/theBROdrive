@@ -8,7 +8,7 @@ import { buildRoomScene, type RoomScene } from './roomscene';
  * it acts (game-design2.md §3). The room explains nothing in words; its things do.
  *
  *   Continue      — the window, the desert road under the moon: the latest drive
- *   New game      — the desk, the exercise book open under the lamp
+ *   New game      — the play mat on the floor, the toy car on its painted road
  *   Drives        — the car keys on their hook by the door: the saved drives
  *   Carcyclopedia — the wall case of 1:43 models, one of every car; a model chosen in
  *                   the panel brings the camera to it (`showModel`)
@@ -29,7 +29,7 @@ import { buildRoomScene, type RoomScene } from './roomscene';
  * (`ready`), and the die-cast models are built in a worker (ui/roomscene.ts).
  */
 
-export type RoomSpot = 'window' | 'desk' | 'keys' | 'shelf' | 'toolbox';
+export type RoomSpot = 'window' | 'mat' | 'keys' | 'shelf' | 'toolbox';
 
 export interface RoomItem {
   readonly label: string;
@@ -40,12 +40,14 @@ export interface RoomItem {
 }
 
 /** The list, top to bottom, and the thing in the room each item looks at. */
-const ITEMS: readonly RoomSpot[] = ['window', 'desk', 'keys', 'shelf', 'toolbox'];
+const ITEMS: readonly RoomSpot[] = ['window', 'mat', 'keys', 'shelf', 'toolbox'];
 
 /** Where the camera stands and what it looks at, for each item and before any. */
 const POSES: Readonly<Record<RoomSpot | 'wide', { readonly at: THREE.Vector3; readonly look: THREE.Vector3; readonly fov: number }>> = {
   wide: { at: new THREE.Vector3(1.35, 1.55, 1.55), look: new THREE.Vector3(-0.7, 0.85, -1.0), fov: 52 },
-  desk: { at: new THREE.Vector3(1.12, 1.3, -0.5), look: new THREE.Vector3(1.75, 0.78, -1.02), fov: 46 },
+  // Down onto the play mat from beside it, the toy car (ui/roomscene.ts `toyAt`, on the
+  // loop's left side) near, right of the list, and the painted desert behind it.
+  mat: { at: new THREE.Vector3(0.2, 0.58, 1.0), look: new THREE.Vector3(-0.5, 0.0, 0.18), fov: 38 },
   shelf: { at: new THREE.Vector3(1.05, 1.62, -0.05), look: new THREE.Vector3(1.51, 1.66, -1.7), fov: 44 },
   keys: { at: new THREE.Vector3(1.5, 1.45, 0.6), look: new THREE.Vector3(2.08, 1.36, 0.3), fov: 30 },
   window: { at: new THREE.Vector3(-0.1, 1.3, 0.85), look: new THREE.Vector3(-0.2, 1.45, -3.5), fov: 50 },

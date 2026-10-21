@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Title room: New game sweeps the camera down onto the play mat and the toy car on its
+  painted road (spot `mat`, ui/titleroom.ts), not to the desk.
 - THE CHASE CAMERA IS WHERE YOU LEFT IT AFTER THE CABIN VIEW. C into the seat and back
   used to bring the arm back from the seat's heading, level, springing out of the cabin.
   Now `showCabin` keeps the arm's angle round the car (as an offset from the car's

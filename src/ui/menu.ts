@@ -2400,7 +2400,7 @@ export class MainMenu {
         window: latest
           ? { label: 'Continue', detail: latestLine, disabled: false }
           : { label: 'Continue', detail: '', disabled: true, hidden: true },
-        desk: { label: 'New game', detail: 'A new road, in an old car', disabled: false },
+        mat: { label: 'New game', detail: 'A new road, in an old car', disabled: false },
         keys: latest
           ? { label: 'Drives', detail: listings.length === 1 ? 'One drive saved' : `${listings.length} drives saved`, disabled: false }
           : { label: 'Drives', detail: 'No drive saved yet', disabled: true },
@@ -2418,7 +2418,7 @@ export class MainMenu {
           if (spot === 'window') {
             const row = room?.element.querySelector<HTMLButtonElement>('[data-key="window"]');
             if (listings[0] && row) load(listings[0], row);
-          } else if (spot === 'desk') finish({ kind: 'new' });
+          } else if (spot === 'mat') finish({ kind: 'new' });
           else {
             view = spot === 'keys' ? 'saves' : spot === 'shelf' ? 'cars' : 'settings';
             render();
