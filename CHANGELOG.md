@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- KEYBOARD STEERING: A TAP IS A SMALL CORRECTION AND A HOLD IS A QUICK TURN, AT ANY
+  SPEED. A held key's rim now gathers speed like a hand, 120°/s at the press up to
+  720°/s 0.3 s in, all of it falling as 30 km/h over the speed above 30; at speed the
+  rim stops at the kinematic grip angle (`KEYS_LIMIT_SHARE`), opening to the lock on
+  the countersteer side as the tail lets go; let go, it eases back to centre (time
+  constant 0.25 s) instead of snapping back at 990°/s; the stabilisation (slower into a
+  turn, quicker against it) acts only from 0.5 g. Measured with tools/tap-response.ts on
+  the VAZ-2101: an 80 ms tap 0.08–0.15 g at 30–150 km/h (it was 0.5 g at 90), a hold at
+  the stop ~0.7 g with no spin (a 0.3 s hold used to spin the car from 90 km/h). The
+  road wheels follow the rim one to one: the speed gearing of the last attempts is gone.
+- NO STEERING FREE PLAY. The backlash window (`steerPlay`, 0.003–0.012 rad by profile)
+  is removed: it was a dead zone every keyboard correction had to cross. The rack and
+  the tyres are one angle (`steerCommand` is gone), and every `steerLock` came down by
+  its profile's play so the factory turning circles stay where tools/reality.ts had them.
 - Title room: New game sweeps the camera down onto the play mat and the toy car on its
   painted road (spot `mat`, ui/titleroom.ts), not to the desk.
 - THE CHASE CAMERA IS WHERE YOU LEFT IT AFTER THE CABIN VIEW. C into the seat and back

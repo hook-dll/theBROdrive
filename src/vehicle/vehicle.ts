@@ -229,7 +229,10 @@ import {
   KEYS_OVERSTEER_SHARE,
   KEYS_RETURN_SETTLE_RAD,
   KEYS_RETURN_TAU_S,
-  KEYS_SPEED_REF_MPS,
+  KEYS_RAMP_S,
+  KEYS_START_RATE_RAD_S,
+  KEYS_LIMIT_SHARE,
+  KEYS_RATE_REF_MPS,
   KEYS_UNDERSTEER_SHARE,
   keysStabilityG,
   ABS_MIN_KMH,
@@ -1106,10 +1109,9 @@ export class Vehicle implements Rebasable {
   private rearDrivenCount = 0;
   private drivenRadius = 0.35;
 
-  // Steering state. `steerCommand` is where the driver's hands have put the rack (rate
-  // limited to the rack speed); `steerAngle` is what the tyres are actually at, inside
-  // the backlash window around it, or anywhere at all when no hand is on the wheel.
-  private steerCommand = 0;
+  // Steering state: the rack's angle, where the driver's hands have put it (rate limited
+  // to the rack speed), or anywhere the tyres' aligning moment swings it when no hand is
+  // on the wheel. The road wheels hang off it with no play, so it is also the rim's.
   private steerAngle = 0;
   /**
    * KEYBOARD STEERING (`SteerMode` 'keys', vehicletuning.ts): the steering wheel's angle,
@@ -1118,8 +1120,9 @@ export class Vehicle implements Rebasable {
    */
   private keysRimRad = 0;
   private keysPeakG = 0;
-  /** Road-wheel share of what the rim asks for (KEYBOARD STEERING rule 4); 1 off the keys. */
-  private keysGearing = 1;
+  /** Seconds the current steering key has been held, and which way it points (−1/0/1). */
+  private keysPressS = 0;
+  private keysPressKey = 0;
   /** Scratch for the chassis' angular velocity in `updateSteering`. */
   private readonly keysAngvel = { x: 0, y: 0, z: 0 };
   /**
@@ -1661,33 +1664,18 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Where the RIM is, as a fraction of full lock, positive to the left.
-   *
-   * This is `steerCommand` and not `steerAngle`, and the two are different on purpose.
-   * `steerAngle` is what the road wheels present after the steering box's backlash,
-   * which is the right number for the physics and the wrong one for a driver: it lags
-   * the input by the play and by the rack rate, so a needle reading it would move in
-   * two steps per correction — once when the slack is taken up and once when the
-   * backlash opens again — and would show the tyres wandering while the driver holds
-   * the wheel still. A real car's rim is rigidly connected to the driver's hands, and
-   * that is the whole reason a driver can feel where the wheels are pointing without
-   * looking at them. The rim's angle is what the hands need; the tyre's angle is what
-   * the tyre model needs.
-   *
-   * Normalised by this model's own lock, so a car with a slow rack and a car with a
-   * quick one both fill the indicator at full lock. Divided rather than clamped at the
-   * source: the rack is already bounded by `steerLock`, so the quotient lands in -1..1
-   * on its own, and the clamp in `Hud.updateSteerStrip` is the only one needed.
+   * Where the RIM is, as a fraction of full lock, positive to the left: the rack over
+   * this model's own lock, so a car with a slow rack and a car with a quick one both
+   * fill the indicator at full lock. Divided rather than clamped at the source: the
+   * rack is already bounded by `steerLock`, so the quotient lands in -1..1 on its own,
+   * and the clamp in `Hud.updateSteerStrip` is the only one needed.
    *
    * With no hand on the wheel the rim turns with the tyres, so a released key shows the
    * wheel unwinding under its own aligning moment — the point being that the driver is
    * looking at the steering, not at the key.
-   *
-   * The keys' speed gearing (`keysGearing`, KEYBOARD STEERING rule 4) sits between the
-   * rim and the rack, so the rim is the rack over it.
    */
   get steeringFraction(): number {
-    return this.model.steerLock > 0 ? this.steerCommand / (this.model.steerLock * this.keysGearing) : 0;
+    return this.model.steerLock > 0 ? this.steerAngle / this.model.steerLock : 0;
   }
 
   /**
@@ -1819,19 +1807,11 @@ export class Vehicle implements Rebasable {
   /**
    * The `steer` that holds the road wheels at `wheelAngle` (the rack's bicycle-model
    * angle, positive yawing the car left) in `SteerMode` 'direct': a share of this car's
-   * lock, with the backlash allowed for. Autonomy and the tow bar use it instead of
-   * keeping their own copy of the car's steering.
-   *
-   * The play is added because the tyres sit on the window's trailing edge while they
-   * carry a side force — their aligning moment pushes them back toward the way the car
-   * is going (`STEER_FREE_TAU_S`) — so a rack at `angle + play` holds them at `angle`.
-   * An angle inside a tenth of the play is no steering at all.
+   * lock. Autonomy and the tow bar use it instead of keeping their own copy of the car's
+   * steering.
    */
   steeringInputForWheelAngle(wheelAngle: number): number {
-    const magnitude = Math.abs(wheelAngle);
-    const play = this.handling.steerPlay;
-    if (magnitude <= play * 0.12) return 0;
-    return clamp((-Math.sign(wheelAngle) * (magnitude + play)) / this.model.steerLock, -1, 1);
+    return clamp(-wheelAngle / this.model.steerLock, -1, 1);
   }
 
 
@@ -1963,11 +1943,11 @@ export class Vehicle implements Rebasable {
     this.clearVisuals();
     this.wheels = [];
     this.beamAxles = [];
-    this.steerCommand = 0;
     this.steerAngle = 0;
     this.keysRimRad = 0;
     this.keysPeakG = 0;
-    this.keysGearing = 1;
+    this.keysPressS = 0;
+    this.keysPressKey = 0;
     this.bumpSteerAngle = 0;
     this.sustainedImbalance = 0;
     this.frontRollRad = 0;
@@ -2484,7 +2464,6 @@ export class Vehicle implements Rebasable {
     const lock = this.model.steerLock;
     const rack = speedMps > 1 ? clamp(Math.atan((this.wheelbaseM * yawRate) / speedMps), -lock, lock) : 0;
     this.steerAngle = rack;
-    this.steerCommand = rack;
     for (const w of this.wheels) w.tyre.steerRad = this.wheelSteerAngle(w);
     this.rollWheelsAt(speedMps);
   }
@@ -2991,7 +2970,7 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Steering: the driver's rack target, the rack speed, the backlash and the tyres'
+    // Steering: the driver's rack target, the rack speed and the tyres'
     // own aligning moment (`updateSteering`). Bump steer and axle roll first, because
     // the assist reads the wheels' geometry off them.
     const speedKmh = Math.abs(fwd) * 3.6;
@@ -3896,18 +3875,17 @@ export class Vehicle implements Rebasable {
       w.mesh.rotation.set(spin % TWO_PI, steer, 0);
     }
 
-    // The rim follows the steering-box command, before rack backlash: the driver
-    // turns the wheel even while play delays the tyres. Every model reaches the same
-    // authored 970-degree lock-to-lock rim travel despite different tyre locks.
+    // The rim turns with the rack. Every model reaches the same authored 970-degree
+    // lock-to-lock rim travel despite different tyre locks.
     //
-    // Sign: `steerCommand` is positive to the LEFT, and the wheel's own axis (its
+    // Sign: `steerAngle` is positive to the LEFT, and the wheel's own axis (its
     // node's local Y, before the rake in the same Euler) points back at the driver,
     // so a positive rotation about it turns the rim anticlockwise as the driver sees
     // it — left. The two agree, so the angle is added, not negated.
     if (this.steeringWheel) {
       this.steeringWheel.rotation.y =
         this.steeringWheelRest +
-        (this.steerCommand / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
+        (this.steerAngle / this.model.steerLock) * STEERING_WHEEL_HALF_LOCK_RAD;
     }
     if (this.kitRig) this.driveKit(this.kitRig);
     this.cabinView?.sync(this.car.cabin);
@@ -4054,7 +4032,7 @@ export class Vehicle implements Rebasable {
    * only near the eye (`viewFrom`). The rig's own lenses stay dark: `lamps` lights this car.
    */
   private driveKit(kit: KitRig): void {
-    kit.set('steer', this.model.steerLock > 0 ? this.steerCommand / this.model.steerLock : 0);
+    kit.set('steer', this.model.steerLock > 0 ? this.steerAngle / this.model.steerLock : 0);
     kit.set('throttle', this.kitThrottle);
     kit.set('brake', this.serviceBrakeCommand);
     kit.set('clutch', this.drivetrain.clutchPedal);
@@ -5341,7 +5319,7 @@ export class Vehicle implements Rebasable {
 
   /**
    * The steering for one step: where the driver's hands want the rack (`SteerMode`),
-   * the rack speed, the backlash, and the tyres' own aligning moment.
+   * the rack speed, and the tyres' own aligning moment.
    *
    * WHERE THE FRONT TYRES ARE GOING. Each front tyre's patch is travelling in some
    * direction; the rack angle at which that tyre would roll exactly along it is the
@@ -5350,9 +5328,9 @@ export class Vehicle implements Rebasable {
    * axle, that is the TRAVEL angle: no side force at all, and no aligning moment.
    *
    * THE KEYS move a steering-wheel position (KEYBOARD STEERING in vehicletuning.ts):
-   * a held key at a constant rate, slower winding into a turn near the limit and
-   * quicker against it, by the lateral acceleration; let go, it eases back to centre.
-   * The rack target is the rim over the steering ratio and the speed gearing.
+   * a held key gathering speed like a hand, slower winding into a turn near the limit
+   * and quicker against it, by the lateral acceleration; let go, it eases back to
+   * centre. The rack target is the rim over the steering ratio.
    *
    * THE MOUSE (mouse driving, core/input.ts) is a rim angle the player put there, sent
    * `direct`: the rack is held at it, so nothing here — no assist, no caster return —
@@ -5372,7 +5350,7 @@ export class Vehicle implements Rebasable {
    * the rim come round to where the caster takes it — leaves the rack free: the tyres
    * swing toward their travel angle on their aligning moment (`STEER_FREE_TAU_S`), never
    * past it, and the rim follows them. A hand on the wheel moves the rack at the rack
-   * speed, and only the backlash window is left to the moment.
+   * speed and holds it there.
    *
    * The negation converts our basis into Rapier's steering sign. Forward is +Z and the
    * axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle yaws the
@@ -5449,10 +5427,10 @@ export class Vehicle implements Rebasable {
     let target: number;
     let handsOff = steer === 0 && input.steerMode !== 'direct';
     if (input.steerMode === 'keys') {
-      // KEYBOARD STEERING (vehicletuning.ts): the rim is a position moved at constant
-      // rates, slower winding into a turn near the limit, quicker against it, easing
-      // back to centre when let go. The rim is signed like the rack, positive to the
-      // left; input is positive right.
+      // KEYBOARD STEERING (vehicletuning.ts): the rim is a position a held key moves,
+      // from a slow start up to its full rate, slower winding into a turn near the
+      // limit, quicker against it, easing back to centre when let go. The rim is signed
+      // like the rack, positive to the left; input is positive right.
       const ratio = STEERING_WHEEL_HALF_LOCK_RAD / lock;
       // The lateral acceleration, in g, positive turning left: the yaw rate (positive
       // about +Y is a left turn, as the rack is) times the ground speed.
@@ -5465,6 +5443,12 @@ export class Vehicle implements Rebasable {
       const key = Math.sign(-steer);
       let want: number;
       let rate: number;
+      if (key !== this.keysPressKey) {
+        this.keysPressKey = key;
+        this.keysPressS = 0;
+      } else if (key !== 0) {
+        this.keysPressS += dt;
+      }
       if (steer === 0) {
         // Both keys down hold the rim; none lets it ease back to centre: a share of what
         // is left each step (KEYS_RETURN_TAU_S), never quicker than KEYS_IN_RATE_RAD_S,
@@ -5474,43 +5458,39 @@ export class Vehicle implements Rebasable {
         if (!input.steerBothHeld && Math.abs(rim) < KEYS_RETURN_SETTLE_RAD) rate = KEYS_IN_RATE_RAD_S;
       } else {
         want = -steer * STEERING_WHEEL_HALF_LOCK_RAD;
-        // The stabilisation only near the limit (rule 2–3): its g ramps in from
+        // At speed the rim stops at the grip angle (rule 2). As the tail lets go the stop
+        // opens to the lock on the countersteer side only (against the yaw), so a slide
+        // can be caught but a key held into it cannot wind the car round.
+        const speed = Math.abs(fwd);
+        if (load > 0 && staticLoad > 0 && speed > 1) {
+          const gripAccel = (capacity * GRAVITY) / staticLoad;
+          const gripAngle = Math.atan((this.wheelbaseM * gripAccel) / (speed * speed)) * KEYS_LIMIT_SHARE;
+          let stop = STEERING_WHEEL_HALF_LOCK_RAD * Math.min(1, gripAngle / lock);
+          if (turn !== 0 && Math.sign(want) === -turn) stop += (STEERING_WHEEL_HALF_LOCK_RAD - stop) * tailOut;
+          want = clamp(want, -stop, stop);
+        }
+        // A press gathers speed (rule 1): KEYS_START_RATE_RAD_S up to the full rate,
+        // linearly over KEYS_RAMP_S, all of it falling as KEYS_RATE_REF_MPS / speed.
+        const gathered = Math.min(this.keysPressS / KEYS_RAMP_S, 1);
+        rate = KEYS_START_RATE_RAD_S + (KEYS_OUT_RATE_RAD_S - KEYS_START_RATE_RAD_S) * gathered;
+        if (speed > KEYS_RATE_REF_MPS) rate *= KEYS_RATE_REF_MPS / speed;
+        // The stabilisation only near the limit (rules 3–4): its g ramps in from
         // KEYS_STABILITY_FROM_G to full at KEYS_STABILITY_FULL_G.
         if (turn !== 0 && key === turn && Math.sign(rim) === turn) {
-          rate = KEYS_OUT_RATE_RAD_S * (1 - KEYS_UNDERSTEER_SHARE * keysStabilityG(absG));
+          rate *= 1 - KEYS_UNDERSTEER_SHARE * keysStabilityG(absG);
         } else if (turn !== 0 && key === -turn) {
-          rate = KEYS_OUT_RATE_RAD_S * (1 + KEYS_OVERSTEER_SHARE * keysStabilityG(this.keysPeakG));
-        } else {
-          rate = KEYS_OUT_RATE_RAD_S;
+          rate *= 1 + KEYS_OVERSTEER_SHARE * keysStabilityG(this.keysPeakG);
         }
       }
       const reach = rate * dt;
       this.keysRimRad = rim + clamp(want - rim, -reach, reach);
       handsOff = steer === 0 && !input.steerBothHeld && this.keysRimRad === 0;
-      // THE RIM-TO-ROAD-WHEEL CURVE (rule 4), in shares of lock: the slope at centre is
-      // the speed gearing (ref / speed)², and the curve steepens as s³ to put full rim
-      // at the kinematic angle of the tightest circle the front tyres' grip holds, so a
-      // tap stays fine and a held key reaches the limit. As the tail lets go it all
-      // gives way to 1:1, so a slide can be caught.
-      const speed = Math.abs(fwd);
-      const ref = speed > KEYS_SPEED_REF_MPS ? KEYS_SPEED_REF_MPS / speed : 1;
-      const centreSlope = ref * ref;
-      let full = centreSlope;
-      if (load > 0 && speed > KEYS_SPEED_REF_MPS) {
-        const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
-        const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (speed * speed));
-        full = clamp(kinematic / lock, centreSlope, 1);
-      }
-      const s = Math.min(Math.abs(this.keysRimRad) / STEERING_WHEEL_HALF_LOCK_RAD, 1);
-      const curved = centreSlope * s + (full - centreSlope) * s * s * s;
-      const wheelShare = curved + (s - curved) * tailOut;
-      // The rim over the rack, for the readouts (`steeringFraction`).
-      this.keysGearing = s > 0 ? wheelShare / s : centreSlope + (1 - centreSlope) * tailOut;
-      target = clamp(Math.sign(this.keysRimRad) * wheelShare * lock, -lock, lock);
+      target = clamp(this.keysRimRad / ratio, -lock, lock);
     } else {
       this.keysRimRad = 0;
       this.keysPeakG = 0;
-      this.keysGearing = 1;
+      this.keysPressS = 0;
+      this.keysPressKey = 0;
       if (input.steerMode === 'analogAssist') {
         const side = steer > 0 ? -1 : 1;
         const share = Math.abs(steer);
@@ -5533,29 +5513,17 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // The tyres' own swing this step, toward the travel angle and never past it: the
-    // moment over the column's damping (`STEER_FREE_TAU_S`).
-    const gap = centre - this.steerAngle;
-    const swingLimit =
-      referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
-    const swing = clamp(gap, -swingLimit, swingLimit);
     if (handsOff) {
-      this.steerAngle = clamp(this.steerAngle + swing, -lock, lock);
-      this.steerCommand = this.steerAngle;
+      // No hand on the wheel: the tyres swing toward the travel angle on their own
+      // moment, never past it, over the column's damping (`STEER_FREE_TAU_S`).
+      const gap = centre - this.steerAngle;
+      const swingLimit =
+        referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
+      this.steerAngle = clamp(this.steerAngle + clamp(gap, -swingLimit, swingLimit), -lock, lock);
       return;
     }
-    const rackSpeed = this.handling.steerRackSpeed;
-    const maxDelta = rackSpeed * dt;
-    this.steerCommand += clamp(target - this.steerCommand, -maxDelta, maxDelta);
-    // The play is the column's, between the hands and the keys' speed gearing, so at the
-    // road wheels it is the play over that gearing: unscaled, it swallowed every tap
-    // under ~120 ms at 90 km/h (tools/tap-response.ts).
-    const play = this.handling.steerPlay * this.keysGearing;
-    this.steerAngle = clamp(
-      clamp(this.steerAngle + swing, this.steerCommand - play, this.steerCommand + play),
-      -lock,
-      lock,
-    );
+    const maxDelta = this.handling.steerRackSpeed * dt;
+    this.steerAngle = clamp(this.steerAngle + clamp(target - this.steerAngle, -maxDelta, maxDelta), -lock, lock);
   }
 
   /**

@@ -1298,11 +1298,13 @@ interface SovietSpec {
  * the inner wheel and less on the outer (`SuspensionTuning.ackermann`). A factory
  * turning radius is swept by the OUTER FRONT WHEEL, a wheelbase ahead of a turn centre
  * that sits on the rear axle's line, so the turn centre lies `sqrt(turn² − L²) − t/2`
- * to the side of the car, and the lock that puts it there is `atan(L / R) + steerPlay`
- * (the play is subtracted from the rack command before it reaches the tyre). At the
+ * to the side of the car, and the lock that puts it there is `atan(L / R)`. At the
  * 10 km/h tools/reality.ts takes the circle at, the tyres still run a little slip, more
  * on a front-driven or soft-tyred car, so each lock is the one that puts reality.ts on
- * the factory figure: 0.01-0.04 rad over the pure geometry.
+ * the factory figure: 0.01-0.04 rad over the pure geometry. (Fitted while the steering
+ * box had free play, which the tyres' moment took off the lock; when the play went,
+ * each lock came down by its profile's play — 0.008 classic, 0.006 road, 0.003 sport,
+ * 0.012 utility — so the circles stayed where they were.)
  */
 /**
  * Floored-pedal brake hardware, g (see `CarModelDef.brakeDecelG`). Both are above
@@ -1403,7 +1405,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 60,
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
-    steerLock: 0.519,
+    steerLock: 0.511,
     rearDriveBias: 1,
     frontWeightShare: 0.48,
     dragArea: 1.12,
@@ -1432,7 +1434,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 55,
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
-    steerLock: 0.638,
+    steerLock: 0.63,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
     dragArea: 1.37,
@@ -1459,7 +1461,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.529,
+    steerLock: 0.521,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
@@ -1485,7 +1487,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.531,
+    steerLock: 0.523,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
     dragArea: 1.07,
@@ -1511,7 +1513,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.53,
+    steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
@@ -1537,7 +1539,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.53,
+    steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.5,
     dragArea: 1.07,
@@ -1563,7 +1565,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.53,
+    steerLock: 0.522,
     rearDriveBias: 1,
     // Kerb 995 kg "в том числе на переднюю ось 545, на заднюю 450" (autoopt.ru, vaz-2105):
     // the one classic whose catalogue prints its kerb axle split.
@@ -1595,7 +1597,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: 0.615,
     // Rally brakes: competition pads and linings on the 2105's servo.
     brakeDecelG: BRAKES_RALLY_G,
-    steerLock: 0.526,
+    steerLock: 0.523,
     rearDriveBias: 1,
     handlingProfile: 'sport',
     frontWeightShare: 0.52,
@@ -1622,7 +1624,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.53,
+    steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.95,
@@ -1647,7 +1649,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
-    steerLock: 0.53,
+    steerLock: 0.522,
     rearDriveBias: 1,
     frontWeightShare: 0.51,
     dragArea: 0.92,
@@ -1675,7 +1677,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
-    steerLock: 0.59,
+    steerLock: 0.584,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
@@ -1701,7 +1703,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
-    steerLock: 0.59,
+    steerLock: 0.584,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.615,
@@ -1729,7 +1731,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
-    steerLock: 0.589,
+    steerLock: 0.583,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.6,
@@ -1759,7 +1761,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 42,
     wheelGrip: 0.576,
     brakeDecelG: BRAKES_SERVO_G,
-    steerLock: 0.499,
+    steerLock: 0.487,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.53,
@@ -1783,7 +1785,7 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     tankLitres: 42,
     wheelGrip: 0.574,
     brakeDecelG: BRAKES_SERVO_G,
-    steerLock: 0.522,
+    steerLock: 0.51,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 0.52,
@@ -1965,7 +1967,7 @@ const SAAS_SPECS: readonly Entry[] = [
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_AZLK_2141,
     suspension: SUSP_SAMARA,
-    steerLock: 0.658,
+    steerLock: 0.652,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
@@ -1991,7 +1993,7 @@ const SAAS_SPECS: readonly Entry[] = [
     tankLitres: 43,
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
-    steerLock: 0.59,
+    steerLock: 0.584,
     rearDriveBias: 0,
     handlingProfile: 'road',
     frontWeightShare: 0.62,
@@ -2049,7 +2051,7 @@ const SAAS_SPECS: readonly Entry[] = [
     // roll stiffness away rather than adding it (see `SuspensionTuning.frontBar`).
     rollCentre: { front: 0.45, rear: 0.48 },
     antiRoll: { front: -0.25, rear: -0.25 },
-    steerLock: 0.487,
+    steerLock: 0.475,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     // Factory kerb axle loads: 1180 kg front, 665 kg rear. Boxy cab-over body:
@@ -2104,7 +2106,7 @@ const SAAS_SPECS: readonly Entry[] = [
     suspension: SUSP_TRUCK,
     // Factory outer-front turning radius is 5.25 m (autoopt.ru, IZH-2715); the lock is
     // the one that measures it on tools/reality.ts, like every other.
-    steerLock: 0.557,
+    steerLock: 0.549,
     rearDriveBias: 1,
     handlingProfile: 'classic',
     // Factory unladen axle loads: 550 kg front, 465 kg rear.
@@ -2199,7 +2201,7 @@ const GTAV_SPECS: readonly Entry[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_SAMARA,
-    steerLock: 0.604,
+    steerLock: 0.596,
     rearDriveBias: 0,
     wheelSetPool: SOVIET_WHEEL_SET_POOL,
     frontWeightShare: 0.62,
@@ -2284,9 +2286,10 @@ const CARFORGE_CARS: readonly Entry[] = [
     },
     rollCentre: { front: 0.45, rear: 0.48 },
     antiRoll: { front: -0.25, rear: -0.25 },
-    // 0.455 puts the outer front wheel on the manual's 6.3 m circle (tools/reality.ts);
-    // the 27° (0.471) it prints for the inner wheel turned it 4% tighter.
-    steerLock: 0.455,
+    // 0.455 put the outer front wheel on the manual's 6.3 m circle (tools/reality.ts) with
+    // the old free play, 0.443 without it; the 27° (0.471) it prints for the inner wheel
+    // turned it 4% tighter.
+    steerLock: 0.443,
     rearDriveBias: 0.5,
     handlingProfile: 'utility',
     frontWeightShare: 950 / 1750,
@@ -2341,7 +2344,7 @@ const CARFORGE_CARS: readonly Entry[] = [
     wheelGrip: KAMA_217_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_VOLGA_24,
-    steerLock: 0.62,
+    steerLock: 0.612,
     rearDriveBias: 1,
     frontWeightShare: 0.49,
     // The GAZ-24's Cd·A: the top speed cannot set it, as the car runs into the cut in
@@ -2385,7 +2388,7 @@ const CARFORGE_CARS: readonly Entry[] = [
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
     suspension: SUSP_SAMARA,
-    steerLock: 0.557,
+    steerLock: 0.551,
     rearDriveBias: 0,
     handlingProfile: 'road',
     // No factory axle loads are published; transverse front-drive default.
@@ -2495,7 +2498,7 @@ const GEAR_VAZ_21102: KitRunningGear = {
   tankLitres: 43,
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
-  steerLock: 0.604,
+  steerLock: 0.598,
   frontWeightShare: 0.62,
   dragArea: 0.67,
   aero: AERO_VAZ_2110,
@@ -2527,7 +2530,7 @@ const GEAR_VAZ_2115: KitRunningGear = {
   tankLitres: 43,
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
-  steerLock: 0.589,
+  steerLock: 0.583,
   frontWeightShare: 0.6,
   dragArea: 0.84,
   aero: AERO_SAMARA_SALOON,
@@ -2547,7 +2550,7 @@ const GEAR_UAZ_2206: KitRunningGear = {
   tankLitres: 86,
   wheelGrip: 0.59,
   brakeDecelG: BRAKES_SERVO_G,
-  steerLock: 0.487,
+  steerLock: 0.475,
   frontWeightShare: 1020 / 1850,
   dragArea: 3.45,
   aero: AERO_UAZ_330364,
@@ -2582,7 +2585,7 @@ const GEAR_DAEWOO_NEXIA: KitOwnGear = {
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
-  steerLock: 0.656,
+  steerLock: 0.65,
   rearDriveBias: 0,
   handlingProfile: 'road',
   frontWeightShare: 0.62,
@@ -2609,7 +2612,7 @@ const GEAR_DAEWOO_ESPERO: KitOwnGear = {
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
-  steerLock: 0.634,
+  steerLock: 0.628,
   rearDriveBias: 0,
   handlingProfile: 'road',
   frontWeightShare: 0.62,
@@ -2635,7 +2638,7 @@ const GEAR_OPEL_ASTRA_F: KitOwnGear = {
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
-  steerLock: 0.6,
+  steerLock: 0.594,
   rearDriveBias: 0,
   handlingProfile: 'road',
   frontWeightShare: 0.62,
@@ -2661,7 +2664,7 @@ const GEAR_OPEL_VECTRA_A: KitOwnGear = {
   wheelGrip: KAMA_217_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
-  steerLock: 0.525,
+  steerLock: 0.519,
   rearDriveBias: 0,
   handlingProfile: 'road',
   frontWeightShare: 0.62,

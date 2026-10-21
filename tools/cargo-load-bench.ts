@@ -630,10 +630,8 @@ const LANE_HOLD_RAD_PER_METRE = 0.04;
  * heading and offset; the roll step's own input is added on top of it, so nothing the
  * suspension has to answer to is changed by more than a couple of hundredths of a radian.
  *
- * The authority is deliberately coarse. A steering rack has 8 mrad of play before the
- * tyres see anything and the input curve is a power, so the bottom of the input range
- * does nothing at all: this commands in units big enough to cross the play, and its own
- * limit is what keeps a correction a correction.
+ * The authority is deliberately coarse: this commands in units big enough to move the
+ * car, and its own limit is what keeps a correction a correction.
  */
 function laneSteer(rig: Rig): number {
   const { headingRad, lateralM } = laneError(rig);

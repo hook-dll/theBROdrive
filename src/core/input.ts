@@ -16,10 +16,11 @@ import { STEERING_WHEEL_HALF_LOCK_RAD } from '../vehicle/vehicletuning';
  *
  *   keys          a keyboard or touch request: -1, 0 or 1 from the keys, the touch
  *                 wheel's deflection from the thumb. The steering wheel moves toward
- *                 that share of lock at a constant rate, so how long a key is down is how
- *                 much wheel (`Vehicle.updateSteering`, KEYBOARD STEERING in
- *                 vehicletuning.ts), and let go it returns to centre. Both keys down is 0
- *                 here and `steerBothHeld`: the wheel held where it is.
+ *                 that share of lock, a held key gathering speed like a hand, so how
+ *                 long a key is down is how much wheel (`Vehicle.updateSteering`,
+ *                 KEYBOARD STEERING in vehicletuning.ts), and let go it eases back to
+ *                 centre. Both keys down is 0 here and `steerBothHeld`: the wheel held
+ *                 where it is.
  *   analogAssist  a position (a pad stick) read against the tyres' peak at speed,
  *                 proportionally: the stick's edge is the peak.
  *   analog        a position read against the whole steering lock.
@@ -33,7 +34,7 @@ import { STEERING_WHEEL_HALF_LOCK_RAD } from '../vehicle/vehicletuning';
  * In the analogue modes a steer of exactly 0 means no hand is on the wheel, and the
  * tyres' own aligning moment turns it; with keys it means so once the wheel is back at
  * centre. `direct` always holds the rack where it is told: nothing turns it but the
- * command, and only the backlash window is left to the tyres.
+ * command.
  */
 export type SteerMode = 'keys' | 'analogAssist' | 'analog' | 'direct';
 

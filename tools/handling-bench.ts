@@ -11,8 +11,8 @@
  *   brake      100-0 km/h distance and peak deceleration, plus which axle locks
  *              first and how far the car yaws while it is stopping
  *   skidpad    steady-state lateral g and the slip angle it holds
- *   play       yaw rate for a small steering input, which is what the steering
- *              box's free play is supposed to swallow
+ *   play       yaw rate for a small steering input: a dead zone here is a small
+ *              correction the car does not answer (the steering has no free play)
  *   settle     ride height and body roll, to catch a spring that bottoms out
  *
  * It is loaded from the dev server in a browser (Rapier is WASM and Three wants a
@@ -76,11 +76,11 @@ export interface BenchResult {
   limitLateralG: number;
   /** Worst lean seen anywhere in the skidpad run. >45 means it went over. */
   maxLeanDeg: number;
-  /** Yaw rate (deg/s) for a 12% steering input at 80 km/h: the play test. */
+  /** Yaw rate (deg/s) for a 12% steering input at 80 km/h: the small-input test. */
   smallInputYawRate: number;
   /** Same at 35% input, for the ratio that shows the dead zone. */
   midInputYawRate: number;
-  /** Smallest swept input that produced any yaw at all: the play's dead zone. */
+  /** Smallest swept input that produced any yaw at all: the edge of any dead zone. */
   deadZoneInput: number;
   /** Trail braking: cornering curvature with the brakes over curvature without. */
   trailYawGain: number;
@@ -805,12 +805,11 @@ export async function benchOne(
     rig.vehicle.dispose();
   }
 
-  // --- steering play: where does the box start to bite, at 80 km/h? ---------
+  // --- small inputs: where does the steering start to bite, at 80 km/h? ------
   //
-  // The play is a backlash window on the ROAD WHEEL angle, so what the driver
-  // notices is a band of stick travel that does nothing. Sweeping the input finds
-  // that band directly: the first amount that produces any yaw at all is the edge
-  // of the dead zone.
+  // What a driver notices of a dead zone is a band of stick travel that does
+  // nothing. Sweeping the input finds that band directly: the first amount that
+  // produces any yaw at all is its edge.
   {
     for (const amount of [0.08, 0.12, 0.17, 0.25, 0.35, 0.5]) {
       const rig = await makeRig(modelId, addGround, false, towKg);
@@ -939,7 +938,7 @@ export async function benchOne(
   // --- weave: can it hold a line with small corrections? --------------------
   //
   // 80 km/h, a 0.2 lane-correction held for 0.7 s and then released to centre. A car
-  // that tracks straight returns to its heading; a car fighting its own steering play
+  // that tracks straight returns to its heading; a car fighting its own steering
   // and its own body movement keeps turning after the input is gone, which is the
   // overshoot measured here.
   {
