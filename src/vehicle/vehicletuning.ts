@@ -121,12 +121,17 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     (KEYS_SPEED_REF_MPS / speed)² above that speed, as active steering does: the
  *     lateral acceleration a road-wheel angle asks for grows with the square of speed,
  *     so a tap (under ~200 ms, s under ~0.3) does the same to the car at any speed.
- *     Full rim f is the front tyres' peak: the kinematic angle of the tightest circle
- *     their grip holds plus their peak slip angle (with STEER_ASSIST_SLIP_MARGIN, as the
- *     pad's assist), so a held key reaches the limit in ~0.6 s and never past it. A
- *     linear (ref / speed)² stopped full rim short of the tyres' slip angle and a held
- *     key never turned the car; scaling the rim's RATE read as a cast-iron wheel. As
- *     the tail lets go (`tailOut`) the curve gives way to 1:1, so a slide can be caught.
+ *     Full rim f is the kinematic angle of the tightest circle the front tyres' grip
+ *     holds, so a held key reaches the limit in ~0.5 s. The tyres' own slip angle is
+ *     NOT added on top: it double-counted the slip the body takes up by itself, and a
+ *     0.45–0.7 s hold with the throttle lifted spun the car at 120–150 km/h
+ *     (tools/tap-response.ts); on the kinematic angle alone a 0.7 s hold peaks near 1 g
+ *     at 90–150 km/h and stays on the road. The steering box's play is the column's, so
+ *     at the road wheels it is scaled by the same gearing (`updateSteering`): unscaled,
+ *     it swallowed every tap under 120 ms at 90 km/h and read as a viscous wheel.
+ *     A linear (ref / speed)² stopped full rim short and a held key never turned the
+ *     car; scaling the rim's RATE read as a cast-iron wheel. As the tail lets go
+ *     (`tailOut`) the curve gives way to 1:1, so a slide can be caught.
  *  5. LET GO, the rim eases back to centre like a real one under its caster: a constant
  *     share of what is left each moment (KEYS_RETURN_TAU_S), never quicker than
  *     KEYS_IN_RATE_RAD_S, and settled at centre inside KEYS_RETURN_SETTLE_RAD. A linear

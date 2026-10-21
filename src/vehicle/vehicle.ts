@@ -5489,18 +5489,17 @@ export class Vehicle implements Rebasable {
       handsOff = steer === 0 && !input.steerBothHeld && this.keysRimRad === 0;
       // THE RIM-TO-ROAD-WHEEL CURVE (rule 4), in shares of lock: the slope at centre is
       // the speed gearing (ref / speed)², and the curve steepens as s³ to put full rim
-      // at the front tyres' peak — the kinematic angle of the tightest circle their grip
-      // holds plus their peak slip angle — so a tap stays fine and a held key reaches
-      // the limit. As the tail lets go it all gives way to 1:1, so a slide can be caught.
+      // at the kinematic angle of the tightest circle the front tyres' grip holds, so a
+      // tap stays fine and a held key reaches the limit. As the tail lets go it all
+      // gives way to 1:1, so a slide can be caught.
       const speed = Math.abs(fwd);
       const ref = speed > KEYS_SPEED_REF_MPS ? KEYS_SPEED_REF_MPS / speed : 1;
       const centreSlope = ref * ref;
       let full = centreSlope;
       if (load > 0 && speed > KEYS_SPEED_REF_MPS) {
-        const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
         const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
         const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (speed * speed));
-        full = clamp((kinematic + tyrePeak) / lock, centreSlope, 1);
+        full = clamp(kinematic / lock, centreSlope, 1);
       }
       const s = Math.min(Math.abs(this.keysRimRad) / STEERING_WHEEL_HALF_LOCK_RAD, 1);
       const curved = centreSlope * s + (full - centreSlope) * s * s * s;
@@ -5548,7 +5547,10 @@ export class Vehicle implements Rebasable {
     const rackSpeed = this.handling.steerRackSpeed;
     const maxDelta = rackSpeed * dt;
     this.steerCommand += clamp(target - this.steerCommand, -maxDelta, maxDelta);
-    const play = this.handling.steerPlay;
+    // The play is the column's, between the hands and the keys' speed gearing, so at the
+    // road wheels it is the play over that gearing: unscaled, it swallowed every tap
+    // under ~120 ms at 90 km/h (tools/tap-response.ts).
+    const play = this.handling.steerPlay * this.keysGearing;
     this.steerAngle = clamp(
       clamp(this.steerAngle + swing, this.steerCommand - play, this.steerCommand + play),
       -lock,
