@@ -257,44 +257,58 @@ function resolveKeys(
 }
 
 /**
- * A keyboard pedal is a quick FOOT: the key down moves the pedal toward the floor at a
- * constant speed, the key up lifts it at a faster one. Seconds for the whole travel.
+ * A keyboard pedal is a quick FOOT that goes down in TWO STAGES: quickly to a knee, then
+ * slowly the rest of the way, and lifts at one faster speed. Seconds for the travel.
  *
- * A foot moves a pedal at a speed, it does not approach the floor exponentially. The
- * old shaping did: a first-order lag of 0.3 s, which put a held key at only 0.8 of the
- * pedal after half a second and 0.95 after nine tenths, so "floored" was most of a
- * second away. A constant rate reaches the floor at a definite moment: a throttle in a
- * quarter of a second, and the brake, which a driver stamps on, in 0.15.
+ * A key is a switch, so how long it is held is the only dose control there is. With one
+ * constant rise the brake was floored in 0.15 s and the throttle in 0.25: a held key was
+ * a full pedal before a driver could judge it, which locked the wheels of a car without
+ * ABS and spun a rear-drive car on the power. Two stages give a tap a gentle pedal, a
+ * short hold a firm one, and keep the floor for a key held on purpose:
  *
- * THE RISE IS THE DOSE CONTROL AND THE FALL IS NOT. How long the key is held selects
- * the value, and everything after the key comes up is pedal the driver did not ask for:
- * a release of 0.3 s once turned a 40 ms brake tap into EIGHT times its own dose. Here
- * the lift takes 0.1 s from a floored throttle and 0.08 from a floored brake, and less
- * from a part pedal, so a tap ends almost when the key does (`tools/pedal-dose.ts`:
- * monotonic in press length, mid-range reachable, the tail a fraction of the press).
+ *   throttle  0 → 0.5 in 0.12 s, then to 1 by 0.72 s;
+ *   brake     0 → the knee in 0.1 s, then to 1 by 0.6 s.
  *
- * A constant rate also lands exactly on 0 and 1, which matters downstream: the vehicle
- * turns "any throttle at all" into a wheel drive torque, so off has to mean off.
+ * The brake's knee is the car's own THRESHOLD PEDAL when the game knows it (`setBrakeKnee`,
+ * `Vehicle.thresholdBrakePedal`: the share of a floored pedal at which the first axle
+ * reaches its tyres' peak), so a held brake key arrives at the hardest stop that still
+ * rolls the wheels and only goes past it, into a lock, if it is held on.
+ *
+ * THE RISE IS THE DOSE CONTROL AND THE FALL IS NOT. Everything after the key comes up is
+ * pedal the driver did not ask for: the lift takes 0.1 s from a floored throttle and 0.08
+ * from a floored brake, and less from a part pedal, so a tap ends almost when the key
+ * does (`tools/pedal-dose.ts`: monotonic in press length, mid-range reachable, the tail a
+ * fraction of the press). Constant rates land exactly on 0 and 1, which matters
+ * downstream: the vehicle turns "any throttle at all" into a wheel drive torque, so off
+ * has to mean off.
  */
 export const KEY_PEDAL_RAMPS = {
-  throttle: { riseS: 0.25, fallS: 0.1 },
-  brake: { riseS: 0.15, fallS: 0.08 },
+  throttle: { knee: 0.5, kneeS: 0.12, fullS: 0.72, fallS: 0.1 },
+  brake: { knee: 0.6, kneeS: 0.1, fullS: 0.6, fallS: 0.08 },
 } as const;
 
+export interface KeyPedalRamp {
+  /** The pedal the quick stage reaches, 0..1. */
+  readonly knee: number;
+  /** Seconds from 0 to the knee. */
+  readonly kneeS: number;
+  /** Seconds from 0 to the floor, through the knee. */
+  readonly fullS: number;
+  /** Seconds for the whole lift from the floor. */
+  readonly fallS: number;
+}
+
 /**
- * One step of a keyboard (or touch) pedal toward `want`, 0..1, at the ramp's speeds.
- * Exported so `tools/pedal-dose.ts` measures this function rather than a copy of it.
+ * One step of a keyboard (or touch) pedal toward `want`, 0..1, at the ramp's speeds;
+ * `knee` overrides the ramp's own. Exported so `tools/pedal-dose.ts` measures this
+ * function rather than a copy of it.
  */
-export function keyPedalStep(
-  value: number,
-  want: number,
-  ramp: { readonly riseS: number; readonly fallS: number },
-  dt: number,
-): number {
-  const up = dt / ramp.riseS;
-  const down = dt / ramp.fallS;
-  const delta = want - value;
-  return value + (delta > up ? up : delta < -down ? -down : delta);
+export function keyPedalStep(value: number, want: number, ramp: KeyPedalRamp, dt: number, knee = ramp.knee): number {
+  if (want < value) return Math.max(want, value - dt / ramp.fallS);
+  // The quick stage up to the knee, the slow stage past it; a step that crosses the
+  // knee stops on it and carries on slowly from the next.
+  if (value < knee) return Math.min(want, knee, value + (dt * knee) / ramp.kneeS);
+  return Math.min(want, value + (dt * (1 - knee)) / (ramp.fullS - ramp.kneeS));
 }
 
 /**
@@ -362,6 +376,8 @@ export class InputReader {
   private mouseDriving = false;
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
+  /** The keyboard brake's knee, the driven car's threshold pedal; see `setBrakeKnee`. */
+  private brakeKnee: number = KEY_PEDAL_RAMPS.brake.knee;
   /**
    * MOUSE DRIVING's steering wheel: the rim angle in radians, positive RIGHT like
    * `steer`, within ±`STEERING_WHEEL_HALF_LOCK_RAD`. Only the mouse and the steering
@@ -468,6 +484,16 @@ export class InputReader {
   /** The settings' steering assist for ANALOG positions: the pad's stick (`SteerMode`). */
   setAnalogSteeringAssist(enabled: boolean): void {
     this.analogSteerAssist = enabled;
+  }
+
+  /**
+   * Where the keyboard brake's quick stage stops (`KEY_PEDAL_RAMPS`): the driven car's
+   * threshold pedal (`Vehicle.thresholdBrakePedal`), kept off the ends so both stages
+   * still exist. Without a car the ramp's own knee.
+   */
+  setBrakeKnee(pedal: number | null): void {
+    const knee = pedal ?? KEY_PEDAL_RAMPS.brake.knee;
+    this.brakeKnee = knee < 0.3 ? 0.3 : knee > 0.9 ? 0.9 : knee;
   }
 
   /**
@@ -668,7 +694,7 @@ export class InputReader {
     f.brake =
       this.brakeDevice === 'pad'
         ? pad.leftTrigger
-        : keyPedalStep(f.brake, wantBrake, KEY_PEDAL_RAMPS.brake, dt);
+        : keyPedalStep(f.brake, wantBrake, KEY_PEDAL_RAMPS.brake, dt, this.brakeKnee);
     // Reverse is the HELD command, not the smoothed pedal: on the keyboard that is
     // exactly the key's own state, so a release stops asking for reverse the same
     // instant it did before, while the pedal tail decays.

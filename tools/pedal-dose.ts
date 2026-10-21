@@ -4,8 +4,8 @@
  *   bun tools/pedal-dose.ts
  *
  * A keyboard pedal is a switch, so the ONLY thing that turns it into a dose is the
- * shaping the input layer applies: a constant-rate rise while the key is down, and a
- * faster fall when it comes up (`keyPedalStep`, `KEY_PEDAL_RAMPS`), throttle and brake
+ * shaping the input layer applies: a two-stage rise while the key is down (quick to a
+ * knee, slow past it), and a faster fall when it comes up (`keyPedalStep`, `KEY_PEDAL_RAMPS`), throttle and brake
  * each at their own speeds. What that produces has to have two properties, and neither of
  * them can be judged by reading the constants:
  *
@@ -27,7 +27,7 @@
  */
 
 import { FIXED_DT } from '../src/core/physics';
-import { KEY_PEDAL_RAMPS, keyPedalStep } from '../src/core/input';
+import { KEY_PEDAL_RAMPS, keyPedalStep, type KeyPedalRamp } from '../src/core/input';
 
 /** Presses swept, seconds. A tap is 40-120 ms; a deliberate hold is a second. */
 const TAPS = [0.04, 0.06, 0.08, 0.12, 0.18, 0.25, 0.4, 0.7, 1.2];
@@ -43,7 +43,7 @@ interface Dose {
   readonly tailS: number;
 }
 
-type Ramp = (typeof KEY_PEDAL_RAMPS)[keyof typeof KEY_PEDAL_RAMPS];
+type Ramp = KeyPedalRamp;
 
 function shape(ramp: Ramp, pressS: number): Dose {
   let value = 0;
@@ -81,7 +81,7 @@ const MAX_TAIL_EQUIVALENT_S = 0.2;
 const failures: string[] = [];
 for (const [name, ramp] of Object.entries(KEY_PEDAL_RAMPS)) {
   const results = TAPS.map((press) => shape(ramp, press));
-  console.log(`${name} key: one press, then release (${ramp.riseS} s up, ${ramp.fallS} s down)`);
+  console.log(`${name} key: one press, then release (${ramp.knee} in ${ramp.kneeS} s, full in ${ramp.fullS} s, ${ramp.fallS} s down)`);
   console.log('  press ms   peak   dose (axis·s)   after release   tail ms   tail/dose');
   let previous = 0;
   for (const r of results) {

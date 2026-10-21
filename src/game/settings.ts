@@ -606,6 +606,16 @@ export interface Settings {
    */
   bouncyCars: boolean;
   /**
+   * Driver aids on the player's own car, all off by default: these cars had none, and
+   * the drive is meant to be driven (vehicle/vehicletuning.ts, DRIVER AIDS).
+   * `abs` eases the brake while a wheel locks; `tractionControl` eases the throttle
+   * while the driven wheels spin; `countersteerAssist` puts the rim exactly at the
+   * countersteer while the steering key is held that way in a slide.
+   */
+  abs: boolean;
+  tractionControl: boolean;
+  countersteerAssist: boolean;
+  /**
    * Size of the driving dashboard, 1 = the default (what was 140% of the authored
    * cluster before 0.20). Applied on top of the presentation's own scale (desktop and
    * phone differ), so the same number means "a bit bigger" on both.
@@ -723,6 +733,9 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraShake: true,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
+  abs: false,
+  tractionControl: false,
+  countersteerAssist: false,
   dashboardSize: 1,
   virtualDashboard: false,
   // 16 km of desert and a 24-car stream; High is for a processor with room beyond them.
@@ -998,6 +1011,9 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // Missing means an older save: on, like every new drive.
     cameraShake: obj.cameraShake !== false,
     bouncyCars: obj.bouncyCars === true,
+    abs: obj.abs === true,
+    tractionControl: obj.tractionControl === true,
+    countersteerAssist: obj.countersteerAssist === true,
     // Snapped to the slider's step, clamped to its range; missing means the default. A
     // save from before 0.20 has `dashboardScale` against the authored cluster instead.
     dashboardSize: (() => {

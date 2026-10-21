@@ -227,6 +227,17 @@ import {
   PLAYER_REAR_PLATEAU,
   PLAYER_WHEEL_LOAD_TAU,
   PLAYER_YAW_INERTIA_GAIN,
+  HANDS_SLIDE_RETURN_MAX_RAD_S,
+  HANDS_SLIDE_RETURN_TAU_S,
+  ABS_MIN_KMH,
+  ABS_MIN_SCALE,
+  ABS_RECOVER_S,
+  ABS_RELEASE,
+  TCS_MIN_SCALE,
+  TCS_RECOVER_S,
+  TCS_REF_MPS,
+  TCS_RELEASE,
+  TCS_SLIP,
 } from './vehicletuning';
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
@@ -1102,6 +1113,9 @@ export class Vehicle implements Rebasable {
    * `setPlayerDriven`.
    */
   private playerDriven = false;
+  /** The driver aids' pedal scales, 1 when idle (`Settings.abs`, `Settings.tractionControl`). */
+  private absScale = 1;
+  private tcsScale = 1;
   /** The stats `applyChassisMass` last built the chassis from, for `setPlayerDriven`. */
   private chassisMassStats: VehicleStats | null = null;
   /** Load-sensitive front bump-steer disturbance, filtered in fixedUpdate. */
@@ -2835,7 +2849,24 @@ export class Vehicle implements Rebasable {
       : brakingForDirectionChange
         ? 0
         : input.throttle;
-    const throttle = this.engineRunning ? throttleInput : 0;
+    // DRIVER AIDS on the player's own car (`Settings.abs`, `Settings.tractionControl`),
+    // off by default: each scales its pedal down while the wheels it watches are past
+    // their grip, and gives it back over a moment once they roll (vehicletuning.ts).
+    const aids = this.playerDriven ? this.world.state.settings : null;
+    let drivenSurface = 0;
+    let drivenCount = 0;
+    for (const w of this.wheels) {
+      if (!w.grounded || (w.isFront ? this.frontDrivenCount === 0 : this.rearDrivenCount === 0)) continue;
+      drivenSurface += w.spinRadS * w.radius;
+      drivenCount++;
+    }
+    const wheelspin =
+      drivenCount > 0 ? (drivenSurface / drivenCount - fwd) / Math.max(Math.abs(fwd), TCS_REF_MPS) : 0;
+    const spinning = aids?.tractionControl === true && throttleInput > 0 && wheelspin > TCS_SLIP;
+    this.tcsScale = spinning
+      ? Math.max(TCS_MIN_SCALE, this.tcsScale * TCS_RELEASE)
+      : Math.min(1, this.tcsScale + dt / TCS_RECOVER_S);
+    const throttle = this.engineRunning ? throttleInput * this.tcsScale : 0;
     this.kitThrottle = throttleInput;
     this.kitHandbrake = input.handbrake ? 1 : 0;
     this.kitIgnition = true;
@@ -2847,9 +2878,15 @@ export class Vehicle implements Rebasable {
       bonnetHasTurbo(this.car.bonnet),
       filter ? airFilterBreath((filter.clog ?? 0) + this.filterWearAccum) : 1,
     );
-    const brake = reverseDrive
+    const pedalBrake = reverseDrive
       ? 0
       : Math.max(input.brake, brakingForDirectionChange ? input.throttle : 0);
+    const locking =
+      aids?.abs === true && pedalBrake > 0 && !input.handbrake && this.speedKmh > ABS_MIN_KMH && this.wheelLocked;
+    this.absScale = locking
+      ? Math.max(ABS_MIN_SCALE, this.absScale * ABS_RELEASE)
+      : Math.min(1, this.absScale + dt / ABS_RECOVER_S);
+    const brake = pedalBrake * this.absScale;
     // S is a brake request in neutral/forward gears, but reverse throttle once R
     // has engaged. The same physical key must not command propulsion and brake lamps.
     this.brakeLightCommand =
@@ -5501,7 +5538,24 @@ export class Vehicle implements Rebasable {
       const align = this.handsAlignRad;
       // Both keys down is both hands on the rim, holding it: steer is 0, but held.
       const gripped = steer !== 0 || input.steerBothHeld;
-      if (gripped) {
+      // COUNTERSTEER ASSIST (`Settings.countersteerAssist`): with the tail out and the key
+      // held the countersteer way, the hands put the rim exactly where the caster takes
+      // it and keep it there as it moves, at the fast hands' rate, never past it.
+      const assisted =
+        steer !== 0 &&
+        this.world.state.settings.countersteerAssist &&
+        tailOut > 0 &&
+        -steer * align > 0 &&
+        Math.abs(align) > HANDS_SETTLE_RAD;
+      if (assisted) {
+        if (!this.handsOnRim) {
+          this.handsOnRim = true;
+          this.handsWheelRad = this.steerCommand * ratio;
+        }
+        const reach = HANDS_ALIGN_RATE_RAD_S * dt;
+        this.handsWheelRad += clamp(align - this.handsWheelRad, -reach, reach);
+        this.handsWheelRate = 0;
+      } else if (gripped) {
         // Taken from rest, the hands grip the wheel where the tyres left it.
         if (!this.handsOnRim) {
           this.handsOnRim = true;
@@ -5527,16 +5581,17 @@ export class Vehicle implements Rebasable {
         if (this.handsWheelRad !== turned) this.handsWheelRate = 0;
       } else if (this.handsOnRim) {
         // Let go: the self-aligning torque spins the rim toward where the caster takes
-        // it, harder with speed, as an exponential approach that cannot pass it. Inside
-        // the column's friction band of it the hands are off, and the tyres swing the
-        // rack on their own aligning moment (`STEER_FREE_TAU_S`), toward the same place.
+        // it, harder with speed and, with the tail out, hard at any speed (THE RETURN IN
+        // A SLIDE), as an exponential approach that cannot pass it. Inside the column's
+        // friction band of it the hands are off, and the tyres swing the rack on their
+        // own aligning moment (`STEER_FREE_TAU_S`), toward the same place.
         this.handsWheelRate = 0;
         const speedShare = clamp((fwd * 3.6) / HANDS_RETURN_REF_KMH, 0, 1);
+        const slide = alignShare * tailOut;
+        const rate = Math.max(speedShare / HANDS_RETURN_TAU_S, slide / HANDS_SLIDE_RETURN_TAU_S);
+        const cap = HANDS_RETURN_MAX_RAD_S + (HANDS_SLIDE_RETURN_MAX_RAD_S - HANDS_RETURN_MAX_RAD_S) * slide;
         const gap = align - this.handsWheelRad;
-        const back = Math.min(
-          -Math.abs(gap) * Math.expm1((-speedShare / HANDS_RETURN_TAU_S) * dt),
-          HANDS_RETURN_MAX_RAD_S * dt,
-        );
+        const back = Math.min(-Math.abs(gap) * Math.expm1(-rate * dt), cap * dt);
         const left = Math.abs(gap) - back;
         if (left <= HANDS_SETTLE_RAD) {
           this.handsOnRim = false;

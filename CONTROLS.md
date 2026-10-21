@@ -109,11 +109,17 @@ overlay uses the same fields), and the pad's triggers and stick go into them
 directly — no keyboard smoothing, because a stick and a trigger are already
 positions.
 
-**Keyboard pedals are a quick foot** (`KEY_PEDAL_RAMPS`, `src/core/input.ts`): a held
-key moves the pedal at a constant speed, throttle 0→1 in 0.25 s and brake in 0.15 s,
-and a released key lifts it faster (0.1 s and 0.08 s for the whole travel). A tap is
-a light touch; a hold reaches the floor at a definite moment. `tools/pedal-dose.ts`
-checks both pedals.
+**Keyboard pedals are a quick foot in two stages** (`KEY_PEDAL_RAMPS`,
+`src/core/input.ts`): a held key moves the pedal quickly to a knee and slowly past it —
+throttle to 0.5 in 0.12 s and the floor by 0.72 s; brake to the car's threshold pedal
+(`Vehicle.thresholdBrakePedal`, via `setBrakeKnee`) in 0.1 s and the floor by 0.6 s —
+and a released key lifts it faster (0.1 s and 0.08 s for the whole travel). A tap is a
+light touch, a short hold a firm one, and the floor is there for a key held on
+purpose. `tools/pedal-dose.ts` checks both pedals.
+
+**Driver aids** (Settings → Controls, all off by default): ABS, traction control and
+countersteer assist, on the player's own car only (vehicle/vehicletuning.ts, DRIVER
+AIDS).
 
 **One device per axis.** Steering, throttle and brake each latch the device that
 last moved them, so a held pad trigger and a key cannot fight: the stick takes the

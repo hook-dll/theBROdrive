@@ -1671,6 +1671,7 @@ async function boot(): Promise<void> {
       !dying && s.settings.mouseDriving && playerDriven !== null,
       playerDriven !== null ? -playerDriven.steeringFraction : 0,
     );
+    input.setBrakeKnee(playerDriven?.thresholdBrakePedal ?? null);
 
     // Refresh the stream's road-frame snapshot before the player's autopilot reads it.
     // Every controller still writes its intent before the shared physics step.

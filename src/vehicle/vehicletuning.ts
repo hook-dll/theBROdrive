@@ -132,16 +132,17 @@ export const HANDS_WHEEL_RATE_RAD_S = (420 * Math.PI) / 180;
  */
 export const HANDS_RAMP_S = 0.1;
 /**
- * The hands with the self-aligning torque behind them, at the rim: 900°/s, two and a
- * half turns a second, a rally driver's flick of countersteer and about what a wheel
- * spinning back through loose fingers does on its own. 56°/s at the road wheels
- * through 16:1, inside every profile's rack speed on the player's car (90-150°/s), so
- * from straight to 5° of countersteer is about 0.11 s against 0.24 s at the hands'
- * own rate. Reached over HANDS_ALIGN_RAMP_S, 0.05 s: the torque is already pulling the
- * rim that way, the arms only have to follow it.
+ * The hands with the self-aligning torque behind them, at the rim: 1400°/s, nearly four
+ * turns a second, a rally driver's flick of countersteer with the wheel already spinning
+ * that way through the fingers. 87°/s at the road wheels through 16:1, at or inside
+ * every profile's rack speed on the player's car (90-150°/s; the rack caps the quicker
+ * 12.8:1 cars), so from straight to 20° of countersteer is about 0.25 s, where 900°/s
+ * took 0.4 s and the slide grew 30-40° more of yaw meanwhile. Reached over
+ * HANDS_ALIGN_RAMP_S, 0.03 s: the torque is already pulling the rim that way, the arms
+ * only have to follow it.
  */
-export const HANDS_ALIGN_RATE_RAD_S = (900 * Math.PI) / 180;
-export const HANDS_ALIGN_RAMP_S = 0.05;
+export const HANDS_ALIGN_RATE_RAD_S = (1400 * Math.PI) / 180;
+export const HANDS_ALIGN_RAMP_S = 0.03;
 /**
  * Where the caster takes the rim is read off the front tyres' travel, which carries the
  * suspension's step-to-step jitter; a 50 ms low-pass takes that out and lags a slide by
@@ -166,6 +167,42 @@ export const HANDS_ALIGN_FULL_KMH = 10;
 export const HANDS_RETURN_TAU_S = 0.25;
 export const HANDS_RETURN_REF_KMH = 100;
 export const HANDS_RETURN_MAX_RAD_S = (720 * Math.PI) / 180;
+/**
+ * THE RETURN IN A SLIDE. The aligning torque comes from the front tyres' slip and load,
+ * not from the road speed, and with the tail out the front axle is travelling well off
+ * where the wheels point: the torque is at its strongest whatever the speed. Scaled by
+ * speed alone, a slide at 50 km/h let go spun the rim back at half the rate of one at
+ * 100, and the slides that happen are mostly at 40-60. So while the rear axle is past
+ * its peak (`tailOut`, 0..1) the return blends toward a 0.13 s time constant and a
+ * 1200°/s cap at any speed above HANDS_ALIGN_FULL_KMH: let go, and a rear-drive car
+ * catches itself through loose hands as quickly as a real one.
+ */
+export const HANDS_SLIDE_RETURN_TAU_S = 0.13;
+export const HANDS_SLIDE_RETURN_MAX_RAD_S = (1200 * Math.PI) / 180;
+/* ---------------------------------------------------------------------------
+ * DRIVER AIDS on the player's car, each a setting and off by default (`Settings.abs`,
+ * `Settings.tractionControl`, `Settings.countersteerAssist`). The first two work like
+ * the autopilot's threshold braking (`modulateBrake`): the pedal is scaled down step by
+ * step while the wheels are past their grip and given back over a moment once they
+ * roll, so the driver's foot stays the ceiling and the aid only takes away.
+ * ------------------------------------------------------------------------- */
+/** ABS: only above this speed does a lock matter. */
+export const ABS_MIN_KMH = 8;
+/** ABS: pedal scale per step while any wheel is locked, its floor, and the recovery, s. */
+export const ABS_RELEASE = 0.7;
+export const ABS_MIN_SCALE = 0.35;
+export const ABS_RECOVER_S = 0.4;
+/**
+ * TRACTION CONTROL: the driven wheels' surface speed past the car's, as a share of the
+ * car's speed (never less than TCS_REF_MPS, so a launch is not all wheelspin), at which
+ * the throttle is cut: 0.15 is just past a road tyre's longitudinal peak.
+ */
+export const TCS_SLIP = 0.15;
+export const TCS_REF_MPS = 3;
+/** Traction control: throttle scale per step while spinning, its floor, and the recovery, s. */
+export const TCS_RELEASE = 0.75;
+export const TCS_MIN_SCALE = 0.15;
+export const TCS_RECOVER_S = 0.3;
 /**
  * The column's friction band at the rim, 1°: a wheel spinning back slows into it and
  * stops, and inside it of where the caster takes it the hands are off the wheel (the

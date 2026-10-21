@@ -2020,6 +2020,20 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         },
       ]),
     );
+    // DRIVER AIDS (game/settings.ts): each off by default, a plain Off / On.
+    const aids = [
+      ['ABS', 'abs', 'The brake is yours alone: hold it too hard and the wheels lock.', 'The brake eases off by itself while a wheel locks, so a held brake key stops the car and still steers.'],
+      ['Traction control', 'tractionControl', 'The throttle is yours alone: too much and the driven wheels spin.', 'The throttle eases off by itself while the driven wheels spin, so the car pulls instead of sliding.'],
+      ['Countersteer assist', 'countersteerAssist', 'Catching a slide is up to your hands on the wheel.', 'In a slide, holding the key toward the countersteer puts the wheel exactly where it catches the car, and keeps it there.'],
+    ] as const;
+    for (const [title, key, offHint, onHint] of aids) {
+      pane.appendChild(
+        segmented(title, [
+          { label: 'Off', icon: 'keys', hint: offHint, active: () => !settings[key], pick: () => { settings[key] = false; apply(); } },
+          { label: 'On', icon: 'drive', hint: onHint, active: () => settings[key], pick: () => { settings[key] = true; apply(); } },
+        ]),
+      );
+    }
     pane.appendChild(
       sliderField(
         'Mouse Look',
@@ -2609,6 +2623,9 @@ export class MainMenu {
         mouseDriving: base.mouseDriving,
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
+        abs: base.abs,
+        tractionControl: base.tractionControl,
+        countersteerAssist: base.countersteerAssist,
         dashboardSize: base.dashboardSize,
         virtualDashboard: base.virtualDashboard,
         viewDistance: base.viewDistance,
@@ -2645,6 +2662,9 @@ export class MainMenu {
           mouseDriving: settings.mouseDriving,
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
+          abs: settings.abs,
+          tractionControl: settings.tractionControl,
+          countersteerAssist: settings.countersteerAssist,
           dashboardSize: settings.dashboardSize,
           virtualDashboard: settings.virtualDashboard,
           viewDistance: settings.viewDistance,

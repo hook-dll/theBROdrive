@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Keyboard pedals in two stages, quicker hands in a slide, and three driver aids
+  (owner). PEDALS (`KEY_PEDAL_RAMPS`): a held throttle key goes to 0.5 in 0.12 s and to
+  the floor by 0.72 s (was 1.0 in 0.25 s); a held brake key goes to the car's own
+  threshold pedal (`Vehicle.thresholdBrakePedal`, fed through `InputReader.setBrakeKnee`)
+  in 0.1 s and to the floor by 0.6 s (was 1.0 in 0.15 s), so a held brake stops at the
+  edge of a lock before it goes past it. Releases unchanged; `tools/pedal-dose.ts`
+  passes. STEERING: a key toward the countersteer turns the rim at 1400°/s reached in
+  0.03 s (was 900°/s in 0.05 s), and a released wheel in a slide comes back at a 0.13 s
+  time constant, capped at 1200°/s, at any speed over 10 km/h, blended in by how far the
+  rear axle is past its peak (`HANDS_SLIDE_RETURN_*`): the return was scaled by road
+  speed alone, so a slide at 50 km/h let go came back at half the rate of one at 100.
+  AIDS (Settings → Controls, all off by default, the player's car only): ABS scales the
+  brake down while a wheel locks above 8 km/h and gives it back over 0.4 s; traction
+  control scales the throttle down while the driven wheels run 15% past the car's speed
+  and gives it back over 0.3 s; countersteer assist puts the rim exactly where the
+  caster takes it while the key is held the countersteer way with the tail out.
+
 - The title room stops lagging and costs a fraction of what it did (ui/titleroom.ts,
   ui/roomscene.ts, ui/diecast.ts). Measured on the M2 Pro, a still title screen held the
   GPU at ~42% and froze the main thread 29 times in its first seven seconds (5.3 s in
