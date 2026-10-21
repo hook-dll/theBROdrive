@@ -5390,6 +5390,10 @@ export class Vehicle implements Rebasable {
    * rack target is the rim over the steering ratio, and let go the caster spins the rim
    * there. Nothing in it reads the tyres' grip, so a key held too long is too much wheel.
    *
+   * THE MOUSE (mouse driving, core/input.ts) is a rim angle the player put there, sent
+   * `direct`: the rack is held at it, so nothing here — no assist, no caster return —
+   * turns the wheel away from where the mouse left it.
+   *
    * THE PAD'S ASSIST. A stick with the assist on is a position against a reach: the
    * front tyres' own peak (`sidePeakTan`, their brush peak at their current load) plus
    * `STEER_ASSIST_SLIP_MARGIN`, measured from where the front axle is going, so the

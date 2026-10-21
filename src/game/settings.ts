@@ -493,10 +493,10 @@ export interface Settings {
    */
   controllerSteerSensitivity: number;
   /**
-   * Steering assist for an ANALOG position — the pad's stick and precise control's
-   * linear wheel. On, the edge of the stick is the angle that puts the front tyres at
-   * their peak slip, at every speed, and the stick is proportional inside it; off, it is
-   * the whole lock. See `SteerMode` in core/input.ts.
+   * Steering assist for an ANALOG position — the pad's stick. On, the edge of the stick
+   * is the angle that puts the front tyres at their peak slip, at every speed, and the
+   * stick is proportional inside it; off, it is the whole lock. See `SteerMode` in
+   * core/input.ts.
    */
   controllerSteerAssist: boolean;
   /**
@@ -584,11 +584,13 @@ export interface Settings {
   /** Redraws a second of each live car mirror, or null for every frame; see `MIRROR_FRAME_RATES`. */
   mirrorFrameRate: MirrorFrameRate;
   /**
-   * Persistent precise control: mouse travel and A/D move one linear virtual wheel
-   * that stays where the player leaves it. Off by default because standard steering
-   * is the familiar self-centering keyboard behavior.
+   * MOUSE DRIVING (M while driving): pointer-locked horizontal mouse motion turns the
+   * steering wheel and it stays exactly where the mouse put it; the left button is the
+   * throttle, the right the brake, and holding the middle button or the look key (Shift)
+   * turns the view instead. Off by default: the keyboard's hands on the wheel are the
+   * familiar control. See `InputReader.setMouseDriving`.
    */
-  preciseSteering: boolean;
+  mouseDriving: boolean;
   /**
    * A light vibration of the driving view at speed, growing from 60 km/h and stronger
    * on rough ground; see `CameraRig`. On by default: it is the cue that says the car is
@@ -716,8 +718,8 @@ export const DEFAULT_SETTINGS: Settings = {
   frameRateLimit: null,
   mirrorFrameRate: DEFAULT_MIRROR_FRAME_RATE,
   fieldOfView: DEFAULT_FIELD_OF_VIEW,
-  // Off by default; M switches it on, and the pause menu remembers which.
-  preciseSteering: false,
+  // Off by default; M switches it while driving, and the pause menu remembers which.
+  mouseDriving: false,
   cameraShake: true,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
@@ -986,9 +988,13 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // the cap its player chose instead of silently becoming uncapped and hot.
     frameRateLimit: frameRateLimitFrom(obj.frameRateLimit ?? obj.mobileFrameRate),
     mirrorFrameRate: mirrorFrameRateFrom(obj.mirrorFrameRate),
-    // `mouseSteering` is the pre-precise-control name in existing saves. Read it once;
-    // every newly sanitized Settings object writes only the truthful new field.
-    preciseSteering: obj.preciseSteering === true || obj.mouseSteering === true,
+    // Older saves stored the mouse-held wheel as `preciseSteering`, and before that as
+    // `mouseSteering`; either switched on means mouse driving on. Only the new field
+    // is written back.
+    mouseDriving:
+      typeof obj.mouseDriving === 'boolean'
+        ? obj.mouseDriving
+        : obj.preciseSteering === true || obj.mouseSteering === true,
     // Missing means an older save: on, like every new drive.
     cameraShake: obj.cameraShake !== false,
     bouncyCars: obj.bouncyCars === true,
@@ -1015,7 +1021,9 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
 
   const rawBindings = obj.keyBindings;
   if (typeof rawBindings === 'object' && rawBindings !== null && !Array.isArray(rawBindings)) {
-    for (const [id, value] of Object.entries(rawBindings as Record<string, unknown>)) {
+    for (const [storedId, value] of Object.entries(rawBindings as Record<string, unknown>)) {
+      // The M toggle's action was `mouseSteer` before it became mouse driving.
+      const id = storedId === 'mouseSteer' ? 'mouseDriving' : storedId;
       if (!(id in BINDABLE_IDS)) continue;
       if (!Array.isArray(value)) continue;
       const codes: string[] = [];

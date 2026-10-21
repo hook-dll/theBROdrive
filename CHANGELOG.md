@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Mouse driving replaces precise control (owner). `M` while driving switches it on and
+  off (toast "Mouse driving: on/off"; Settings → Controls → Mouse driving; saved like
+  every setting and kept after leaving the car; on foot `M` does nothing). Horizontal
+  mouse motion turns the steering wheel directly, 0.5° of rim per pixel up to the 485°
+  stop, and the wheel stays exactly where the mouse put it: it is sent `direct`, so no
+  assist, no self-centring and no caster return touch it; the road wheels go to rim /
+  steering ratio at the rack's speed. Left button is the throttle, right the brake; hold
+  Shift or the middle button to look around while the wheel holds. W/S, gears and the
+  rest of the keyboard work beside it, and A/D nudge the held wheel. Removed: the
+  Standard/Precise steering choice, `preciseSteering`, the precise wheel read through
+  the pad's steering assist, and the pad's RS toggle. A saved `preciseSteering` (or
+  older `mouseSteering`) on loads as mouse driving on, and a rebound `mouseSteer` key
+  carries over to the new action.
+
 - The police are gone (owner). No posts on the shoulder or the lay-bys, no UAZ-469 in the
   militia's livery, no radar, chase, siren, stop, fine or heat. Removed with them:
   `src/world/police.ts`, `src/audio/sirenvoice.ts`, `src/carkit/police.ts`,

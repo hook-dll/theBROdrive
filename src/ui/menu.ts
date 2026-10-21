@@ -1966,7 +1966,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'On',
           icon: 'drive',
-          hint: 'Full stick is as much steering as the front tyres can use at this speed; the stick is proportional inside it. Precise mouse steering follows the same setting.',
+          hint: 'Full stick is as much steering as the front tyres can use at this speed; the stick is proportional inside it.',
           active: () => settings.controllerSteerAssist,
           pick: () => {
             settings.controllerSteerAssist = true;
@@ -1989,24 +1989,24 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
 
   const renderControls = (): void => {
     pane.appendChild(
-      segmented('Steering', [
+      segmented('Mouse driving', [
         {
-          label: 'Standard',
+          label: 'Off',
           icon: 'keys',
           hint: 'A and D are your hands on the wheel: hold one and the wheel keeps turning, as far as the lock if you let it. Let go and the wheel comes back by itself, briskly at speed and hardly at all when crawling.',
-          active: () => !settings.preciseSteering,
+          active: () => !settings.mouseDriving,
           pick: () => {
-            settings.preciseSteering = false;
+            settings.mouseDriving = false;
             apply();
           },
         },
         {
-          label: 'Precise',
+          label: 'On',
           icon: 'mouse',
-          hint: 'Mouse and A/D wind one linear wheel that stays put. Tap a key to trim; hold it to keep turning.',
-          active: () => settings.preciseSteering,
+          hint: 'Moving the mouse left and right turns the steering wheel, and it stays exactly where you leave it. Left button is the throttle, right button the brake. Hold Shift or the middle button to look around instead.',
+          active: () => settings.mouseDriving,
           pick: () => {
-            settings.preciseSteering = true;
+            settings.mouseDriving = true;
             apply();
           },
         },
@@ -2016,7 +2016,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
       sliderField(
         'Mouse Look',
         'mouse',
-        'Pointer sensitivity for looking around. Precise control uses a fixed steering gain.',
+        'Pointer sensitivity for looking around. Mouse driving turns the wheel at its own fixed rate.',
         MOUSE_SENSITIVITY_MIN,
         MOUSE_SENSITIVITY_MAX,
         0.0001,
@@ -2595,7 +2595,7 @@ export class MainMenu {
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
-        preciseSteering: base.preciseSteering,
+        mouseDriving: base.mouseDriving,
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
         dashboardSize: base.dashboardSize,
@@ -2631,7 +2631,7 @@ export class MainMenu {
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,
-          preciseSteering: settings.preciseSteering,
+          mouseDriving: settings.mouseDriving,
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
           dashboardSize: settings.dashboardSize,

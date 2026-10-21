@@ -99,7 +99,7 @@ own layout would otherwise drive the car with its triggers as its steering.
 | Back | autopilot (`P`) | remove worn item (`G`) |
 | Start | pause (opens and closes) | same |
 | LS press | cycle headlights (`L`) | sprint (hold) |
-| RS press | precise steering toggle (`M`) | same |
+| RS press | — | — |
 | Right stick | look / camera orbit | look |
 
 There is no horn: the game has no horn sound or button, so nothing is bound to one.
@@ -141,29 +141,36 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 
 `InputFrame.steerMode` says what `steer` means (`SteerMode` in `src/core/input.ts`):
 
-- **Keyboard (and the touch wheel).** Settings → Controls → **Keyboard steering
-  assist** On (default): a held A/D asks for the
-  steering that runs the front tyres at their own peak slip angle (+10%), measured
-  from the way the front axle is actually travelling — full lock when parking, a few
-  degrees at 100 km/h. The key winds up over ~0.3 s; partial wind-up is a share of
-  that slip. If the tail slides past its own peak, the key toward the bend gives way
-  until the front wheels simply follow the car's direction; the opposite key is the
-  countersteer and reaches past the direction of travel. Off: the key winds toward
-  full lock at any speed.
-- **Letting go is letting go of the wheel.** A centred stick, and a released key with
-  **Steering key release** on Let go (default), means no hand on the wheel at once:
-  the tyres' aligning moment (pneumatic trail plus the caster's mechanical trail)
-  swings the wheel back toward where the car is going. Mid-corner it unwinds and the
-  car straightens; with the tail out it countersteers on its own; parked it stays put.
-  On Ease off, a released key first eases the hand off (0.25 s time constant) and lets
-  go near the centre, so a tap's correction is not taken back in one physics step.
-- **Pad stick / precise mouse wheel: a position.** Settings → Controller →
-  **Steering assist** On (default): full stick is the same tyre-peak reach as the
-  keyboard, proportional inside it. Off: full stick is full lock at any speed.
+- **Keyboard (and the touch wheel): hands on the wheel** (HANDS ON WHEEL in
+  `src/vehicle/vehicletuning.ts`). A held A/D turns the steering wheel at a hand's rate,
+  as far as the lock if it is held that long; the road wheels follow through the
+  steering ratio. Let go and the caster brings the wheel back to where the front wheels
+  roll along their own travel, briskly at speed and hardly at all when crawling. Both
+  keys down hold the wheel where it is.
+- **Mouse driving** (`M` while driving; Settings → Controls → **Mouse driving**). Off
+  by default; the setting persists, and leaving the car keeps it for next time. On foot
+  `M` does nothing and the mouse looks as always. While it is on and the player drives
+  with his own hands (not under the autopilot):
+  - horizontal mouse motion (pointer locked) turns the STEERING WHEEL directly, 0.5° of
+    rim per pixel (`MOUSE_RIM_RAD_PER_PX`, independent of Mouse Look), up to the rim's
+    485° stop where every car reaches its lock: 970 px from centre to lock. The wheel
+    stays exactly where the mouse put it: no assist, no self-centring, no caster
+    return. The road wheels go to rim / steering ratio, sent `direct`, and the rack
+    speed below still applies. Turning it on takes the wheel where it already stands;
+  - left button is the throttle, right button the brake (both 0/1 on the keyboard
+    pedal ramps), so they no longer use or aim a held item;
+  - hold the middle button or **Shift** (the bindable "Mouse driving: look around",
+    sharing Shift with sprint by default) and the mouse turns the camera instead; the
+    wheel keeps its angle;
+  - the keyboard works beside it: W/S, gears, handbrake and the rest as usual, and A/D
+    nudge the same held wheel at 270° of rim per second, which also stays put.
+- **Pad stick: a position.** Settings → Controller → **Steering assist** On
+  (default): full stick reaches the front tyres' peak slip angle at this speed,
+  proportional inside it. Off: full stick is full lock at any speed.
 - The rack never moves faster than the car's rack speed (60°/s at the road wheel
   for the Soviet cars, quicker for later racks), whatever the device.
-- Autopilot, traffic and the tow bar send `direct`: a rack angle as a share of lock,
-  held, never reinterpreted (`Vehicle.steeringInputForWheelAngle`).
+- Autopilot, traffic, the tow bar and mouse driving send `direct`: a rack angle as a
+  share of lock, held, never reinterpreted (`Vehicle.steeringInputForWheelAngle`).
 
 ## Driving views and the cabin camera
 

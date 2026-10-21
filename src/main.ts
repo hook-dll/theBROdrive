@@ -1658,19 +1658,19 @@ async function boot(): Promise<void> {
     }
     syncPackMass(driving);
 
-    // Precise control is a preference, so M edits settings rather than a local flag:
-    // the pause menu and hotkey always agree, and the held wheel survives save/load.
-    // The reader is enabled only while driving, leaving normal mouse look on foot.
-    if (f.togglePreciseSteer) {
-      const on = !s.settings.preciseSteering;
-      world.apply({ t: 'settings', settings: { ...s.settings, preciseSteering: on } });
-      hud.setToast(
-        on
-          ? 'precise control on — mouse or A/D holds the wheel'
-          : 'precise control off — steering self-centres',
-      );
+    // Mouse driving is a preference, so M edits settings rather than a local flag: the
+    // pause menu and the key always agree, and it outlasts leaving the car. The reader
+    // drives with the mouse only while the player's own hands are on this car's wheel
+    // (not on foot, not under the autopilot), taking the wheel where it stands.
+    if (f.toggleMouseDriving) {
+      const on = !s.settings.mouseDriving;
+      world.apply({ t: 'settings', settings: { ...s.settings, mouseDriving: on } });
+      hud.setToast(on ? 'Mouse driving: on' : 'Mouse driving: off');
     }
-    input.setPreciseSteering(!dying && s.settings.preciseSteering && controlled !== null);
+    input.setMouseDriving(
+      !dying && s.settings.mouseDriving && playerDriven !== null,
+      playerDriven !== null ? -playerDriven.steeringFraction : 0,
+    );
 
     // Refresh the stream's road-frame snapshot before the player's autopilot reads it.
     // Every controller still writes its intent before the shared physics step.
