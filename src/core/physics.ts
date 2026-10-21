@@ -123,12 +123,15 @@ export class PhysicsWorld {
    *
    * `vertices` is a flat xyz array and `indices` a flat triangle list. Registering
    * the surface here rather than at the call site is what guarantees every drivable
-   * collider has a friction profile.
+   * collider has a friction profile. `wear` (0 fresh .. 1 at MAX_WEAR) is the road
+   * condition a road slab was built at, for its sub-collider profile
+   * (`subColliderShare`); anything else omits it.
    */
   addStaticTrimesh(
     vertices: Float32Array,
     indices: Uint32Array,
     surface: SurfaceType,
+    wear?: number,
   ): RAPIER.Collider {
     const bodyDesc = RAPIER.RigidBodyDesc.fixed();
     const bodyRef = this.world.createRigidBody(bodyDesc);
@@ -136,7 +139,7 @@ export class PhysicsWorld {
       RAPIER.ColliderDesc.trimesh(vertices, indices),
       bodyRef,
     );
-    this.surfaces.register(collider.handle, surface);
+    this.surfaces.register(collider.handle, surface, wear);
     return collider;
   }
 

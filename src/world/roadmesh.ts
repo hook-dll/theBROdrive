@@ -18,6 +18,7 @@ import { tileGroundSampler, type DrawnGroundSample } from './deserttiledata';
 import {
   COURSE_AGED_ALBEDO,
   desertPaletteAt,
+  MAX_WEAR,
   roadConditionAt,
   roadCourseAt,
   ROAD_START_SURFACE,
@@ -51,11 +52,13 @@ import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
 
 /**
  * The asphalt ribbon, banked into corners and displaced by a layered surface field —
- * broad undulation, wheel-scale bumps, broken edges, discrete potholes and the road
- * events (humps, rimmed holes, cracks, patches, heaves, joints). The desert terrain
- * begins beneath each asphalt edge and falls away on the road's low embankment, and a
- * shoulder strip (SHOULDER_STYLE) is that embankment's graded top. Surface type owns ordinary bump amplitude and the event
- * mix; decay increases undulation, edge breakup, pothole and event occurrence. The
+ * broad undulation, bump sites (heaves, sags, washboard runs, broken patches), broken
+ * edges, discrete potholes and the road events (humps, rimmed holes, cracks, patches,
+ * heaves, joints). The desert terrain begins beneath each asphalt edge and falls away
+ * on the road's low embankment, and a shoulder strip (SHOULDER_STYLE) is that
+ * embankment's graded top. Surface type owns the loose roughness amplitude and the
+ * site and event mixes; decay increases undulation, edge breakup, and site, pothole
+ * and event occurrence, and the roughness envelope gathers them into stretches. The
  * same vertices feed the visible mesh and trimesh collider, so the car feels the
  * shape the driver sees.
  *
@@ -1319,7 +1322,11 @@ export class RoadMeshProvider implements ChunkProvider {
           for (let si = q0; si < q1; si++) {
             si2 = gapQuads(slabIndices, si2, si, gapRows, latCount, q0, baseRows, e0);
           }
-          const collider = physics.addStaticTrimesh(slabVertices, slabIndices, surface);
+          // The slab's wear, at its middle, scales its sub-collider profile
+          // (`subColliderShare`); 20 m is well inside the decay field's own drift.
+          const slabMiddle = sStart + (q0 + q1) * 0.5 * SURFACE_STEP;
+          const wear = Math.min(1, roadConditionAt(this.seed, slabMiddle).decay / MAX_WEAR);
+          const collider = physics.addStaticTrimesh(slabVertices, slabIndices, surface, wear);
           collider.setEnabled(false);
           colliders.push(collider);
           const body = collider.parent();

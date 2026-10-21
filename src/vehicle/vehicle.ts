@@ -20,7 +20,7 @@ import type { StickerState } from '../game/state';
 import { GRAPHICS_CONFIG } from '../config';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
-import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare } from '../core/surfaces';
+import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare, subColliderShare } from '../core/surfaces';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { DAY_LENGTH, MIRROR_FIELD, type CarState, type GameWorld } from '../game/state';
@@ -1640,6 +1640,11 @@ export class Vehicle implements Rebasable {
     return this.drivetrain.isForwardDriveInterrupted;
   }
 
+  /** Reverse is in and driving (no shift under way): the brake pedal is reverse throttle; see `Drivetrain`. */
+  get reverseDriveEngaged(): boolean {
+    return this.drivetrain.isReverseDriveEngaged;
+  }
+
   /** Pedal for `forceN` of drive at the wheels at the current speed; see `Drivetrain.throttleForWheelForce`. */
   throttleForDriveForce(forceN: number, reverse = false): number {
     return this.drivetrain.throttleForWheelForce(forceN, this.forwardSpeedMps(), this.drivenRadius, reverse);
@@ -1687,7 +1692,8 @@ export class Vehicle implements Rebasable {
     return this.steerLightnessValue;
   }
   /**
-   * Stable peak lateral acceleration available to an autonomous speed planner.
+   * Stable peak lateral acceleration available to an autonomous speed planner, at
+   * `speedMps`.
    *
    * Uses the same model, tyre, mass, surface and tyre temperature as the live tyre
    * pass, but not transient load transfer or slip. The controller applies its own
@@ -1696,8 +1702,22 @@ export class Vehicle implements Rebasable {
    * It reads the WORST wheel's temperature rather than assuming a cold tyre, because a
    * planner that believes in grip the tyres have already lost is planning corners its
    * own car cannot take — which is exactly the state a long, hard drive puts it in.
+   *
+   * AND THE AIR'S LIFT ON THE AXLE THAT LOSES MOST OF ITS LOAD TO IT. The live pass
+   * lifts each axle by `½ρA·CL·v²` (`applyAero`), and the axle with the larger share of
+   * its static load gone sets the stable limit: on the Zhiguli saloons that is the
+   * rear, so the car lets go at the tail. The estimate used to be one figure at every
+   * speed. Measured on a flat skidpad, a rally VAZ-2105 held 10.1 m/s² at 15 m/s and
+   * 7.2 at 42 against a constant 12.4, and a frantic driver planned a 180 km/h sweeper
+   * on the low-speed figure and spun in it.
    */
-  estimatedLateralAccel(surfaceType: SurfaceType, _speedMps: number): number {
+  estimatedLateralAccel(surfaceType: SurfaceType, speedMps: number): number {
+    const weightN = this.statsValue.mass * GRAVITY;
+    const frontLoadN = weightN * this.parkedFrontShare;
+    const rearLoadN = weightN - frontLoadN;
+    const airSq = speedMps * speedMps;
+    const frontKept = frontLoadN > 0 ? 1 - (this.liftFrontCoeff * airSq) / frontLoadN : 1;
+    const rearKept = rearLoadN > 0 ? 1 - (this.liftRearCoeff * airSq) / rearLoadN : 1;
     return (
       GRAVITY *
       SURFACES[surfaceType].mu *
@@ -1705,7 +1725,8 @@ export class Vehicle implements Rebasable {
       this.handling.tyreLateralScale *
       this.tyreCarGrip(this.statsValue.mass) *
       this.worstTyreTemperatureGrip() *
-      this.handling.rearAxleSideGrip
+      this.handling.rearAxleSideGrip *
+      clamp(Math.min(frontKept, rearKept), 0, 1)
     );
   }
 
@@ -3215,27 +3236,31 @@ export class Vehicle implements Rebasable {
       //                stretch reported no road feel at all: the collider's own rows
       //                are 1.33 m apart and there was nothing between them.
       //
+      // A fresh sealed deck carries half of all three, rising to all of it as the road
+      // wears (`subColliderShare`): on a new mat it is texture, not bumps.
+      //
       // The sum is then ENVELOPED over the contact patch. A tyre stands on 160 mm of
       // road and cannot see anything shorter, so the filter is a low-pass over
       // DISTANCE TRAVELLED, not over time: the same ripple is equally sharp at 40 and
       // at 100 km/h, and detail below the patch length is attenuated at both.
       const profileTarget =
         ground && w.grounded
-          ? surface.microRelief *
+          ? subColliderShare(surfaceType, this.physics.surfaces.lookupWear(ground.handle)) *
+            (surface.microRelief *
               this.microRelief.at(
                 w.contactPoint.x + this.origin.x,
                 w.contactPoint.z + this.origin.z,
               ) +
-            surface.hummock *
-              this.microRelief.hummockAt(
-                w.contactPoint.x + this.origin.x,
-                w.contactPoint.z + this.origin.z,
-              ) +
-            surface.texture *
-              this.roadTexture.at(
-                w.contactPoint.x + this.origin.x,
-                w.contactPoint.z + this.origin.z,
-              )
+              surface.hummock *
+                this.microRelief.hummockAt(
+                  w.contactPoint.x + this.origin.x,
+                  w.contactPoint.z + this.origin.z,
+                ) +
+              surface.texture *
+                this.roadTexture.at(
+                  w.contactPoint.x + this.origin.x,
+                  w.contactPoint.z + this.origin.z,
+                ))
           : 0;
       const rolled = Math.abs(fwdSpeed) * dt;
       const envelope = 1 - Math.exp(-rolled / CONTACT_PATCH_M);

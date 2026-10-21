@@ -444,8 +444,9 @@ function districtSurface(seed: number, k: number): SurfaceType {
  * HOW FAR A MATERIAL JOIN IS FEATHERED, metres.
  *
  * A district's material is a STEP of arclength, and so was every amplitude read from
- * it — most visibly `BUMP_AMP` in `roadsurface.ts`, where the deck's short-scale
- * roughness changed by up to 3 cm between one sample and the next at a join and left a
+ * it — most visibly the roughness amplitude in `roadsurface.ts` (`LOOSE_BUMP_AMP`, which
+ * then ran under every deck), where the short-scale roughness changed by up to 3 cm
+ * between one sample and the next at a join and left a
  * crease right across the road, exactly where two pieces of road meet. The surface
  * field feathers that amplitude over this half-width instead, so two materials meet
  * over 80 m of road rather than at a line. The COLOUR still changes at the boundary: a
@@ -500,7 +501,7 @@ export function surfaceJoinAt(seed: number, s: number, out: SurfaceJoinBuffer): 
  *
  * Decay is clamped to MAX_WEAR, so the broken half of that range stops at the worst
  * road the world is willing to show. Everything downstream — sand cover, markings,
- * bump amplitude, pothole density, the weather on the vertex colours — is a function of
+ * bump sites, pothole density, the weather on the vertex colours — is a function of
  * the clamped value, so the ceiling is one decision rather than eight.
  *
  * A gravel district at low decay is a well-kept gravel road and an asphalt district at

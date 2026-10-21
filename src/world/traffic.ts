@@ -2739,8 +2739,8 @@ export class RoadTraffic {
 
   /**
    * Nothing ahead of a car at (s, lateral) that only a driver can deal with: the lane
-   * it holds goes on, the road's ends are not near and no body that is not on rails
-   * itself stands in it.
+   * it holds goes on, the road's ends are not near, no body that is not on rails
+   * itself stands in it and no driven car is coming down it (`oncomingInLane`).
    */
   private railsRoadClear(
     car: TrafficCar,
@@ -2760,7 +2760,33 @@ export class RoadTraffic {
     ) {
       return false;
     }
+    if (this.oncomingInLane(car, s, lateral, speed)) return false;
     return !this.foreignBodyAhead(car, s, lateral, reach);
+  }
+
+  /**
+   * A driven car coming the other way in this lane, near enough to arrive within the
+   * survey's horizon at the speed the two are CLOSING at.
+   *
+   * The box ahead is sized on this car's own speed, which is the right reach for
+   * anything going its way and less than half the right reach for anything coming at
+   * it: measured in the traffic bench, a car on rails at 38 m/s woke with a frantic
+   * passer 110 m off in its lane at a 71 m/s closing speed — 1.5 s, with no driver
+   * in the car for the 1.6 s before it. A car on rails steers and brakes for nothing
+   * but the car in front, so it has to be handed back before anything else can reach
+   * it. Cars on rails themselves are not asked about: both of them stay in their lanes.
+   */
+  private oncomingInLane(car: TrafficCar, s: number, lateral: number, speed: number): boolean {
+    for (const other of this.carList) {
+      if (other === car || other.rails || other.turnS >= 0) continue;
+      if (Math.abs(other.roadLateral - lateral) > RAILS_SAME_LANE_M) continue;
+      const along = (other.forwardS - s) * car.direction;
+      if (along <= 0) continue;
+      const towards = -other.forwardSpeed * car.direction;
+      if (towards <= 0) continue;
+      if (along < Math.max(RAILS_SURVEY_MIN_M, (speed + towards) * RAILS_SURVEY_HORIZON_S)) return true;
+    }
+    return false;
   }
 
   /**
@@ -3461,9 +3487,17 @@ export class RoadTraffic {
       // (its centre need not be over the crown: a frantic car left 0.45 m over it after
       // a pass reaches the oncoming lane's centre, and a car was spawned 38 m in front
       // of it at 75 km/h — head-on in the traffic bench).
+      //
+      // "In a pass" is the COMMITTED manoeuvre, not the telemetry: `activity` reads
+      // 'pass' only once the body is half a width over the crown, and the pull-out
+      // before that is a second of road. Measured in the traffic bench: a frantic car
+      // committed to an empty oncoming lane, still 0.83 m on its own side of the crown,
+      // had a car placed 74 m in front of it in that lane, which launched at 160 km/h
+      // as the pass arrived there.
       if (
         car.direction !== direction &&
         (car.autopilot.activity === 'pass' ||
+          car.autopilot.manoeuvre === 'pass-oncoming' ||
           this.isAcrossCrown(car) ||
           Math.abs(car.roadLateral - lateral) <= car.roadHalfWidth + halfWidth) &&
         gap < PASSING_SPAWN_EXCLUSION_M

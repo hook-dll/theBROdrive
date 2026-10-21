@@ -221,9 +221,10 @@ export interface SurfaceProps {
    * Only a little, though. It is value noise, white below its 5.5 m lattice, so on a
    * road it was also the second-largest source of 10-40 m swell — the band a body on
    * 1.1-1.3 Hz springs floats on at 60-100 km/h (tools/ride-bench.ts: 3 cm put 6 mm RMS
-   * there, as much as the collider's own bump layer). The road's feel now comes from its
-   * discrete events (world/roadsurface.ts, ROAD EVENTS), and this is the settle beneath
-   * them: 1-1.6 cm on the sealed decks, and gravel's whoops a little down from 5 cm.
+   * there, as much as the collider's bump layer then had). The road's feel now comes
+   * from its discrete faults (world/roadsurface.ts, BUMP SITES and ROAD EVENTS), and
+   * this is the settle beneath them: 1-1.6 cm on the sealed decks, scaled down to half
+   * on a fresh one (`subColliderShare`), and gravel's whoops a little down from 5 cm.
    */
   readonly hummock: number;
   /**
@@ -234,13 +235,14 @@ export interface SurfaceProps {
    * This is the band a driver means by "feeling the road", and it was missing
    * entirely. Sealed surfaces had `microRelief: 0` on the grounds that their texture
    * was already in the collider — but the collider's rows are 1.333 m apart and its
-   * shortest bump octave is 3.33 m, so what it actually carries is the road's
+   * shortest feature then was a 3.33 m bump octave, so what it carried was the road's
    * WAVINESS. Between those rows the road was glass, and the measured result was a
    * heave of 0.000 g on flat asphalt: nothing at all under the tyres. Every real road
    * has a broadband roughness spectrum, and this is the short end of it — the
    * continuous end. The discrete one (a hump, a rimmed hole, a seam, a joint) is real
    * geometry now, on extra collider rows where it sits (world/roadsurface.ts, ROAD
    * EVENTS), because a thing a wheel hits once must also be a thing the driver sees.
+   * A fresh sealed deck keeps half of this (`subColliderShare`).
    */
   readonly texture: number;
   /** Base albedo for the surface material. */
@@ -614,8 +616,8 @@ export class MicroRelief {
  * game reaches and lands at 11 Hz at 60 km/h and 17 Hz at 90: the secondary-ride band,
  * right on the wheel-hop mode, which is precisely where a road talks to a driver.
  *
- * The long octave at 4.5 m fills the gap between that and the collider's own 3.33 m
- * bump field, so the spectrum has no hole in it.
+ * The long octave at 4.5 m fills the gap between that and the collider's own geometry,
+ * which on a sealed deck starts at the 2.7 m segments of its bump sites.
  *
  * Everything below 1.5 m — the tyre roar and fine buzz a real car also has — is not
  * simulated here and must not be: at 60 Hz it cannot be, and a tyre envelops most of
@@ -648,19 +650,44 @@ export class RoadTexture {
 }
 
 /**
- * Collider handle -> surface type. Rapier colliders carry no structured user-data
- * slot, so ownership of that mapping lives here. Chunk unloading must call `forget`
- * or this map leaks across a long drive.
+ * Share of its sub-collider profile (`microRelief`, `hummock`, `texture`) a SEALED
+ * surface keeps when fresh. On a sealed deck the profile is texture and settle, not
+ * bumps, and a new mat has less of both than a worn one: half, rising linearly to all
+ * of it at MAX_WEAR (world/gradient.ts), so fresh asphalt is quiet under the tyres and
+ * a worn one talks.
+ */
+const SEALED_FRESH_PROFILE_SHARE = 0.5;
+
+/**
+ * Multiplier on a surface's sub-collider profile at road wear `wear` (0 fresh, 1 at
+ * MAX_WEAR). Loose ground is uneven whatever its upkeep and keeps all of it.
+ */
+export function subColliderShare(surface: SurfaceType, wear: number): number {
+  if (surface !== SurfaceType.Asphalt && surface !== SurfaceType.CrackedAsphalt && surface !== SurfaceType.Concrete) {
+    return 1;
+  }
+  return SEALED_FRESH_PROFILE_SHARE + (1 - SEALED_FRESH_PROFILE_SHARE) * Math.min(1, Math.max(0, wear));
+}
+
+/**
+ * Collider handle -> surface type, and the road wear the collider was built at.
+ * Rapier colliders carry no structured user-data slot, so ownership of that mapping
+ * lives here. Chunk unloading must call `forget` or this map leaks across a long drive.
  */
 export class SurfaceRegistry {
   private readonly byHandle = new Map<number, SurfaceType>();
+  /** Wear (0..1) of the road colliders that have one; everything else reads as 1. */
+  private readonly wearByHandle = new Map<number, number>();
 
-  register(colliderHandle: number, surface: SurfaceType): void {
+  register(colliderHandle: number, surface: SurfaceType, wear?: number): void {
     this.byHandle.set(colliderHandle, surface);
+    if (wear === undefined) this.wearByHandle.delete(colliderHandle);
+    else this.wearByHandle.set(colliderHandle, wear);
   }
 
   forget(colliderHandle: number): void {
     this.byHandle.delete(colliderHandle);
+    this.wearByHandle.delete(colliderHandle);
   }
 
   /**
@@ -670,6 +697,16 @@ export class SurfaceRegistry {
   lookupType(colliderHandle: number | null | undefined): SurfaceType {
     if (colliderHandle == null) return SurfaceType.Asphalt;
     return this.byHandle.get(colliderHandle) ?? SurfaceType.Asphalt;
+  }
+
+  /**
+   * Road wear a collider was built at, 0 fresh .. 1 at MAX_WEAR. Colliders registered
+   * without one (buildings, the desert, debris) read as fully worn, which leaves their
+   * sub-collider profile untouched.
+   */
+  lookupWear(colliderHandle: number | null | undefined): number {
+    if (colliderHandle == null) return 1;
+    return this.wearByHandle.get(colliderHandle) ?? 1;
   }
 
   /** Driving characteristics of a collider's registered surface. */

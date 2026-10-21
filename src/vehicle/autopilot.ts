@@ -21,6 +21,7 @@ import { LateralCommitment, type LateralKind } from './lateral';
 import type { TrafficField, TrafficNeighbour } from './trafficfield';
 import { RacingLine, type RacingLineBand } from './racingline';
 import { shouldShelter } from './weatherpace';
+import { AUTO_DIRECTION_RELEASE_MPS } from './vehicletuning';
 
 /**
  * How far ahead the corridor is planned: three seconds of travel, bounded so a
@@ -49,7 +50,7 @@ const RACING_WINDOW_MAX_M = 600;
  */
 const RACING_EDGE_MARGIN_M = 0.2;
 const RACING_EDGE_MARGIN_S = 0.035;
-const RACING_CROWN_MARGIN_M = 0.3;
+export const RACING_CROWN_MARGIN_M = 0.3;
 /**
  * THE OTHER HALF OF THE ROAD IS USED ONLY WHERE THE DRIVER CAN VOUCH FOR IT: in
  * sight, clear of anything standing in it, and left again with this many seconds in
@@ -468,10 +469,20 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     // from the brake, so this mode spends a loose surface's whole ratio like the
     // careful ones.
     looseSurfacePace: 1,
-    // The same share of the tyres as the careful drivers — but of the tyres, not of a
-    // budget of its own, which is what frantic's old 6.8 m/s² was: 55% of a rally
-    // Zhiguli. 0.76 already left the road on the playground's downhill esses.
-    gripReserve: 0.72,
+    // A share of the tyres, not a budget of its own, which is what frantic's old 6.8
+    // m/s² was: 55% of a rally Zhiguli. 0.76 already left the road on the playground's
+    // downhill esses.
+    //
+    // THE SHARE IS THE DRIVER'S MARGIN, AND IT IS SET ON THE CARS AS THEY DRIVE NOW
+    // (9196ab27's tyres and inertia). Swept on the playground lap, rally VAZ-2105 alone
+    // for two laps, where the 25% downhill 320 m sweeper at 165-177 km/h is the fastest
+    // corner the game has: 0.72 — the careful drivers' share — spun out of it, 14.3 m
+    // off the road; 0.70 stayed on but ran 0.36 m wide of its lane; 0.68, 0.66, 0.64,
+    // 0.62 and 0.60 ran 0.19, 0.17, 0.15, 0.15 and 0.15 m wide. This is the largest
+    // share short of that doubling; each 0.02 under it costs about half a second of
+    // lap and 2 km/h of peak. Under the careful drivers' because only this one is ever
+    // that fast.
+    gripReserve: 0.68,
     brakeReserve: 0.9,
     brakingDistanceShare: 0.8,
     racingLine: true,
@@ -3568,7 +3579,12 @@ export class Autopilot {
     const bodyScanSpeed = this.bodyScanGap === pedestrianBodyGap
       ? pedestrianSpeed
       : this.probeHitSpeed;
-    const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS);
+    // AND THE LANE PROBE SEES AT LEAST THAT FAR. The leader the speed plan follows is
+    // the own-lane probe's answer, and 3.2 s of travel falls short of `obstacleSight`
+    // from about 25 m/s up on a typical car's half pedal: measured in the traffic bench,
+    // a frantic car at 166 km/h first found a 6 m/s queue at 138 m, where the half pedal
+    // the plan brakes on needed 294 m and a full threshold stop 151 m, and hit it.
+    const sight = Math.max(PROBE_MIN_SIGHT_M, speed * PROBE_SIGHT_SECONDS, obstacleSight);
     const horizon = Math.max(
       CORRIDOR_MIN_HORIZON_M,
       obstacleSight,
@@ -4344,10 +4360,20 @@ export class Autopilot {
     // sight nor the six-second commitment. It is sized while the driver is held up or
     // already out there, because a pass under way is re-measured every step — see the
     // corridor.
+    //
+    // "OUT THERE" IS WHERE THE BODY IS, NOT WHAT LAST STEP'S PLAN SAID. Read from the
+    // plan, a racer out over the crown that chose its own lane for one step was not
+    // measured on the next, so its crossing lost the abandonment that prices it as a
+    // wall, won again, was measured, lost — a plan flipping between the lanes every
+    // step while the line drifted further out. Measured in the traffic bench: a frantic
+    // car past one car and out after the next, 120 m from a car coming at 38 m/s, flip
+    // between home and the opposing lane for two seconds and meet it head-on.
+    const bodyAcrossCrown =
+      projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
     const passSized =
       config.overtakes &&
       lanesPerSide === 1 &&
-      (passUrge || this.planUsesOncomingLane) &&
+      (passUrge || this.planUsesOncomingLane || bodyAcrossCrown) &&
       this.sizePass(
         vehicle,
         speed,
@@ -5279,11 +5305,13 @@ export class Autopilot {
       //
       // `estimatedLateralAccel` and `sampleGradeLoad` already carry the surface and
       // the gradient, so nothing here needs to know about either.
-      const physicalLateral =
-        vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
-        Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad));
-      const lateralAccel =
-        Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
+      //
+      // AT THE SPEED THE BEND WILL BE TAKEN AT. The estimate carries the lift the air
+      // takes off each axle, which grows with the square of the speed, so it is asked at
+      // the bend's own speed: first at the driver's pace (never above it), then again at
+      // the limit that gave. Asked at the pace alone, a racer's 200 km/h lift was charged
+      // to every hairpin.
+      const gradeShare = Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad));
       // On the racing line a bend is taken at the LINE's curvature, which is the
       // whole point of it; past the solved window, at the road's. A tight bend is the
       // exception, and `bendSpeed` says how.
@@ -5307,10 +5335,23 @@ export class Autopilot {
       // `bendSpeed` is `sqrt((lateral + bank) / curvature)` for the careful modes; for
       // the racer it also takes a tight bend on the road's curvature and its
       // `tightBendShare` of the tyres.
+      const paceSpeed = Math.max(speed, clearRoadSpeed);
+      let physicalLateral = vehicle.estimatedLateralAccel(surface, paceSpeed) * gradeShare;
+      let lateralAccel =
+        Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
       let localLimit = Math.min(
         straightLimit,
         bendSpeed(this.modeValue, lateralAccel, bank, curvature, roadCurvature),
       );
+      if (localLimit < paceSpeed) {
+        physicalLateral = vehicle.estimatedLateralAccel(surface, localLimit) * gradeShare;
+        lateralAccel =
+          Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
+        localLimit = Math.min(
+          straightLimit,
+          bendSpeed(this.modeValue, lateralAccel, bank, curvature, roadCurvature),
+        );
+      }
       // OVER A CREST THE TYRES PRESS WITH LESS THAN THE CAR'S WEIGHT.
       //
       // Driven at `v` over a vertical curvature `kv`, the body is accelerating DOWN at
@@ -5419,7 +5460,17 @@ export class Autopilot {
     // and it must not swallow a cap set from outside: a race rival told to stop beside
     // its courier was held at 11 km/h by it, creeping past the courier for good.
     this.speedLimit.atLeast(3);
-    targetSpeed = this.speedLimit.limit(this.speedCapValue, 'speed-cap');
+    // AND A COMMITTED PASS IS DRIVEN AT THE SPEED IT WAS SIZED ON. The cap a traffic
+    // driver is given is a cruising habit, not a limiter (`PASS_KICKDOWN_SHARE`): the
+    // crossing gate prices the manoeuvre on `crossingSpeed`, which is the kicked-down
+    // pace, and clipping it back to the cap here left the pedal short of the speed the
+    // window was proven at — measured on a hurried car capped at 20 m/s passing one at
+    // 13: committed at a 25 m/s pass, held at 20 for the whole crossing. Scaled, not
+    // replaced, so a cap that is a stop (a rival told to halt at its courier) stays one.
+    const capSpeed = this.passAttemptValue
+      ? this.speedCapValue * (1 + PASS_KICKDOWN_SHARE / config.passNerve)
+      : this.speedCapValue;
+    targetSpeed = this.speedLimit.limit(capSpeed, 'speed-cap');
     // THE SPEED PLAN FOLLOWS THE CORRIDOR THAT WAS CHOSEN, AND NOTHING ELSE.
     //
     // This replaces four overlapping clamps — an approach crawl for a planned prop,
@@ -6706,25 +6757,39 @@ export class Autopilot {
         return;
       }
       this.recoveryLegElapsed += dt;
-      // In automatic mode, reverse=true selects R at rest and brake becomes reverse
-      // throttle on the following tick, so the same pedal stops a car still rolling
-      // forward and then backs it up. Eased off toward the rung's walking pace: the
-      // reverse is a crawl, not a lunge.
       const back = Math.max(0, -forwardSpeed);
       const cap = RECOVERY_RUNG_REVERSE_MPS[rung]!;
-      // Never less than what backs the car up the grade behind it, when there is one:
-      // the old pedal alone stalled a nose-down reverse and ended the leg with no room
-      // gained. See the launch pedal in `driveControls`.
-      out.brake = Math.max(
-        RECOVERY_REVERSE_BRAKE * clamp((cap - back) / cap, 0, 1) * 0.6,
-        back < cap
-          ? vehicle.throttleForDriveForce(
-              vehicle.stats.mass *
-                (ROLLING_DECEL_MPS2 - GRAVITY * grade + clamp((cap - back) / LAUNCH_TAU_S, 0, LAUNCH_ACCEL_MPS2)),
-              true,
-            )
-          : 0,
-      );
+      // UNTIL REVERSE IS IN, THE PEDAL IS THE SERVICE BRAKE. The selector takes R only
+      // with the wheels at rest, and a car already rolling back down a grade never is:
+      // on the brakes it creeps instead (measured on the playground: nosed into a boulder
+      // on the 23% climb, 0.27 m/s backward under every pedal the reverse leg asks for,
+      // just over the selector's 0.25 m/s, with first gear still in). The reverse pedal
+      // below brakes HARDER the slower the car goes, so the leg held that creep, read it
+      // as a stall, and handed a car still in first and still rolling to a pull-out that
+      // waits for the roll to stop — for good. Rolling back is what this leg is for:
+      // gravity drives it, and the pedal only holds it to the rung's pace.
+      if (!vehicle.reverseDriveEngaged && forwardSpeed < -AUTO_DIRECTION_RELEASE_MPS) {
+        out.brake = RECOVERY_REVERSE_BRAKE * clamp((back - cap) / cap, 0, 1);
+      } else {
+        // In automatic mode, reverse=true selects R at rest and brake becomes reverse
+        // throttle on the following tick, so the same pedal stops a car still rolling
+        // forward and then backs it up. Eased off toward the rung's walking pace: the
+        // reverse is a crawl, not a lunge.
+        //
+        // Never less than what backs the car up the grade behind it, when there is one:
+        // the old pedal alone stalled a nose-down reverse and ended the leg with no room
+        // gained. See the launch pedal in `driveControls`.
+        out.brake = Math.max(
+          RECOVERY_REVERSE_BRAKE * clamp((cap - back) / cap, 0, 1) * 0.6,
+          back < cap
+            ? vehicle.throttleForDriveForce(
+                vehicle.stats.mass *
+                  (ROLLING_DECEL_MPS2 - GRAVITY * grade + clamp((cap - back) / LAUNCH_TAU_S, 0, LAUNCH_ACCEL_MPS2)),
+                true,
+              )
+            : 0,
+        );
+      }
       this.recoveryReversed += back * dt;
       this.recoveryLegStalled =
         this.recoveryLegElapsed > RECOVERY_LEG_GRACE_S &&
@@ -6762,15 +6827,30 @@ export class Autopilot {
     // Keep the reverse lock while braking the remaining backward roll. Reversing
     // the wheel before the car reverses its travel bends the tail back toward the
     // obstacle and also spends the pull-out timer without moving forward.
-    if (forwardSpeed < -0.15) {
+    //
+    // BRAKING IT TO A STOP IS FOR A CAR STILL IN REVERSE: that gear stays in until the
+    // wheels stop, and drives the wrong way until then. With a forward gear already in,
+    // the brakes are the wrong tool for the roll: on a climb they let the car creep back
+    // at a steady 0.27 m/s (see the reverse leg) and this wait never ended — measured on
+    // the playground as a sleeper rolling back from a boulder for fifty seconds with the
+    // brake on. There the launch pedal below arrests the roll, as an automatic does from
+    // a rollback (`Vehicle`'s direction change), and the reverse lock stays on until it has.
+    //
+    // AND THE STOP ASKS FOR FIRST. The selector leaves R only at rest AND with a forward
+    // pedal down; with the throttle at zero it held R through the stop, and a car still
+    // creeping back on its brakes at 0.2 m/s (sand, a slope) sat in R for good — measured
+    // on the playground's shoulder face-off, eleven seconds of it. While R is in and the
+    // car rolls back, the vehicle reads that pedal as brake, not drive.
+    const rollingBack = forwardSpeed < -0.15;
+    if (rollingBack && vehicle.forwardDriveInterrupted) {
       out.steer = clamp(this.recoverySide * lock, -1, 1);
-      out.throttle = 0;
+      out.throttle = RECOVERY_PULLOUT_THROTTLE;
       out.brake = 0.5;
       return;
     }
 
-    this.recoveryTimer -= dt;
-    out.steer = clamp(-this.recoverySide * lock, -1, 1);
+    if (!rollingBack) this.recoveryTimer -= dt;
+    out.steer = clamp((rollingBack ? 1 : -1) * this.recoverySide * lock, -1, 1);
     // The same launch pedal as ordinary driving, never less than the old fixed 0.45, and
     // held on the brake while the gearbox comes out of reverse: released for the shift,
     // a car on a climb rolled back the whole shift time, was caught by the backward-roll

@@ -21,7 +21,7 @@ import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
-import { Autopilot, AUTOPILOT_MODES, type AutopilotMode } from '../src/vehicle/autopilot';
+import { Autopilot, AUTOPILOT_MODES, RACING_CROWN_MARGIN_M, type AutopilotMode } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 import {
@@ -35,7 +35,7 @@ import { PlaygroundRoad } from '../src/playground/playgroundroad';
 import { addCircuitCollider } from '../src/playground/ribbon';
 import { PlaygroundTraffic, type TrafficState } from '../src/playground/traffic';
 import { installAssetShim } from './assetshim';
-
+import { installDocumentShim } from './domshim';
 
 /**
  * The lane the circuit's traffic and ego car hold. A lane centre is a road property
@@ -55,6 +55,8 @@ class BunProgressEvent extends Event implements ProgressEvent {
 }
 if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgressEvent;
 installAssetShim();
+// The rally car boots with sticker decals, which need a 2D canvas context.
+installDocumentShim();
 
 const SEED = 1337;
 const MODEL_ID = 'sv_vaz2105r';
@@ -307,6 +309,13 @@ interface LapMetrics {
   indicatorSeconds: number;
   /** Seconds the driver spent on its racing line rather than its lane. */
   racingSeconds: number;
+  /**
+   * Highest road lateral the line was commanded to while on the racing line: the
+   * lane is on the negative side, so this is how far toward the crown it went.
+   */
+  racingLineMax: number;
+  /** The car's body half width, metres: what the racing band keeps off the crown. */
+  bodyHalfWidth: number;
   progress: number;
   sectors: SectorMetrics[];
 }
@@ -378,6 +387,7 @@ async function measure(
   let passing = false;
   let indicatorSeconds = 0;
   let racingSeconds = 0;
+  let racingLineMax = -Infinity;
 
   while (elapsed < seconds && lapSeconds.length < laps) {
     rig.autopilot.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
@@ -437,7 +447,10 @@ async function measure(
     if (nowPassing && !passing) passes++;
     passing = nowPassing;
     if (rig.vehicle.indicator !== 'off') indicatorSeconds += FIXED_DT;
-    if (rig.autopilot.onRacingLine) racingSeconds += FIXED_DT;
+    if (rig.autopilot.onRacingLine) {
+      racingSeconds += FIXED_DT;
+      racingLineMax = Math.max(racingLineMax, rig.autopilot.commandedLine);
+    }
     // Impacts are the honest collision test: the vehicle reports a velocity change
     // its own tyres cannot explain, at the threshold that scratches paint.
     const impact = rig.vehicle.lastImpact;
@@ -504,6 +517,8 @@ async function measure(
     passes,
     indicatorSeconds,
     racingSeconds,
+    racingLineMax,
+    bodyHalfWidth: rig.vehicle.modelMeasure.halfExtents[0],
     progress: travelled,
     sectors: finished,
   };
@@ -547,13 +562,27 @@ for (const mode of ['sleeper', 'frantic'] as const) {
   );
   // A racing driver alone on the lap has nothing to be but on its line, and a line that
   // never leaves the lane is the old driver with a new name: it has to spend most of
-  // the lap on it and use the far half of the road at least somewhere.
+  // the lap on it, and the line it steers to has to leave the lane centre and run out
+  // to the crown-side limit of its own half — the body's half width plus
+  // `RACING_CROWN_MARGIN_M` off the centre line, the band's inner edge.
+  //
+  // IT USED TO HAVE TO REACH THE FAR HALF, and on this road that is not the line's to
+  // take. The band's edge margin grows with speed (`RACING_EDGE_MARGIN_S`, since
+  // 016fe82b), so on the lap's 5.8 m of asphalt the band is a few tenths wide at the
+  // hairpin's 50 km/h and is the home lane itself from about 80 km/h; and the far half
+  // is offered only where 3 s of an unseen car fits inside the sight left after the
+  // return (`racingCrownClearM`). Measured on a clean lap: on its line 99% of it, the
+  // band down to the home lane for 42% of that, and the line steered between -1.45 and
+  // -1.00 m, never over the crown. "Out to 1 m on the far half" was met only by laps
+  // that spun across it — 14.3 m at a grip reserve of 0.72.
   if (config.racingLine) {
     const share = metrics.racingSeconds / Math.max(1e-6, metrics.lapSeconds.reduce((a, b) => a + b, 0));
+    const crownLimit = Math.sign(CIRCUIT_LANE) * (metrics.bodyHalfWidth + RACING_CROWN_MARGIN_M);
     check(
-      `${mode}: drives a racing line across the road`,
-      share >= 0.6 && metrics.maxSignedLateral >= 1,
-      `${(share * 100).toFixed(0)}% of the lap on its line, out to ${metrics.maxSignedLateral.toFixed(2)} m on the far half`,
+      `${mode}: drives a racing line across its half of the road`,
+      share >= 0.6 && metrics.racingLineMax >= crownLimit,
+      `${(share * 100).toFixed(0)}% of the lap on its line, steered out to ${metrics.racingLineMax.toFixed(2)} m ` +
+        `from a ${CIRCUIT_LANE.toFixed(2)} m lane against a ${crownLimit.toFixed(2)} m crown-side limit`,
     );
   }
   // A cap nobody reaches is a comment, not a character: the lower bound is what says
@@ -610,10 +639,15 @@ check(
       CIRCUIT_HALF_WIDTH + 1.2,
   `nearest car ${busy.nearestCar.toFixed(2)} m, ${busy.impacts} impact(s), lateral ${busy.minSignedLateral.toFixed(2)}..${busy.maxSignedLateral.toFixed(2)} m`,
 );
+// A RACER SIGNALS NOTHING (`ModeConfig.racer`): since 045be201 the frantic driver takes
+// the oncoming lane the moment a pass measured on its own car fits, and tells nobody.
+// This check still asked for a second of indicator, as it did of the by-the-book driver
+// frantic was before (ed18a0f8), and read 0.0 s on every commit run since (04f90b1c,
+// 247096f0, e98fde36).
 check(
-  'frantic: signals its lane changes',
-  busy.indicatorSeconds >= 1,
-  `${busy.indicatorSeconds.toFixed(1)} s with an indicator active`,
+  'frantic: passes without signalling, as a racer',
+  AUTOPILOT_MODES.frantic.racer && busy.passes >= 1 && busy.indicatorSeconds === 0,
+  `${busy.indicatorSeconds.toFixed(1)} s with an indicator active over ${busy.passes} pass(es)`,
 );
 console.log(
   `  mean ${(busy.meanSpeed * 3.6).toFixed(1)} km/h, peak ${(busy.peakSpeed * 3.6).toFixed(0)}, ` +

@@ -41,9 +41,9 @@
  * Nothing here is part of the game bundle.
  */
 
-import { RoadTexture, MicroRelief, SurfaceType, SURFACES } from '../src/core/surfaces';
+import { RoadTexture, MicroRelief, SurfaceType, SURFACES, subColliderShare } from '../src/core/surfaces';
 import { FIXED_DT } from '../src/core/physics';
-import { roadConditionAt } from '../src/world/gradient';
+import { MAX_WEAR, roadConditionAt } from '../src/world/gradient';
 import { ROAD_HALF_WIDTH } from '../src/world/road';
 import { EVENT_MAX_KNOTS, SURFACE_STEP, SurfaceField } from '../src/world/roadsurface';
 
@@ -289,7 +289,8 @@ function measureBand(seed: number, s0: number, surface?: SurfaceType): Ride {
     for (let b = 0; b < bands.length; b++) bands[b] += rms[b]! ** 2;
 
     // The 60 Hz ray, and a quarter car on it.
-    const surfaceProps = SURFACES[surface ?? roadConditionAt(seed, s0).surface];
+    const subSurface = surface ?? roadConditionAt(seed, s0).surface;
+    const surfaceProps = SURFACES[subSurface];
     const omega = 2 * Math.PI * BODY_HZ;
     const k = omega * omega;
     const c = 2 * BODY_ZETA * omega;
@@ -309,9 +310,10 @@ function measureBand(seed: number, s0: number, surface?: SurfaceType): Ride {
       if (n > 0) steps.push(Math.abs(input - lastInput));
       lastInput = input;
       const sub =
-        surfaceProps.microRelief * micro.at(at, lateral) +
-        surfaceProps.hummock * micro.hummockAt(at, lateral) +
-        surfaceProps.texture * texture.at(at, lateral);
+        subColliderShare(subSurface, roadConditionAt(seed, at).decay / MAX_WEAR) *
+        (surfaceProps.microRelief * micro.at(at, lateral) +
+          surfaceProps.hummock * micro.hummockAt(at, lateral) +
+          surfaceProps.texture * texture.at(at, lateral));
       subSq += sub * sub;
       subN++;
       const ground = mesh + sub;

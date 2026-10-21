@@ -196,7 +196,18 @@ function sampleStoppedTraffic(): void {
 // Observe dt delivered to real controllers, including their staggered first calls.
 // A car on rails is not driven: its clock restarts when it wakes, so its elapsed time
 // is re-synced after every step it spends on them (`syncRailClocks`).
-type ClockCar = { settleFor: number; autopilot: Autopilot; vehicle: Vehicle; modelId: string; forwardS: number; rails: unknown };
+type ClockCar = {
+  id: string;
+  rival: boolean;
+  direction: 1 | -1;
+  style: string;
+  settleFor: number;
+  autopilot: Autopilot;
+  vehicle: Vehicle;
+  modelId: string;
+  forwardS: number;
+  rails: unknown;
+};
 // Bench-only access to the live records; controls are still the real Autopilots.
 const clockTraffic = traffic as unknown as { carList: ClockCar[] };
 const clocks = new Map<ClockCar, { elapsed: number; delivered: number }>();
@@ -226,6 +237,27 @@ function syncRailClocks(): void {
     if (clock && car.rails) clock.elapsed = clock.delivered;
   }
 }
+// A direction's OPENER is the car drawn while no other ambient car drove that way: the
+// one `drawDriver` makes cautious when it draws a sleeper. Spawns are one at a time, so a
+// car that appears in a direction that had none on the step before is exactly that.
+const openers: { id: string; direction: 1 | -1; mode: string; style: string; model: string }[] = [];
+const seenCars = new Set<string>();
+const liveDirections = new Set<number>();
+let cautiousElsewhere = 0;
+function observeOpeners(): void {
+  for (const car of clockTraffic.carList) {
+    if (car.rival || seenCars.has(car.id)) continue;
+    seenCars.add(car.id);
+    if (!liveDirections.has(car.direction)) {
+      openers.push({ id: car.id, direction: car.direction, mode: car.autopilot.mode, style: car.style, model: car.modelId });
+    } else if (car.style === 'cautious') {
+      cautiousElsewhere++;
+    }
+    liveDirections.add(car.direction);
+  }
+  liveDirections.clear();
+  for (const car of clockTraffic.carList) if (!car.rival) liveDirections.add(car.direction);
+}
 let unsupportedSamples = 0;
 let supportSamples = 0;
 function sampleTrafficSupport(playerS: number): void {
@@ -246,6 +278,7 @@ for (let step = 0; step < Math.ceil(30 / FIXED_DT); step++) {
   traffic.postStep();
   sampleTrafficSupport(PLAYER_S);
   sampleStoppedTraffic();
+  observeOpeners();
   largestCount = Math.max(largestCount, traffic.status.count);
   if (traffic.status.count > 0) smallestPopulated = Math.min(smallestPopulated, traffic.status.count);
   if (step % 6 === 0) await Bun.sleep(0);
@@ -272,10 +305,25 @@ check(
   populated.sameDirection > 0 && populated.oncoming > 0,
   `${populated.sameDirection} same-direction, ${populated.oncoming} oncoming`,
 );
+// THE CAUTIOUS DRIVER IS THE OPENER'S, NOT A QUOTA. Since 8decf760 the character is
+// drawn from the body's odds (`DRIVER_ODDS`: a 2110 or a Volga never draws a sleeper),
+// and a direction's first car is the cautious one only IF it drew a sleeper — "usually",
+// in `drawDriver`'s words. So a live cautious car on this seed was a coin the check could
+// lose with nothing wrong. What is checked is the rule: every opener that drew a sleeper
+// is cautious, nothing else is, and the stream holds both a sleeper to pass and a
+// hurried driver to pass it.
+const openerIds = new Set(openers.map((opener) => opener.id));
+const cautiousOpenersOk = openers.every((opener) => (opener.mode === 'sleeper') === (opener.style === 'cautious'));
 check(
   'traffic contains cautious, normal and passing-capable drivers',
-  populated.sleeper > 0 && populated.hurried > 0 && populated.cautious > 0,
-  `${populated.sleeper} sleeper, ${populated.hurried} hurried, ${populated.cautious} cautious`,
+  populated.sleeper > 0 &&
+    populated.hurried > 0 &&
+    openers.length >= 2 &&
+    cautiousOpenersOk &&
+    cautiousElsewhere === 0,
+  `${populated.sleeper} sleeper, ${populated.hurried} hurried, ${populated.cautious} cautious; openers ` +
+    openers.map((opener) => `${opener.direction > 0 ? '+' : '-'} ${opener.model} ${opener.mode}/${opener.style}`).join(', ') +
+    `; ${cautiousElsewhere} cautious past an opener of ${seenCars.size - openerIds.size}`,
 );
 check(
   'traffic runs on low beam and never on high',

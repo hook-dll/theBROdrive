@@ -83,8 +83,8 @@ const S_STEP = 8;
  * the segment joining them.
  *
  * Three gives 2.67 m, which gives the detail layer's shortest octave (7 m) 2.6 samples
- * per wavelength — the same ratio the road's own collider gives its shortest bump
- * (3.33 m over a 1.333 m step), and the same reason: below it a wave reaches the trimesh
+ * per wavelength — the same ratio the road's own collider gives its loose roughness
+ * lattice (3.33 m over a 1.333 m step), and the same reason: below it a wave reaches the trimesh
  * as seed-dependent spikes instead of as the shape it is.
  */
 const FINE_SUBDIVISIONS = 3;

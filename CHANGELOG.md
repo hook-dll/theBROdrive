@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+- The autopilot and its benches on the new physics. FRANTIC'S GRIP RESERVE 0.72 → 0.68,
+  its own margin measured on the playground lap (rally 2105, the 25% downhill 320 m
+  sweeper at 165-177 km/h): 0.72 spun 14 m off the road, 0.70 ran 0.36 m wide, 0.68 and
+  below 0.15-0.19 m. The planner reads `estimatedLateralAccel` less the aerodynamic lift
+  on the axle that loses most of its load, and asks for it at the bend's own speed. The
+  own-lane probe sees at least the obstacle stopping distance (a frantic car at 166 km/h
+  found a queue at 138 m that needed 294 m); a racer's pass is re-measured whenever its
+  body is over the crown, not when last step's plan said so; a committed pass may exceed
+  the speed cap by its kickdown; a car on rails wakes for a driven car coming down its
+  lane at the closing speed (`oncomingInLane`). NO SPAWN IN FRONT OF A COMMITTED PASS:
+  `roadGapClear` reads the manoeuvre (`pass-oncoming`), not the telemetry that says
+  "pass" only once the body is over the crown (a car placed 74 m ahead of a pull-out
+  launched at 160 km/h into it). RECOVERY ON A GRADE THE BRAKES CANNOT HOLD: a car
+  nosed into a boulder on a 23% climb creeps back at 0.27 m/s on its brakes, over the
+  selector's 0.25 m/s, so R never engaged, the reverse pedal (a service brake until R
+  is in) held the creep, and the pull-out waited for a roll that never stopped — fifty
+  seconds. Until R is in, the reverse leg lets the car roll back and brakes only past the
+  rung's pace; a pull-out with first already in arrests the roll on the launch pedal; one
+  still in R asks for first while it brakes, which the selector needs at rest (the
+  shoulder face-off: 28.9 → 1.4 s stopped). Bench checks corrected: the traffic driver
+  mix checks the opener rule (cautious only if a direction's first car drew a sleeper,
+  which a 2110 or Volga never does), not a live cautious car; playground "racing line
+  across the road" measures the line out to its own half's crown-side limit — the far
+  half was met only by spins since the speed-scaled edge margin (016fe82b); frantic in
+  traffic is checked to pass without signalling, the racer contract since 045be201.
+
+- Paved roads lose the endless bump wave; their bumps are discrete, rare and grouped
+  (owner). The 3.33 m first-difference roughness ran under every surface, so a sealed
+  deck crested every ~8 m from one end of the drive to the other. It now runs only on
+  loose ground (`LOOSE_BUMP_AMP`: gravel, sand, rock, the shoulder, unchanged). Sealed
+  decks get BUMP SITES instead (`world/roadsurface.ts`): heave (one 3-6 m hump), sag (one
+  5-10 m dip), washboard (3-4 waves of 3-4 m) and broken patch (2-4 lumps and dips of
+  2.7-4 m, road events inside it raised by 90/km), one candidate per 20 m slot, per km
+  0.3→6 on asphalt, 2→10 cracked, 0.3→4 concrete from new to MAX_WEAR, each segment held
+  to half the event swing cap. A ROUGHNESS ENVELOPE (400 m value noise, positive half
+  scaled to mean 1 over a 0.15 floor) now spreads sites, sealed-deck road events and
+  (0.6 of it) potholes, so half the road is quiet and the rest comes in rough stretches;
+  it replaces the 120 m event cluster noise (loose events follow it at 0.2). Fresh sealed
+  decks carry half of their sub-collider `microRelief`/`hummock`/`texture`, rising to all
+  of it at MAX_WEAR (`subColliderShare`; road slabs register their wear with the
+  collider). Census (4 seeds × 120 km, wheel paths, 80 km/h; `>1 cm` excursions per km of
+  one path, before → after): asphalt new 113 → 2.4, worn 116 → 8.8; cracked 143-149 →
+  9-29; concrete 82-95 → 4-8; 2-8 Hz RMS on asphalt 5.8 → 0.7-1.7 mm; longest run of
+  bumps under 8 m apart 26 → 2-5 on asphalt; 100 m windows with no bump 0% → 60%,
+  dispersion 0.99 → 4.15 (grouped). ride-bench 80 km/h asphalt 3-10 m band 5.8 → 1.1 mm,
+  kick and step maxima unchanged at 2.22 m/s. surface-feel 60 km/h heave g: asphalt 0.084
+  → 0.031, cracked 0.123 → 0.064, concrete 0.095 → 0.067, gravel 0.187 → 0.188.
+
 - One physics for every car, and each part of it a mechanism (owner). INERTIA
   (`applyChassisMass`): the body's tensor is the sum of its parts — unsprung masses at
   each wheel centre, engine and gearbox from the registries at their bay position

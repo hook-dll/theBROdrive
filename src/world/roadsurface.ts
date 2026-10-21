@@ -99,63 +99,48 @@ export function sectionLateral(halfWidth: number, column: number): number {
 }
 
 /**
- * Short bump layer: the 3-10 m band, as a first difference.
+ * LOOSE ROUGHNESS: the 3-10 m band of an unsealed surface, as a first difference.
  *
- * The collider and the mesh share these samples, and the collider is flat between
- * vertex rows SURFACE_STEP apart — so what a WHEEL gets from this layer is not the
- * smooth wave, it is a slope change at every row. `tools/ride-bench.ts` measures the
- * vertical velocity step that produces (the kick) and, since the boat, the RMS per
- * wavelength band.
+ * Gravel, sand, a rock shelf and the grader's spoil really are uneven at a few metres of
+ * wavelength, everywhere, and that continuous unevenness is what makes them read as a
+ * track rather than a painted road. A sealed road is not like that: it is smooth, and
+ * what a driver meets on it is a THING — a frost heave, a sag, a shoved run, a broken
+ * patch (BUMP SITES below) — met once or in a group, with quiet road between.
+ *
+ * ---- why the sealed decks have none of it ----
+ *
+ * This layer used to run under every surface, asphalt 3 cm, cracked 3.8, concrete 2.5.
+ * Measured over 4 seeds x 120 km (wheel paths, 80 km/h): 115 excursions over 1 cm per
+ * km of a wheel path on NEW asphalt and 131 on worn, runs of up to 31 in a row, 5.9-6.8
+ * mm RMS between 2 and 8 Hz, and not one paved kilometre without a 1 cm bump. That is a
+ * crest every 8 m from one end of the drive to the other, stronger and weaker like a
+ * wave, and it is what the owner found tiring. A road's roughness is not a texture of
+ * this band; it is how many discrete faults its wear has opened.
  *
  * ---- why it is a difference and not a noise ----
  *
- * It used to be two octaves of value noise, 6.7 m and 3.33 m lattices, at 6 cm on
- * asphalt. Value noise is WHITE below its lattice frequency: the random lattice values
- * put as much amplitude into a 15 m wave as into a 7 m one. Measured on the mesh
- * (ride-bench, asphalt): 15.6 mm RMS in the 10-40 m band against 6.1 mm in 3-10 m and
- * 0.7 mm under 3 m. 10-40 m is exactly where a body on 1.1-1.3 Hz springs is driven at
- * its own resonance between 60 and 100 km/h, so the whole road was a slow swell the
- * car rode like a boat, and almost nothing a wheel could hit. The lower octave alone
- * was most of it: its 6.7 m lattice makes waves of 13-20 m.
- *
- * Now: one octave on the 3.33 m lattice, minus itself ROUGH_COMB metres back. A first
- * difference is a high-pass that rises 6 dB an octave, so it keeps the 3-7 m pitch and
- * heave band — above the body's resonance at any driving speed, where the springs
- * work and the body is told about it without swimming — and drops the white low end.
- * Same amplitude scale, a fraction of the float: on asphalt 4.6 mm in 3-10 m and 2.7 mm
- * in 10-40 m per 2 cm of `BUMP_AMP`.
+ * Value noise is WHITE below its lattice frequency, so plain noise puts as much
+ * amplitude into a 15 m wave as into a 7 m one, and 10-40 m is where a body on 1.1-1.3
+ * Hz springs is driven at its own resonance between 60 and 100 km/h: a boat. One octave
+ * on the 3.33 m lattice minus itself ROUGH_COMB metres back is a high-pass that rises 6
+ * dB an octave, so it keeps the 3-7 m pitch and heave band and drops the white low end
+ * (tools/ride-bench.ts: 4.6 mm in 3-10 m and 2.7 mm in 10-40 m per 2 cm of amplitude).
  *
  * In the ROAD frame (s, lateral), because the difference has to be taken along the
- * road; it is as much a pure function of position as world noise was.
- *
- * ---- why the amplitudes are low ----
- *
- * At 110 mm, long ago, the measured profile was 36-63 mm RMS with a 99th-percentile
- * kick of 1.0-1.6 m/s and a worst case of 2.9 m/s at 90 km/h: an ISO class E farm
- * track drawn as a highway, which forced stiff springs, which stopped the car feeling
- * anything at all (see carmodels.ts). The road is not smooth now — the long
- * undulation below, this band, the edge break, potholes, the ROAD EVENTS and the
- * sub-collider texture in core/surfaces.ts are each a different band. What went away
- * is a metre-scale swell nobody would build a road with.
+ * road. The collider is flat between rows SURFACE_STEP apart, so what a wheel gets from
+ * it is a slope change at every row (ride-bench's kick).
  */
 const ROUGH_FREQ = 0.3;
 /** Metres between the two samples of the first difference. */
 const ROUGH_COMB = 1;
 /**
- * Bump amplitude per surface type, metres, in units of the first difference. Cracked
- * asphalt stays rougher than the starting mat but not by much: what makes a broken
- * road broken is its EVENTS (EVENT_MIX), not a taller wave.
+ * Roughness amplitude per LOOSE surface, metres, in units of the first difference.
+ * Sealed surfaces are absent: zero, and their bumps are BUMP SITES.
  */
-const BUMP_AMP: Record<SurfaceType, number> = {
-  [SurfaceType.Asphalt]: 0.03,
-  [SurfaceType.CrackedAsphalt]: 0.038,
-  // The loose surfaces keep more of it: a gravel track and a rock shelf really are
-  // this uneven at a few metres of wavelength, and it is what makes them read as a
-  // track rather than a painted road.
+const LOOSE_BUMP_AMP: Partial<Record<SurfaceType, number>> = {
   [SurfaceType.Gravel]: 0.05,
   [SurfaceType.Sand]: 0.038,
   [SurfaceType.Rock]: 0.062,
-  [SurfaceType.Concrete]: 0.025,
   // Between the district's packed course and the open desert: the grader's spoil is
   // coarser than the road it came off and nothing has ever rolled it flat.
   [SurfaceType.LooseShoulder]: 0.05,
@@ -279,16 +264,32 @@ function potholeForSlot(
 }
 
 /**
- * The pothole anchored at `slot`, if its decay-scaled occupancy test passes.
- * Occupancy rises quadratically with decay and is bursty (0.35..1 multiplier), so
- * holes cluster on ruined stretches and almost vanish from maintained ones.
+ * How far pothole occupancy follows the ROUGHNESS ENVELOPE (mean 1 either way). Holes
+ * gather where the road is weak, but in full the envelope's ceiling times the burst
+ * would put a hole in nearly every slot of a ruined rough stretch; 0.6 keeps the worst
+ * slot's occupancy at 0.62.
  */
-function potholeAtSlot(seed: number, slot: number, decay: number, halfWidth: number): Pothole | null {
+const POTH_CLUSTERING = 0.6;
+
+/**
+ * The pothole anchored at `slot`, if its decay-scaled occupancy test passes.
+ * Occupancy rises quadratically with decay, follows the roughness `envelope` at the
+ * slot and is bursty (0.35..1 multiplier), so holes gather on ruined stretches and
+ * almost vanish from maintained ones.
+ */
+function potholeAtSlot(
+  seed: number,
+  slot: number,
+  decay: number,
+  halfWidth: number,
+  envelope: number,
+): Pothole | null {
   const burst = 0.35 + 0.65 * hash01(seed, slot, TAG_POTH_BURST);
   // Floor + quadratic decay growth: pristine road still gets the odd patched hole,
   // ruined road gets plenty.
   const decayFactor = POTH_DECAY_FLOOR + (1 - POTH_DECAY_FLOOR) * decay * decay;
-  if (hash01(seed, slot, TAG_POTH_OCCUPANCY) >= POTH_DENSITY * decayFactor * burst) return null;
+  const cluster = 1 + POTH_CLUSTERING * (envelope - 1);
+  if (hash01(seed, slot, TAG_POTH_OCCUPANCY) >= POTH_DENSITY * decayFactor * burst * cluster) return null;
   const shape = potholeForSlot(seed, slot, halfWidth);
   // Decay drives HOW MANY holes there are (above), not how shallow each one is. A
   // hole in maintained tarmac is a hole — the old double taper (this factor times
@@ -304,32 +305,6 @@ function potholeAtSlot(seed: number, slot: number, decay: number, halfWidth: num
     depthFactor *
     (0.5 + 0.5 * hash01(seed, slot, TAG_POTH_DEPTH));
   return { s: shape.s, lateral: shape.lateral, diameter: shape.diameter, depth };
-}
-
-/**
- * Pothole displacement (m, negative = down) at a road point, or 0. Anchors sit on
- * vertex rows, so the cosine profile's centre is always exactly sampled; the
- * 1.333 m grid cannot resolve anything smaller anyway.
- */
-function potholeAt(
-  seed: number,
-  s: number,
-  lateral: number,
-  decay: number,
-  halfWidth: number,
-): number {
-  // The +1e-9 guards a float-boundary trap: row s = 3j * (4/3) rounds to just
-  // BELOW 4j, so floor(s / 4) alone would look up slot j-1 and silently drop every
-  // pothole anchored at a slot start. The epsilon is far below any real feature.
-  const hole = potholeAtSlot(seed, Math.floor(s / POTH_SLOT + 1e-9), decay, halfWidth);
-  if (!hole) return 0;
-  const ds = s - hole.s;
-  const dl = lateral - hole.lateral;
-  const half = hole.diameter * 0.5;
-  if (Math.abs(ds) > half || Math.abs(dl) > half) return 0;
-  const r = Math.sqrt(ds * ds + dl * dl);
-  // Cosine profile: deepest at the centre, zero slope at the rim (C1).
-  return -hole.depth * Math.cos((Math.PI * r) / hole.diameter) ** 2;
 }
 
 /**
@@ -372,7 +347,7 @@ function potholeAt(
  * be hit with is not the slope change at one knot, it is the event's whole SWING, its
  * steepest climb minus its steepest descent. That is capped at EVENT_MAX_SWING, which
  * is 2.5 m/s at 90 km/h — under the cap the road already lives under (the worst
- * pothole, 2.75 m/s: POTH_MAX_RAMP), with the bump layer's own slope as headroom. A
+ * pothole, 2.75 m/s: POTH_MAX_RAMP), with a bump site's own slope as headroom. A
  * gap within reach of one of those potholes holds no event, so the two never stack.
  *
  * Every event's height is clamped to the cap from its own knot geometry, so a short
@@ -384,7 +359,8 @@ function potholeAt(
  * ---- how many ----
  *
  * A rate per kilometre of road per surface, from new (decay 0) to as broken as a road
- * gets (MAX_WEAR), clustered by a slow noise so bad patches come in stretches. New
+ * gets (MAX_WEAR), modulated by the ROUGHNESS ENVELOPE so bad patches come in stretches
+ * with quiet road between, and raised inside a broken-patch bump site. New
  * asphalt and concrete have a few a kilometre; cracked asphalt and gravel tens. Most
  * sit in the wheel tracks (section columns 1, 5, 9, 13 on either road width) and the
  * outer track is the one nearest the edge, as on a real road; cracks, heaves and
@@ -431,10 +407,31 @@ const EVENT_MAX_SWING = 0.1;
 export const EVENT_MAX_KNOTS = 5;
 /** Concrete slabs are this many gaps long (5.33 m), with a joint in the first. */
 const JOINT_GAPS = 4;
-/** Metres of the noise that clusters events into bad stretches. */
-const EVENT_CLUSTER_WAVELENGTH = 120;
-/** Cluster multiplier range, mean 1. */
-const EVENT_CLUSTER_SWING = 0.55;
+/**
+ * ROUGHNESS ENVELOPE: how much of a road's wear shows HERE, over hundreds of metres.
+ *
+ * A real road is not equally bad along its length: a stretch over a wet subgrade, a
+ * cutting, a run the trucks brake on is broken, and the next kilometre is fine. So
+ * every discrete fault the wear opens — bump sites, and the road events on sealed
+ * decks — is spread by one slow noise rather than evenly: one octave of value noise
+ * on an ENVELOPE_LATTICE lattice, its positive half scaled to mean 1, over a floor.
+ * Half the road sits at the floor (the noise is negative half the time), and the
+ * other half carries the rest in rough stretches of a few hundred metres.
+ */
+const ENVELOPE_LATTICE = 400;
+/**
+ * The envelope's quiet value: a quiet stretch still meets the odd single fault. At
+ * worn asphalt's BUMP_MIX rate (6 sites/km) this is one every ~1.1 km.
+ */
+const ENVELOPE_FLOOR = 0.15;
+/**
+ * Mean of max(0, n) for the Noise1D value noise, measured over 1.5e7 samples of six
+ * seeds (0.2174). Dividing by it makes the envelope's mean exactly 1, so a surface's
+ * rate per km below is still its mean rate per km.
+ */
+const ENVELOPE_POSITIVE_MEAN = 0.2174;
+/** The envelope's ceiling, for the occupancy bounds. */
+const ENVELOPE_MAX = ENVELOPE_FLOOR + (1 - ENVELOPE_FLOOR) / ENVELOPE_POSITIVE_MEAN;
 
 /**
  * Events per kilometre of road (both directions, all laterals) at decay 0 and at
@@ -444,6 +441,12 @@ const EVENT_CLUSTER_SWING = 0.55;
 interface EventMix {
   readonly rateNew: number;
   readonly rateWorn: number;
+  /**
+   * How far this surface's events follow the ROUGHNESS ENVELOPE: 1 fully, 0 not at
+   * all. Mean 1 either way. Loose ground is uneven everywhere (LOOSE ROUGHNESS), and
+   * its stones only gather a little: the old 120 m cluster noise swung them ±0.55.
+   */
+  readonly clustering: number;
   readonly hump: number;
   readonly pothole: number;
   readonly crack: number;
@@ -452,18 +455,32 @@ interface EventMix {
   readonly heave: number;
 }
 const EVENT_MIX: Record<SurfaceType, EventMix> = {
-  [SurfaceType.Asphalt]: { rateNew: 3, rateWorn: 30, hump: 0.3, pothole: 0.25, crack: 0.15, ridge: 0.1, patch: 0.15, heave: 0.05 },
-  [SurfaceType.CrackedAsphalt]: { rateNew: 30, rateWorn: 90, hump: 0.2, pothole: 0.3, crack: 0.2, ridge: 0.1, patch: 0.15, heave: 0.05 },
+  [SurfaceType.Asphalt]: { rateNew: 3, rateWorn: 30, clustering: 1, hump: 0.3, pothole: 0.25, crack: 0.15, ridge: 0.1, patch: 0.15, heave: 0.05 },
+  [SurfaceType.CrackedAsphalt]: { rateNew: 30, rateWorn: 90, clustering: 1, hump: 0.2, pothole: 0.3, crack: 0.2, ridge: 0.1, patch: 0.15, heave: 0.05 },
   // Slabs crack and spall at the joints, which are their own channel (JOINT_GAPS).
-  [SurfaceType.Concrete]: { rateNew: 3, rateWorn: 20, hump: 0.1, pothole: 0.35, crack: 0.3, ridge: 0.05, patch: 0.2, heave: 0 },
+  [SurfaceType.Concrete]: { rateNew: 3, rateWorn: 20, clustering: 1, hump: 0.1, pothole: 0.35, crack: 0.3, ridge: 0.05, patch: 0.2, heave: 0 },
   // Loose ground has no seams: stones, ruts and scoured holes.
-  [SurfaceType.Gravel]: { rateNew: 50, rateWorn: 130, hump: 0.6, pothole: 0.4, crack: 0, ridge: 0, patch: 0, heave: 0 },
-  [SurfaceType.Sand]: { rateNew: 10, rateWorn: 25, hump: 0.7, pothole: 0.3, crack: 0, ridge: 0, patch: 0, heave: 0 },
-  [SurfaceType.Rock]: { rateNew: 60, rateWorn: 120, hump: 0.75, pothole: 0.25, crack: 0, ridge: 0, patch: 0, heave: 0 },
-  [SurfaceType.LooseShoulder]: { rateNew: 30, rateWorn: 60, hump: 0.5, pothole: 0.5, crack: 0, ridge: 0, patch: 0, heave: 0 },
+  [SurfaceType.Gravel]: { rateNew: 50, rateWorn: 130, clustering: 0.2, hump: 0.6, pothole: 0.4, crack: 0, ridge: 0, patch: 0, heave: 0 },
+  [SurfaceType.Sand]: { rateNew: 10, rateWorn: 25, clustering: 0.2, hump: 0.7, pothole: 0.3, crack: 0, ridge: 0, patch: 0, heave: 0 },
+  [SurfaceType.Rock]: { rateNew: 60, rateWorn: 120, clustering: 0.2, hump: 0.75, pothole: 0.25, crack: 0, ridge: 0, patch: 0, heave: 0 },
+  [SurfaceType.LooseShoulder]: { rateNew: 30, rateWorn: 60, clustering: 0.2, hump: 0.5, pothole: 0.5, crack: 0, ridge: 0, patch: 0, heave: 0 },
 };
-/** Upper bound on any gap's occupancy (the highest `rateWorn`), so most gaps are rejected on one hash. */
-const EVENT_P_MAX = (130 * (1 + EVENT_CLUSTER_SWING) * SURFACE_STEP) / 1000;
+/**
+ * Extra events per km inside a broken-patch bump site: the rate of the worst cracked
+ * asphalt, because that is what a broken patch is — a few metres of it.
+ */
+const BROKEN_EVENT_RATE = 90;
+/**
+ * Upper bound on any gap's occupancy, so most gaps are rejected on one hash: the
+ * largest worn rate at its envelope ceiling, plus a broken patch.
+ */
+const EVENT_P_MAX =
+  ((Math.max(
+    ...Object.values(EVENT_MIX).map((mix) => mix.rateWorn * (1 + mix.clustering * (ENVELOPE_MAX - 1))),
+  ) +
+    BROKEN_EVENT_RATE) *
+    SURFACE_STEP) /
+  1000;
 
 /**
  * Lateral column spans (inclusive, weight 1 inside, linear to zero on the next column
@@ -517,8 +534,117 @@ function plateKnots(event: RoadEvent, ramp: number): void {
 }
 
 /**
- * The layered surface field: long undulation + short bumps + discrete potholes, and the
- * road events inside the gaps.
+ * BUMP SITES: the faults a sealed road's ride is made of, a few metres to a few tens of
+ * metres long, met once or in a group and then gone.
+ *
+ * A paved road has no continuous roughness at this scale (see LOOSE ROUGHNESS). What
+ * it has, and more of as it wears, is:
+ *
+ *   Heave      a frost heave or a root: one broad hump, 3-6 m, across a lane or the road.
+ *   Sag        a settled stretch over a soft subgrade or a culvert: one dip, 5-10 m.
+ *   Washboard  a shoved run where traffic brakes and climbs: 3-4 waves of 3-4 m.
+ *   Broken     a broken patch: 2-4 irregular lumps and dips of 2.7-4 m, one lane, with
+ *              the road events inside it raised to BROKEN_EVENT_RATE (holes, cracks).
+ *
+ * Each is a chain of raised-cosine segments, sampled by the base rows like the long
+ * undulation: no segment is shorter than SITE_MIN_SEGMENT, two rows, so the 1.333 m
+ * lattice carries every one as the shape it is and the collider and `roadSurfaceY` stay
+ * one surface. Across the road a site covers the carriageway, or one lane falling to
+ * nothing over CROWN_TAPER past the crown.
+ *
+ * ---- how many, and where ----
+ *
+ * One candidate per SITE_SLOT, occupied with probability rate(wear) x envelope x slot,
+ * where the rate is BUMP_MIX's per surface and the envelope is the ROUGHNESS ENVELOPE.
+ * A site always lies inside its own slot, so two never overlap; neighbouring slots are
+ * what makes a group, and the envelope is what makes a rough stretch hundreds of metres
+ * long and a quiet one after it. Loose surfaces have no sites: their LOOSE ROUGHNESS is
+ * already everywhere.
+ *
+ * ---- how hard ----
+ *
+ * A segment's height is clamped so its swing (steepest climb minus steepest descent,
+ * 2πh/L for a raised cosine) is at most SITE_MAX_SWING, half of EVENT_MAX_SWING. The
+ * other half is the headroom a road event or a pothole sitting on the site's flank
+ * needs: the continuous bump layer used to take that same share everywhere.
+ */
+const enum BumpKind {
+  Heave,
+  Sag,
+  Washboard,
+  Broken,
+}
+/**
+ * Metres per site candidate. Longer than the longest site (4 waves of 4 m), so every
+ * site fits inside its own slot.
+ */
+const SITE_SLOT = 20;
+/** Most segments a site has. */
+const SITE_MAX_SEGMENTS = 4;
+/** Shortest segment, metres: two base rows, so the lattice resolves it. */
+const SITE_MIN_SEGMENT = 2 * SURFACE_STEP;
+/** Largest slope swing a site segment may present; see "how hard". */
+const SITE_MAX_SWING = 0.05;
+/**
+ * Metres past the crown over which a one-lane site falls to nothing: the narrow
+ * section's 0.4/0.85/1.2 m columns carry it in three steps.
+ */
+const CROWN_TAPER = 1.2;
+
+/**
+ * Bump sites per kilometre of road at decay 0 and at MAX_WEAR (growing as wear^1.5, as
+ * the road events do), and the mix of kinds, for the sealed surfaces.
+ *
+ * New asphalt and concrete: one site in ~3 km — nearly smooth, but not glass. Worn
+ * asphalt: 6 a km on average, which the envelope gathers into rough stretches where
+ * they come every 40-80 m and quiet ones with one a kilometre. Cracked asphalt starts
+ * where worn asphalt is heading and reaches 10. Concrete slabs settle and curl rather
+ * than shove, so no washboard and more sags.
+ */
+interface BumpMix {
+  readonly rateNew: number;
+  readonly rateWorn: number;
+  readonly heave: number;
+  readonly sag: number;
+  readonly washboard: number;
+  readonly broken: number;
+}
+const BUMP_MIX: Partial<Record<SurfaceType, BumpMix>> = {
+  [SurfaceType.Asphalt]: { rateNew: 0.3, rateWorn: 6, heave: 0.3, sag: 0.3, washboard: 0.2, broken: 0.2 },
+  [SurfaceType.CrackedAsphalt]: { rateNew: 2, rateWorn: 10, heave: 0.25, sag: 0.2, washboard: 0.15, broken: 0.4 },
+  [SurfaceType.Concrete]: { rateNew: 0.3, rateWorn: 4, heave: 0.35, sag: 0.45, washboard: 0, broken: 0.2 },
+};
+/** Upper bound on any slot's occupancy (the highest `rateWorn` at the envelope ceiling), so most slots are rejected on one hash. */
+const SITE_P_MAX =
+  (Math.max(...Object.values(BUMP_MIX).map((mix) => mix.rateWorn)) * ENVELOPE_MAX * SITE_SLOT) / 1000;
+
+// Hash tags keep each site property's random stream independent.
+const TAG_SITE_OCCUPANCY = 0x5173;
+const TAG_SITE_KIND = 0x51ce;
+const TAG_SITE_SIZE = 0x5175;
+const TAG_SITE_SIDE = 0x51d3;
+const TAG_SITE_COUNT = 0x5c07;
+const TAG_SITE_LENGTH = 0x5e64;
+const TAG_SITE_HEIGHT = 0x5e16;
+const TAG_SITE_SIGN = 0x5516;
+const TAG_SITE_PLACE = 0x5a1c;
+
+/** The site a slot holds: consecutive raised-cosine segments along the road. */
+interface BumpSite {
+  kind: BumpKind;
+  /** 0 across the carriageway, else the side (sign of lateral) of the one lane it covers. */
+  side: number;
+  start: number;
+  end: number;
+  count: number;
+  readonly lengths: Float64Array;
+  /** Signed crest height of each segment, metres. */
+  readonly heights: Float64Array;
+}
+
+/**
+ * The layered surface field: long undulation + loose roughness + bump sites + discrete
+ * potholes, and the road events inside the gaps.
  * Everything is a pure function of (seed, s, lateral), so rebuilds reproduce
  * exactly and chunk seams stay watertight.
  */
@@ -526,11 +652,18 @@ export class SurfaceField {
   private readonly seed: number;
   private readonly undulationNoise: Noise1D;
   private readonly bumpNoise: Noise2D;
-  private readonly clusterNoise: Noise1D;
+  private readonly envelopeNoise: Noise1D;
   /** Scratch for the material join, read once per displacement. */
   private readonly join: SurfaceJoinBuffer = { neighbour: SurfaceType.Asphalt, t: 0 };
   /** Scratch for the condition of an event's gap. */
   private readonly gapCondition: RoadConditionBuffer = {
+    surface: SurfaceType.Asphalt,
+    decay: 0,
+    sandCover: 0,
+    markings: 0,
+  };
+  /** Scratch for the condition of a bump site's slot. */
+  private readonly slotCondition: RoadConditionBuffer = {
     surface: SurfaceType.Asphalt,
     decay: 0,
     sandCover: 0,
@@ -552,6 +685,18 @@ export class SurfaceField {
     knotH: new Float64Array(EVENT_MAX_KNOTS),
     knotTint: new Float64Array(EVENT_MAX_KNOTS),
   };
+  /** The last bump-site slot resolved and its site; one entry, as for the gap. */
+  private memoSlot = Number.NaN;
+  private memoSiteLive = false;
+  private readonly site: BumpSite = {
+    kind: BumpKind.Heave,
+    side: 0,
+    start: 0,
+    end: 0,
+    count: 0,
+    lengths: new Float64Array(SITE_MAX_SEGMENTS),
+    heights: new Float64Array(SITE_MAX_SEGMENTS),
+  };
 
   /**
    * The material every event gap reads instead of the road's own district, or null.
@@ -564,19 +709,20 @@ export class SurfaceField {
     this.seed = seed >>> 0;
     this.surfaceOverride = surfaceOverride;
     // Separate seeds keep the layers decorrelated; the bump seed is the one the
-    // old single-octave roughness used, so existing worlds keep the same bumps.
+    // old single-octave roughness used, so loose ground keeps the same bumps, and the
+    // envelope's is the old 120 m event cluster noise's.
     this.undulationNoise = new Noise1D(seed ^ 0x2d5f3e71);
     this.bumpNoise = new Noise2D(seed ^ 0x72e5c0a1);
-    this.clusterNoise = new Noise1D(seed ^ 0x6c0de5);
+    this.envelopeNoise = new Noise1D(seed ^ 0x6c0de5);
   }
 
   /**
    * Total displacement (m, positive up) at a road point. `x`/`z` are the point's
    * world position (the edge break is 2D world noise), `decay` the road condition
    * at this s (undulation, edge and potholes), `surface` the surface type, which sets
-   * the bump layer's amplitude — together with the material across the nearest
-   * district join, which it is feathered toward. Road events read their own gap's
-   * condition, so one event is one shape whichever of its rows asks.
+   * the loose roughness amplitude — together with the material across the nearest
+   * district join, which it is feathered toward. Bump sites and road events read their
+   * own slot's and gap's condition, so one is one shape whichever of its rows asks.
    */
   displacement(
     s: number,
@@ -589,18 +735,19 @@ export class SurfaceField {
   ): number {
     const und =
       UND_AMP * (UND_FLOOR + (1 - UND_FLOOR) * decay) * this.undulationNoise.at(s / UND_WAVELENGTH);
-    // The material owns the bump amplitude, and a material is a district — a step of
-    // arclength. Feathering the amplitude across the join is what stops the deck
+    // The material owns the roughness amplitude, and a material is a district — a step
+    // of arclength. Feathering the amplitude across the join is what stops the deck
     // stepping there; see SURFACE_JOIN_BLEND_M. Away from a join `t` is 0 and this is
-    // exactly `BUMP_AMP[surface]`.
+    // exactly the surface's own amplitude, zero on a sealed deck.
     surfaceJoinAt(this.seed, s, this.join);
-    const amp =
-      BUMP_AMP[surface]! +
-      (BUMP_AMP[this.join.neighbour]! - BUMP_AMP[surface]!) * this.join.t;
+    const ownAmp = LOOSE_BUMP_AMP[surface] ?? 0;
+    const amp = ownAmp + ((LOOSE_BUMP_AMP[this.join.neighbour] ?? 0) - ownAmp) * this.join.t;
     const bump =
-      amp *
-      (this.bumpNoise.at(s * ROUGH_FREQ, lateral * ROUGH_FREQ) -
-        this.bumpNoise.at((s - ROUGH_COMB) * ROUGH_FREQ, lateral * ROUGH_FREQ));
+      amp === 0
+        ? 0
+        : amp *
+          (this.bumpNoise.at(s * ROUGH_FREQ, lateral * ROUGH_FREQ) -
+            this.bumpNoise.at((s - ROUGH_COMB) * ROUGH_FREQ, lateral * ROUGH_FREQ));
     const edgeT = Math.max(
       0,
       Math.min(1, (Math.abs(lateral) - (halfWidth - EDGE_BREAK_WIDTH)) / EDGE_BREAK_WIDTH),
@@ -612,9 +759,10 @@ export class SurfaceField {
       Math.max(0, this.bumpNoise.at(x * 0.08 + 19.7, z * 0.08 - 7.3));
     return (
       und +
-      bump -
+      bump +
+      this.siteAt(s, lateral) -
       edgeBreak +
-      potholeAt(this.seed, s, lateral, decay, halfWidth) +
+      this.potholeAt(s, lateral, decay, halfWidth) +
       this.eventAt(s, lateral, halfWidth)
     );
   }
@@ -716,16 +864,18 @@ export class SurfaceField {
       this.setColumns(FULL_WIDTH[0], FULL_WIDTH[1]);
     } else {
       const mix = EVENT_MIX[surface];
-      const cluster =
-        1 + EVENT_CLUSTER_SWING * this.clusterNoise.at(gapStart / EVENT_CLUSTER_WAVELENGTH);
-      const rate = mix.rateNew + (mix.rateWorn - mix.rateNew) * wear * Math.sqrt(wear);
-      if (roll >= (rate * cluster * SURFACE_STEP) / 1000) return false;
+      const gapCentre = gapStart + SURFACE_STEP * 0.5;
+      let rate =
+        (mix.rateNew + (mix.rateWorn - mix.rateNew) * wear * Math.sqrt(wear)) *
+        (1 + mix.clustering * (this.envelope(gapCentre) - 1));
+      if (this.brokenAt(gapCentre)) rate += BROKEN_EVENT_RATE;
+      if (roll >= (rate * SURFACE_STEP) / 1000) return false;
       // The road's own potholes are cosine bowls up to POTH_MAX_D across, anchored on
       // rows; an event inside one would stack two caps (see "how hard they may hit").
       const reach = POTH_MAX_D * 0.5;
       const lastSlot = Math.floor((gapStart + SURFACE_STEP + reach) / POTH_SLOT + 1e-9);
       for (let slot = Math.floor((gapStart - reach) / POTH_SLOT - 1); slot <= lastSlot; slot++) {
-        const hole = potholeAtSlot(seed, slot, condition.decay, NARROW_HALF_WIDTH);
+        const hole = potholeAtSlot(seed, slot, condition.decay, NARROW_HALF_WIDTH, this.envelope(slot * POTH_SLOT));
         if (
           hole &&
           hole.s + hole.diameter * 0.5 > gapStart &&
@@ -839,6 +989,137 @@ export class SurfaceField {
       event.knotH[k] = event.knotH[k]! * signed;
     }
     this.memoLive = true;
+    return true;
+  }
+
+  /**
+   * Pothole displacement (m, negative = down) at a road point, or 0. Anchors sit on
+   * vertex rows, so the cosine profile's centre is always exactly sampled; the
+   * 1.333 m grid cannot resolve anything smaller anyway.
+   */
+  private potholeAt(s: number, lateral: number, decay: number, halfWidth: number): number {
+    // The +1e-9 guards a float-boundary trap: row s = 3j * (4/3) rounds to just
+    // BELOW 4j, so floor(s / 4) alone would look up slot j-1 and silently drop every
+    // pothole anchored at a slot start. The epsilon is far below any real feature.
+    const slot = Math.floor(s / POTH_SLOT + 1e-9);
+    const hole = potholeAtSlot(this.seed, slot, decay, halfWidth, this.envelope(slot * POTH_SLOT));
+    if (!hole) return 0;
+    const ds = s - hole.s;
+    const dl = lateral - hole.lateral;
+    const half = hole.diameter * 0.5;
+    if (Math.abs(ds) > half || Math.abs(dl) > half) return 0;
+    const r = Math.sqrt(ds * ds + dl * dl);
+    // Cosine profile: deepest at the centre, zero slope at the rim (C1).
+    return -hole.depth * Math.cos((Math.PI * r) / hole.diameter) ** 2;
+  }
+
+  /** The ROUGHNESS ENVELOPE at `s`: ENVELOPE_FLOOR..ENVELOPE_MAX, mean 1. */
+  private envelope(s: number): number {
+    const n = this.envelopeNoise.at(s / ENVELOPE_LATTICE);
+    return ENVELOPE_FLOOR + ((1 - ENVELOPE_FLOOR) * Math.max(0, n)) / ENVELOPE_POSITIVE_MEAN;
+  }
+
+  /** Whether `s` lies inside a broken-patch bump site. */
+  private brokenAt(s: number): boolean {
+    return (
+      this.resolveSite(Math.floor(s / SITE_SLOT)) &&
+      this.site.kind === BumpKind.Broken &&
+      s > this.site.start &&
+      s < this.site.end
+    );
+  }
+
+  /** The bump site's displacement at a road point (metres, signed), or 0. */
+  private siteAt(s: number, lateral: number): number {
+    if (!this.resolveSite(Math.floor(s / SITE_SLOT))) return 0;
+    const site = this.site;
+    if (s <= site.start || s >= site.end) return 0;
+    // A one-lane site falls to nothing across the crown; `side` 0 never does.
+    let across = 1;
+    const over = -lateral * site.side;
+    if (over > 0) {
+      if (over >= CROWN_TAPER) return 0;
+      across = 0.5 + 0.5 * Math.cos((Math.PI * over) / CROWN_TAPER);
+    }
+    let from = site.start;
+    let k = 0;
+    while (k < site.count - 1 && s > from + site.lengths[k]!) {
+      from += site.lengths[k]!;
+      k++;
+    }
+    const length = site.lengths[k]!;
+    return across * site.heights[k]! * (0.5 - 0.5 * Math.cos((2 * Math.PI * (s - from)) / length));
+  }
+
+  /** Resolves slot `slot`'s bump site into `this.site`; false if the slot is empty. */
+  private resolveSite(slot: number): boolean {
+    if (slot === this.memoSlot) return this.memoSiteLive;
+    this.memoSlot = slot;
+    this.memoSiteLive = false;
+    const seed = this.seed;
+    const roll = hashUnit3(seed, slot, TAG_SITE_OCCUPANCY);
+    if (roll >= SITE_P_MAX) return false;
+    const centre = (slot + 0.5) * SITE_SLOT;
+    const condition = roadConditionAt(seed, centre, this.slotCondition);
+    const mix = BUMP_MIX[this.surfaceOverride ?? condition.surface];
+    if (!mix) return false;
+    const wear = Math.min(1, condition.decay / MAX_WEAR);
+    const rate = mix.rateNew + (mix.rateWorn - mix.rateNew) * wear * Math.sqrt(wear);
+    if (roll >= (rate * this.envelope(centre) * SITE_SLOT) / 1000) return false;
+
+    const site = this.site;
+    const size = hashUnit3(seed, slot, TAG_SITE_SIZE) * (0.6 + 0.4 * wear);
+    const countRoll = hashUnit3(seed, slot, TAG_SITE_COUNT);
+    const total = mix.heave + mix.sag + mix.washboard + mix.broken;
+    let pick = hashUnit3(seed, slot, TAG_SITE_KIND) * total;
+    // Probability the site covers one lane rather than the carriageway.
+    let laneShare: number;
+    if ((pick -= mix.heave) < 0) {
+      site.kind = BumpKind.Heave;
+      site.count = 1;
+      site.lengths[0] = 3 + 3 * hash01(seed, slot, 0, TAG_SITE_LENGTH);
+      site.heights[0] = 0.012 + 0.028 * size;
+      laneShare = 0.5;
+    } else if ((pick -= mix.sag) < 0) {
+      site.kind = BumpKind.Sag;
+      site.count = 1;
+      site.lengths[0] = 5 + 5 * hash01(seed, slot, 0, TAG_SITE_LENGTH);
+      site.heights[0] = -(0.015 + 0.03 * size);
+      laneShare = 0.7;
+    } else if ((pick -= mix.washboard) < 0) {
+      // Shoving is a lane's: the braking traffic's own.
+      site.kind = BumpKind.Washboard;
+      site.count = 3 + Math.floor(countRoll * 2);
+      const wave = 3 + hash01(seed, slot, 0, TAG_SITE_LENGTH);
+      const crest = 0.006 + 0.01 * size;
+      for (let k = 0; k < site.count; k++) {
+        site.lengths[k] = wave;
+        site.heights[k] = crest * (0.75 + 0.25 * hash01(seed, slot, k, TAG_SITE_HEIGHT));
+      }
+      laneShare = 0.6;
+    } else {
+      site.kind = BumpKind.Broken;
+      site.count = 2 + Math.floor(countRoll * 3);
+      for (let k = 0; k < site.count; k++) {
+        site.lengths[k] = SITE_MIN_SEGMENT + (4 - SITE_MIN_SEGMENT) * hash01(seed, slot, k, TAG_SITE_LENGTH);
+        const sign = hash01(seed, slot, k, TAG_SITE_SIGN) < 0.5 ? 1 : -1;
+        site.heights[k] = sign * (0.008 + 0.017 * size) * (0.5 + 0.5 * hash01(seed, slot, k, TAG_SITE_HEIGHT));
+      }
+      laneShare = 1;
+    }
+    const sideRoll = hashUnit3(seed, slot, TAG_SITE_SIDE);
+    site.side = sideRoll >= laneShare ? 0 : sideRoll < laneShare * 0.5 ? 1 : -1;
+
+    // Clamp each segment to the swing cap; see "how hard".
+    let length = 0;
+    for (let k = 0; k < site.count; k++) {
+      const cap = (SITE_MAX_SWING * site.lengths[k]!) / (2 * Math.PI);
+      site.heights[k] = Math.sign(site.heights[k]!) * Math.min(Math.abs(site.heights[k]!), cap);
+      length += site.lengths[k]!;
+    }
+    site.start = slot * SITE_SLOT + (SITE_SLOT - length) * hashUnit3(seed, slot, TAG_SITE_PLACE);
+    site.end = site.start + length;
+    this.memoSiteLive = true;
     return true;
   }
 

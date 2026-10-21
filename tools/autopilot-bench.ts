@@ -383,8 +383,33 @@ async function checkShelter(): Promise<void> {
   );
 }
 
-const LOOSE_START_S = 12_250;
 const LOOSE_ROUTE_METRES = 1_000;
+
+/**
+ * First arclength at or after `from` whose whole route is gravel, with 60 m of gravel
+ * behind it so the car lands on it too.
+ *
+ * Found, not written down: the district used to start at 12 250 m on seed 42 and the
+ * road generator has since moved it (that arclength is asphalt now), which turned
+ * both gravel checks into checks about asphalt — `allGravel` false and an asphalt
+ * cruise judged against a loose-surface ceiling.
+ */
+function gravelStart(road: Road, from: number, routeMetres: number): number {
+  const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0 };
+  for (let s = from; s < from + 100_000; s += 50) {
+    let gravel = true;
+    for (let x = s - 60; x <= s + routeMetres + 40; x += 10) {
+      road.conditionAt(x, condition);
+      if (condition.surface !== SurfaceType.Gravel) {
+        gravel = false;
+        break;
+      }
+    }
+    if (gravel) return s;
+  }
+  throw new Error(`no ${routeMetres} m gravel district after ${from} m`);
+}
+const LOOSE_START_S = gravelStart(new Road(42), 0, LOOSE_ROUTE_METRES);
 
 interface LooseSurfaceMetrics {
   meanSpeed: number;
@@ -622,36 +647,19 @@ async function checkPassingSafety(): Promise<void> {
         `brake=${rig.input.brake.toFixed(2)} throttle=${rig.input.throttle.toFixed(2)}`,
     );
   }
+  // FULL emergency braking is the car's THRESHOLD pedal, not a floored one: since the
+  // brakes reach the tyres the autopilot brakes at the pedal share that peaks the
+  // first axle (`Vehicle.thresholdBrakePedal`), and every pedal it sends is scaled by
+  // it. A floored 1.0 would lock the wheels. Ordinary speed control for this driver
+  // stops at `brakeCeiling` (0.8) of that.
+  const fullPedal = rig.vehicle.thresholdBrakePedal;
   check(
     'a closer home-lane leader cannot mask oncoming emergency braking',
-    rig.input.brake === 1 && rig.input.throttle === 0,
-    `brake ${rig.input.brake.toFixed(2)}, throttle ${rig.input.throttle.toFixed(2)}`,
+    rig.input.brake >= fullPedal - 1e-6 && rig.input.throttle === 0,
+    `brake ${rig.input.brake.toFixed(2)} of a ${fullPedal.toFixed(2)} threshold pedal, throttle ${rig.input.throttle.toFixed(2)}`,
   );
 
   rig.physics.removeBody(oncoming);
-  lead.setTranslation({ x: -1.45, y: 1, z: 1032.3 }, true);
-  lead.setLinvel({ x: 0, y: 0, z: 16 }, true);
-  placeEgo();
-  const passing = new Autopilot(flat, rig.physics);
-  passing.setMode('hurried');
-  passing.setSpeedCap(20);
-  passing.setEngaged(true);
-  for (let i = 0; i < 8; i++) {
-    rig.physics.step();
-    passing.drive(FIXED_DT, rig.vehicle, rig.input, 0, 0);
-    console.log(
-      `  passing t=${((i + 1) * FIXED_DT).toFixed(3)} gap=${passing.obstacleGap.toFixed(2)} ` +
-        `obs=${passing.obstacleSpeed.toFixed(2)} target=${passing.targetSpeed.toFixed(2)} ` +
-        `pass=${passing.passAttempt} urge=${passing.passUrge} activity=${passing.activity} ` +
-        `limit=${passing.bindingSpeedLimit} brake=${rig.input.brake.toFixed(2)} ` +
-        `throttle=${rig.input.throttle.toFixed(2)}`,
-    );
-  }
-  check(
-    'a clear committed overtake keeps its kickdown allowance',
-    passing.passAttempt && passing.targetSpeed > 20 && rig.input.throttle > 0,
-    `pass ${passing.passAttempt}, target ${passing.targetSpeed.toFixed(2)} m/s, throttle ${rig.input.throttle.toFixed(2)}`,
-  );
 
   const wide: DriveRoad = {
     ...flat,
@@ -691,6 +699,19 @@ async function checkPassingSafety(): Promise<void> {
   rig.physics.world.free();
 }
 
+interface OvertakeMetrics {
+  crossed: boolean;
+  completed: boolean;
+  straddleSeconds: number;
+  clearanceWhileLevel: number;
+  indicatorChanges: number;
+  /** Steps out past the crown with the passed car still ahead and a pass attempt live. */
+  committedSteps: number;
+  /** Of those, steps whose target is over the cap with the throttle open. */
+  kickdownSteps: number;
+  peakCommittedTarget: number;
+}
+
 /**
  * OVERTAKING A SLOWER CAR WITH THE OPPOSING LANE EMPTY, with a second real car on
  * the road: the only scenario in which the driver's own line
@@ -699,7 +720,7 @@ async function checkPassingSafety(): Promise<void> {
  * before this check existed: the car went to the centre of the road, flashed both
  * indicators, and pushed the car it was trying to pass along in front of it.
  */
-async function checkOvertake(): Promise<void> {
+async function driveOvertake(chaserMode: AutopilotMode, chaserCap: number): Promise<OvertakeMetrics> {
   const leadAhead = 45;
   const leadCap = 12;
   const seconds = 30;
@@ -732,7 +753,8 @@ async function checkOvertake(): Promise<void> {
   }
   chaserInput.handbrake = false;
   leadInput.handbrake = false;
-  chaserPilot.setMode('frantic');
+  chaserPilot.setMode(chaserMode);
+  chaserPilot.setSpeedCap(chaserCap);
   leadPilot.setMode('sleeper');
   chaserPilot.setEngaged(true);
   leadPilot.setEngaged(true);
@@ -742,6 +764,9 @@ async function checkOvertake(): Promise<void> {
   let clearanceWhileLevel = Infinity;
   let crossed = false;
   let completed = false;
+  let committedSteps = 0;
+  let kickdownSteps = 0;
+  let peakCommittedTarget = 0;
   const chaserPosition = new THREE.Vector3();
   const leadPosition = new THREE.Vector3();
   for (let i = 0; i < Math.ceil(seconds / FIXED_DT); i++) {
@@ -773,7 +798,30 @@ async function checkOvertake(): Promise<void> {
       );
     }
     if (along < -8) completed = true;
+    if (chaserPilot.passAttempt && chaserRoad.lateral > 0.9 && along > 0) {
+      committedSteps++;
+      peakCommittedTarget = Math.max(peakCommittedTarget, chaserPilot.targetSpeed);
+      if (chaserPilot.targetSpeed > chaserCap && chaserInput.throttle > 0) kickdownSteps++;
+    }
   }
+  chaser.dispose();
+  lead.dispose();
+  physics.world.free();
+  return {
+    crossed,
+    completed,
+    straddleSeconds,
+    clearanceWhileLevel,
+    indicatorChanges,
+    committedSteps,
+    kickdownSteps,
+    peakCommittedTarget,
+  };
+}
+
+async function checkOvertake(): Promise<void> {
+  const { crossed, completed, straddleSeconds, clearanceWhileLevel, indicatorChanges } =
+    await driveOvertake('frantic', Infinity);
   check(
     'frantic overtakes a slower car and gets back in',
     crossed && completed,
@@ -791,9 +839,22 @@ async function checkOvertake(): Promise<void> {
       Number.isFinite(clearanceWhileLevel) ? clearanceWhileLevel.toFixed(2) + ' m' : 'never level'
     }, ${indicatorChanges} indicator changes`,
   );
-  chaser.dispose();
-  lead.dispose();
-  physics.world.free();
+  // THE KICKDOWN, ON A PASS THAT WAS REALLY DRIVEN. A hurried driver capped at 20 m/s,
+  // the same 12 m/s car ahead: once it is out past the crown with the pass live, it is
+  // to be asking for more than its cap with the throttle open, because the crossing
+  // was sized on that kicked-down pace (`PASS_KICKDOWN_SHARE`).
+  //
+  // This used to be a sensor-only frame — a freshly engaged pilot placed in the
+  // oncoming lane and read after eight steps — which no longer describes a pass: a
+  // driver is barred from passing for `WAKE_CAUTION_S` after it engages, and a car
+  // out there with no crossing behind it is priced home behind the leader.
+  const kickdownCap = 20;
+  const hurried = await driveOvertake('hurried', kickdownCap);
+  check(
+    'a clear committed overtake keeps its kickdown allowance',
+    hurried.crossed && hurried.completed && hurried.kickdownSteps > 0,
+    `crossed=${hurried.crossed}, cleared=${hurried.completed}, ${hurried.kickdownSteps} of ${hurried.committedSteps} committed step(s) over the ${kickdownCap} m/s cap on throttle, peak target ${hurried.peakCommittedTarget.toFixed(2)} m/s`,
+  );
 }
 
 /**
