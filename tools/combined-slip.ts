@@ -5,11 +5,11 @@
  * does to a car in a bend.
  *
  *   tyre    the model itself (vehicletuning.ts `combinedLateral`/`combinedLongitudinal`),
- *           on asphalt with the VAZ-2106's front tyre at its static load: side force
- *           against slip ratio at fixed slip angles, drive force against slip angle at
- *           fixed slip ratios, and the side grip a locked wheel keeps — each beside the
- *           one-way friction ellipse it replaced (`old`), which trimmed only the side
- *           force and floored it at 0.05, and cut a locked wheel's to 0.22.
+ *           on dry asphalt at 60 km/h with the VAZ-2106's front tyre at its static load:
+ *           side force against slip ratio at fixed slip angles, drive force against slip
+ *           angle at fixed slip ratios, and the side grip a locked wheel keeps — each
+ *           beside the pure-slip value (`pure`). The sliding ratio is read at the patch's
+ *           sliding speed, v·√(tan²α + κ²) (SLIDING FRICTION).
  *   power   a steady 40 m corner at 0.5 and 0.65 g held by a curvature loop, then the
  *           road-wheel angle frozen and full throttle for 1.5 s. The change in front and
  *           rear slip angle, in body slip and in path curvature (yaw rate over speed),
@@ -35,11 +35,12 @@ import { carModel } from '../src/vehicle/carmodels';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import {
   HANDLING_PROFILES,
-  LONGITUDINAL_PEAK_U,
+  brushShape,
   combinedLateral,
   combinedLongitudinal,
-  longitudinalShape,
-  sideForceShape,
+  longitudinalSlipUnit,
+  slidingFloor,
+  slidingRatio,
   tyreCurve,
 } from '../src/vehicle/vehicletuning';
 import { addGround, makeRig, drive, type Rig } from './handling-bench';
@@ -73,12 +74,15 @@ function tyreTables(): void {
   const peakDeg = curve.peakFrontDeg;
   const peakTan = Math.tan(rad(peakDeg));
   const fadeDeg = Math.min(peakDeg, curve.fullFrontDeg - 1);
-  const optimal = SURFACES[SurfaceType.Asphalt].optimalSlip;
-  const pureSide = (alphaDeg: number): number =>
-    sideForceShape(rad(alphaDeg), peakTan, fadeDeg, curve.fullFrontDeg, curve.plateauFront, true);
+  const asphalt = SURFACES[SurfaceType.Asphalt];
+  const unit = longitudinalSlipUnit(asphalt);
+  const floor = slidingFloor(asphalt.slide, 0);
+  const speed = 60 / 3.6;
+  const slide = (alphaDeg: number, kappa: number): number =>
+    slidingRatio(floor, speed * Math.hypot(Math.tan(rad(alphaDeg)), kappa));
   const sideSlip = (alphaDeg: number): number => Math.tan(rad(alphaDeg)) / peakTan;
-  const longSlip = (kappa: number): number => kappa / (optimal * LONGITUDINAL_PEAK_U);
-  const newSide = (alphaDeg: number, kappa: number): number =>
+  const longSlip = (kappa: number): number => kappa / unit;
+  const side = (alphaDeg: number, kappa: number): number =>
     combinedLateral(
       sideSlip(alphaDeg),
       longSlip(kappa),
@@ -86,56 +90,48 @@ function tyreTables(): void {
       fadeDeg,
       curve.fullFrontDeg,
       curve.plateauFront,
-      true,
+      false,
+      slide(alphaDeg, kappa),
     );
-  const oldSide = (alphaDeg: number, kappa: number): number => {
-    const usage = Math.abs(longitudinalShape(kappa / optimal));
-    const ellipse = Math.max(0.05, Math.sqrt(Math.max(0, 1 - usage * usage)));
-    return pureSide(alphaDeg) * ellipse * (kappa <= -0.5 ? 0.22 : 1);
-  };
+  const along = (kappa: number, alphaDeg: number): number =>
+    combinedLongitudinal(longSlip(kappa), sideSlip(alphaDeg), false, slide(alphaDeg, kappa));
+  const pureSide = (alphaDeg: number): number => brushShape(sideSlip(alphaDeg), slide(alphaDeg, 0));
+  const pureAlong = (kappa: number): number => Math.sign(kappa) * brushShape(Math.abs(longSlip(kappa)), slide(0, kappa));
 
   console.log(
-    `--- tyre: VAZ-2106 front (peak ${peakDeg.toFixed(1)} deg), asphalt (optimal slip ${optimal}) ---`,
+    `--- tyre: VAZ-2106 front (peak ${peakDeg.toFixed(1)} deg), dry asphalt at 60 km/h (slip unit ${unit.toFixed(3)}) ---`,
   );
-  console.log('side force / capacity against slip ratio, new (old)');
+  console.log('side force / capacity against slip ratio, combined (pure)');
   const kappas = [0, 0.03, 0.06, 0.1, 0.2, 0.5, -0.06, -0.15, -1];
   console.log(`  alpha  ${kappas.map((k) => `k=${k}`.padStart(13)).join('')}`);
   for (const a of [2, 4, 8, 15]) {
     console.log(
       `  ${String(a).padStart(3)} deg${kappas
-        .map((k) => `${newSide(a, k).toFixed(2)} (${oldSide(a, k).toFixed(2)})`.padStart(13))
+        .map((k) => `${side(a, k).toFixed(2)} (${pureSide(a).toFixed(2)})`.padStart(13))
         .join('')}`,
     );
   }
 
-  console.log('drive/brake force / capacity against slip angle, new (old: none)');
+  console.log('drive/brake force / capacity against slip angle, combined (pure)');
   const alphas = [0, 2, 4, 8, 15];
   console.log(`  kappa  ${alphas.map((a) => `${a} deg`.padStart(13)).join('')}`);
   for (const k of [0.03, 0.06, 0.1, 0.2, -0.06, -0.15]) {
-    const pure = longitudinalShape(k / optimal);
     console.log(
       `  ${k.toFixed(2).padStart(5)}  ${alphas
-        .map(
-          (a) =>
-            `${combinedLongitudinal(longSlip(k), sideSlip(a)).toFixed(2)} (${pure.toFixed(2)})`.padStart(13),
-        )
+        .map((a) => `${along(k, a).toFixed(2)} (${pureAlong(k).toFixed(2)})`.padStart(13))
         .join('')}`,
     );
   }
 
   // The low-slip limit: the stiffnesses pure slip calibrated must survive unchanged.
   const h = 1e-5;
-  const cxPure = longitudinalShape(h / optimal) / h;
-  const cxNew = combinedLongitudinal(longSlip(h), 0) / h;
-  const cyPure = pureSide(deg(h)) / h;
-  const cyNew = newSide(deg(h), 0) / h;
   console.log(
-    `low-slip stiffness: longitudinal ${cxNew.toFixed(3)} vs pure ${cxPure.toFixed(3)}, ` +
-      `lateral ${cyNew.toFixed(3)} vs pure ${cyPure.toFixed(3)} (per unit slip, /capacity)`,
+    `low-slip stiffness: longitudinal ${(along(h, 0) / h).toFixed(3)} vs pure ${(pureAlong(h) / h).toFixed(3)}, ` +
+      `lateral ${(side(deg(h), 0) / h).toFixed(3)} vs pure ${(pureSide(deg(h)) / h).toFixed(3)} (per unit slip, /capacity)`,
   );
   console.log(
     `locked wheel (k = -1) side grip: ${[3, 5, 10, 20, 40]
-      .map((a) => `${a} deg ${newSide(a, -1).toFixed(2)} (${oldSide(a, -1).toFixed(2)})`)
+      .map((a) => `${a} deg ${side(a, -1).toFixed(2)}`)
       .join(', ')}`,
   );
   console.log('');

@@ -728,11 +728,11 @@ export interface LimitedSlip {
 }
 
 /**
- * A car's tyre: carcass construction and sidewall. The side-force curve is derived
- * from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall builds force slowly,
- * peaks late and lets go gently; a low radial is quick, peaks early and breaks away
- * more sharply. Every road car runs `KAMA_217`; the off-road cars (Niva, UAZ) and the
- * rally 2105 keep their own.
+ * A car's tyre: carcass construction and sidewall. The brush tyre's peak angle and
+ * relaxation are derived from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall
+ * builds force slowly and peaks late; a low radial is quick and peaks early. On loose
+ * ground (the placeholder) it also sets how gently the tyre lets go by angle. Every
+ * road car runs `KAMA_217`; the off-road cars (Niva, UAZ) and the rally 2105 keep their own.
  */
 export interface TyreSpec {
   readonly construction: 'crossply' | 'radial';
@@ -753,8 +753,8 @@ export interface TyreSpec {
  *
  * KAMA publishes no dry-grip, cornering-stiffness or relaxation figure, so these are
  * DERIVED:
- *  - the side-force curve: `tyreCurve`'s radial rule at the 70 aspect (peak 5.8°,
- *    plateau 0.81 by 23.9°, 0.31 m relaxation). One curve for every road car; each
+ *  - the side-force curve: `tyreCurve`'s radial rule at the 70 aspect (peak 5.8°, on
+ *    loose ground plateau 0.81 by 23.9°, 0.31 m relaxation). One curve for every road car; each
  *    car keeps its own factory wheel radius and width (`FACTORY_GEOMETRY`), so this is
  *    the KAMA carcass at the car's own size, not a 175/70 R13 on a Volga hub.
  *  - `KAMA_217_GRIP`, below.
@@ -764,7 +764,8 @@ export interface TyreSpec {
 export const KAMA_217: TyreSpec = { construction: 'radial', aspect: 0.7 };
 /**
  * KAMA-217's `wheelGrip`, DERIVED: 0.53 is a peak of 0.90 on the reference asphalt
- * (mu 1.7), 0.68 once locked (`SLIDING_GRIP_FRACTION`). Wet grip class E (1.10-1.24
+ * (mu 1.7), about 0.80 once locked on dry asphalt (`PAVED_SLIDE`, the peak 1.13 times the
+ * locked figure). Wet grip class E (1.10-1.24
  * of the EU reference tyre, EC 1222/2009) puts it at the cheap end of its decade. The
  * figure is set on the two VAZs measured on budget 13-inch radials, and on the bench
  * (tools/physics-suite.ts, +150 kg, 2026-10-17) it held both: the Samara at 0.73 g on the 40 m
@@ -980,7 +981,7 @@ export interface CarModelDef {
    * that does not limit them, in g: the drums, discs and servo, not the tyres. Every
    * car here could lock its wheels on dry asphalt, so every figure is above its tyres'
    * peak and a floored pedal locks; the stopping distance is then the tyre's
-   * (`wheelGrip`, the surface, the sliding plateau), as it was on the real cars.
+   * (`wheelGrip`, the surface, its sliding friction), as it was on the real cars.
    *
    * The floor under these figures is the Soviet type approval: GOST 22895-77 held a
    * passenger car to 43.2 m from 80 km/h at gross mass with a 50 kgf pedal
@@ -1288,7 +1289,7 @@ interface SovietSpec {
  * cross-ply and 225/75 R16 (block treads on tall sidewalls, with their own grip),
  * and the rally 2105's competition tyre. The stopping distance on dry asphalt is the
  * tyre's: every car's brakes (`brakeDecelG`) out-pull it, so a hard stop ends at its
- * peak and a floored pedal at its sliding plateau.
+ * peak and a floored pedal at its sliding friction.
  *
  * ---- steering lock ----
  *

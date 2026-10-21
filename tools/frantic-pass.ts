@@ -27,12 +27,12 @@
  *                             [--seconds N] [--trace]
  */
 
-import type RAPIER from '@dimforge/rapier3d-compat';
+import type { TyreContacts } from '../src/vehicle/tyrecontact';
 import * as THREE from 'three';
 
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
-import { SurfaceType } from '../src/core/surfaces';
+import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { createServiceableCarState, poseOnGround } from '../src/game/spawn';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { carModelMeasure, carSpawnYAboveGround, loadCarModel, preloadCarModels } from '../src/render/carmodel';
@@ -175,7 +175,7 @@ physics.step();
 const condition = { surface: SurfaceType.Asphalt, decay: 0, sandCover: 0, markings: 1 };
 road.conditionAt(START_S + 500, condition);
 console.log(
-  `frantic pass bench, seed ${SEED}, straight at s ${START_S} (${SurfaceType[condition.surface]}, ` +
+  `frantic pass bench, seed ${SEED}, straight at s ${START_S} (${SURFACES[condition.surface].label}, ` +
     `half width ${road.halfWidthAt(START_S).toFixed(2)} m, shoulder ${SHOULDER_WIDTH_M.toFixed(1)} m), ` +
     `${SECONDS} s per run, drivers at ${(1 / CONTROL_DT).toFixed(0)} Hz`,
 );
@@ -285,28 +285,26 @@ function measureCar(car: Car): void {
 }
 
 /** Every wheel's ground: `true` when one stands on the desert (sand or rock). */
-interface WithController {
-  readonly controller: RAPIER.DynamicRayCastVehicleController | null;
+interface WithTyres {
+  readonly tyres: TyreContacts | null;
 }
 function wheelInDesert(vehicle: Vehicle): boolean {
-  const controller = (vehicle as unknown as WithController).controller;
-  if (!controller) return false;
-  for (let i = 0; i < vehicle.wheelRide.length; i++) {
-    if (!controller.wheelIsInContact(i)) continue;
-    const ground = controller.wheelGroundObject(i);
+  const tyres = (vehicle as unknown as WithTyres).tyres;
+  if (!tyres) return false;
+  for (let i = 0; i < tyres.wheels.length; i++) {
+    const tyre = tyres.wheels[i]!;
+    if (!tyre.inContact) continue;
+    const ground = tyre.ground;
     if (!ground) continue;
     const type = ground.shape.type;
     if (type !== physics.rapier.ShapeType.TriMesh && type !== physics.rapier.ShapeType.HeightField) continue;
     const surfaceType = physics.surfaces.lookupType(ground.handle);
     if (surfaceType === SurfaceType.Sand || surfaceType === SurfaceType.Rock) {
       if (TRACE) {
-        const cp = controller.wheelContactPoint(i);
-        if (cp) {
-          const p = road.project(cp.x, cp.z);
-          console.log(
-            `      wheel ${i} on ${SurfaceType[surfaceType]}, ${(Math.abs(p.lateral) - road.halfWidthAt(p.s)).toFixed(2)} m past the paint at s ${p.s.toFixed(0)}`,
-          );
-        }
+        const p = road.project(tyre.point.x, tyre.point.z);
+        console.log(
+          `      wheel ${i} on ${SURFACES[surfaceType].label}, ${(Math.abs(p.lateral) - road.halfWidthAt(p.s)).toFixed(2)} m past the paint at s ${p.s.toFixed(0)}`,
+        );
       }
       return true;
     }

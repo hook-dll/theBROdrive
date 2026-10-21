@@ -37,7 +37,6 @@ import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import type { VistaMesh } from '../render/vista';
-import { TYRE_MODEL } from '../vehicle/vehicletuning';
 import { carModel } from '../vehicle/carmodels';
 import {
   TRAILER_HALF_LENGTH,
@@ -627,12 +626,6 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     jumpTo: devJumpTo,
     settled: jumpSettled,
     driveModel: devDriveModel,
-    // A/B for the brush tyre (vehicletuning.ts `TYRE_MODEL`), on the move.
-    brushTyres: (on = true) => {
-      TYRE_MODEL.brush = on;
-      ctx.hud.setToast(on ? 'tyres: brush' : 'tyres: curve');
-      return on;
-    },
     tumbleweeds: ctx.tumbleweeds,
     traffic: ctx.traffic,
     // `race.snapshot()`: the three rivals' place, speed and phase.

@@ -36,6 +36,48 @@ export const enum SurfaceType {
 }
 
 /**
+ * HOW A TYRE SLIDES ON A SURFACE: the friction a patch has once its rubber slides over
+ * the ground, as opposed to the peak `mu` its gripping part holds.
+ *
+ *   paved  rubber on a sealed surface. The sliding coefficient falls with the patch's
+ *          sliding speed from the peak towards a locked-wheel figure (vehicletuning.ts,
+ *          SLIDING FRICTION), and that figure is stated as the peak's ratio to it, dry
+ *          and wet: `PAVED_SLIDE`.
+ *   loose  THE LOOSE-GROUND PLACEHOLDER. Gravel, sand and dirt are not rubber sliding
+ *          on a surface: the tyre shears and ploughs the ground, which wants a
+ *          terramechanics model this game does not have yet. Until it does, a tyre on
+ *          loose ground keeps the old authored curves: a sliding share of the
+ *          longitudinal capacity (`share`) and the side force fading by slip ANGLE to
+ *          the tyre's own plateau (`TyreCurve.plateau*`). No measurement stands behind
+ *          either.
+ */
+export type SurfaceSlide =
+  | {
+      readonly kind: 'paved';
+      /** μ_peak / μ_locked on the dry surface. */
+      readonly dryPeakRatio: number;
+      /** μ_peak / μ_locked on the wet surface. */
+      readonly wetPeakRatio: number;
+    }
+  | {
+      readonly kind: 'loose';
+      /** Longitudinal force a fully sliding tyre keeps, as a share of its capacity. */
+      readonly share: number;
+    };
+
+/**
+ * Rubber on asphalt and concrete. ABS, which holds a tyre at its peak, raised the
+ * friction coefficient over a locked wheel by 13% on dry asphalt and 30% on wet (MDPI
+ * Sustainability 2023, 15(8), 6945, https://www.mdpi.com/2071-1050/15/8/6945), and
+ * PennDOT's Little Book of Tire Pavement Friction finds little difference between peak
+ * and sliding on dry surfaces, the gap opening up in the wet. Blended between the two
+ * by the weather's wetness.
+ */
+export const PAVED_SLIDE: SurfaceSlide = { kind: 'paved', dryPeakRatio: 1.13, wetPeakRatio: 1.3 };
+/** The loose-ground placeholder (see `SurfaceSlide`): three quarters of the grip kept. */
+export const LOOSE_GROUND_SLIDE: SurfaceSlide & { readonly kind: 'loose' } = { kind: 'loose', share: 0.75 };
+
+/**
  * ONE SURFACE, ONE SET OF REAL COEFFICIENTS.
  *
  * These two fields used to be different animals sharing a name. `frictionSlip` was a
@@ -102,6 +144,8 @@ export interface SurfaceProps {
    * the surface for the shortfall.
    */
   readonly optimalSlip: number;
+  /** How a tyre's patch slides here: rubber on a sealed surface, or loose ground. */
+  readonly slide: SurfaceSlide;
   /** Speed-independent drag, as a fraction of vehicle weight. */
   readonly rollingResistance: number;
   /**
@@ -225,6 +269,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // the calibration the handling benches were read at.
     mu: 1.7,
     optimalSlip: 0.12,
+    slide: PAVED_SLIDE,
     rollingResistance: 0.013,
     deformationDrag: 0,
     sinkage: 0,
@@ -247,6 +292,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // 0.85 of new.
     mu: 1.43,
     optimalSlip: 0.14,
+    slide: PAVED_SLIDE,
     rollingResistance: 0.018,
     deformationDrag: 0,
     sinkage: 0,
@@ -269,6 +315,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // behave like wet ice while braking on it was fine.
     mu: 1.2,
     optimalSlip: 0.2,
+    slide: LOOSE_GROUND_SLIDE,
     rollingResistance: 0.02,
     // Some ploughing, because a wheel does push a ridge of loose stone — but a graded
     // road has little loose material on it, and this is the number that decides
@@ -301,6 +348,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // it and sinks, not because the surface is smooth.
     mu: 0.51,
     optimalSlip: 0.3,
+    slide: LOOSE_GROUND_SLIDE,
     // Rolling resistance is where sand's cost lives: five times a road's, which is what
     // makes crossing a dune slow and thirsty rather than merely slippery. It is capped
     // by what a two-wheel-drive car can PUSH here, not by the loose-sand literature's
@@ -341,6 +389,9 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // `roughness` and `microRelief` below are for.
     mu: 1.5,
     optimalSlip: 0.14,
+    // A rock shelf is hard but not a paved course, and no rubber-on-rock sliding data
+    // was found: the loose-ground placeholder until there is.
+    slide: LOOSE_GROUND_SLIDE,
     rollingResistance: 0.022,
     deformationDrag: 0,
     sinkage: 0,
@@ -358,6 +409,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // Slightly denser and more uniform than asphalt, and slightly more grippy dry.
     mu: 1.65,
     optimalSlip: 0.12,
+    slide: PAVED_SLIDE,
     rollingResistance: 0.012,
     deformationDrag: 0,
     sinkage: 0,
@@ -381,6 +433,7 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // Slip peaks late because the material has to be sheared, like sand and unlike the
     // packed district gravel above.
     optimalSlip: 0.26,
+    slide: LOOSE_GROUND_SLIDE,
     rollingResistance: 0.06,
     // Deeper loose material than a graded district, so it ploughs more.
     deformationDrag: 0.32,

@@ -30,7 +30,7 @@ import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { emptyInput, type InputFrame } from '../src/core/input';
-import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
+import { preloadCarModels } from '../src/render/carmodel';
 import { CAR_MODELS, carModel, modelEngine, modelGearbox } from '../src/vehicle/carmodels';
 import { fullThrottleUpshiftDue } from '../src/vehicle/drivetrain';
 import { benchCarState } from './benchcar';
@@ -389,14 +389,6 @@ export function addLongGround(physics: PhysicsWorld): void {
   );
 }
 
-/** Mean rolling radius of the axle that drives, as `Vehicle` computes it. */
-export function drivenRadiusOf(modelId: string): number {
-  const wheels = carModelMeasure(modelId).wheels;
-  const rearDriven = carModel(modelId).rearDriveBias >= 0.5;
-  const driven = wheels.filter((w) => w.isFront !== rearDriven);
-  return driven.reduce((sum, w) => sum + w.radius, 0) / driven.length;
-}
-
 /** Seconds of full throttle against the brake before a sprint's clock starts. */
 const PRE_REV_S = 0.6;
 
@@ -405,8 +397,14 @@ const PRE_REV_S = 0.6;
  * first gear engaged before the clock starts, the revs raised against the brake, then
  * full throttle, and each change made at the power-optimal point
  * (`fullThrottleUpshiftDue`, the same definition the automatic uses at wide-open
- * throttle) — decided on the crank speed the road speed implies in the engaged gear,
- * so a free-revving crank mid-change cannot trigger a second one.
+ * throttle) — decided on the tachometer, the crank's own speed, and only while the
+ * gears are driving, so a crank mid-change cannot trigger a second one.
+ *
+ * The tachometer and not the crank speed the road speed implies, because the driven
+ * tyres slip: 4-6% at full throttle in the low gears, so the road's figure lagged the
+ * crank by 300 rpm, and a driver who waited for it sat on the fuel cut for 0.35 s
+ * before every change. The time lost grew with every change in the tyres' slip, which
+ * a 0-100 run has no business measuring.
  *
  * The revs are raised first because a test driver does not let the clutch up at idle:
  * the crank's own inertia takes a third of a second of full torque to spin up from
@@ -423,7 +421,6 @@ export function manualSprint(
 ): (number | null)[] {
   const engine = modelEngine(carModel(modelId));
   const gearbox = modelGearbox(carModel(modelId));
-  const radius = drivenRadiusOf(modelId);
   // A settings delta, never a field write: a fresh world shares DEFAULT_SETTINGS by
   // reference, and mutating it would put every later rig in manual too.
   rig.world.apply({
@@ -457,8 +454,7 @@ export function manualSprint(
       const gear = Number(rig.vehicle.gearLabel);
       if (gear >= 1 && gear < gearbox.ratios.length) {
         const ratio = gearbox.ratios[gear - 1]!;
-        const wheelRad = Math.abs(rig.vehicle.audio.forwardMps) / radius;
-        const rpm = (wheelRad * ratio * gearbox.finalDrive * 60) / (2 * Math.PI);
+        const rpm = rig.vehicle.forwardDriveInterrupted ? 0 : rig.vehicle.rpm;
         if (fullThrottleUpshiftDue(engine, rpm, ratio, gearbox.ratios[gear]!)) f.shift = 1;
       }
     },
@@ -1112,7 +1108,8 @@ export async function runLaunchTractionCheck(
   const rig = await makeRig(modelId, (physics) => addGround(physics, surface));
   const start = rig.vehicle.chassis.translation();
   let maxSlipMps = 0;
-  let to10KmhS: number | null = null;
+  // Written inside the drive callback, which control-flow narrowing cannot see into.
+  let to10KmhS = null as number | null;
 
   drive(rig, 3, (t, input) => {
     input.throttle = 1;
@@ -1199,7 +1196,9 @@ export async function steepestPullAwayDeg(
  * Pull-away on a loose incline. This protects the low-speed contract that matters
  * outside the flat-road launch check: a sound two-wheel-drive car must be able to get
  * moving from rest on a loose slope. Eight seconds also covers the transition from the
- * launch to ordinary rolling speed.
+ * launch to ordinary rolling speed — about 50 m on sand, so the ramp is long: on the
+ * default 30 m one the car drove off the top at 5.5 s and the final speed read was
+ * that of a car tumbling through the air.
  */
 export async function runInclineLaunchCheck(
   modelId = 'sv_vaz2106',
@@ -1209,7 +1208,7 @@ export async function runInclineLaunchCheck(
   await preloadCarModels([modelId]);
   const rig = await makeRig(
     modelId,
-    (physics) => addInclineGround(physics, degrees, surface),
+    (physics) => addInclineGround(physics, degrees, surface, 150),
     true,
   );
   const start = rig.vehicle.chassis.translation();

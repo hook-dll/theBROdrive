@@ -44,7 +44,7 @@
  *                change between fixed steps (a triangle edge the ray-cast wheel follows
  *                instantly)
  *
- * DIAG=1 adds, per run: the share of 1 g jolts with a wheel at Rapier's travel clamp,
+ * DIAG=1 adds, per run: the share of 1 g jolts with a wheel at the suspension's travel clamp,
  * with the chassis box on the ground and with a bump stop engaged, and the body force
  * on those steps split by source (spring, damper, bump stop, tyre hop, bleed, rest);
  * what each wheel stood on (surface / road chunk or tile); where on the box the body
@@ -68,6 +68,7 @@ import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { SUSPENSION_FORCE_HEADROOM } from '../src/vehicle/vehicletuning';
+import type { TyreContact } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { type ChunkContext } from '../src/world/chunks';
 import { DESERT_TILE_SIZE, DesertTileStreamer } from '../src/world/deserttiles';
@@ -130,7 +131,7 @@ interface WheelInternals {
   compressionM: number;
   maxTravelM: number;
   contactNormal: { y: number };
-  /** World contact point (relative to the origin), as Rapier last reported it. */
+  /** World contact point (relative to the origin), as the tyre contact last reported it. */
   contactPoint: { y: number };
   bleedN: number;
   hopZ: number;
@@ -138,9 +139,9 @@ interface WheelInternals {
   springRateNPerM: number;
   compressionRateNsPerM: number;
   relaxationRateNsPerM: number;
+  tyre: TyreContact;
 }
 interface VehicleInternals {
-  controller: RAPIER.DynamicRayCastVehicleController;
   chassisCollider: RAPIER.Collider;
   wheels: WheelInternals[];
 }
@@ -152,7 +153,7 @@ interface Anatomy {
   body: number;
   bump: number;
   rapier: number;
-  /** The spring's share of `rapier`; the rest is Rapier's damper. */
+  /** The spring's share of `rapier` (the tyre contact's force); the rest is its damper. */
   spring: number;
   bumpStop: number;
   hop: number;
@@ -277,7 +278,7 @@ interface Stats {
   colliderChatter: number;
   surfaceSwitches: number;
   surfaceChatter: number;
-  /** Wheel-steps in contact, and of those at the end of Rapier's travel. */
+  /** Wheel-steps in contact, and of those at the end of the suspension's travel. */
   wheelContactSteps: number;
   wheelClampSteps: number;
   anatomy: Anatomy;
@@ -455,11 +456,10 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
     scratchQuat.set(rot.x, rot.y, rot.z, rot.w);
     const upY = scratchVec.set(0, 1, 0).applyQuaternion(scratchQuat).y;
     if (process.env.TRACE && steps % 30 === 0) {
-      const c = internals.controller;
       const under: string[] = [];
       for (let i = 0; i < vehicle.wheelRide.length; i++) {
-        // Rapier keeps the LAST collider a wheel touched after it leaves the ground.
-        const ground = c.wheelIsInContact(i) ? c.wheelGroundObject(i) : null;
+        const tyre = internals.wheels[i]!.tyre;
+        const ground = tyre.inContact ? tyre.ground : null;
         under.push(ground ? SURFACES[g.physics.surfaces.lookupType(ground.handle)].label : 'air');
       }
       console.log(
@@ -515,7 +515,6 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
     stats.rollRates.push(Math.abs(scratchVec.z) * (180 / Math.PI));
     stats.pitchRates.push(Math.abs(scratchVec.x) * (180 / Math.PI));
 
-    const controller = internals.controller;
     let off = 0;
     let load = 0;
     let clamped = false;
@@ -529,7 +528,7 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
     for (let i = 0; i < ride.length; i++) {
       const r = ride[i]!;
       const wheel = internals.wheels[i]!;
-      const contact = controller.wheelIsInContact(i);
+      const contact = wheel.tyre.inContact;
       const track = car.tracks[i]!;
       if (!contact) {
         off++;
@@ -544,8 +543,8 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
         }
         track.groundY = groundY;
         track.groundRate = rate;
-        const suspension = controller.wheelSuspensionForce(i) ?? 0;
-        // What the body is actually handed through this tyre: Rapier's force and the stop.
+        const suspension = wheel.tyre.forceN;
+        // What the body is actually handed through this tyre: the spring's force and the stop.
         const raw = suspension + r.bumpStopN;
         if (r.staticLoadN > 0) load = Math.max(load, raw / r.staticLoadN);
         stats.wheelContactSteps++;
@@ -557,16 +556,14 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
         const up = wheel.contactNormal.y;
         const applied = Math.min(suspension, SUSPENSION_FORCE_HEADROOM * r.staticLoadN);
         rapierN += applied * up;
-        // Rapier's spring term is k·(rest − length); the rest of its force is the damper.
+        // The spring term is k·(rest − length); the rest of the force is the damper.
         springN += Math.min(applied, wheel.springRateNPerM * wheel.compressionM) * up;
         bumpN += r.bumpStopN;
         bleedN += wheel.bleedN;
         const cSusp = wheel.hopV > 0 ? wheel.compressionRateNsPerM : wheel.relaxationRateNsPerM;
         hopN += Math.max(-r.loadN, wheel.springRateNPerM * wheel.hopZ + cSusp * wheel.hopV);
       }
-      // Rapier keeps reporting the last collider a wheel touched after it has left the
-      // ground: only a wheel in contact is standing on anything.
-      const ground = contact ? controller.wheelGroundObject(i) : null;
+      const ground = contact ? wheel.tyre.ground : null;
       if (!ground) continue;
       const handle = ground.handle;
       const surface = g.physics.surfaces.lookupType(handle);

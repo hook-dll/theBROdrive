@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+- One physics for every car, and each part of it a mechanism (owner). INERTIA
+  (`applyChassisMass`): the body's tensor is the sum of its parts — unsprung masses at
+  each wheel centre, engine and gearbox from the registries at their bay position
+  (longitudinal behind the front axle on rear-drive and 4×4, transverse ahead of it on
+  front-drive), a full tank, the body shell as a thin shell (0.27 of kerb mass, the
+  factory "масса агрегатов" tables) and the fittings between the axle lines — placed so
+  the centre of mass stays on the measured weight split. Yaw dynamic index 0.88-0.93
+  across the kit cars (published saloons 0.85-1.0); the box × gain it replaced gave 2.3-2.9
+  to the autopilot and 0.9-1.15 to the player (`INERTIA_*_GAIN`,
+  `PLAYER_YAW_INERTIA_GAIN` removed). RACK: one speed for every driver, the player's
+  (classic 90°/s at the road wheel, road 117, sport 150, utility 105;
+  `PLAYER_RACK_SPEED_SCALE` removed). TYRE CONTACT (`src/vehicle/tyrecontact.ts`,
+  replacing Rapier's `DynamicRayCastVehicleController` in the car and the trailer): each
+  tyre is a disc of its radius rounded by half its tread, swept along the strut and read
+  back onto the face it touches, so a kerb lip or the next triangle is met by the tyre's
+  profile instead of one ray under the hub; the spring and damper keep Rapier's law
+  (rest force within 0.2%, a 10 cm drop's peak identical), the damper reading the strut's
+  rate against the face under the hub. The tyre-load low-pass is gone
+  (`WHEEL_LOAD_TAU`, `PLAYER_WHEEL_LOAD_TAU`): the load is this step's spring, bump
+  stop, bleed, bar and links. Cost: about 20-30 µs a car a step. `setPlayerDriven` now
+  only gates the driver aids. Benches: handling-cli all ok (its sand ramp lengthened to
+  150 m: the car now outran the old 30 m one), reality.ts kit cars within tolerance (its
+  factory sprint now shifts on the engine's real revs), roll-balance ζroll consistent
+  with the analytic roll damping.
+
+- Tyres slide at the rubber's sliding friction, not at an authored plateau (owner;
+  vehicletuning.ts SLIDING FRICTION, core/surfaces.ts `SurfaceSlide`). On paved surfaces
+  the brush tyre holds its bristles at the peak μ_p and slides the rest of the patch at
+  μ(V_s) = μ_k + (μ_p − μ_k)·exp(−V_s / 5 m/s), V_s the patch's combined sliding speed:
+  F/(μ_p Fz) = 3z(1−z)² + r(3z² − 2z³), r once the whole patch slides, both ways, with
+  μ_p/μ_k 1.13 dry and 1.30 wet (ABS over a locked wheel, MDPI Sustainability 2023,
+  15(8) 6945; PennDOT Little Book of Tire Pavement Friction), blended by wetness. The
+  longitudinal brush keeps the old slip stiffness (unit 1.85 · optimalSlip). Removed:
+  the side force's fade by slip angle to 0.7-0.88 of peak and the 0.75 locked share on
+  paved ground (`SLIP_FULL_*`, `SLIP_PLATEAU_*`, `SLIDING_GRIP_FRACTION`,
+  `PLAYER_REAR_PLATEAU`, `LONGITUDINAL_PEAK_FORCE`), and the side-force curve A/B
+  (`?tyre=curve`, `__bro.brushTyres`, `TYRE_MODEL`, tools/tyre-ab.ts). Loose ground
+  (gravel, sand, shoulder, rock) keeps the old curves as a documented placeholder
+  (`LOOSE_GROUND_SLIDE`). reality.ts: skidpad kit_vaz2106 0.55 → 0.62 g (real 0.72),
+  kit_vaz2108 0.66 → 0.72 (0.78); 80 km/h laden stop 36.1 → 33.4 m and 34.7 → 33.0 m.
+
 - Keyboard steering after BeamNG's keyboard filter (owner; the idea and figures of its
   `lua/vehicle/input.lua` "Key" filter, not its code). The steering wheel is a position
   a held key moves at a constant 720°/s with no ramp-up; winding further into a turn

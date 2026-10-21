@@ -1,8 +1,8 @@
 /**
  * tools/cargo-load-bench.ts
  *
- * What a heavy crate in the boot does to the car that carries it, and what Rapier's
- * ray-cast suspension does with the numbers it is handed.
+ * What a heavy crate in the boot does to the car that carries it, and what the tyre
+ * contacts' suspension (src/vehicle/tyrecontact.ts) does with the numbers it is handed.
  *
  * The report this exists for: a 300-700 kg `heavy_crate` in an Oka's trunk made the
  * suspension feel softer, the car wallow, and — the part no real car does — launch it
@@ -10,18 +10,18 @@
  *
  * Three sections:
  *
- *  1. THE LAW, on a bare controller: the body is pinned at a known height so the spring
- *     compression is exact, and the force Rapier returns is compared with
- *     `stiffness x compression x chassis_mass` for two masses, two stiffnesses and a
- *     rest length changed after construction. Everything the real car's numbers mean
- *     rests on this.
- *  2. STATIC, on the real car: ride height, the compression the controller is holding
+ *  1. THE LAW, on a bare tyre contact: the body is pinned at a known height so the spring
+ *     compression is exact, and the force the contact returns is compared with
+ *     `stiffness x compression` (absolute N/m) for two masses and two stiffnesses, and
+ *     checked NOT to move when the mass changes after construction. Everything the real
+ *     car's numbers mean rests on this.
+ *  2. STATIC, on the real car: ride height, the compression the tyre contact is holding
  *     against the same number as the game's telemetry reports it, travel, reserve, the
  *     load each corner is carrying, the car's real centre of mass and the weight split
  *     it produces, and where the bump stop begins.
  *  3. DRIVING, on the real car, on a road built here: flat asphalt with two smooth
  *     humps, 40 mm and 90 mm, at cruise — body rise, peak vertical speed, airborne
- *     time, time on Rapier's travel clamp, peak g — and a step steer for body roll.
+ *     time, time on the suspension's travel clamp, peak g — and a step steer for body roll.
  *     Loads of 0, +300 and +700 kg, each in the boot through the path a delivered
  *     crate uses: a `contract_cargo` item in `car.storage`, then `Vehicle.refreshLoad`.
  *
@@ -41,9 +41,9 @@
  * steering is added to it, so the suspension numbers stay the suspension's.
  *
  * `--legacy` puts the pre-real-COM car back through public surfaces — the whole mass as
- * one point at the catalogue's weight distribution with a solid-box tensor, and the
- * pre-fix suspension geometry — so the before/after comparison is measured by one
- * instrument; it FAILS the verdict, which is how the check is shown to bite.
+ * one point at the catalogue's weight distribution with a solid-box tensor — so the
+ * before/after comparison is measured by one instrument; it FAILS the verdict, which is
+ * how the check is shown to bite.
  * `--identity` instead proves the opposite end: a STOCK car handed the legacy placement
  * must measure what the new one does — to the float Rapier stores its centre of mass in —
  * which is the invariant that keeps every unloaded car in the game exactly where it was.
@@ -67,6 +67,7 @@ import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState, type CarState } from '../src/game/state';
 import type { Item } from '../src/items/items';
 import { preloadCarModels } from '../src/render/carmodel';
+import { TyreContacts, type TyreContact } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { frontWeightFraction } from '../src/vehicle/carmodels';
 import {
@@ -74,9 +75,6 @@ import {
   BUMP_STOP_PEAK,
   COM_DROP_FRACTION,
   FUEL_DENSITY,
-  INERTIA_PITCH_YAW_GAIN,
-  INERTIA_ROLL_GAIN,
-  MOUNT_ABOVE_WHEEL_CENTRE,
 } from '../src/vehicle/vehicletuning';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -108,22 +106,21 @@ const MODELS = process.argv.slice(2).filter((argument) => !argument.startsWith('
 const DEFAULT_MODELS = ['cf_vaz1111', 'gt_vaz2110'];
 
 /* ---------------------------------------------------------------------------
- * Section 1: the law, on a bare controller.
+ * Section 1: the law, on a bare tyre contact.
  * ------------------------------------------------------------------------- */
 
 interface LawRig {
   world: RAPIER.World;
   body: RAPIER.RigidBody;
-  controller: RAPIER.DynamicRayCastVehicleController;
+  tyres: TyreContacts;
+  tyre: TyreContact;
 }
 
 const LAW_RADIUS = 0.35;
+const LAW_WIDTH = 0.2;
+const LAW_REST = 0.6;
 
-function lawRig(options: {
-  readonly mass: number;
-  readonly stiffness: number;
-  readonly rest: number;
-}): LawRig {
+function lawRig(options: { readonly mass: number; readonly stiffness: number }): LawRig {
   const world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
   world.timestep = FIXED_DT;
   const h = 200;
@@ -134,99 +131,72 @@ function lawRig(options: {
   const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 1, 0));
   world.createCollider(RAPIER.ColliderDesc.cuboid(0.8, 0.5, 2).setDensity(0), body);
   // `setAdditionalMass` only marks the mass properties dirty; Rapier folds them in on
-  // the next step (or on an explicit recompute, as the game does). Without this the
-  // body stays at mass 0 and every suspension force is 0 x stiffness.
+  // the next step (or on an explicit recompute, as the game does).
   body.setAdditionalMass(options.mass, true);
   body.recomputeMassPropertiesFromColliders();
-  const controller = new RAPIER.DynamicRayCastVehicleController(
-    body,
-    world.broadPhase,
-    world.narrowPhase,
-    world.bodies,
-    world.colliders,
-  );
-  controller.indexUpAxis = 1;
-  controller.setIndexForwardAxis = 2;
-  controller.addWheel(
-    { x: 0, y: 0, z: 0 },
-    { x: 0, y: -1, z: 0 },
-    { x: -1, y: 0, z: 0 },
-    options.rest,
-    LAW_RADIUS,
-  );
-  controller.setWheelSuspensionStiffness(0, options.stiffness);
-  controller.setWheelSuspensionCompression(0, 0);
-  controller.setWheelSuspensionRelaxation(0, 0);
-  controller.setWheelMaxSuspensionTravel(0, 2);
-  controller.setWheelMaxSuspensionForce(0, 1e9);
-  return { world, body, controller };
+  const tyres = new TyreContacts({ world } as unknown as PhysicsWorld, body);
+  const tyre = tyres.add({ x: 0, y: 0, z: 0 }, LAW_REST, LAW_RADIUS, LAW_WIDTH);
+  tyre.springRateNPerM = options.stiffness;
+  tyre.compressionRateNsPerM = 0;
+  tyre.relaxationRateNsPerM = 0;
+  tyre.maxTravelM = 2;
+  tyre.maxForceN = 1e9;
+  return { world, body, tyres, tyre };
 }
 
 /**
- * The force one step returns with the body held at exactly `height` above the floor,
+ * The force one update returns with the body held at exactly `height` above the floor,
  * so the suspension length is `height - radius` and the compression is known without a
- * simulation. The world is never stepped, so gravity and motion cannot drift it.
+ * simulation.
  */
 function lawForce(rig: LawRig, height: number): number {
-  let force = 0;
-  // Rapier builds its query pipeline inside `step`, so the first `updateVehicle` after
-  // the pipeline is stale casts its ray into an empty tree and reports no contact. The
-  // body is re-pinned to the same height every iteration, so the step's gravity and
-  // impulse are thrown away and the compression stays exact.
+  // The world's query tree is only built inside `step`, so the first contact against a
+  // fresh world sees nothing. The body is re-pinned to the same height every iteration,
+  // so the step's gravity and impulse are thrown away and the compression stays exact.
   for (let i = 0; i < 3; i++) {
     rig.body.setTranslation({ x: 0, y: height, z: 0 }, true);
     rig.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     rig.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    rig.controller.updateVehicle(FIXED_DT);
-    force = rig.controller.wheelSuspensionForce(0) ?? 0;
+    rig.tyres.update(FIXED_DT);
     rig.world.step();
   }
-  return force;
+  return rig.tyre.forceN;
 }
 
 function lawSection(): void {
   const height = 0.75;
-  const compression = 0.6 - (height - LAW_RADIUS);
-  console.log('--- Rapier ray-cast suspension: force at a known compression ---');
+  const compression = LAW_REST - (height - LAW_RADIUS);
+  console.log('--- Tyre contact suspension: force at a known compression ---');
   console.log(
-    `  pinned at ${height} m, rest 0.6, radius ${LAW_RADIUS}, so compression ` +
+    `  pinned at ${height} m, rest ${LAW_REST}, radius ${LAW_RADIUS}, so compression ` +
       `${(compression * 1000).toFixed(0)} mm, zero velocity.`,
   );
-  console.log('  mass   stiffness/kg   force N   force/(k*x)   chassis.mass()');
+  console.log('  mass   k N/m     force N   force/(k*x)   chassis.mass()');
   for (const [mass, stiffness] of [
-    [635, 13134 / 635],
-    [1335, 13134 / 635],
-    [1335, 13134 / 1335],
+    [635, 13134],
+    [1335, 13134],
+    [1335, 27612],
   ] as const) {
-    const rig = lawRig({ mass, stiffness, rest: 0.6 });
+    const rig = lawRig({ mass, stiffness });
     const force = lawForce(rig, height);
     console.log(
-      `  ${String(mass).padStart(4)}   ${stiffness.toFixed(3).padStart(12)}   ` +
-        `${force.toFixed(0).padStart(7)}   ${(force / (stiffness * compression)).toFixed(0).padStart(11)}` +
+      `  ${String(mass).padStart(4)}   ${stiffness.toFixed(0).padStart(6)}   ` +
+        `${force.toFixed(0).padStart(7)}   ${(force / (stiffness * compression)).toFixed(3).padStart(11)}` +
         `   ${rig.body.mass().toFixed(0)}`,
     );
-    rig.controller.free();
     rig.world.free();
   }
 
-  // A mass changed AFTER the controller exists, and a rest length changed after it too.
-  const rig = lawRig({ mass: 635, stiffness: 13134 / 635, rest: 0.6 });
+  // A mass changed AFTER the contact exists: with absolute rates the force must not move.
+  const rig = lawRig({ mass: 635, stiffness: 13134 });
   const before = lawForce(rig, height);
   rig.body.setAdditionalMass(1335, true);
   const reMassed = lawForce(rig, height);
-  rig.controller.setWheelSuspensionRestLength(0, 0.9);
-  const reRested = lawForce(rig, height);
+  const held = Math.abs(reMassed - before) <= 1e-6 * Math.max(1, before);
   console.log(
     `  live mass change 635 -> 1335: force ${before.toFixed(0)} -> ${reMassed.toFixed(0)} N` +
-      ` (chassis.mass() ${rig.body.mass().toFixed(0)})`,
+      ` (chassis.mass() ${rig.body.mass().toFixed(0)})  ${held ? 'OK, mass-independent' : 'FAIL: the force followed the mass'}`,
   );
-  console.log(
-    `  live rest change 0.6 -> 0.9 (+300 mm): force ${reMassed.toFixed(0)} -> ` +
-      `${reRested.toFixed(0)} N (read back ${(
-        rig.controller.wheelSuspensionRestLength(0) ?? 0
-      ).toFixed(3)} m)`,
-  );
-  rig.controller.free();
   rig.world.free();
   console.log('');
 }
@@ -287,7 +257,7 @@ function heavyCrateItem(id: string, kg: number): Item {
 }
 
 /**
- * The `Vehicle`'s controller and wheel records; private to it, read here to measure.
+ * The `Vehicle`'s wheel records and their tyre contacts; private to it, read here to measure.
  *
  * Everything the legacy column writes back is declared mutable: reproducing the old
  * behaviour means writing the old numbers into these records, exactly as the old code
@@ -299,8 +269,8 @@ interface WheelRecord {
   sagM: number;
   designSagM: number;
   readonly bumpTravelM: number;
-  maxTravelM: number;
-  restLengthM: number;
+  readonly maxTravelM: number;
+  readonly restLengthM: number;
   staticLoadN: number;
   readonly springRateNPerM: number;
   readonly rideHz: number;
@@ -309,9 +279,9 @@ interface WheelRecord {
   readonly slipAngleRad: number;
   loadN: number;
   compressionM: number;
+  readonly tyre: TyreContact;
 }
 interface Internals {
-  controller: RAPIER.DynamicRayCastVehicleController | null;
   wheels: WheelRecord[];
   /** Measured axle lines and the catalogue's kerb weight distribution. */
   axleGeometry: {
@@ -382,28 +352,23 @@ function loadCargo(rig: Rig, kg: number): void {
 }
 
 /**
- * What Rapier hands back for one parked front wheel, step by step, against the product
- * its own getters say the force should be. Exists because the loaded car's force does
- * not match `stiffness x compression x chassis.mass` even though the law section shows
- * every one of those is honoured live; the trace is what says which of the three is not
- * the number it appears to be.
+ * What the tyre contact hands back for one parked front wheel, step by step, against
+ * the product its own rates say the spring force should be (`k x compression`, absolute
+ * N/m, no mass factor); the difference is the damper and the contact's angle factor.
  */
 function traceWheel(rig: Rig, label: string): void {
-  const { controller, wheels } = rig.vehicle as unknown as Internals;
+  const { wheels } = rig.vehicle as unknown as Internals;
   const w = wheels.find((candidate) => candidate.isFront)!;
   for (let i = 0; i < 3; i++) {
     rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
     rig.physics.step();
     rig.vehicle.postStep();
-    const rest = controller?.wheelSuspensionRestLength(w.index) ?? 0;
-    const length = controller?.wheelSuspensionLength(w.index) ?? 0;
-    const stiffness = controller?.wheelSuspensionStiffness(w.index) ?? 0;
-    const force = controller?.wheelSuspensionForce(w.index) ?? 0;
+    const { restLengthM: rest, lengthM: length, springRateNPerM: stiffness, forceN: force } = w.tyre;
     const mass = rig.vehicle.chassis.mass();
     console.log(
-      `  trace ${label} ${i}: mass ${mass.toFixed(0)} kg  k ${stiffness.toFixed(3)}/kg  ` +
+      `  trace ${label} ${i}: mass ${mass.toFixed(0)} kg  k ${stiffness.toFixed(0)} N/m  ` +
         `rest ${mm(rest)} mm  len ${mm(length)} mm  comp ${mm(rest - length)} mm  ` +
-        `force ${force.toFixed(0)} N  k*comp*mass ${(stiffness * (rest - length) * mass).toFixed(0)} N  ` +
+        `force ${force.toFixed(0)} N  k*comp ${(stiffness * (rest - length)).toFixed(0)} N  ` +
         `loadN ${w.loadN.toFixed(0)} N  static ${w.staticLoadN.toFixed(0)} N`,
     );
   }
@@ -445,35 +410,10 @@ interface StaticFacts {
 }
 
 /**
- * Reproduces the suspension as it behaved BEFORE this bench existed, so the before and
- * after columns come from one instrument rather than from two builds.
- *
- * Every line is what `reloadSprings` used to do to a loaded car: re-derive the spring's
- * free length and the travel from the load it is carrying, anchor the bump stop's knee
- * on that same load's sag, and scale the stop's crush force with the load. Producing it
- * through the controller's public setters is why it can be switched on from here at all.
- */
-function applyLegacyGeometry(rig: Rig): void {
-  const { controller, wheels } = rig.vehicle as unknown as Internals;
-  for (const w of wheels) {
-    const travel = w.sagM + w.bumpTravelM;
-    // The controller's free length and travel followed the load. The telemetry's rest
-    // length did NOT — it stayed at the kerb value it was built with, which is why the
-    // compression the game reported (and the bump stop it sized) had nothing to do with
-    // the one the springs were actually holding. Both halves are part of the behaviour.
-    w.restLengthM = w.designSagM + MOUNT_ABOVE_WHEEL_CENTRE;
-    w.maxTravelM = travel;
-    w.designSagM = w.sagM;
-    w.bumpStopPeakN = BUMP_STOP_PEAK * w.staticLoadN;
-    controller?.setWheelSuspensionRestLength(w.index, w.sagM + MOUNT_ABOVE_WHEEL_CENTRE);
-    controller?.setWheelMaxSuspensionTravel(w.index, travel);
-  }
-}
-
-/**
  * Reproduces the MASS placement as it was before this change: the whole car, a 700 kg
  * crate included, as one point at the catalogue's weight distribution and today's
- * centre-of-mass height, with a solid-box tensor scaled by the total mass. Every load
+ * centre-of-mass height, with a solid-box tensor scaled by the total mass and by the
+ * box gains the chassis carried then (2.55 on pitch and yaw, 1.35 on roll). Every load
  * therefore sits at the car's own centre of mass and none of them moves it — which is
  * the thing this bench exists to disprove.
  *
@@ -488,9 +428,9 @@ function applyLegacyMass(rig: Rig): void {
   const half = vehicle.modelMeasure.halfExtents;
   const mass = vehicle.stats.mass;
   const inertia = {
-    x: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (half[1] * half[1] + half[2] * half[2]),
-    y: INERTIA_PITCH_YAW_GAIN * (mass / 3) * (half[0] * half[0] + half[2] * half[2]),
-    z: INERTIA_ROLL_GAIN * (mass / 3) * (half[0] * half[0] + half[1] * half[1]),
+    x: 2.55 * (mass / 3) * (half[1] * half[1] + half[2] * half[2]),
+    y: 2.55 * (mass / 3) * (half[0] * half[0] + half[2] * half[2]),
+    z: 1.35 * (mass / 3) * (half[0] * half[0] + half[1] * half[1]),
   };
   const comZ =
     axleGeometry.rearZ + axleGeometry.frontWeightShare * (axleGeometry.frontZ - axleGeometry.rearZ);
@@ -520,7 +460,7 @@ function applyLegacyMass(rig: Rig): void {
 function reportStatic(modelId: string, kg: number, rig: Rig): StaticFacts {
   const { vehicle } = rig;
   const internals = vehicle as unknown as Internals;
-  const { controller, wheels, axleGeometry } = internals;
+  const { wheels, axleGeometry } = internals;
   const halfY = vehicle.modelMeasure.halfExtents[1];
   const front = wheels.filter((w) => w.isFront);
   const rear = wheels.filter((w) => !w.isFront);
@@ -529,16 +469,11 @@ function reportStatic(modelId: string, kg: number, rig: Rig): StaticFacts {
   const axle = (frontAxle: boolean): string => {
     const list = frontAxle ? front : rear;
     const w = list[0]!;
-    const rest = controller?.wheelSuspensionRestLength(w.index) ?? 0;
-    const length = controller?.wheelSuspensionLength(w.index) ?? rest;
-    const travel = controller?.wheelMaxSuspensionTravel(w.index) ?? 0;
-    const maxForce = controller?.wheelMaxSuspensionForce(w.index) ?? 0;
-    const stiffness = controller?.wheelSuspensionStiffness(w.index) ?? 0;
-    const force = controller?.wheelSuspensionForce(w.index) ?? 0;
+    const { restLengthM: rest, lengthM: length, maxTravelM: travel, maxForceN: maxForce, springRateNPerM: stiffness, forceN: force } = w.tyre;
     const stopBegins = w.designSagM + w.bumpTravelM * (1 - BUMP_STOP_FRACTION);
     const index = w.index;
     const sample = ride[index]!;
-    const impliedMass = stiffness * (rest - length) > 0 ? force / (stiffness * (rest - length)) : 0;
+    const springN = stiffness * (rest - length);
     return (
       `k ${w.springRateNPerM.toFixed(0).padStart(6)} N/m  rest ${mm(rest).padStart(4)} mm ` +
       `(telemetry ${mm(w.restLengthM).padStart(4)})  len ${mm(length).padStart(4)} mm  ` +
@@ -547,20 +482,20 @@ function reportStatic(modelId: string, kg: number, rig: Rig): StaticFacts {
       `travel ${mm(travel).padStart(4)} mm (record ${mm(w.maxTravelM).padStart(4)})  ` +
       `stop ${mm(stopBegins).padStart(4)} mm  ` +
       `static ${w.staticLoadN.toFixed(0).padStart(5)} N  ${w.rideHz.toFixed(2)} Hz\n` +
-      `        controller k ${stiffness.toFixed(3).padStart(6)}/kg  maxF ${maxForce.toFixed(0).padStart(6)} N` +
-      `  force ${force.toFixed(0).padStart(5)} N  (implies mass ${impliedMass.toFixed(0)} kg)\n` +
+      `        contact k ${stiffness.toFixed(0).padStart(6)} N/m  maxF ${maxForce.toFixed(0).padStart(6)} N` +
+      `  force ${force.toFixed(0).padStart(5)} N  (k*comp ${springN.toFixed(0)} N)\n` +
       `        telemetry  comp ${mm(sample.compressionM).padStart(4)} mm  reserve ${mm(sample.reserveM).padStart(4)} mm` +
       `  load ${sample.loadN.toFixed(0).padStart(5)} N  wheel record comp ${mm(w.compressionM).padStart(4)} mm`
     );
   };
   const axleFacts = (list: WheelRecord[]): AxleFacts => {
     const w = list[0]!;
-    const rest = controller?.wheelSuspensionRestLength(w.index) ?? 0;
-    const length = controller?.wheelSuspensionLength(w.index) ?? rest;
+    const rest = w.tyre.restLengthM;
+    const length = w.tyre.lengthM;
     return {
       lengthM: length,
       compressionM: rest - length,
-      travelM: controller?.wheelMaxSuspensionTravel(w.index) ?? 0,
+      travelM: w.tyre.maxTravelM,
       stopBeginsM: w.designSagM + w.bumpTravelM * (1 - BUMP_STOP_FRACTION),
       staticLoadN: w.staticLoadN,
       springRateNPerM: w.springRateNPerM,
@@ -726,7 +661,7 @@ function laneGuard(rig: Rig): number {
 /** One fixed step with the commanded inputs, then everything that step can be read for. */
 function step(rig: Rig, steer: number, throttle: number, brake: number): StepFacts {
   const { vehicle, physics, input } = rig;
-  const { controller, wheels } = vehicle as unknown as Internals;
+  const { wheels } = vehicle as unknown as Internals;
 
   input.steer = steer;
   input.throttle = throttle;
@@ -738,20 +673,17 @@ function step(rig: Rig, steer: number, throttle: number, brake: number): StepFac
 
   const pos = vehicle.chassis.translation();
   const vy = vehicle.chassis.linvel().y;
-  const wheelCount = controller?.numWheels() ?? 0;
   let wheelsDown = 0;
   let compression = 0;
   let force = 0;
   let stopN = 0;
   let clamped = false;
-  for (let w = 0; w < wheelCount; w++) {
-    const rest = controller?.wheelSuspensionRestLength(w) ?? 0;
-    const length = controller?.wheelSuspensionLength(w) ?? rest;
-    const travel = controller?.wheelMaxSuspensionTravel(w) ?? 0;
-    const comp = rest - length;
+  for (let w = 0; w < wheels.length; w++) {
+    const tyre = wheels[w]!.tyre;
+    const comp = tyre.restLengthM - tyre.lengthM;
     if (comp > compression) compression = comp;
-    if (length <= rest - travel + 5e-4) clamped = true;
-    if ((controller?.wheelSuspensionForce(w) ?? 0) > force) force = controller?.wheelSuspensionForce(w) ?? 0;
+    if (tyre.lengthM <= tyre.restLengthM - tyre.maxTravelM + 5e-4) clamped = true;
+    if (tyre.forceN > force) force = tyre.forceN;
     if (wheels[w]!.bumpStopN > stopN) stopN = wheels[w]!.bumpStopN;
     if (vehicle.wheelRide[w]?.inContact) wheelsDown++;
   }
@@ -1224,12 +1156,9 @@ async function main(): Promise<void> {
         const rig = await makeRig(id);
         if (kg > 0) loadCargo(rig, kg);
         // `--legacy` puts the pre-real-COM car back — the whole mass at the car's own
-        // centre of mass and the pre-fix suspension geometry — through public surfaces,
-        // so the before column is measured by this bench rather than by an older build.
-        if (legacy) {
-          applyLegacyMass(rig);
-          if (kg > 0) applyLegacyGeometry(rig);
-        }
+        // centre of mass — through public surfaces, so the before column is measured by
+        // this bench rather than by an older build.
+        if (legacy) applyLegacyMass(rig);
         // Everything the load changed (springs, stance, the low-passed load the tyre
         // model reads) has to be settled before anything is measured, or the numbers
         // are the car it was a second ago.
@@ -1245,10 +1174,7 @@ async function main(): Promise<void> {
         // off the tyre temperature.
         const rollRig = await makeRig(id);
         if (kg > 0) loadCargo(rollRig, kg);
-        if (legacy) {
-          applyLegacyMass(rollRig);
-          if (kg > 0) applyLegacyGeometry(rollRig);
-        }
+        if (legacy) applyLegacyMass(rollRig);
         settle(rollRig, 5);
         const roll = rollRun(rollRig);
         console.log(
@@ -1262,10 +1188,7 @@ async function main(): Promise<void> {
         // state to lift out of, and the tyres it has just heated would flatter the rear.
         const liftRig = await makeRig(id);
         if (kg > 0) loadCargo(liftRig, kg);
-        if (legacy) {
-          applyLegacyMass(liftRig);
-          if (kg > 0) applyLegacyGeometry(liftRig);
-        }
+        if (legacy) applyLegacyMass(liftRig);
         settle(liftRig, 5);
         const lift = liftRun(liftRig);
         const deg = (rad: number): string => ((rad * 180) / Math.PI).toFixed(2);

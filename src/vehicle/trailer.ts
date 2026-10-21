@@ -19,28 +19,30 @@ import {
   LOAD_SENSITIVITY,
   LOAD_SENSITIVITY_MAX,
   LOAD_SENSITIVITY_MIN,
-  LONGITUDINAL_PEAK_U,
+  longitudinalSlipUnit,
   LONGITUDINAL_RELAXATION_FLOOR_MPS,
   rotateVector,
   SLIP_ANGLE_REF_MPS,
+  slidingFloor,
+  slidingRatio,
   SLIP_REFERENCE_MPS,
   tyreCurve,
-  WHEEL_LOAD_TAU,
   WHEEL_MASS_KG,
   WHEEL_REFERENCE_RADIUS,
 } from './vehicletuning';
-import { weatherGrip } from '../world/weather';
+import { weather, weatherGrip } from '../world/weather';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
+import { TyreContacts, type TyreContact } from './tyrecontact';
 
 /**
  * A towed trailer, and the drawbar hitch that couples it to any car.
  *
  * Deliberately not a `Vehicle`: no engine, gearbox, steering or driver. What it
- * shares with a car is the part that matters — Rapier's ray-cast suspension, via
- * its own `DynamicRayCastVehicleController` with two unpowered wheels, and the
- * car's own tyre law (see TRAILER TYRES below). That is what makes it behave like a
- * trailer rather than a sliding crate: the wheels resist sideways motion, so the
- * thing tracks behind you, and when it stops tracking you feel it in the car.
+ * shares with a car is the part that matters — the car's wheel contacts and springs
+ * (vehicle/tyrecontact.ts) on two unpowered wheels, and the car's own tyre law (see
+ * TRAILER TYRES below). That is what makes it behave like a trailer rather than a
+ * sliding crate: the wheels resist sideways motion, so the thing tracks behind you,
+ * and when it stops tracking you feel it in the car.
  *
  * The hitch sits just behind the measured rear face of the towing car. Car models
  * are centred on their measured body bounds, so `-halfExtents.z` is the exact rear
@@ -103,40 +105,45 @@ export const TRAILER_CAPACITY_KG = 700;
 /**
  * TRAILER TYRES: the car's tyre law on a small cross-ply.
  *
- * Rapier's own friction channels are zeroed on both wheels, exactly as the car's are,
- * and the forces come from the shared functions in vehicletuning.ts: the brush side
- * force (`brushPeakTan`, `combinedLateral`) read at a slip angle relaxed over the
- * distance rolled, the longitudinal curve read at a carcass slip relaxed the same
- * way (`combinedLongitudinal`) from a wheel that spins and locks, the two sharing one
- * patch (COMBINED SLIP), load sensitivity against each wheel's own static load, and
- * each surface's own coefficient, peak slip and rolling resistance.
+ * The wheel contacts make no tyre force, exactly as the car's do,
+ * and the forces come from the shared functions in vehicletuning.ts: the brush tyre
+ * (`brushPeakTan`, `combinedLateral`) read at a slip angle relaxed over the distance
+ * rolled, the longitudinal force read at a carcass slip relaxed the same way
+ * (`combinedLongitudinal`) from a wheel that spins and locks, the two sharing one
+ * patch (COMBINED SLIP) and sliding at the rubber's friction for the patch's sliding
+ * speed (SLIDING FRICTION), load sensitivity against each wheel's own static load,
+ * and each surface's own coefficient, slip unit, sliding and rolling resistance.
  *
- * Rapier's channel was a velocity-cancelling constraint — an infinitely stiff tyre
- * that never slid, whatever the load — so the trailer had no slip angle to speak of
- * and could neither sway nor be dragged sideways on a loose verge.
+ * Rapier's ray-cast vehicle channel, used here once, was a velocity-cancelling
+ * constraint — an infinitely stiff tyre that never slid, whatever the load — so the
+ * trailer had no slip angle to speak of and could neither sway nor be dragged
+ * sideways on a loose verge.
  *
- * The tyre is a period trailer's 13-inch cross-ply (`tyreCurve`: peak at 8°, fading
- * to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a little under
- * the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap.
+ * The tyre is a period trailer's 13-inch cross-ply (`tyreCurve`: peak at 8°, on loose
+ * ground fading to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a
+ * little under the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap.
  * No temperature model: a trailer tyre does no work but roll.
  */
 const TRAILER_TYRE = tyreCurve({ construction: 'crossply', aspect: 0.8 }, HANDLING_PROFILES.classic);
 const TRAILER_TYRE_GRIP = 0.5;
+/** Tread width, metres: a 145-13 trailer tyre. The contact's profile (vehicle/tyrecontact.ts). */
+const TYRE_WIDTH = 0.145;
 /** One road wheel's spin inertia, kg·m²: the car's wheel (vehicletuning.ts) at this radius. */
 const WHEEL_INERTIA =
   0.5 * WHEEL_MASS_KG * (WHEEL_RADIUS / WHEEL_REFERENCE_RADIUS) ** 2 * WHEEL_RADIUS * WHEEL_RADIUS;
 
 /**
- * Suspension, in the same per-kilogram units the car catalogue uses — see the
- * suspension note in carmodels.ts for why a rate is per kilogram and why TRAVEL vs
- * SAG is the load-bearing relationship.
+ * Suspension, per kilogram of the trailer's mass: `applyMass` multiplies the rates by
+ * the mass it sets, so a loaded trailer is stiffer in proportion and rides at the same
+ * height. See the suspension note in carmodels.ts for why TRAVEL vs SAG is the
+ * load-bearing relationship.
  *
  * A trailer carries its whole mass on TWO wheels, so the same ride as a car needs
  * twice a car's rate: the body frequency is sqrt(wheels * stiffness), and 32 on two
  * wheels is 8.0 rad/s against the road car's 8.25 on four. The first attempt used a
  * car-like 20 with only 0.22 m of travel, which settled with 32 mm of compression
- * left (`tools/trailer-bench.mjs`) — so any hummock taller than that pushed the
- * spring onto its clamp, and Rapier both draws AND simulates a clamped wheel at the
+ * left (`tools/trailer-bench.ts`) — so any hummock taller than that pushed the
+ * spring onto its clamp, and the contact both draws AND simulates a clamped wheel at the
  * clamp while the ground goes on rising. That is what put one wheel under the
  * terrain with the other sitting correctly on it: not an asymmetric trailer, an
  * exhausted spring under whichever wheel found the bump. The bench measures 166 mm
@@ -161,14 +168,14 @@ const SUSPENSION = {
 
 /**
  * How far a settled wheel hangs below its mount, metres — MEASURED coupled and
- * empty on the bench in `tools/trailer-bench.mjs`, not derived from
- * `g / (wheels * stiffness)`. Rapier's ray-cast spring settles about a third
+ * empty on the bench in `tools/trailer-bench.ts`, not derived from
+ * `g / (wheels * stiffness)`. The spring (vehicle/tyrecontact.ts) settles about a third
  * stiffer than that formula predicts (0.134 m of compression at k=32, not 0.153 m),
  * and this number is not free tuning: MOUNT_Y, the collider floor and
  * TRAILER_MODEL_FIT all key off it, so being wrong here rides the whole trailer at
  * the wrong height with its wheels tucked up into the arches.
  *
- * Re-measure with `node tools/trailer-bench.mjs 32 0.3 0.3 <hang>` after any change
+ * Re-measure with `bun tools/trailer-bench.ts 32 0.3 0.3 <hang>` after any change
  * to the spring above: the bench prints the settled bed height against the height
  * the art expects (0.670 m), and the two have to agree. They do at 0.166.
  */
@@ -206,7 +213,7 @@ export const TRAILER_HALF_LENGTH = BED_HALF[2];
  * Both wheels sit BEHIND the bed's centre of mass (AXLE_Z), which is what makes a
  * trailer track instead of snake, and it means the tongue is heavy: uncoupled, there
  * is nothing ahead of the axle holding the nose up, so the whole thing pivots onto
- * its drawbar and stands 18 degrees nose-down (measured, `tools/trailer-bench.mjs`,
+ * its drawbar and stands 18 degrees nose-down (measured, `tools/trailer-bench.ts`,
  * the "standing" case). Real trailers answer this with a jockey wheel or a prop
  * stand, and so does this one: a leg from the drawbar to the ground, whose collider
  * and mesh exist only while the trailer is standing on its own.
@@ -331,13 +338,15 @@ const matCrate = new THREE.MeshStandardMaterial({ color: 0x8a6238, roughness: 0.
  * car's `Wheel` (vehicle.ts), for the same reasons.
  */
 interface TrailerWheel {
-  /** Controller index. */
+  /** Index into the trailer's wheel lists (spray states, wheel meshes). */
   readonly index: number;
+  /** Where this tyre touches the ground, and its spring and damper. */
+  readonly tyre: TyreContact;
   /** Which side of the bed, as the sign of its local X. */
   readonly side: number;
   /** What it carries standing level and coupled, N: the reference for μ(Fz). */
   staticLoadN: number;
-  /** Low-passed normal load, N (the car's WHEEL_LOAD_TAU). */
+  /** Normal load this step, N: the spring and damper, and last step's `linkN`. */
   loadN: number;
   /**
    * The part of the axle's cornering moment the axle carries straight to this tyre,
@@ -388,7 +397,7 @@ export class Trailer implements Rebasable {
   /** Static vertical load on the ball for the current payload, N (`tongueLoadN`). */
   private tongueN = 0;
   private readonly body: RAPIER.RigidBody;
-  private readonly controller: RAPIER.DynamicRayCastVehicleController;
+  private readonly tyres: TyreContacts;
   private readonly root = new THREE.Group();
   private readonly wheelMeshes: THREE.Mesh[] = [];
   private readonly drawbar: THREE.Mesh;
@@ -477,36 +486,22 @@ export class Trailer implements Rebasable {
       this.body,
     );
 
-    this.controller = new physics.rapier.DynamicRayCastVehicleController(
-      this.body,
-      physics.world.broadPhase,
-      physics.world.narrowPhase,
-      physics.world.bodies,
-      physics.world.colliders,
-    );
-    this.controller.indexUpAxis = 1;
-    this.controller.setIndexForwardAxis = 2;
-
+    // The tyre forces are this file's own (`applyTyres`); the contacts are a suspension.
+    // Their rates are set per kilogram in `applyMass`.
+    this.tyres = new TyreContacts(physics, this.body);
     for (const side of [-1, 1]) {
-      const index = this.controller.numWheels();
-      this.controller.addWheel(
+      const index = this.wheels.length;
+      const tyre = this.tyres.add(
         { x: side * TRACK_HALF, y: MOUNT_Y, z: AXLE_Z },
-        { x: 0, y: -1, z: 0 },
-        { x: -1, y: 0, z: 0 },
         SUSPENSION.restLength,
         WHEEL_RADIUS,
+        TYRE_WIDTH,
       );
-      this.controller.setWheelSuspensionStiffness(index, SUSPENSION.stiffness);
-      this.controller.setWheelSuspensionCompression(index, SUSPENSION.compression);
-      this.controller.setWheelSuspensionRelaxation(index, SUSPENSION.relaxation);
-      this.controller.setWheelMaxSuspensionTravel(index, SUSPENSION.maxTravel);
-      this.controller.setWheelMaxSuspensionForce(index, SUSPENSION.maxForce);
-      // ZERO, both channels, as the car does: the tyre forces are this file's own
-      // (`applyTyres`). Brake and side gain zero leave Rapier's controller a suspension.
-      this.controller.setWheelSideFrictionStiffness(index, 0);
-      this.controller.setWheelBrake(index, 0);
+      tyre.maxTravelM = SUSPENSION.maxTravel;
+      tyre.maxForceN = SUSPENSION.maxForce;
       this.wheels.push({
         index,
+        tyre,
         side,
         staticLoadN: 0,
         loadN: 0,
@@ -575,8 +570,8 @@ export class Trailer implements Rebasable {
     this.drawbar.castShadow = true;
     this.root.add(this.drawbar);
 
-    // The controller indexes wheels right (-1) first, so the visual list must be
-    // built in the same order or syncVisuals reads the wrong side's suspension.
+    // The wheels are listed right (-1) first, so the visual list must be built in the
+    // same order or syncVisuals reads the wrong side's suspension.
     model.rightWheel.position.set(-TRACK_HALF, MOUNT_Y - WHEEL_HANG, AXLE_Z);
     model.leftWheel.position.set(TRACK_HALF, MOUNT_Y - WHEEL_HANG, AXLE_Z);
     this.root.add(model.rightWheel);
@@ -902,7 +897,7 @@ export class Trailer implements Rebasable {
    */
   fixedUpdate(dt: number, carBrake = 0): void {
     this.lastStepDt = dt;
-    this.controller.updateVehicle(dt);
+    this.tyres.update(dt);
     this.applyTyres(dt, Math.min(1, Math.max(0, carBrake)));
   }
 
@@ -952,7 +947,6 @@ export class Trailer implements Rebasable {
         Math.min(this.serviceBrakeDecel * this.massKg, FOOT_BRAKE_GRIP_RATIO * gripN) *
         WHEEL_RADIUS) /
       this.wheels.length;
-    const loadBlend = dt / (WHEEL_LOAD_TAU + dt);
     const lv = body.linvel(this.velocityScratch);
     const speed = Math.hypot(lv.x, lv.z);
     const travelX = speed > 1e-3 ? lv.x / speed : 0;
@@ -966,11 +960,8 @@ export class Trailer implements Rebasable {
 
     for (const w of this.wheels) {
       const s = this.sprayStates[w.index];
-      const inContact = this.controller.wheelIsInContact(w.index);
-      const rawLoad = inContact
-        ? Math.max(0, (this.controller.wheelSuspensionForce(w.index) ?? 0) + w.linkN)
-        : 0;
-      w.loadN += (rawLoad - w.loadN) * loadBlend;
+      const inContact = w.tyre.inContact;
+      w.loadN = inContact ? Math.max(0, w.tyre.forceN + w.linkN) : 0;
       s.inContact = inContact;
       if (!inContact || !(w.loadN > 0) || !(w.staticLoadN > 0)) {
         // In the air a wheel only turns, and its brake (or the parked lock) slows it.
@@ -986,8 +977,12 @@ export class Trailer implements Rebasable {
       }
 
       // The patch's own frame: the bed's forward and side axes laid into the ground.
-      this.controller.wheelContactPoint(w.index, w.contact);
-      this.controller.wheelContactNormal(w.index, w.normal);
+      w.contact.x = w.tyre.point.x;
+      w.contact.y = w.tyre.point.y;
+      w.contact.z = w.tyre.point.z;
+      w.normal.x = w.tyre.normal.x;
+      w.normal.y = w.tyre.normal.y;
+      w.normal.z = w.tyre.normal.z;
       const n = w.normal;
       const f = w.forward;
       rotateVector(f, rotation, 0, 0, 1);
@@ -1014,7 +1009,7 @@ export class Trailer implements Rebasable {
       const lateralSpeed = vel.x * right.x + vel.y * right.y + vel.z * right.z;
       const absForward = Math.abs(forwardSpeed);
 
-      const ground = this.controller.wheelGroundObject(w.index);
+      const ground = w.tyre.ground;
       const surfaceType = this.physics.surfaces.lookupType(ground ? ground.handle : null);
       const surface = SURFACES[surfaceType];
       const loadRatio = w.loadN / w.staticLoadN;
@@ -1037,7 +1032,13 @@ export class Trailer implements Rebasable {
       const sideSlip = Math.tan(Math.min(Math.abs(w.slipAngleRad), 1.4)) / peakTan;
 
       // ALONG: the car's wheel and carcass, solved together.
-      const slipScale = 1 / (surface.optimalSlip * LONGITUDINAL_PEAK_U);
+      const slipScale = 1 / longitudinalSlipUnit(surface);
+      // How the patch slides here, at the speed it slid last step (SLIDING FRICTION).
+      const loose = surface.slide.kind === 'loose';
+      const floor = slidingFloor(surface.slide, weather.wet);
+      const slideRatio = loose
+        ? floor
+        : slidingRatio(floor, Math.hypot(lateralSpeed, w.spinRadS * WHEEL_RADIUS - forwardSpeed));
       const reference = Math.max(absForward, SLIP_REFERENCE_MPS);
       const carcassBlend =
         1 -
@@ -1052,7 +1053,11 @@ export class Trailer implements Rebasable {
       if (parked) {
         const carcass = w.carcassSlip + (-forwardSpeed / reference - w.carcassSlip) * carcassBlend;
         const stopN = (shareMass * absForward) / dt;
-        const slide = clamp(capacityN * combinedLongitudinal(carcass * slipScale, sideSlip), -stopN, stopN);
+        const slide = clamp(
+          capacityN * combinedLongitudinal(carcass * slipScale, sideSlip, loose, slideRatio),
+          -stopN,
+          stopN,
+        );
         // STATIC FRICTION holds against the slope as well as the slide: the impulse goes
         // in before the solver adds this step's gravity, so a hold that cancelled only
         // the speed already there is undone every step. Counting the slope took the
@@ -1074,12 +1079,12 @@ export class Trailer implements Rebasable {
           w.carcassSlip + ((spin * WHEEL_RADIUS - forwardSpeed) / reference - w.carcassSlip) * carcassBlend;
         const stiffness =
           (capacityN *
-            Math.max(0, combinedLongitudinalSlope(carcass0 * slipScale, sideSlip)) *
+            Math.max(0, combinedLongitudinalSlope(carcass0 * slipScale, sideSlip, loose, slideRatio)) *
             slipScale *
             carcassBlend *
             WHEEL_RADIUS) /
           reference;
-        const force0 = capacityN * combinedLongitudinal(carcass0 * slipScale, sideSlip);
+        const force0 = capacityN * combinedLongitudinal(carcass0 * slipScale, sideSlip, loose, slideRatio);
         let delta = -(dt * force0 * WHEEL_RADIUS) / (WHEEL_INERTIA + dt * stiffness * WHEEL_RADIUS);
         const toSync = forwardSpeed / WHEEL_RADIUS - spin;
         delta = delta >= 0 ? Math.min(delta, Math.max(0, toSync)) : Math.max(delta, Math.min(0, toSync));
@@ -1120,7 +1125,8 @@ export class Trailer implements Rebasable {
           fadePeakDeg,
           TRAILER_TYRE.fullFrontDeg,
           TRAILER_TYRE.plateauFront,
-          true,
+          loose,
+          slideRatio,
         ) *
         dt;
       const stopImpulse = Math.abs(lateralSpeed) * shareMass;
@@ -1159,8 +1165,8 @@ export class Trailer implements Rebasable {
       w.surface = surfaceType;
       s.forwardSpeed = forwardSpeed;
       s.slipRatio = w.slipRatio;
-      // Past the surface's peak, as the car reports it: a locked trailer wheel throws.
-      s.slideSlip = Math.max(0, Math.abs(w.slipRatio) - surface.optimalSlip * LONGITUDINAL_PEAK_U);
+      // Past the surface's slip unit, as the car reports it: a locked trailer wheel throws.
+      s.slideSlip = Math.max(0, Math.abs(w.slipRatio) - longitudinalSlipUnit(surface));
     }
 
     // The axle's share of the cornering moment, onto the tyres for the next step: the
@@ -1320,12 +1326,12 @@ export class Trailer implements Rebasable {
       this.root.quaternion.slerpQuaternions(this.prevQuat, this.stepQuat, alpha);
     }
 
-    // Wheels ride their suspension and turn with their own spin. The ride comes off
-    // the controller, so the drawn wheel is the one the solver used; the spin is the
+    // Wheels ride their suspension and turn with their own spin. The ride comes off the
+    // contacts, so the drawn wheel is the one the solver used; the spin is the
     // tyre pass's own wheel, integrated like the car's `drawnSpin`, so a wheel the
     // brakes have locked is drawn locked.
     for (let i = 0; i < this.wheelMeshes.length; i++) {
-      const suspension = this.controller.wheelSuspensionLength(i) ?? SUSPENSION.restLength;
+      const suspension = this.wheels[i].tyre.lengthM;
       const mesh = this.wheelMeshes[i];
       mesh.position.y = MOUNT_Y - suspension;
       mesh.rotation.x = this.wheels[i].drawnRad;
@@ -1370,7 +1376,6 @@ export class Trailer implements Rebasable {
 
     this.detachCoupling(false);
     this.unregisterOrigin();
-    this.controller.free();
     this.physics.removeBody(this.body);
     this.scene.remove(this.root);
     for (const geo of this.disposables) geo.dispose();
@@ -1449,6 +1454,11 @@ export class Trailer implements Rebasable {
       false,
     );
     this.body.recomputeMassPropertiesFromColliders();
+    for (const w of this.wheels) {
+      w.tyre.springRateNPerM = SUSPENSION.stiffness * mass;
+      w.tyre.compressionRateNsPerM = SUSPENSION.compression * mass;
+      w.tyre.relaxationRateNsPerM = SUSPENSION.relaxation * mass;
+    }
 
     // Moments about the axle, level and with no pull on the drawbar: the ball carries
     // the share of the weight its lever gives it, the two tyres the rest.

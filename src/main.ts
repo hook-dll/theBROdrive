@@ -1,4 +1,3 @@
-import { TYRE_MODEL } from './vehicle/vehicletuning';
 import * as THREE from 'three';
 import { FrameProfiler } from './core/frameprofiler';
 import { PerfOverlay } from './ui/perfoverlay';
@@ -1648,9 +1647,9 @@ async function boot(): Promise<void> {
     // remember to call in. `computeStats` is a couple of dozen reads, `refreshLoad`
     // returns immediately when the total has not moved, and a live set is a handful
     // of cars, so one unconditional call is both cheaper and impossible to forget.
-    // The car the player drives with their own hands reads THE PLAYER'S CAR figures
-    // (vehicletuning.ts `PLAYER_*`); every other car, and this one under the autopilot,
-    // keeps the catalogue's the autopilot was tuned on.
+    // The car the player drives with their own hands gets the driver aids (ABS,
+    // traction control); every other car, and this one under the autopilot, drives
+    // without them.
     const playerDriven = autopilot.engaged ? null : controlled;
     for (const vehicle of vehicles.values()) {
       vehicle.setPlayerDriven(vehicle === playerDriven);
@@ -3290,8 +3289,6 @@ async function boot(): Promise<void> {
 // Dev scenes are separate entry points reached by query string, so their code is a
 // dynamic import the production bundle drops rather than something the game carries.
 const query = new URLSearchParams(window.location.search);
-// `?tyre=curve`: the old side-force curve instead of the brush tyre (A/B).
-if (query.get('tyre') === 'curve') TYRE_MODEL.brush = false;
 const launch = query.has('poi-gallery')
   ? import('./poi-gallery').then(({ bootPoiGallery }) => bootPoiGallery())
   : query.has('artifact-gallery')

@@ -9,7 +9,7 @@
  * the constants they explain.
  */
 
-import { SurfaceType } from '../core/surfaces';
+import { LOOSE_GROUND_SLIDE, SurfaceType, type SurfaceProps, type SurfaceSlide } from '../core/surfaces';
 import { FLUID_DENSITY } from '../items/items';
 import { variant } from '../parts/registry';
 import type { HandlingProfile } from './carmodels';
@@ -53,9 +53,12 @@ export const GRAVITY = 9.81;
 // ---------------------------------------------------------------------------
 
 /**
- * Rack speed, radians per second at the ROAD WHEEL: how fast the driver's hands can
- * move the tyres, at any speed. 60°/s is about 1000°/s at the rim of a 16:1
- * recirculating-ball box, a quick pair of hands; the later racks are quicker.
+ * Rack speed, radians per second at the ROAD WHEEL: how fast a driver's hands can
+ * move the tyres, at any speed, the same for the player and the autopilot. 90°/s is
+ * about 1450°/s at the rim of a 16:1 recirculating-ball box, a quick pair of hands
+ * spinning the wheel; the later racks are quicker. It was 60 for the autopilot and
+ * 1.5 × that for the player; one driver's hands are one figure, and the player's was
+ * the one a person reaches.
  *
  * It replaces a pair of rates blended by a speed table (2.0 rad/s parked, 0.5 at
  * 100 km/h). The high-speed one was there to keep a held key from asking for too much
@@ -63,7 +66,7 @@ export const GRAVITY = 9.81;
  * and the pad's assist asks for a few degrees at speed, and the parked one was faster
  * than anyone turns a wheel.
  */
-export const STEER_RACK_SPEED_RAD_S = (60 * Math.PI) / 180;
+export const STEER_RACK_SPEED_RAD_S = (90 * Math.PI) / 180;
 /**
  * THE PAD'S STEERING ASSIST AT SPEED (`SteerMode` 'analogAssist'): a full stick asks for
  * the rack angle that puts the front tyres at their own peak slip angle, and this much
@@ -110,8 +113,7 @@ export const STEER_ASSIST_SLIP_MARGIN = 0.1;
  *     KEYS_G_DECAY_PER_S, so the boost does not vanish as the car swaps direction).
  *  4. LET GO, the rim returns to centre at KEYS_IN_RATE_RAD_S, linearly, at any speed.
  *  5. The road wheels follow through the steering ratio (`STEERING_WHEEL_HALF_LOCK_RAD`
- *     / `steerLock`), and the rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`)
- *     still applies after.
+ *     / `steerLock`), and the rack speed (`steerRackSpeed`) still applies after.
  * ------------------------------------------------------------------------- */
 /** A held key's rim rate, 720°/s (BeamNG's 1.6 × 450°): lock in about 0.67 s. */
 export const KEYS_OUT_RATE_RAD_S = (720 * Math.PI) / 180;
@@ -148,49 +150,6 @@ export const TCS_RELEASE = 0.75;
 export const TCS_MIN_SCALE = 0.15;
 export const TCS_RECOVER_S = 0.3;
 
-/* ---------------------------------------------------------------------------
- * THE PLAYER'S CAR: four figures the car the player drives from the driver's seat, with
- * their own hands, reads in place of the catalogue's (`Vehicle.setPlayerDriven`).
- * Together they are a car that turns in, rotates and lets its tail go the way a real
- * one does, where the catalogue's figures made every car too safe at speed.
- *
- * Every other car — traffic, rivals, a car the player has left, and the
- * player's own while the autopilot drives it — keeps the catalogue's. Those cars are
- * driven by the autopilot, whose steering inverse, corner speeds and threshold braking
- * were tuned and measured on those figures (`tools/steer-feel.ts`, `tools/reality.ts`
- * and the traffic benches), and a car that yaws more readily and keeps less grip past
- * the rear's peak is one a person catches with the wheel; under a controller tuned for
- * the lazier car it would retune every AI car at once. Kept to the player's hands, the
- * change is the player's alone.
- * ------------------------------------------------------------------------- */
-/**
- * The profile's rack speed (`steerRackSpeed`), times 1.5: a driver's quick hands on a
- * rack rather than the deliberate figure the autopilot was tuned on. The pad's stick
- * is where it shows; the keys' hands turn the rim slower than either.
- */
-export const PLAYER_RACK_SPEED_SCALE = 1.5;
-/**
- * The REAR axle's past-peak plateau, at most: a dry road tyre keeps some 70-85% of its
- * peak side force once it is past the slip peak, so 0.7 is the low end of a real tyre,
- * not ice. The front keeps its own, so the tail lets go and the nose does not; a tyre
- * whose own plateau is already lower keeps that.
- */
-export const PLAYER_REAR_PLATEAU = 0.7;
-/**
- * The box gain on the kerb body's YAW inertia, in place of `INERTIA_PITCH_YAW_GAIN`:
- * the plain uniform box. A real car's yaw inertia is about 0.9-1.0 of the box of its
- * own size and mass (engine and axles near the ends, an empty cabin in the middle), so
- * 2.55 is a very lazy car and 1 a real one. Pitch keeps 2.55: it is a separate term in
- * the tensor, and that gain was raised for the nose lifting under power.
- */
-export const PLAYER_YAW_INERTIA_GAIN = 1;
-/**
- * The tyre-load low-pass, in place of `WHEEL_LOAD_TAU`: 8 ms, so a bump mid-corner
- * reaches the grip as it does through a real carcass instead of being smoothed over.
- * The contact patch's own envelope (`CONTACT_PATCH_M`, 16 cm, a real patch's 12-18) is
- * unchanged.
- */
-export const PLAYER_WHEEL_LOAD_TAU = 0.008;
 /**
  * Steering-box free play, radians at the ROAD WHEEL.
  *
@@ -294,18 +253,11 @@ export const DRIVELINE_LAG_S = 0.1;
 // ---------------------------------------------------------------------------
 // Lateral grip budget.
 //
-// Rapier's ray-cast wheels generate lateral force two ways (verified against the
-// installed 0.20.0 sources): a soft constraint cancels the chassis' lateral
-// velocity at each contact point and is then scaled by the wheel's
-// `side_friction_stiffness` (a gain: 1 = near-kinematic rail), and the combined
-// forward+side impulse is clipped to a friction cone
-//     maxImp = wheel_suspension_force * dt * friction_slip
-// where the suspension force already scales with the chassis mass and that
-// wheel's load. So `friction_slip` is the per-wheel grip budget: exceeding it
-// scales both impulses down (skid) instead of letting the car follow the wheels
-// exactly. The forward impulse counts only half in the cone check, so drive and
-// brake keep ~2x headroom before sliding; that is what makes the budget act as
-// a *lateral* cap.
+// The tyre model makes every side and longitudinal force itself (`Vehicle.
+// updateWheelDynamics`). What is left of the old ray-cast vehicle's friction cone
+//     maxImp = suspension_force * dt * friction_slip
+// is the parked hold's (`TyreContacts.holdBrake`, the brake counted half against
+// it), and `friction_slip` there is the surface's coefficient times this fraction.
 // ---------------------------------------------------------------------------
 
 /**
@@ -484,85 +436,27 @@ export const REAR_AXLE_SIDE_GRIP = 0.95;
 // Everything above this block loses grip for LONGITUDINAL reasons — the budget a
 // drive or brake slip takes from the side force (COMBINED SLIP), a locked wheel.
 // A pure cornering breakaway has neither: lift off mid-bend, turn in too hard, and
-// the tyres are barely using their longitudinal channel at all. Before this, the
-// only thing that limited such a corner was Rapier clipping the side impulse at the
-// cone, which is a CEILING, not a curve: side force rose linearly with slip until
-// it hit a wall, so the car understeered wide with a dead front end and the tail
-// never came round on its own.
+// the tyres are barely using their longitudinal channel at all. Before the tyre
+// model, the only thing that limited such a corner was Rapier clipping the side
+// impulse at the cone, which is a CEILING, not a curve.
 //
-// A real tyre makes its peak side force at a few degrees of slip angle, then gives
-// force back as slip grows — but it gives back to a PLATEAU, not to zero. That
-// plateau is precisely the property being modelled here, because it is what makes a
-// slide something you can fight:
-//
-//   - Below the peak angle nothing at all changes. Straight lines and gentle
-//     curves run at 1-3 degrees, so ordinary driving is untouched.
-//   - Past the peak the axle sheds side force smoothly, so the break is felt
-//     building instead of arriving.
-//   - Past the full angle it stops shedding. There is still real force under the
-//     car at 30 degrees of slip, which is what a correction has to work against.
-//
-// The REAR peaks earlier and falls to a lower plateau than the front. That single
-// asymmetry is what puts the tail out first and leaves the front with enough grip
-// to steer with while it is out — a car that loses both ends together cannot be
-// caught by anybody, and one that loses only the front just washes wide.
+// A real tyre makes its peak side force at a few degrees of slip angle (the brush
+// tyre's peak, `brushPeakTan`), then gives force back as the patch slides — but to
+// the rubber's SLIDING friction, not to zero, and that is what makes a slide
+// something you can fight. How much it gives back is not a property of the angle: it
+// is the friction of rubber sliding over the road at the patch's sliding speed
+// (SLIDING FRICTION below). On loose ground the old angle plateau stands in for it
+// (`SurfaceSlide`, the loose-ground placeholder).
 // ---------------------------------------------------------------------------
 
 /**
- * Slip angle (deg) where each axle makes peak side force, and the fraction it keeps
- * once past it.
- *
- * THE REAR MATCHES THE FRONT PAST PEAK, and that is the difference between a slide
- * you can catch and one you cannot. The rear used to peak at 6 degrees against the
- * front's 8 and then fall to 0.62 against the front's 0.80 — earlier AND twice as
- * far. Stack that on REAR_AXLE_SIDE_GRIP and the yaw
- * feedback is POSITIVE: more yaw gives more rear slip gives less rear grip gives more
- * yaw. At 100 km/h and 15 degrees of slip the rear ended on ~0.48 of lateral gain
- * against the front's ~0.72, so there was no restoring moment for a countersteer to
- * work against and the only outcomes were a spin or a lucky lift.
- *
- * The character is preserved by MAGNITUDE, not by falloff, which is the right split:
- * REAR_AXLE_SIDE_GRIP (0.95) is untouched, so the
- * tail still lets go first and still lets go earlier the faster you are going. What it
- * no longer does is keep letting go once it has gone — past peak it HOLDS, so a small
- * countersteer produces real force and the car comes back.
- *
- * `SLIP_FULL_REAR_DEG` stays below the front's, so the rear reaches its plateau
- * sooner. That keeps a trace of the old suddenness at the moment of breakaway without
- * costing anything at the angles a save is made at.
- */
-/**
- * Peak slip angles encode axle cornering stiffness. Rear tyres remain slightly
- * stiffer near centre for straight-line stability, but the old 8° front against 6°
- * rear made the front roughly 25% softer and every car ploughed regardless of speed.
- * A 6.6° front peak retains mild understeer without making it the only handling state.
+ * Peak slip angles encode axle cornering stiffness, for a car whose model names no
+ * tyre (`tyreCurve`). Rear tyres remain slightly stiffer near centre for
+ * straight-line stability; a 6.6° front peak retains mild understeer without making
+ * it the only handling state.
  */
 export const SLIP_PEAK_FRONT_DEG = 6.6;
 export const SLIP_PEAK_REAR_DEG = 6;
-/**
- * Sharpness of the rise to peak: `tanh(k · a/a_peak) / tanh(k)`.
- *
- * A quarter sine was the first shape, and it is too soft where a tyre is stiffest. A
- * real carcass does most of its work in the first degree or two and then rounds over;
- * a sine spreads the same rise evenly across the whole approach, so the car floated
- * around centre and needed real slip to hold a camber — which is both the "air
- * cushion" feel reported from play and, through cornering drag, the lost top speed.
- *
- * At k = 2.2 the initial slope is 2.2/tanh(2.2) ≈ 2.28 against the sine's 1.57, so
- * the tyre is about 45% stiffer in the degrees ordinary driving lives in, with the
- * peak, the plateau and the ultimate capacity all exactly where they were. The slip a
- * given corner runs comes down with it: 0.7 g now arrives at about 4.3 degrees rather
- * than 5, still inside the 4-6 the model is built around.
- */
-export const SLIP_CURVE_SHARPNESS = 2.2;
-/** `tanh(k)`, so the shape normalises to exactly 1 at the peak without a per-wheel call. */
-export const TANH_SHARPNESS = Math.tanh(SLIP_CURVE_SHARPNESS);
-/** Slip angle (deg) by which the fade is complete and the plateau has been reached. */
-export const SLIP_FULL_FRONT_DEG = 26;
-export const SLIP_FULL_REAR_DEG = 22;
-/** Side grip retained on the plateau, as a fraction of the axle's peak. */
-export const SLIP_PLATEAU_FRONT = 0.8;
-export const SLIP_PLATEAU_REAR = 0.8;
 /**
  * Loose ground does not gain this extra resistance until a tyre is genuinely
  * travelling sideways. Below the start it still has only its ordinary cornering
@@ -607,8 +501,8 @@ export const PNEUMATIC_TRAIL_M = 0.045;
 
 /**
  * The pneumatic trail as a share of `PNEUMATIC_TRAIL_M` at the patch's normalised
- * combined slip `z` (σ in the COMBINED SLIP block, 1 at the side-force peak): the brush
- * model's own result with the parabolic pressure `sideForceShape` uses,
+ * combined slip `z` (σ in the COMBINED SLIP block, 1 once the whole patch slides): the brush
+ * model's own result with the parabolic pressure `brushShape` uses,
  *
  *     t / t0 = 3 (1 − z)³ / (3 − 3z + z²)
  *
@@ -678,7 +572,11 @@ export interface HandlingTuning {
   readonly tyreRelaxationLength: number;
 }
 
-/** The side-force curve's shape, per axle: see `tyreCurve`. */
+/**
+ * The tyre's side-force geometry, per axle: see `tyreCurve`. The peak angles size the
+ * brush tyre (`brushPeakTan`) on every surface; `full*` and `plateau*` are the
+ * loose-ground placeholder's angle fade (`looseSideShape`) and are read nowhere else.
+ */
 export interface TyreCurve {
   readonly peakFrontDeg: number;
   readonly peakRearDeg: number;
@@ -691,9 +589,11 @@ export interface TyreCurve {
   readonly longitudinalRelaxationM: number;
 }
 
+/** The aspect of the road radial (`KAMA_217`), for a car whose model names no tyre. */
+const ROAD_RADIAL_ASPECT = 0.7;
+
 /**
- * THE CAR'S OWN TYRE. Without a `TyreSpec` a car runs its handling profile's curve and
- * the constants above, exactly as before. With one, the curve comes from the sidewall:
+ * THE CAR'S OWN TYRE, from its sidewall:
  *
  *   peak slip angle   a cross-ply carcass needs about 8 degrees to reach its peak; a
  *                     radial's peak falls with its sidewall, 3 + 4 · aspect (6.3 at
@@ -702,74 +602,127 @@ export interface TyreCurve {
  *                     0.1 + 0.3 · aspect for a radial, from 0.35 m at 82-series down to
  *                     0.24 m at 45 — tall rubber lags, low rubber answers at once. The
  *                     longitudinal one is LONGITUDINAL_RELAXATION_RATIO of it.
- *   breakaway         what the tyre keeps past its peak and how soon it gets there:
- *                     a cross-ply fades gently to 0.86 by 30 degrees, a tall radial
- *                     to 0.84 by 26, a 45-series to 0.72 by 20. That is the feel of
- *                     a slide: a tall tyre warns and forgives, a low one lets go.
+ *   loose breakaway   ON LOOSE GROUND ONLY (the placeholder, `SurfaceSlide`): what the
+ *                     tyre keeps past its peak by slip angle and how soon it gets
+ *                     there. A cross-ply fades to 0.86 by 30 degrees, a tall radial to
+ *                     0.84 by 26, a 45-series to 0.72 by 20. On a paved surface the
+ *                     force past the peak is sliding friction (SLIDING FRICTION).
  *
- * The rear peaks 0.6 degrees before the front and reaches its plateau 4 degrees
- * sooner, the same relation the profile constants keep (see SLIP_PEAK_*).
+ * The rear peaks 0.6 degrees before the front and reaches its loose plateau 4 degrees
+ * sooner. A car whose model names no tyre runs its handling profile's peak angles and
+ * relaxation, with the road radial's loose breakaway.
  */
 export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: number } | undefined, handling: HandlingTuning): TyreCurve {
-  if (!spec) {
-    return {
-      peakFrontDeg: handling.slipPeakFrontDeg,
-      peakRearDeg: handling.slipPeakRearDeg,
-      fullFrontDeg: SLIP_FULL_FRONT_DEG,
-      fullRearDeg: SLIP_FULL_REAR_DEG,
-      plateauFront: SLIP_PLATEAU_FRONT,
-      plateauRear: SLIP_PLATEAU_REAR,
-      relaxationM: handling.tyreRelaxationLength,
-      longitudinalRelaxationM: LONGITUDINAL_RELAXATION_RATIO * handling.tyreRelaxationLength,
-    };
-  }
-  const aspect = Math.min(1, Math.max(0.3, spec.aspect));
-  const crossply = spec.construction === 'crossply';
+  const aspect = Math.min(1, Math.max(0.3, spec?.aspect ?? ROAD_RADIAL_ASPECT));
+  const crossply = spec?.construction === 'crossply';
   const peak = crossply ? 8 : 3 + 4 * aspect;
   const full = crossply ? 30 : 12 + 17 * aspect;
-  const plateau = crossply ? 0.86 : 0.72 + 0.35 * (aspect - 0.45);
-  const relaxation = crossply ? 0.45 : 0.1 + 0.3 * aspect;
+  const plateau = Math.min(0.88, crossply ? 0.86 : 0.72 + 0.35 * (aspect - 0.45));
+  const relaxation = !spec ? handling.tyreRelaxationLength : crossply ? 0.45 : 0.1 + 0.3 * aspect;
   return {
-    peakFrontDeg: peak,
-    peakRearDeg: peak - 0.6,
+    peakFrontDeg: spec ? peak : handling.slipPeakFrontDeg,
+    peakRearDeg: spec ? peak - 0.6 : handling.slipPeakRearDeg,
     fullFrontDeg: full,
     fullRearDeg: full - 4,
-    plateauFront: Math.min(0.88, plateau),
-    plateauRear: Math.min(0.88, plateau),
+    plateauFront: plateau,
+    plateauRear: plateau,
     relaxationM: relaxation,
     longitudinalRelaxationM: LONGITUDINAL_RELAXATION_RATIO * relaxation,
   };
 }
 
+// ---------------------------------------------------------------------------
+// SLIDING FRICTION: what a sliding patch keeps on a paved surface.
+//
+// Rubber sliding over a road holds less than rubber gripping it, and less the faster
+// it slides, from the peak coefficient towards the locked-wheel one:
+//
+//     μ(V_s) = μ_k + (μ_p − μ_k) · exp(−V_s / V0)          r = μ(V_s) / μ_p
+//
+// V_s is the patch's combined sliding speed, m/s: the hypot of its sideways speed and
+// the tread's speed over the road along the wheel. μ_p is the tyre's capacity as it
+// always was; μ_p / μ_k is the surface's (`SurfaceSlide`): 1.13 on dry asphalt and
+// 1.30 on wet, which is what ABS gains over a locked wheel (MDPI Sustainability 2023,
+// 15(8), 6945, https://www.mdpi.com/2071-1050/15/8/6945), blended by the weather's
+// wetness. PennDOT's Little Book of Tire Pavement Friction finds the same on dry
+// roads: little difference between peak and sliding, and little effect of speed.
+//
+// V0 is an ASSUMPTION, not a measurement: that the locked-wheel coefficient is reached
+// once the patch slides at a few metres a second, the speeds skid tests run at.
+//
+// It replaces two authored plateaus: the side force fading by slip ANGLE to 0.7-0.88
+// of its peak, and a locked or spinning tyre keeping a constant three quarters of its
+// capacity. Both now come from how fast the rubber is sliding, in the brush tyre's
+// sliding zone (`brushShape`). Loose ground keeps the plateaus as a placeholder.
+// ---------------------------------------------------------------------------
+
+/** V0 in μ(V_s), m/s: see SLIDING FRICTION. An assumption. */
+export const SLIDING_DECAY_MPS = 5;
+
 /**
- * THE BRUSH TYRE: the side-force model for every car with a `TyreSpec`, which is the
- * whole catalogue. The curve above remains for A/B (`?tyre=curve`, or
- * `__bro.brushTyres(false)` on the move) and for a car that names no tyre.
+ * The floor `slidingRatio` decays to on this surface in this weather: μ_k / μ_p on a
+ * paved surface, the placeholder's constant sliding share on loose ground.
+ */
+export function slidingFloor(slide: SurfaceSlide, wet: number): number {
+  if (slide.kind === 'loose') return slide.share;
+  return 1 / (slide.dryPeakRatio + (slide.wetPeakRatio - slide.dryPeakRatio) * wet);
+}
+
+/** r = μ(V_s) / μ_p on a paved surface, for the floor `slidingFloor` gave. */
+export function slidingRatio(floor: number, slideSpeedMps: number): number {
+  return floor + (1 - floor) * Math.exp(-slideSpeedMps / SLIDING_DECAY_MPS);
+}
+
+/**
+ * THE BRUSH TYRE: the force model on every paved surface, both ways.
  *
  * The tread is a row of bristles on the belt. Each one is carried through the contact
- * patch and deflects sideways with the slip until the local grip under it runs out,
- * from the back of the patch forward. With the load pressed over the patch as a
- * parabola, the side force as a fraction of the grip is
+ * patch and deflects with the slip until the grip under it runs out, from the back of
+ * the patch forward. With the load pressed over the patch as a parabola, a bristle
+ * holds until its force reaches the PEAK coefficient μ_p and then slides at μ(V_s)
+ * (SLIDING FRICTION), so the force as a fraction of μ_p Fz is the adhesion zone plus
+ * the sliding zone's share of the load:
  *
- *     s(z) = 3z - 3z² + z³   for z < 1, and 1 once the whole patch slides,
- *     z    = tan α · Cα / (3 μ Fz)
+ *     s(z) = 3z(1 − z)² + r · (3z² − 2z³)   for z < 1, and r once the whole patch slides
+ *     z    = tan α · Cα / (3 μ_p Fz)        (sideways; along, κ over its own unit)
  *
- * which is the model racing simulators build on. What it adds over a fixed curve is
- * that the angle the tyre peaks at is not a constant: cornering stiffness Cα grows
- * more slowly than load (`BRUSH_STIFFNESS_LOAD_EXPONENT`), so a tyre pressed harder
- * reaches its peak LATER and a light one sooner — the outside front of a car loaded
- * into a bend needs more lock than it did in a straight line, and a light inside tyre
- * lets go at small angles. At the car's static load it peaks exactly where the
- * `TyreCurve` says, so the two models agree in the straight and part in the bend.
+ * With r = 1 it is the one-coefficient brush, 3z − 3z² + z³, peaking at 1 where the
+ * last bristle lets go; with r < 1 it peaks at z = 1/(3 − 2r), a little sooner and a
+ * little lower, and falls to r. Its slope at zero slip is 3 whatever r is, so the
+ * cornering stiffness does not depend on the sliding coefficient. (Pacejka, Tyre and
+ * Vehicle Dynamics, 3.2.)
+ *
+ * The angle the tyre peaks at is not a constant: cornering stiffness Cα grows more
+ * slowly than load (`BRUSH_STIFFNESS_LOAD_EXPONENT`), so a tyre pressed harder reaches
+ * its peak LATER and a light one sooner — the outside front of a car loaded into a
+ * bend needs more lock than it did in a straight line, and a light inside tyre lets
+ * go at small angles. At the car's static load z = 1 at the `TyreCurve`'s peak angle.
  */
-export const TYRE_MODEL = { brush: true };
+export function brushShape(z: number, r: number): number {
+  if (z >= 1) return r;
+  const free = 1 - z;
+  return 3 * z * free * free + r * z * z * (3 - 2 * z);
+}
+
+/** d`brushShape`/dz: 3(1 − z)(1 − 3z + 2rz), 0 once the whole patch slides. */
+export function brushShapeSlope(z: number, r: number): number {
+  if (z >= 1) return 0;
+  return 3 * (1 - z) * (1 - 3 * z + 2 * r * z);
+}
+
+/** The brush tyre's most force, at z = 1/(3 − 2r), as a fraction of μ_p Fz. */
+export function brushPeak(r: number): number {
+  return brushShape(1 / (3 - 2 * r), r);
+}
+
 /** Cα ∝ Fz^this: 0.7 is a passenger radial's measured sublinear growth. */
 export const BRUSH_STIFFNESS_LOAD_EXPONENT = 0.7;
 
 /**
  * The brush tyre's peak, as the TANGENT of the angle it peaks at for this load:
  * `loadRatio` is Fz over the static load and `muRatio` the load-sensitivity factor
- * already in the capacity. Its side slip `z` is `tan α` over this, so z = 1 at the peak.
+ * already in the capacity. Its side slip `z` is `tan α` over this, so z = 1 where the
+ * whole patch slides.
  */
 export function brushPeakTan(staticPeakDeg: number, loadRatio: number, muRatio: number): number {
   const ratio = Math.max(0.05, loadRatio);
@@ -780,31 +733,21 @@ export function brushPeakTan(staticPeakDeg: number, loadRatio: number, muRatio: 
 }
 
 /**
- * The side-force curve's shape at slip angle `slipRad`, as a fraction of the tyre's
- * lateral capacity, under PURE side slip. Both models rise to a peak and fade to the
- * plateau between `fadePeakDeg` and `fullDeg`:
- *
- *   brush   rises as 3z - 3z² + z³ with z = tan α / `peakTan` (`brushPeakTan`), and
- *           fades from `fadePeakDeg`, its own peak held a degree short of `fullDeg`
- *   curve   rises as tanh(k · α/α_peak) / tanh(k) to the peak at `fadePeakDeg`;
- *           `peakTan` is that angle's tangent and only normalises its combined slip
+ * THE LOOSE-GROUND PLACEHOLDER's side force under PURE side slip, as a fraction of
+ * capacity (`SurfaceSlide`): the one-coefficient brush, 3z − 3z² + z³ with
+ * z = tan α / `peakTan`, faded by slip ANGLE to the tyre's `plateau` between
+ * `fadePeakDeg` (the brush's own peak, held a degree short of `fullDeg`) and `fullDeg`.
+ * Authored, not measured; it stands until loose ground has a terramechanics model.
  */
-export function sideForceShape(
+export function looseSideShape(
   slipRad: number,
   peakTan: number,
   fadePeakDeg: number,
   fullDeg: number,
   plateau: number,
-  brush: boolean,
 ): number {
   const slipDeg = (slipRad * 180) / Math.PI;
-  let risen: number;
-  if (brush) {
-    const z = Math.tan(Math.min(slipRad, 1.4)) / peakTan;
-    risen = z >= 1 ? 1 : 3 * z - 3 * z * z + z * z * z;
-  } else {
-    risen = Math.tanh(SLIP_CURVE_SHARPNESS * Math.min(slipDeg / fadePeakDeg, 1)) / TANH_SHARPNESS;
-  }
+  const risen = brushShape(Math.tan(Math.min(slipRad, 1.4)) / peakTan, 1);
   const fadeT = Math.min(1, Math.max(0, (slipDeg - fadePeakDeg) / (fullDeg - fadePeakDeg)));
   return risen * (1 - (1 - plateau) * fadeT * fadeT * (3 - 2 * fadeT));
 }
@@ -814,81 +757,98 @@ export function sideForceShape(
 //
 // A tyre's two slips are two components of ONE sliding of the tread over the road, so
 // the force each direction gets is decided by both. The model is the normalised-slip
-// one: each slip is measured in units of its own peak,
+// one: each slip is measured in its own unit,
 //
-//     σx = κ / κ_peak               κ_peak = optimalSlip · LONGITUDINAL_PEAK_U
-//     σy = tan α / tan α_peak       (the brush's z, the curve's own peak)
+//     σx = κ / κ_unit               κ_unit = `longitudinalSlipUnit`
+//     σy = tan α / tan α_peak       (the brush's z)
 //     σ  = √(σx² + σy²)
 //
-// and each channel reads its OWN pure-slip curve at the combined σ and keeps the share
+// and each channel reads its pure-slip curve at the combined σ and keeps the share
 // of it that its slip is of the whole:
 //
 //     Fx = Cap_x · Fx_pure(σ) · σx/σ        Fy = Cap_y · Fy_pure(σ) · σy/σ
 //
-// With the other slip zero this IS the pure curve, to the digit, so every straight-line
-// and every throttle-steady figure the pure curves were calibrated on stands. Near zero
-// slip it reduces to each channel's own pure stiffness (Fx_pure(σ)/σ → its slope), so
-// the stiffnesses stand too. Only when both slips are present does anything change, and
-// then it changes BOTH ways: drive or brake slip shrinks the side force, and slip angle
-// shrinks the drive and brake force, which the one-way friction ellipse this replaced
-// never did — a driven wheel kept its whole traction mid-corner.
+// On a paved surface both pure curves are the one brush (`brushShape`) at one sliding
+// ratio, and σ = 1 is the whole patch sliding both ways: the combined brush tyre. On
+// loose ground each channel reads its placeholder curve (`looseLongitudinalShape`,
+// `looseSideShape`), with σ = 1 at each one's peak.
 //
-// A locked wheel needs no constant of its own any more. At κ = -1 its σx is several
-// times its σy, so the side share is small and grows with slip angle, the way a sliding
-// patch's force follows its sliding direction (`tools/combined-slip.ts` prints it).
+// With the other slip zero this IS the pure curve, and near zero slip it reduces to
+// each channel's own pure stiffness (Fx_pure(σ)/σ → its slope). Only when both slips
+// are present does anything change, and then it changes BOTH ways: drive or brake slip
+// shrinks the side force, and slip angle shrinks the drive and brake force.
+//
+// A locked wheel needs no constant of its own. At κ = -1 its σx is several times its
+// σy, so the side share is small and grows with slip angle, the way a sliding patch's
+// force follows its sliding direction (`tools/combined-slip.ts` prints it).
 // ---------------------------------------------------------------------------
 
 /**
- * The longitudinal force curve under pure slip, as a fraction of capacity, at
- * `u = κ / optimalSlip`: a peak term that decays past u = 1 blended with a sliding
- * plateau (`SLIDING_GRIP_FRACTION`), so a spinning or locked tyre keeps three quarters
- * of its grip. Odd in `u`. Its true maximum is at `LONGITUDINAL_PEAK_U`.
+ * THE LOOSE-GROUND PLACEHOLDER's longitudinal curve under pure slip (`SurfaceSlide`),
+ * as a fraction of capacity, at `u = κ / optimalSlip`: a peak term that decays past
+ * u = 1 blended with the surface's constant sliding `share`, so a spinning or locked
+ * tyre keeps that share of its grip. Odd in `u`. Its true maximum is at
+ * `LONGITUDINAL_PEAK_U`. The pure 2u/(1+u²) alone decays like 1/u, and a standing
+ * start (u ≈ 25) then delivered 8% of the grip: the share carries it.
  */
-export function longitudinalShape(u: number): number {
-  return (
-    (1 - SLIDING_GRIP_FRACTION) * ((2 * u) / (1 + u * u)) +
-    SLIDING_GRIP_FRACTION * Math.tanh(SLIDE_CURVE_GAIN * u)
-  );
+export function looseLongitudinalShape(u: number, share: number): number {
+  return (1 - share) * ((2 * u) / (1 + u * u)) + share * Math.tanh(SLIDE_CURVE_GAIN * u);
 }
 
-/** d`longitudinalShape`/du. Even in `u`; negative past the peak. */
-export function longitudinalShapeSlope(u: number): number {
+/** d`looseLongitudinalShape`/du. Even in `u`; negative past the peak. */
+export function looseLongitudinalShapeSlope(u: number, share: number): number {
   const th = Math.tanh(SLIDE_CURVE_GAIN * u);
   const d = 1 + u * u;
-  return (
-    (1 - SLIDING_GRIP_FRACTION) * ((2 * (1 - u * u)) / (d * d)) +
-    SLIDING_GRIP_FRACTION * SLIDE_CURVE_GAIN * (1 - th * th)
-  );
+  return (1 - share) * ((2 * (1 - u * u)) / (d * d)) + share * SLIDE_CURVE_GAIN * (1 - th * th);
+}
+
+/**
+ * The slip ratio that counts as ONE in combined slip (σx = κ / this): on loose ground
+ * the placeholder curve's peak, `optimalSlip · LONGITUDINAL_PEAK_U`; on a paved surface
+ * the brush's whole-patch slide, `optimalSlip · LONGITUDINAL_FULL_U`.
+ */
+export function longitudinalSlipUnit(surface: SurfaceProps): number {
+  return surface.optimalSlip * (surface.slide.kind === 'paved' ? LONGITUDINAL_FULL_U : LONGITUDINAL_PEAK_U);
 }
 
 /**
  * Longitudinal force as a fraction of the longitudinal capacity under combined slip:
- * `longSlip` is σx (signed), `sideSlip` σy (see the block above).
+ * `longSlip` is σx (signed), `sideSlip` σy (see the block above). `loose` picks the
+ * loose-ground placeholder, and `slide` is its sliding share there, the sliding ratio
+ * r (`slidingRatio`) on a paved surface.
  */
-export function combinedLongitudinal(longSlip: number, sideSlip: number): number {
+export function combinedLongitudinal(longSlip: number, sideSlip: number, loose: boolean, slide: number): number {
   const total = Math.hypot(longSlip, sideSlip);
   if (total < 1e-9) return 0;
-  return (longitudinalShape(total * LONGITUDINAL_PEAK_U) * longSlip) / total;
+  const shape = loose ? looseLongitudinalShape(total * LONGITUDINAL_PEAK_U, slide) : brushShape(total, slide);
+  return (shape * longSlip) / total;
 }
 
 /**
- * d`combinedLongitudinal`/dσx: the pure slope along the slip direction, plus the
- * secant the lateral share holds the force on. At `sideSlip = 0` it is the pure curve's
- * own slope.
+ * d`combinedLongitudinal`/dσx at a fixed `slide`: the pure slope along the slip
+ * direction, plus the secant the lateral share holds the force on. At `sideSlip = 0`
+ * it is the pure curve's own slope.
  */
-export function combinedLongitudinalSlope(longSlip: number, sideSlip: number): number {
+export function combinedLongitudinalSlope(longSlip: number, sideSlip: number, loose: boolean, slide: number): number {
   const total = Math.hypot(longSlip, sideSlip);
-  if (total < 1e-9) return LONGITUDINAL_PEAK_U * longitudinalShapeSlope(0);
+  if (total < 1e-9) return loose ? LONGITUDINAL_PEAK_U * looseLongitudinalShapeSlope(0, slide) : brushShapeSlope(0, slide);
   const cx = longSlip / total;
   const cy = sideSlip / total;
-  const u = total * LONGITUDINAL_PEAK_U;
-  return LONGITUDINAL_PEAK_U * longitudinalShapeSlope(u) * cx * cx + (longitudinalShape(u) / total) * cy * cy;
+  if (loose) {
+    const u = total * LONGITUDINAL_PEAK_U;
+    return (
+      LONGITUDINAL_PEAK_U * looseLongitudinalShapeSlope(u, slide) * cx * cx +
+      (looseLongitudinalShape(u, slide) / total) * cy * cy
+    );
+  }
+  return brushShapeSlope(total, slide) * cx * cx + (brushShape(total, slide) / total) * cy * cy;
 }
 
 /**
- * Side force as a fraction of the lateral capacity under combined slip: the side
- * curve (`sideForceShape`) read at the angle whose σy is the combined σ, times σy/σ.
- * `sideSlip` is σy ≥ 0, `longSlip` σx; the curve arguments are `sideForceShape`'s.
+ * Side force as a fraction of the lateral capacity under combined slip, times σy/σ:
+ * the brush at the combined σ on a paved surface, the placeholder (`looseSideShape`,
+ * whose arguments the curve ones are) read at the angle whose σy is σ on loose ground.
+ * `sideSlip` is σy ≥ 0, `longSlip` σx; `loose` and `slide` as `combinedLongitudinal`.
  */
 export function combinedLateral(
   sideSlip: number,
@@ -897,12 +857,26 @@ export function combinedLateral(
   fadePeakDeg: number,
   fullDeg: number,
   plateau: number,
-  brush: boolean,
+  loose: boolean,
+  slide: number,
 ): number {
   const total = Math.hypot(longSlip, sideSlip);
   if (total < 1e-9) return 0;
-  const shape = sideForceShape(Math.atan(total * peakTan), peakTan, fadePeakDeg, fullDeg, plateau, brush);
+  const shape = loose
+    ? looseSideShape(Math.atan(total * peakTan), peakTan, fadePeakDeg, fullDeg, plateau)
+    : brushShape(total, slide);
   return (shape * sideSlip) / total;
+}
+
+/**
+ * The most longitudinal force a tyre makes before it locks or spins, as a fraction of
+ * its capacity, for the threshold-brake estimates: the placeholder curve's peak on loose
+ * ground; on a paved surface the brush's peak with the patch sliding at V0 (a tyre at
+ * its peak at road speed slides at about that, `SLIDING_DECAY_MPS`).
+ */
+export function longitudinalPeakShare(slide: SurfaceSlide, wet: number): number {
+  if (slide.kind === 'loose') return looseLongitudinalShape(LONGITUDINAL_PEAK_U, slide.share);
+  return brushPeak(slidingRatio(slidingFloor(slide, wet), SLIDING_DECAY_MPS));
 }
 
 export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>> = {
@@ -920,7 +894,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
   },
   road: {
     // The old rate pair's own ratio to classic's (×1.25 parked, ×1.44 at speed).
-    steerRackSpeed: (78 * Math.PI) / 180,
+    steerRackSpeed: (117 * Math.PI) / 180,
     steerPlay: 0.006,
     bumpSteer: 0.009,
     drivelineLag: 0.055,
@@ -932,7 +906,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     tyreRelaxationLength: 0.28,
   },
   sport: {
-    steerRackSpeed: (100 * Math.PI) / 180,
+    steerRackSpeed: (150 * Math.PI) / 180,
     steerPlay: 0.003,
     bumpSteer: 0.005,
     drivelineLag: 0.035,
@@ -944,7 +918,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     tyreRelaxationLength: 0.2,
   },
   utility: {
-    steerRackSpeed: (70 * Math.PI) / 180,
+    steerRackSpeed: (105 * Math.PI) / 180,
     steerPlay: 0.012,
     bumpSteer: 0.016,
     drivelineLag: 0.075,
@@ -958,10 +932,9 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
 };
 
 // ---------------------------------------------------------------------------
-// Braking. Rapier's setWheelBrake takes a *maximum braking impulse* (N·s), not
-// a force: internally `rolling_friction` is clamped to that impulse. To brake
-// the whole chassis at `a` m/s² across `n` wheels for one `dt` step, each wheel
-// needs the impulse `a * mass * dt / n`.
+// Braking. The parked hold (`TyreContacts.holdBrake`) takes a *maximum braking
+// impulse* (N·s) per wheel, not a force. To brake the whole chassis at `a` m/s²
+// across `n` wheels for one `dt` step, each wheel needs the impulse `a * mass * dt / n`.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1096,18 +1069,6 @@ export const SLIP_REFERENCE_MPS = 1.5;
 /** Slip ratio at or below which a wheel counts as locked and sliding. */
 export const LOCK_SLIP_RATIO = -0.5;
 /**
- * Load low-pass, seconds: the ray-cast suspension force is spiky over collider seams,
- * and a spike is not a load.
- *
- * Halved to 0.02 — about one and a half fixed steps, so a single-step seam artefact is
- * still swallowed while a real bump is not. What it was smoothing away is the point of
- * a rough road: capacity is proportional to load, so a wheel going light over a crest
- * SHOULD lose its grip and hand the driver a moment to catch, and at 0.04 s that
- * moment was averaged into the two steps either side of it. Reported from play as
- * uneven surfaces having stopped providing any thrill at speed.
- */
-export const WHEEL_LOAD_TAU = 0.025;
-/**
  * Substeps of the wheel, carcass and driveline loop per 60 Hz fixed step
  * (`Vehicle.updateWheelDynamics`): 4, so the loop runs at 240 Hz. The chassis is
  * Rapier's and is held through them; it receives each tyre's force averaged over the
@@ -1146,27 +1107,22 @@ export const WHEEL_SUBSTEPS = 4;
  * whole model read sand at an asphalt slip angle — see the field's own note.
  */
 /**
- * Force a fully sliding tyre keeps, as a fraction of its peak. This is why ABS
- * exists: locking costs about a quarter of the grip, and it is now that ratio
- * doing the work rather than a separate locked-deceleration constant.
+ * How quickly the loose-ground placeholder's longitudinal curve reaches its sliding
+ * share (`looseLongitudinalShape`), per unit of `optimalSlip`.
  */
-export const SLIDING_GRIP_FRACTION = 0.75;
-/** How quickly the sliding plateau is reached, in units of PEAK_SLIP_RATIO. */
 export const SLIDE_CURVE_GAIN = 1.5;
 /**
- * Where the longitudinal force curve (`longitudinalShape`) really peaks, in units
- * of the surface's `optimalSlip`: the sliding plateau lifts the peak past the peak
- * term's own u = 1, to about 1.45. Below it a tyre is working, not sliding — a hard
- * launch runs right up to it — so anything that SHOWS sliding (spray, dark tracks)
- * starts here. It is also the longitudinal slip that counts as ONE in combined slip
- * (see COMBINED SLIP). Found numerically from the two curve constants so it cannot
- * drift.
+ * Where the loose-ground placeholder's longitudinal curve (`looseLongitudinalShape`)
+ * really peaks, in units of the surface's `optimalSlip`: the sliding share lifts the
+ * peak past the peak term's own u = 1, to about 1.45. On loose ground it is the slip
+ * that counts as ONE in combined slip (`longitudinalSlipUnit`). Found numerically from
+ * the curve constants so it cannot drift.
  */
 export const LONGITUDINAL_PEAK_U = ((): number => {
   let best = 1;
   let bestForce = 0;
   for (let u = 1; u <= 4; u += 0.001) {
-    const force = longitudinalShape(u);
+    const force = looseLongitudinalShape(u, LOOSE_GROUND_SLIDE.share);
     if (force > bestForce) {
       bestForce = force;
       best = u;
@@ -1175,10 +1131,14 @@ export const LONGITUDINAL_PEAK_U = ((): number => {
   return best;
 })();
 /**
- * The longitudinal curve's value at its peak, as a fraction of capacity (about 0.96):
- * the most braking or drive force a tyre can make before it starts to lock or spin.
+ * The paved surfaces' longitudinal slip unit, in units of `optimalSlip`: the slip at
+ * which the brush's whole patch slides (σx = 1). Set so the tyre's slip STIFFNESS is
+ * the one every surface's `optimalSlip` was calibrated at, the slope of the old curve
+ * at zero slip (2(1 − 0.75) + 0.75 · 1.5 = 1.625 per unit of optimalSlip): the brush's
+ * slope is 3 per unit of this, so it is 3 / 1.625 ≈ 1.85. The brush then peaks at
+ * 1/(3 − 2r) of it, 1.5-1.6 optimalSlip at road speed, beside the old 1.45.
  */
-export const LONGITUDINAL_PEAK_FORCE = longitudinalShape(LONGITUDINAL_PEAK_U);
+export const LONGITUDINAL_FULL_U = 3 / looseLongitudinalShapeSlope(0, LOOSE_GROUND_SLIDE.share);
 
 /**
  * Relaxation length: how far the tyre must ROLL before its carcass has built the
@@ -1535,11 +1495,12 @@ export function unsprungMass(radius: number): number {
 export const BEAM_AXLE_GYRATION_SQ = 0.6;
 
 /**
- * Progressive bump stop, in place of Rapier's rigid travel clamp.
+ * Progressive bump stop, in place of a rigid travel clamp.
  *
- * Rapier clamps the spring at `rest +/- maxTravel`, and a clamp is a collision: the
- * wheel simply stops moving relative to the body and the whole impact goes through as
- * a step. Real suspension has a rubber stop that starts taking load some way before
+ * The contact clamps the spring at `rest +/- maxTravel` (vehicle/tyrecontact.ts), and
+ * a clamp is a collision: the wheel simply stops moving relative to the body and the
+ * whole impact goes through as a step. Real suspension has a rubber stop that starts
+ * taking load some way before
  * the end of the travel and stiffens as it crushes, which is what turns bottoming out
  * into a firm thump instead of a hammer blow — and it is what makes a genuinely soft
  * spring usable over a big hit.
@@ -1565,7 +1526,7 @@ export const BUMP_STOP_PEAK = 6;
  * all of them low piston speed — come to rest in about one swing.
  *
  * The preset damping ratios are the valve stack's, the figure a damper is specified
- * by. Rapier applies that linear part; `updateWheelDynamics` adds the bleed's extra
+ * by. The wheel contact applies that linear part; `resolveTravel` adds the bleed's extra
  * `(gain − 1) · c · clamp(v, ±knee)` at each contact patch, and the tyre carries it.
  *
  * It is the only roll damping in the model (see the body-roll block below): with the
@@ -1579,14 +1540,14 @@ export const DAMPER_BLEED_KNEE_MPS = 0.1;
  * How far above a settled wheel's centre its suspension mount is placed, metres.
  *
  * Pure bookkeeping: `restLength = sag + this`, so the spring is `this` short of free
- * length when parked and the ray still starts above the wheel centre. It cannot
+ * length when parked. It cannot
  * change how the car rides — sag is set by the frequency and the mount is then placed
  * to put the wheel on the ground — and it cannot change the available droop, which
  * for a linear spring is exactly the sag.
  */
 export const MOUNT_ABOVE_WHEEL_CENTRE = 0.12;
 /**
- * Rapier's per-wheel suspension force ceiling, as a multiple of that corner's static
+ * The per-wheel suspension force ceiling, as a multiple of that corner's static
  * load. It exists so a catastrophic landing cannot launch the car; the bump stop above
  * is what shapes ordinary bottoming, and it peaks well below this.
  */
@@ -1638,9 +1599,9 @@ export const DESTROYED_ENGINE_SPEED_CAP_MPS = 20 / 3.6;
 // ---------------------------------------------------------------------------
 // Body roll and lateral load transfer: from the linkage, not from a gain.
 //
-// Rapier's ray-cast vehicle is a port of Bullet's, and Bullet throws the roll
-// couple away ("roll influence"). This car does not use Rapier's side friction at
-// all any more: `updateWheelDynamics` makes each tyre's side force itself and
+// Bullet's ray-cast vehicle, which Rapier's ported, threw the roll couple away ("roll
+// influence"). This car's side force is its own: `updateWheelDynamics` makes each
+// tyre's side force itself and
 // applies it to the body at that axle's ROLL CENTRE (`SuspensionTuning.
 // frontRollCentreM` / `rearRollCentreM`), which is where real links hand it over.
 //
@@ -1681,19 +1642,100 @@ export interface AxleGeometry {
   readonly frontWeightShare: number;
 }
 
-/**
- * Inertia gains over a uniform solid box.
+/* ---------------------------------------------------------------------------
+ * The chassis' mass, as the parts it is made of (`Vehicle.applyChassisMass`).
  *
- * A car is not a uniform box: its engine hangs off one end, its tank and boot off
- * the other, and the body box we measure is shorter than the real overhangs. A
- * solid-box tensor therefore under-states pitch and yaw inertia by roughly half —
- * which is why the nose rose so eagerly under power. Real saloons sit near a
- * pitch/yaw radius of gyration of 0.3-0.35 of wheelbase; these gains bring the box
- * up to that without pretending to model mass distribution properly.
+ * The kerb car is summed from components, each a mass at its own place with its own
+ * small inertia, carried to the car's centre of mass by the parallel-axis theorem:
+ *
+ *   - an unsprung mass at each wheel centre (`unsprungMass`), a disc of the wheel's
+ *     radius;
+ *   - the engine and the gearbox, from the part registry's masses for the model's own
+ *     `engineId` and `gearboxId` (parts/registry.ts), each a solid box (`ENGINE_*`,
+ *     `GEARBOX_*`). The layout follows the drive: a car that drives its rear axle has a
+ *     propshaft and a longitudinal engine set back behind the front axle with the
+ *     gearbox bolted on behind it (and, on four-wheel drive, the transfer box behind
+ *     that, which the Niva's registry mass already includes); a front-drive car has a
+ *     transverse engine just ahead of its front axle and the transaxle on the axle line;
+ *   - the fuel of a full tank (the kerb car is a full one) at the tank's anchor
+ *     (`LOAD_TANK_*`), a point: a liquid does not spin with the tank it is in;
+ *   - the body shell (`BODY_SHELL_MASS_FRACTION`), a thin uniform shell over the
+ *     measured body box;
+ *   - and the fittings, everything else — seats, glass, trim, wiring, the sprung half
+ *     of the suspension, radiator, battery, exhaust, spare wheel — a solid box between
+ *     the axle lines, the wheels' track wide and the body's height tall.
+ *
+ * The shell and the fittings share one centroid, solved so the whole kerb car's centre
+ * of mass lands where the catalogue's weight split and `COM_DROP_FRACTION` put it.
+ *
+ * Checked against the published passenger-car range of the yaw DYNAMIC INDEX
+ * k²/(a·b), 0.85-1.0 (k the yaw radius of gyration, a and b the centre of mass to each
+ * axle): the kit VAZ-2101/2106/2108/2121/1111 come out at 0.88-0.93 and the UAZ-469 at
+ * 0.90 from these figures alone. The solid box times 2.55 this replaced was 2.3-2.9.
+ *
+ * The factory unit-mass tables ("Масса агрегатов", autoopt.ru encyclopedia pages after
+ * the factory manuals) are the data:
+ *
+ *   VAZ-2106, kerb 1035: engine 117, gearbox with its clutch housing 26, body assembled
+ *     without seats 275, rear axle 53, wheel and tyre 15;
+ *   VAZ-2108, kerb 900: engine without clutch or gearbox 82, gearbox with differential
+ *     34, body assembled without trim or seats 245, front suspension 55, rear 45, wheel
+ *     and tyre 14.3;
+ *   VAZ-2121, kerb 1150: engine 114, gearbox 32, transfer box 27.6, body assembled
+ *     without trim 284, wheel and tyre 21;
+ *   VAZ-1111, kerb 635: engine without clutch or gearbox 66.5, gearbox with
+ *     differential 24.5, body assembled without trim or seats 172.
+ * --------------------------------------------------------------------------- */
+
+/**
+ * The body shell's share of the kerb mass: 275/1035 = 0.266 (VAZ-2106), 245/900 =
+ * 0.272 (VAZ-2108), 284/1150 = 0.247 (VAZ-2121), 172/635 = 0.271 (VAZ-1111) in the
+ * tables above; avtotema.ru gives the VAZ-2101's as 280 of 955, 0.293.
  */
-export const INERTIA_PITCH_YAW_GAIN = 2.55;
-/** Roll inertia is closer to a box's, since mass is not spread across the width. */
-export const INERTIA_ROLL_GAIN = 1.35;
+export const BODY_SHELL_MASS_FRACTION = 0.27;
+/**
+ * The engine's box, along its crank, across it and tall, metres: the kit bay's engine
+ * cell for the classic four (carkit/bay.ts, 0.54 × 0.47 × 0.54 [E]).
+ */
+export const ENGINE_LENGTH_M = 0.54;
+export const ENGINE_WIDTH_M = 0.47;
+export const ENGINE_HEIGHT_M = 0.54;
+/**
+ * The engine's centre above the crank, which sits at the wheel centres' height: the
+ * block and head stand over the crank and only the sump hangs below it [E].
+ */
+export const ENGINE_ABOVE_CRANK_M = 0.15;
+/** The gearbox's box: along its shafts, and its square section, metres [E]. */
+export const GEARBOX_LENGTH_M = 0.5;
+export const GEARBOX_SECTION_M = 0.3;
+/** A four-wheel-drive car's transfer box, behind the gearbox on a short shaft [E]. */
+export const TRANSFER_BOX_LENGTH_M = 0.3;
+/**
+ * The longitudinal engine's centre behind the front axle line: the kit bay's engine
+ * cell stands 0.11 m behind it on the classic, 0.05 on the Niva and 0.06 on the UAZ-469
+ * (carkit/bay.ts, measured through the body fit).
+ */
+export const LONGITUDINAL_ENGINE_BEHIND_FRONT_AXLE_M = 0.1;
+/**
+ * The transverse engine's centre ahead of the front axle line: the kit bay's engine
+ * cell stands 0.11 m ahead on the Samara, the Oka and the Nexia. Its transaxle's
+ * differential drives the wheels, so the gearbox sits on the axle line itself.
+ */
+export const TRANSVERSE_ENGINE_AHEAD_OF_FRONT_AXLE_M = 0.1;
+
+/**
+ * Moment of inertia of a thin uniform box SHELL — six plates of one surface density —
+ * about the axis through its centre along `along`, with `p` and `q` the other two
+ * half-extents. Each plate adds its own moment and its offset from the axis.
+ */
+export function thinBoxShellMoment(mass: number, along: number, p: number, q: number): number {
+  const areaSum = along * p + p * q + q * along;
+  if (areaSum <= 0) return 0;
+  return (
+    (mass / areaSum) *
+    ((p * q * (p * p + q * q)) / 3 + along * q * (p * p + (q * q) / 3) + along * p * ((p * p) / 3 + q * q))
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Aerodynamic drag: 0.5 * rho * Cd * A, with A = 4 * hx * hy (frontal area).
@@ -1792,7 +1834,7 @@ export const TWO_PI = Math.PI * 2;
  * `Settings.bouncyCars`: a purely cosmetic joke — the "bouncing Yaris" meme, a
  * cartoon hop applied to the whole visual root (body, wheels, lights, stickers)
  * after the physics pose is copied into it in `syncVisuals`. The chassis body,
- * its collider and the ray-cast suspension never see this: it is drawn on top
+ * its collider and the suspension never see this: it is drawn on top
  * of the settled pose, so handling, contact patches and projected lights are
  * exactly as if the toggle were off.
  *
@@ -1867,12 +1909,12 @@ export function rotateVector(
  * Anti-squat and anti-dive: the fraction of the longitudinal pitch couple that real
  * suspension GEOMETRY carries through the links instead of through the springs.
  *
- * Rapier's ray-cast suspension has no geometry at all — no wishbones, no instant
+ * The wheel contacts' suspension has no geometry at all — no wishbones, no instant
  * centre, no trailing-arm angle — so 100% of the couple goes into the springs and the
- * nose rises under power like a speedboat. `INERTIA_PITCH_YAW_GAIN` was already raised
- * to 2.55 in an earlier pass for exactly this complaint, but pitch inertia only makes
- * the lift SLOWER: the body still travels the whole way, just less abruptly. The cause
- * is a missing reaction path, not too little inertia.
+ * nose rises under power like a speedboat. Pitch inertia cannot cure that (an earlier
+ * pass raised it to 2.55 times a solid box's for exactly this complaint): it only makes
+ * the lift SLOWER, and the body still travels the whole way, just less abruptly. The
+ * cause is a missing reaction path, not too little inertia.
  *
  * It is the longitudinal counterpart of the roll centre (see the body-roll block
  * above): the share of the moment the links carry never reaches the springs. Here the

@@ -49,6 +49,7 @@ import {
 import { benchCarState } from './benchcar';
 import { Autopilot, roadPaceCeiling, type AutopilotMode } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
+import type { TyreContacts } from '../src/vehicle/tyrecontact';
 import { installAssetShim } from './assetshim';
 import type { RoadConditionBuffer } from '../src/world/gradient';
 import { WorldOrigin } from '../src/world/origin';
@@ -1212,27 +1213,26 @@ const WAKE_HARD_LOAD = 1.8;
 const controlTally = new Map<string, ControlTally>();
 const controlCars = new Map<string, ControlCar>();
 const controlEvents: string[] = [];
-/** `Vehicle.controller` is private; the bench reads the ray hit nothing in the game publishes. */
-interface WithController {
-  readonly controller: RAPIER.DynamicRayCastVehicleController | null;
+/** `Vehicle.tyres` is private; the bench reads the tyre contact nothing in the game publishes. */
+interface WithTyres {
+  readonly tyres: TyreContacts | null;
 }
 /**
- * What each wheel stands on, one character per wheel in the controller's order: `a` in
+ * What each wheel stands on, one character per wheel in the vehicle's order: `a` in
  * the air, a digit for the `SurfaceType` of the road mesh or the terrain under it, `P`
- * a scatter prop, `C` another car, `X` any other collider. Read off Rapier's own ray
- * hit, so it is the ground the tyre forces were computed on.
+ * a scatter prop, `C` another car, `X` any other collider. Read off the tyre contact
+ * itself, so it is the ground the tyre forces were computed on.
  */
 function wheelCode(vehicle: Vehicle): string {
-  const exposed: WithController = vehicle as unknown as WithController;
-  const controller = exposed.controller;
-  if (!controller) return '?';
+  const tyres = (vehicle as unknown as WithTyres).tyres;
+  if (!tyres) return '?';
   let out = '';
-  for (let i = 0; i < vehicle.wheelRide.length; i++) {
-    if (!controller.wheelIsInContact(i)) {
+  for (const tyre of tyres.wheels) {
+    if (!tyre.inContact) {
       out += 'a';
       continue;
     }
-    const ground = controller.wheelGroundObject(i);
+    const ground = tyre.ground;
     if (!ground) out += 'n';
     else if (propColliders.has(ground.handle)) out += 'P';
     else if (chassisOwner(ground) !== null) out += 'C';

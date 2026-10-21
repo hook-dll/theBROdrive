@@ -5,17 +5,17 @@
  *
  * `ride-bench.ts` measures the ground and `surface-feel.ts` measures the seat. This
  * measures the thing between them, and it exists because the suspension is the one
- * part of the car whose numbers cannot be read off the catalogue: Rapier's ray-cast
- * spring force is `stiffness * compression * chassis_mass`, a rate PER KILOGRAM, and
- * every quantity a chassis engineer actually thinks in — ride frequency, damping
- * ratio, static deflection, axle load — has to be derived from it. Derive it wrong
- * by a factor of two and every car in the catalogue rides like a race car while the
- * comment above it claims a land yacht.
+ * part of the car whose numbers cannot be read off the catalogue: the tyre contact's
+ * spring (src/vehicle/tyrecontact.ts) takes absolute rates, N/m and N·s/m per corner,
+ * and every quantity a chassis engineer actually thinks in — ride frequency, damping
+ * ratio, static deflection, axle load — has to be derived from them and the mass each
+ * corner carries. Derive it wrong by a factor of two and every car in the catalogue
+ * rides like a race car while the comment above it claims a land yacht.
  *
- * So section one checks the ALGEBRA against a bare Rapier controller with no game
- * code near it: drop a known mass on known springs, count the bounces, and compare
- * with the closed forms the catalogue is written in. Section two runs the real
- * `Vehicle` and reports what a driver would feel.
+ * So section one checks the ALGEBRA against bare `TyreContacts` with no other game
+ * code near them: drop a known mass on known springs, count the bounces, and compare
+ * with the closed forms. Section two runs the real `Vehicle` and reports what a driver
+ * would feel.
  *
  *   npx tsx tools/suspension-probe.ts [modelId ...]
  *
@@ -32,11 +32,7 @@ import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { benchCarState } from './benchcar';
-import {
-  heaveFrequencyHz,
-  suspensionDampingRatio,
-  wheelSpringRate,
-} from '../src/vehicle/carmodels';
+import { TyreContacts } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
 
@@ -45,7 +41,7 @@ const MODELS = process.argv.slice(2);
 const DEFAULT_MODELS = ['sv_vaz2105r', 'sv_vaz2101', 'gt_vaz2110', 'sa_uaz330364'];
 
 /* ---------------------------------------------------------------------------
- * Section 1: the law, on a bare controller.
+ * Section 1: the law, on bare tyre contacts.
  * ------------------------------------------------------------------------- */
 
 /** A flat trimesh floor at y = 0, big enough that nothing can drive off it. */
@@ -69,8 +65,9 @@ interface LawResult {
 }
 
 /**
- * Drops a rigid box on four ray-cast wheels and measures what it does. `damping`
- * is applied to both compression and rebound so the decay measures ONE ratio.
+ * Drops a rigid box on four tyre contacts and measures what it does. `stiffness` (N/m)
+ * and `damping` (N·s/m) are per corner; `damping` is applied to both compression and
+ * rebound so the decay measures ONE ratio.
  */
 function measureLaw(mass: number, stiffness: number, damping: number): LawResult {
   const world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
@@ -79,6 +76,7 @@ function measureLaw(mass: number, stiffness: number, damping: number): LawResult
 
   const radius = 0.35;
   const rest = 0.6;
+  const width = 0.2;
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 1.2, 0).setAdditionalMass(mass),
   );
@@ -86,41 +84,31 @@ function measureLaw(mass: number, stiffness: number, damping: number): LawResult
     RAPIER.ColliderDesc.cuboid(0.8, 0.5, 2).setDensity(0),
     body,
   );
-  const controller = new RAPIER.DynamicRayCastVehicleController(
-    body,
-    world.broadPhase,
-    world.narrowPhase,
-    world.bodies,
-    world.colliders,
-  );
-  controller.indexUpAxis = 1;
-  controller.setIndexForwardAxis = 2;
-  for (const [x, z] of [
+  const tyres = new TyreContacts({ world } as unknown as PhysicsWorld, body);
+  const wheels = [
     [-0.7, 1.3],
     [0.7, 1.3],
     [-0.7, -1.3],
     [0.7, -1.3],
-  ]) {
-    const i = controller.numWheels();
-    controller.addWheel({ x, y: 0, z }, { x: 0, y: -1, z: 0 }, { x: -1, y: 0, z: 0 }, rest, radius);
-    controller.setWheelSuspensionStiffness(i, stiffness);
-    controller.setWheelSuspensionCompression(i, damping);
-    controller.setWheelSuspensionRelaxation(i, damping);
-    controller.setWheelMaxSuspensionTravel(i, 0.5);
-    controller.setWheelMaxSuspensionForce(i, 1e9);
-    controller.setWheelFrictionSlip(i, 2);
-    controller.setWheelSideFrictionStiffness(i, 1);
-  }
+  ].map(([x, z]) => {
+    const tyre = tyres.add({ x: x!, y: 0, z: z! }, rest, radius, width);
+    tyre.springRateNPerM = stiffness;
+    tyre.compressionRateNsPerM = damping;
+    tyre.relaxationRateNsPerM = damping;
+    tyre.maxTravelM = 0.5;
+    tyre.maxForceN = 1e9;
+    return tyre;
+  });
 
   const step = (): void => {
-    controller.updateVehicle(FIXED_DT);
+    tyres.update(FIXED_DT);
     world.step();
   };
 
-  // Settle, then read the static compression straight off the controller.
+  // Settle, then read the static compression straight off the contact.
   for (let i = 0; i < 3000; i++) step();
   const settledY = body.translation().y;
-  const sagM = rest - (controller.wheelSuspensionLength(0) ?? rest);
+  const sagM = rest - wheels[0]!.lengthM;
 
   // Lift it clear of static and let go: the free response is the body mode.
   body.setTranslation({ x: 0, y: settledY + 0.12, z: 0 }, true);
@@ -158,30 +146,30 @@ function measureLaw(mass: number, stiffness: number, damping: number): LawResult
     }
   }
 
-  controller.free();
   world.free();
   return { sagM, bounceHz, zeta };
 }
 
 function lawSection(): void {
-  console.log('--- Rapier spring law: measured vs the closed forms the catalogue uses ---');
+  console.log('--- Tyre contact spring law: measured vs the closed forms ---');
   console.log(
-    'mass    k      c     sag mm  predicted   bounce Hz  predicted   zeta   predicted',
+    'mass    k N/m   c N·s/m  sag mm  predicted   bounce Hz  predicted   zeta   predicted',
   );
-  // Two masses per rate, because the whole point of a per-kilogram rate is that
-  // NEITHER the sag nor the frequency may move when the mass does.
-  for (const stiffness of [12, 24, 44, 70]) {
+  // Two masses per rate, because the rates are ABSOLUTE: the sag must grow with the
+  // mass (m g / 4k) and the frequency fall with it (sqrt(4k / m)), as a real spring's do.
+  for (const stiffness of [22000, 44000, 70000, 110000]) {
     for (const mass of [900, 2400]) {
-      const damping = 0.3 * Math.sqrt(stiffness);
+      // 0.3 of critical for the whole body on four corners.
+      const damping = 0.3 * Math.sqrt(stiffness * mass);
       const m = measureLaw(mass, stiffness, damping);
-      // Closed forms under test. Equal load on four wheels, so each spring carries
-      // a quarter of the weight: sag = g / (4k). The body mode is the whole mass on
-      // all four springs: omega = sqrt(4 * k * mass / mass) = 2 * sqrt(k).
-      const predictedSag = GRAVITY / (4 * stiffness);
-      const predictedHz = heaveFrequencyHz(stiffness, 0.25);
-      const predictedZeta = suspensionDampingRatio(stiffness, damping, 0.25);
+      // Closed forms under test. Equal load on four wheels, so each spring carries a
+      // quarter of the weight: sag = m g / (4k). The body mode is the whole mass on all
+      // four springs: omega = sqrt(4k / m); zeta = 4c / (2 sqrt(4k m)) = c / sqrt(k m).
+      const predictedSag = (mass * GRAVITY) / (4 * stiffness);
+      const predictedHz = Math.sqrt((4 * stiffness) / mass) / (2 * Math.PI);
+      const predictedZeta = damping / Math.sqrt(stiffness * mass);
       console.log(
-        `${String(mass).padStart(4)}  ${String(stiffness).padStart(4)}  ${damping.toFixed(2).padStart(5)}  ` +
+        `${String(mass).padStart(4)}  ${String(stiffness).padStart(6)}  ${damping.toFixed(0).padStart(7)}  ` +
           `${(m.sagM * 1000).toFixed(1).padStart(6)}  ${(predictedSag * 1000).toFixed(1).padStart(9)}  ` +
           `${m.bounceHz.toFixed(3).padStart(9)}  ${predictedHz.toFixed(3).padStart(9)}  ` +
           `${m.zeta.toFixed(3).padStart(5)}  ${predictedZeta.toFixed(3).padStart(9)}`,
@@ -280,7 +268,7 @@ async function carSection(modelId: string): Promise<void> {
   );
   console.log(
     `  ride frequency front ${susp.frontHz.toFixed(2)} Hz, rear ${susp.rearHz.toFixed(2)} Hz asked` +
-      `   clearance ${(clearance * 1000).toFixed(0)} mm (target ${(susp.rideHeight * 1000).toFixed(0)} mm)`,
+      `   clearance ${(clearance * 1000).toFixed(0)} mm`,
   );
 
   // --- drop test: frequency and damping, on the real car ----------------------

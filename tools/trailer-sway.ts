@@ -43,6 +43,7 @@ import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
 import { Trailer, TRAILER_BALL_Z, TRAILER_MODEL_FIT, TRAILER_TARE_KG } from '../src/vehicle/trailer';
+import type { TyreContacts } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { carModel } from '../src/vehicle/carmodels';
 import { WorldOrigin } from '../src/world/origin';
@@ -454,9 +455,9 @@ async function load(): Promise<void> {
     const weight = trailer.massKg * G;
     const predicted = predictedTongueFraction(kg, PLACEMENTS[placement]) * weight;
     const measured = l.front + l.rear - (s.front + s.rear);
-    // The trailer's own springs, read off its private controller: bench introspection.
-    const springs = (trailer as unknown as { controller: { wheelSuspensionForce(i: number): number | null } }).controller;
-    const atBall = weight - (springs.wheelSuspensionForce(0) ?? 0) - (springs.wheelSuspensionForce(1) ?? 0);
+    // The trailer's own springs, read off its private tyre contacts: bench introspection.
+    const springs = (trailer as unknown as { tyres: TyreContacts }).tyres.wheels;
+    const atBall = weight - springs[0]!.forceN - springs[1]!.forceN;
     console.log(
       `  ${String(kg).padStart(3)} kg ${placement.padEnd(6)}  front ${l.front.toFixed(0)} (${(l.front - s.front).toFixed(0).padStart(5)})` +
       `  rear ${l.rear.toFixed(0)} (${l.rear >= s.rear ? '+' : ''}${(l.rear - s.rear).toFixed(0)})  tongue: car wheels ${measured.toFixed(0)} N` +
