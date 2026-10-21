@@ -20,7 +20,6 @@
  */
 
 import type { CabinLayoutOverride } from './interior';
-import type { LiveryLook } from './police';
 
 /** One half-section of the tub; every value is interpolated between stations. */
 export interface TubStation {
@@ -412,11 +411,6 @@ export interface KitLook {
    * under the windows).
    */
   readonly featureLine?: { readonly points: readonly (readonly [number, number])[]; readonly height: number };
-  /**
-   * A service livery over the car's paint (police.ts): livery-paint doors, lettering
-   * painted into the front doors, a light bar with beacons on the roof. Absent: none.
-   */
-  readonly livery?: LiveryLook;
 }
 
 /**

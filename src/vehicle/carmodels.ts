@@ -1172,11 +1172,6 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // (ru.wikipedia "УАЗ-469", after the 1983 "Краткий автомобильный справочник"); 220
   // clearance (ibid.: 300 on the military 469's portal axles). src/carkit/measurements-uaz.md.
   kit_uaz469:     { length: 4.025, width: 1.785, height: 2.015, clearance: 0.220, wheelbase: 2.380, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.215 },
-  // The 469 in the militia's livery (src/carkit/police.ts): the 469's figures but its height,
-  // which is over the light bar. The bar stands 0.12 over the built roof (1.78 → 1.90); the
-  // 469's built body (0.22-1.78, 1.56) is fitted to its 1.795, so 2.015 + 0.12 × 1.795 / 1.56
-  // fits this body at the 469's very scale and the two cars are one shape under the bar.
-  kit_uaz469_police: { length: 4.025, width: 1.785, height: 2.153, clearance: 0.220, wheelbase: 2.380, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.215 },
   // The UAZ-2206 bus, the operating manual's figure (РЭ 05808600.059-96): 4380 bumper to
   // bumper (993 + 2300 + 1087; 4440 over the hitch), 1940 wide, 2101 high over the roof
   // vent, 2300 wheelbase, 1445 tracks, 220 clearance, 215/90-15C (364 static); the
@@ -2729,16 +2724,6 @@ const KIT_CARS: readonly Entry[] = (
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
-/**
- * Kit cars in a service's livery (src/carkit/police.ts): resolvable by id (`carModel`,
- * `loadCarModel`) for the game that spawns them, but in no list anything draws from
- * (traffic, rivals, car lots, the spawn menu, the car lab). The police UAZ-469 is the
- * 469 on the 469's running gear; the game gives it its black paint.
- */
-const SERVICE_KIT_CARS: readonly Entry[] = (
-  [['kit_uaz469_police', 'cf_uaz31512', 'uaz469_police', 'UAZ-469 Militsiya']] satisfies readonly KitCarRow[]
-).map(kitEntry);
-
 /** A kit car's catalogue entry from its row (`KitCarRow`). */
 function kitEntry([id, source, kit, label, gear]: KitCarRow): Entry {
   const base = kitBase(id, source, kit, label);
@@ -2832,7 +2817,7 @@ export const CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
  */
 const PACK_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 
-const BY_ID = new Map([...CAR_MODELS, ...SERVICE_KIT_CARS.map(catalogueDef), ...PACK_CAR_MODELS].map((m) => [m.id, m]));
+const BY_ID = new Map([...CAR_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
 
 /**
  * The model a new game starts in and every unknown saved id resolves to. The

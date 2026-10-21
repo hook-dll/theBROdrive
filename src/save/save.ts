@@ -1,11 +1,10 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, POLICE_HEAT_MAX, SAVE_VERSION, type PlayerSeat } from '../game/state';
+import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
   HeadlightMode,
   PlayerState,
-  PoliceRecord,
   StickerState,
   TrailerState,
   TrailerLoad,
@@ -494,6 +493,9 @@ export function migrateState(raw: unknown): WorldState {
     throw new Error('Save data is malformed: worn item is not sun shades');
   }
 
+  // Only the fields named here are read. A save from the police days (2026-10-18 to
+  // 10-21) also carries `player.police` (heat, heatUntil); the police are gone and it
+  // is dropped.
   const player: PlayerState = {
     x: numOr(playerRaw.x, dp.x),
     y: numOr(playerRaw.y, dp.y),
@@ -511,7 +513,6 @@ export function migrateState(raw: unknown): WorldState {
       Math.max(0, carried.length - 1),
     ),
     wornSunShades: wornItem,
-    police: migratePoliceRecord(playerRaw.police),
     // A save from the coin days carries its coins instead (`legacyCoinKopecks`).
     money: version < 3
       ? legacyCoinKopecks(carriedRaw, looseItemsRaw, carsRaw, courierStorageRaw)
@@ -672,19 +673,6 @@ function migrateBarrelLitres(value: unknown): Record<string, number> {
   return out;
 }
 
-/**
- * The police's record of the player (world/police.ts). Absent on every save from before
- * the police: no heat. Out-of-range values are clamped rather than rejected.
- */
-function migratePoliceRecord(value: unknown): PoliceRecord {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { heat: 0, heatUntil: 0 };
-  const raw = value as Record<string, unknown>;
-  return {
-    heat: Math.min(POLICE_HEAT_MAX, Math.max(0, Math.round(numOr(raw.heat, 0)))),
-    heatUntil: Math.max(0, numOr(raw.heatUntil, 0)),
-  };
-}
-
 function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   if (typeof raw.id !== 'string') {
     throw new Error('Save data is malformed: trailer is missing an id');
@@ -779,13 +767,15 @@ function migrateCarPaint(raw: unknown): CarPaint | null {
  * Bodies the catalogue dropped for a new body of the same car: the save keeps the car,
  * running gear and all, on the body that replaced it. The GTA SA Oka gave way to the
  * carforge one (2026-10-12); the 2105 rally car has no kit body and becomes the kit 2105;
- * the pack Nivas, whose ids do not name the model, load on the kit 2121 and 2131.
+ * the pack Nivas, whose ids do not name the model, load on the kit 2121 and 2131; the
+ * police UAZ-469 went with the police (2026-10-21) and loads as the plain 469.
  */
 const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
   sa_oka: 'cf_vaz1111',
   sv_vaz2105r: 'kit_vaz2105',
   sv_niva: 'kit_vaz2121',
   sv_niva_long: 'kit_vaz2131',
+  kit_uaz469_police: 'kit_uaz469',
 };
 
 /**
@@ -794,13 +784,12 @@ const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
  * `gt_vaz2110`, `sa_azlk2141`, …) loads on the kit body of the same car (`kit_vaz2101`,
  * `kit_azlk2141`, …), and one with no kit twin (the UAZs, the GAZ-21, …) on the default.
  * The carforge Oka (`cf_vaz1111`, and the retired `sa_oka` through it) loads on
- * `kit_vaz1111`, the carforge Volga (`cf_gaz31029`) on `kit_gaz31029`. A kit car in no
- * list (the police UAZ-469, `kit_uaz469_police`) loads as itself.
+ * `kit_vaz1111`, the carforge Volga (`cf_gaz31029`) on `kit_gaz31029`.
  */
 function worldModelId(saved: unknown): string {
   if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;
   const id = RETIRED_MODEL_IDS[saved] ?? saved;
-  if (CAR_MODELS.some((model) => model.id === id) || (id.startsWith('kit_') && hasCarModel(id))) return id;
+  if (CAR_MODELS.some((model) => model.id === id)) return id;
   const twin = `kit_${id.slice(id.indexOf('_') + 1)}`;
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
 }

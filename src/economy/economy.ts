@@ -82,11 +82,6 @@ export function formatMoney(kopecks: number): string {
   return kop === 0 ? `${rub}р` : `${rub}р ${kop}коп`;
 }
 
-/** The purse's balance, kopecks. */
-export function moneyHeld(world: GameWorld): number {
-  return world.state.player.money;
-}
-
 /**
  * Takes `kopecks` out of the purse. False, and nothing taken, when it holds less: a
  * machine short of its price gives nothing.
@@ -208,7 +203,6 @@ export const PRICE_TABLE = {
     kit_vaz2104: 81 * RUB,
     kit_vaz2111: 94 * RUB,
     kit_uaz469: 100 * RUB,
-    kit_uaz469_police: 100 * RUB,
     kit_vaz2131: 113 * RUB,
     kit_nexia: 113 * RUB,
     kit_astraf: 125 * RUB,

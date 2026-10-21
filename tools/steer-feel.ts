@@ -1,21 +1,22 @@
 /**
  * tools/steer-feel.ts
  *
- * What the player's steering does to the car, through the real `Vehicle`.
+ * What the player's steering does to the car, through the real `Vehicle` as the player
+ * drives it (`Vehicle.setPlayerDriven`).
  *
  *   bun tools/steer-feel.ts [modelId ...]
  *
- * 1. KEY HOLD at 60/100/130 km/h: the keyboard's steering key held down (the vehicle
- *    winds its own hold, `KEY_STEER_WIND_S`), speed held by a throttle governor. Reports
- *    the lateral g the car reaches, the rack angle as a share of lock, and the FRONT
- *    tyres' built slip angle against their own peak. A whole hold exists to put the
- *    front axle at its peak: well under it is grip the player cannot reach, well past
- *    it is a plough.
+ * 1. KEY HOLD at 60/100/130 km/h: the keyboard's steering key held down (the hands turn
+ *    the wheel, HANDS ON WHEEL in vehicletuning.ts, toward the lock for as long as it is
+ *    held), speed held by a throttle governor. Reports the lateral g the car reaches,
+ *    the rack angle as a share of lock, and the FRONT tyres' built slip angle against
+ *    their own peak. Nothing stops the hands at the peak: a long hold is a plough or a
+ *    spin, and that is the player's to avoid.
  * 2. STEP: the time from the key going down to 63% and 90% of the yaw rate the hold
  *    settles at, 60 and 100 km/h.
  * 3. RELEASE: from that hold at 60 km/h the key comes up. Time for the rack to come
  *    back to a tenth of its held angle, and for the yaw rate to fall to a tenth: the
- *    hold is given back (`KEY_STEER_RETURN_S`), then the tyres' aligning moment.
+ *    caster spins the wheel back (`HANDS_RETURN_TAU_S`), then the tyres' aligning moment.
  * 4. YAW KICK: straight at 70 km/h, the body is given 1.2 rad/s of yaw (a clipped kerb,
  *    a shove) and either nobody touches the keys (`hands off`) or a keyboard driver
  *    steers back to the original heading with the keys alone (`keys`). Peak heading
@@ -101,6 +102,7 @@ function rearSlip(rig: Rig): number {
 
 async function rolling(modelId: string, kmh: number): Promise<Rig> {
   const rig = await makeRig(modelId);
+  rig.vehicle.setPlayerDriven(true);
   drive(rig, 1, (_, f) => {
     f.throttle = 0;
     f.brake = 0;
@@ -127,7 +129,7 @@ interface Hold {
 }
 
 /**
- * Holds one steering input (the keyboard key, wound in by the vehicle, or the stick as
+ * Holds one steering input (the keyboard key, turning the wheel by hand, or the stick as
  * a position) for `holdS`, sampling yaw for the step response and averaging the last
  * second for the steady figures. Leaves the rig at the end of the hold.
  */

@@ -30,7 +30,6 @@ import { BODY_2110, BODY_2111, BODY_2112, LOOK_2110, LOOK_2111, LOOK_2112 } from
 import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
 import { BODY_GAZ24, BODY_GAZ31029, LOOK_GAZ24, LOOK_GAZ31029 } from './volgas';
 import { BODY_UAZ2206, BODY_UAZ469, LOOK_UAZ2206, LOOK_UAZ469 } from './uaz';
-import { LOOK_UAZ469_POLICE } from './police';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
 export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
@@ -556,8 +555,6 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   gaz31029: { id: 'gaz31029', ...BODY_GAZ31029, look: LOOK_GAZ31029, cabinLayout: CABIN_GAZ31029 },
   azlk2141: { id: 'azlk2141', ...BODY_2141, look: LOOK_2141, cabinLayout: CABIN_2141 },
   uaz469: { id: 'uaz469', ...BODY_UAZ469, look: LOOK_UAZ469, cabinLayout: CABIN_UAZ469 },
-  // The 469 in the militia's livery (police.ts): no catalogue list draws it (vehicle/carmodels.ts).
-  uaz469_police: { id: 'uaz469_police', ...BODY_UAZ469, look: LOOK_UAZ469_POLICE, cabinLayout: CABIN_UAZ469 },
   uaz2206: { id: 'uaz2206', ...BODY_UAZ2206, look: LOOK_UAZ2206, cabinLayout: CABIN_UAZ2206 },
   nexia: { id: 'nexia', ...BODY_NEXIA, look: LOOK_NEXIA, cabinLayout: CABIN_NEXIA },
   espero: { id: 'espero', ...BODY_ESPERO, look: LOOK_ESPERO, cabinLayout: CABIN_ESPERO },

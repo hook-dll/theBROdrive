@@ -14,8 +14,6 @@ export type Vec3 = readonly [number, number, number];
 /** Material slots a kit part draws with; see `kitMaterial` in kit.ts. */
 export type KitSlot =
   | 'paint'
-  /** Livery paint: paint in its own vertex colour, whatever the car's (police.ts, materials.ts). */
-  | 'livery'
   | 'glass'
   | 'trim'
   | 'chrome'

@@ -6,10 +6,10 @@
  * The keyboard is how most players steer this game: they hold a key for a fraction of a
  * second, let go, and hold the other one to take it back. That makes the mapping from
  * TAP LENGTH to ROAD-WHEEL ANGLE the whole of the control system that matters most, and
- * it is not something that can be judged by reading the code — the vehicle's keyboard
- * hold (`KEY_STEER_WIND_S`), the reach it winds toward and the steering box's free play
- * sit in series, and whether they add up to a usable curve or a dead zone is only
- * visible by measurement.
+ * it is not something that can be judged by reading the code — the hands on the wheel
+ * (HANDS ON WHEEL in vehicletuning.ts: their rate and its ramp), the steering ratio and
+ * the steering box's free play sit in series, and whether they add up to a usable curve
+ * or a dead zone is only visible by measurement.
  *
  * WHAT THIS DEFENDS. A tap has to do something, and a longer tap has to do more. Those
  * two properties are what "light taps to correct the car" means, and both of them have
@@ -34,8 +34,9 @@ const model = process.argv[2] ?? 'sv_vaz2101';
 const speedKmh = Number(process.argv[3] ?? 60);
 const speedMps = speedKmh / 3.6;
 
-// The keyboard sends a direction, -1/0/1, and the vehicle winds its own hold toward it
-// (`SteerMode` 'keys'): the bench sends the same frames the game does.
+// The keyboard sends a direction, -1/0/1, and the vehicle's hands turn the wheel that way
+// (`SteerMode` 'keys'): the bench sends the same frames the game does, to the car as the
+// player drives it (`Vehicle.setPlayerDriven`).
 
 /** Tap lengths swept, seconds. The short end is a real tap, not a minimum hold. */
 const TAPS = [0.04, 0.06, 0.08, 0.12, 0.16, 0.22, 0.3, 0.45, 0.7];
@@ -44,8 +45,8 @@ const FINE_TAPS = [0.04, 0.06, 0.08];
 
 interface TapResult {
   readonly tapS: number;
-  /** The vehicle's keyboard hold at its peak, 0..1 (`KEY_STEER_WIND_S`). */
-  readonly hold: number;
+  /** The steering wheel's angle at its peak, degrees at the rim (HANDS ON WHEEL). */
+  readonly rimDeg: number;
   readonly steerDeg: number;
   readonly yawDegS: number;
   readonly latG: number;
@@ -65,6 +66,7 @@ async function tap(tapS: number): Promise<TapResult> {
   // The flat 8 km ground: the old 30 m ramp ran out under the car within the run.
   const rig = await makeRig(model, (physics) => addGround(physics, SurfaceType.Asphalt), false);
   const body = rig.vehicle.chassis;
+  rig.vehicle.setPlayerDriven(true);
   // Body forward is +Z (vehicle.ts `updateSteering`); -Z is a car reversing at speed.
   body.setLinvel({ x: 0, y: 0, z: speedMps }, true);
   body.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -72,7 +74,7 @@ async function tap(tapS: number): Promise<TapResult> {
   let steerDeg = 0;
   let yawDegS = 0;
   let latG = 0;
-  let hold = 0;
+  let rimDeg = 0;
 
   const steps = Math.round(3 / FIXED_DT);
   for (let i = 0; i < steps; i++) {
@@ -98,14 +100,16 @@ async function tap(tapS: number): Promise<TapResult> {
     const vel = body.linvel();
     const g = (Math.abs(vel.x) * 9.81) / Math.max(0.1, Math.abs(vel.z));
     if (g > latG) latG = g;
-    // The vehicle's private hold, read for the report.
+    // The vehicle's private steering-wheel angle, read for the report.
     const vehicle: object = rig.vehicle;
-    if ('keySteerHold' in vehicle && typeof vehicle.keySteerHold === 'number') hold = Math.max(hold, vehicle.keySteerHold);
+    if ('handsWheelRad' in vehicle && typeof vehicle.handsWheelRad === 'number') {
+      rimDeg = Math.max(rimDeg, Math.abs(vehicle.handsWheelRad) * DEG);
+    }
   }
   rig.vehicle.dispose();
   return {
     tapS,
-    hold,
+    rimDeg,
     steerDeg: steerDeg * DEG,
     yawDegS,
     latG,
@@ -117,13 +121,13 @@ const results: TapResult[] = [];
 for (const t of TAPS) results.push(await tap(t));
 
 console.log(`\n${model} at ${speedKmh} km/h on asphalt: one steering tap, held for the given time`);
-console.log('  tap ms    hold   steer deg   yaw deg/s    lat g   x previous');
+console.log('  tap ms  rim deg   steer deg   yaw deg/s    lat g   x previous');
 
 let previous = 0;
 for (const r of results) {
   const ratio = previous > 0 ? r.steerDeg / previous : 0;
   console.log(
-    `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.hold.toFixed(3).padStart(8)} ` +
+    `${String(Math.round(r.tapS * 1000)).padStart(7)} ${r.rimDeg.toFixed(1).padStart(8)} ` +
       `${r.steerDeg.toFixed(2).padStart(11)} ${r.yawDegS.toFixed(1).padStart(11)} ` +
       `${r.latG.toFixed(3).padStart(8)} ${ratio.toFixed(2).padStart(11)}`,
   );

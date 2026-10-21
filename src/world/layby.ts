@@ -1,10 +1,9 @@
 import type { SurfaceType } from '../core/surfaces';
 import { roadConditionAt } from './gradient';
 import { roadsideSlotNear, roadsideSlotsBetween } from './poislots';
-import { CURVE_WIDENING_M, halfWidthAt, LANE_WIDTH } from './roadprofile';
+import { LANE_WIDTH } from './roadprofile';
 import {
   LAYBY_TAPER_M,
-  PAD_HALF_LENGTH_M,
   roadHalf,
   roadsideStop,
   SERVICE_DEPTH_M,
@@ -149,42 +148,6 @@ export function laybysBetween(seed: number, fromS: number, toS: number): Layby[]
   }
   return out;
 }
-
-/**
- * A PULL-OFF ON THE SHOULDER, shaped as a lay-by so the traffic's stop machinery
- * (`RoadTraffic` lay-by visits) drives it unchanged: the same slips and pad length, but
- * nothing built — no asphalt, no levelled ground, in no list the terrain, the verge or
- * the stream reads. Its parking line is `SHOULDER_PARK_OFF_M` past the widest asphalt
- * edge along it, so a car standing there has its inner wheels at the edge and its outer
- * ones on the graded shoulder (roadprofile.ts `SHOULDER_WIDTH_M`). The police post on
- * the open road stands on one (world/police.ts). `id` must be negative, unlike any
- * `Poi.index`, and unique among the pull-offs alive at once.
- */
-export function shoulderPullOff(seed: number, s: number, side: 1 | -1, id: number): Layby {
-  const sEntry = s - PAD_HALF_LENGTH_M - LAYBY_TAPER_M;
-  const sExit = s + PAD_HALF_LENGTH_M + LAYBY_TAPER_M;
-  let edge = 0;
-  for (let at = sEntry; at <= sExit; at += 6) edge = Math.max(edge, halfWidthAt(seed, at));
-  const padInner = edge + CURVE_WIDENING_M;
-  const padOuter = padInner + SHOULDER_PARK_OFF_M - CURVE_WIDENING_M + PARK_OUTER_CLEAR_M;
-  return {
-    poiIndex: id,
-    s,
-    side,
-    sEntry,
-    sPadStart: s - PAD_HALF_LENGTH_M,
-    sPadEnd: s + PAD_HALF_LENGTH_M,
-    sExit,
-    padInner,
-    padOuter,
-    siteOuter: padOuter,
-    siteHalfAlong: 0,
-    surface: roadConditionAt(seed, s).surface,
-  };
-}
-
-/** A shoulder pull-off's parking line past the asphalt's edge, metres; see `shoulderPullOff`. */
-const SHOULDER_PARK_OFF_M = 1.1;
 
 /**
  * The lay-by whose levelled ground reaches arclength `s`, or null. A bracket lookup the

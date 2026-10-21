@@ -14,12 +14,11 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
  * What `InputFrame.steer` means, decided by the device that produced it.
  *
  *   keys          a keyboard or touch DIRECTION: -1, 0 or 1 from the keys, the touch
- *                 wheel's deflection from the thumb. Not a position: the vehicle winds
- *                 its own hold toward it, so how long a key is down is how much wheel
- *                 (`Vehicle.updateSteering`, `KEY_STEER_WIND_S` in vehicletuning.ts).
- *                 Near walking pace the hold turns the wheels about the car's axis up
- *                 to the whole lock; at speed it asks for slip on top of where the front
- *                 tyres are travelling, up to their peak.
+ *                 wheel's deflection from the thumb. Not a position: it is hands turning
+ *                 the steering wheel, so how long a key is down is how much wheel
+ *                 (`Vehicle.updateSteering`, HANDS ON WHEEL in vehicletuning.ts), and
+ *                 let go the caster brings the wheel back. Both keys down is 0 here and
+ *                 `steerBothHeld`: both hands holding the wheel where it is.
  *   analogAssist  a position (a pad stick, the precise-control wheel) read against the
  *                 tyres' peak at speed, proportionally: the stick's edge is the peak.
  *   analog        a position read against the whole steering lock.
@@ -27,8 +26,8 @@ import { INVENTORY_ITEM_LIMIT } from '../items/items';
  *                 has computed the angle it wants (`Vehicle.steeringInputForWheelAngle`).
  *
  * In the analogue modes a steer of exactly 0 means no hand is on the wheel, and the
- * tyres' own aligning moment turns it; with keys it means so once the hold has been
- * given back. `direct` always holds the rack where it is told.
+ * tyres' own aligning moment turns it; with keys it means so once the wheel is back at
+ * centre. `direct` always holds the rack where it is told.
  */
 export type SteerMode = 'keys' | 'analogAssist' | 'analog' | 'direct';
 
@@ -105,6 +104,11 @@ export interface InputFrame {
   toggleAutopilot: boolean;
   /** How `steer` is to be read: see `SteerMode`. */
   steerMode: SteerMode;
+  /**
+   * Both steering keys are down at once (`SteerMode` 'keys' only): `steer` is 0, and the
+   * hands are holding the wheel, not letting go of it.
+   */
+  steerBothHeld: boolean;
 }
 
 export function emptyInput(): InputFrame {
@@ -149,6 +153,7 @@ export function emptyInput(): InputFrame {
     togglePreciseSteer: false,
     // A synthetic frame is a computed command until a device says otherwise.
     steerMode: 'direct',
+    steerBothHeld: false,
   };
 }
 
@@ -654,16 +659,17 @@ export class InputReader {
     // The cabin editor hands the mouse back to the look and the keys to the eye.
     const editing = this.cabinEditing;
     const steerWithMouse = preciseDrive && !lookOverride && !editing;
-    const keySteer = editing
-      ? 0
-      : (this.anyHeld(this.keys.right) ? 1 : 0) - (this.anyHeld(this.keys.left) ? 1 : 0);
+    const rightHeld = !editing && this.anyHeld(this.keys.right);
+    const leftHeld = !editing && this.anyHeld(this.keys.left);
+    const keySteer = (rightHeld ? 1 : 0) - (leftHeld ? 1 : 0);
     if (pad.steer !== 0) this.steerDevice = 'pad';
     else if (keySteer !== 0) this.steerDevice = 'keyboard';
     else if (touch?.steeringActive === true) this.steerDevice = 'touch';
     const analogMode = this.analogSteerAssist ? 'analogAssist' : 'analog';
+    f.steerBothHeld = false;
     if (this.steerDevice === 'pad') {
       // An analog stick is already a position, held and released by the thumb; the
-      // keyboard's wind-up would only put a lag between it and the wheels.
+      // keyboard's hands on the wheel would only put a lag between it and the wheels.
       f.steer = pad.steer;
       f.steerMode = analogMode;
     } else if (preciseDrive) {
@@ -673,11 +679,12 @@ export class InputReader {
       f.steer = this.preciseWheel;
       f.steerMode = analogMode;
     } else {
-      // Keys and the touch wheel give a direction, and the vehicle winds the wheel
-      // toward it for as long as it is held (`SteerMode` 'keys'). The touch wheel's
-      // deflection is how far it may wind; lifting the thumb is releasing a key.
+      // Keys and the touch wheel give a direction, and the vehicle's hands turn the
+      // wheel that way for as long as it is held (`SteerMode` 'keys'). The touch wheel's
+      // deflection is a share of the hands' rate; lifting the thumb is releasing a key.
       f.steer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steerMode = 'keys';
+      f.steerBothHeld = rightHeld && leftHeld;
     }
     if (editing) {
       f.throttle = 0;

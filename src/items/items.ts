@@ -275,7 +275,7 @@ export interface CargoParty {
 
 /**
  * The contract an item belongs to: its party's id for a passenger, its own id otherwise.
- * A party of three teddies is ONE contract in a car's contract slots and to the police.
+ * A party of three teddies is ONE contract in a car's contract slots.
  */
 export function contractIdOf(item: ContractCargoItem): string {
   return item.party?.id ?? item.id;

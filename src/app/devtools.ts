@@ -37,12 +37,7 @@ import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
 import type { VistaMesh } from '../render/vista';
-import {
-  RAW_HANDLING,
-  RAW_HANDLING_DEFAULTS,
-  TYRE_MODEL,
-  type RawHandlingTuning,
-} from '../vehicle/vehicletuning';
+import { TYRE_MODEL } from '../vehicle/vehicletuning';
 import { carModel } from '../vehicle/carmodels';
 import {
   TRAILER_HALF_LENGTH,
@@ -51,7 +46,7 @@ import {
 } from '../vehicle/trailer';
 import type { Vehicle } from '../vehicle/vehicle';
 import type { Hud } from '../ui/hud';
-import type { DevSpawnItemRequest, RawHandlingControl } from '../ui/menu';
+import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
 import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
@@ -64,7 +59,6 @@ import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { RoadTraffic } from '../world/traffic';
 import type { RivalRace } from '../contracts/race';
-import type { PolicePatrol } from '../world/police';
 import type { Terrain } from '../world/terrain';
 import type { WorldWorkScheduler } from '../world/workqueue';
 import { forceWeather, weather } from '../world/weather';
@@ -126,7 +120,6 @@ export interface DevToolsContext {
   readonly tumbleweeds: TumbleweedField;
   readonly traffic: RoadTraffic;
   readonly race: RivalRace;
-  readonly police: PolicePatrol;
   readonly vitals: PlayerVitals;
   readonly autopilot: Autopilot;
   readonly hud: Hud;
@@ -152,8 +145,6 @@ export interface DevTools {
   jumpToLake(index: number): void;
   /** Puts 100 rubles in the purse. */
   giveMoney(): void;
-  /** The raw-handling switch and levers (vehicletuning.ts `RAW_HANDLING`), kept per browser. */
-  readonly rawHandling: RawHandlingControl;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
   updateLakeSeek(activeS: number): void;
 }
@@ -163,35 +154,6 @@ export interface DevTools {
  * right-hand lane on an ordinary two-lane road.
  */
 const DEV_JUMP_LATERAL = -1.9;
-
-/** Where this browser keeps the raw-handling switch and levers. */
-const RAW_HANDLING_STORAGE_KEY = 'bro.rawHandling';
-
-/**
- * Puts the stored raw-handling switch and levers into `RAW_HANDLING`. A missing,
- * unreadable or partial record leaves each missing field at its default; a lever is
- * clamped to 0..1.
- */
-function loadRawHandling(): void {
-  let stored: unknown = null;
-  try {
-    const raw = localStorage.getItem(RAW_HANDLING_STORAGE_KEY);
-    stored = raw === null ? null : JSON.parse(raw);
-  } catch {
-    return;
-  }
-  if (typeof stored !== 'object' || stored === null) return;
-  const record = stored as Partial<Record<keyof RawHandlingTuning, unknown>>;
-  if (typeof record.enabled === 'boolean') RAW_HANDLING.enabled = record.enabled;
-  for (const key of ['assistFade', 'steerSpeed', 'rearBreakaway', 'yawInertia', 'bumpFeel'] as const) {
-    const value = record[key];
-    RAW_HANDLING[key] =
-      typeof value === 'number' && Number.isFinite(value)
-        ? Math.min(1, Math.max(0, value))
-        : RAW_HANDLING_DEFAULTS[key];
-  }
-}
-
 
 /**
  * Builds the dev surface and installs the `window.__bro` console handle.
@@ -675,12 +637,6 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     traffic: ctx.traffic,
     // `race.snapshot()`: the three rivals' place, speed and phase.
     race: ctx.race,
-    // `police.snapshot()`: heat, the chase, the posts in reach. Smoke hooks:
-    // `police.devPost('shoulder' | 'layby', metres)` puts a post up the road (as near as
-    // 20 m), `police.devChase('speeding' | 'accident' | 'check')` sends its car after the
-    // player, `police.devFlight(true | false | null)` forces the next flight to give up or
-    // escalate, `police.devHeat(n)` sets the wanted level.
-    police: ctx.police,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
     // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands
@@ -821,19 +777,6 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.beginDeathSequence();
   };
 
-  loadRawHandling();
-  const rawHandling: RawHandlingControl = {
-    values: RAW_HANDLING,
-    set: (patch) => {
-      Object.assign(RAW_HANDLING, patch);
-      try {
-        localStorage.setItem(RAW_HANDLING_STORAGE_KEY, JSON.stringify(RAW_HANDLING));
-      } catch {
-        // Storage disabled or full: the levers still hold for this session.
-      }
-    },
-  };
-
   return {
     spawnVehicle: devSpawnVehicle,
     spawnTrailer: devSpawnTrailer,
@@ -844,6 +787,5 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     jumpToLake: devJumpToLake,
     giveMoney: devGiveMoney,
     updateLakeSeek,
-    rawHandling,
   };
 }

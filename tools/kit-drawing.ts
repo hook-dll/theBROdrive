@@ -103,7 +103,7 @@ const OWNER_ACCEPTED_EXISTING_DASH: Record<string, true> = {
   vaz2101: true, vaz2102: true, vaz2103: true, vaz2104: true, vaz2105: true, vaz2106: true, vaz2107: true,
   vaz2108: true, vaz2109: true, vaz21099: true, vaz2110: true, vaz2111: true, vaz2112: true, vaz2115: true,
   vaz2121: true, vaz2131: true, vaz1111: true, gaz24: true, gaz31029: true, azlk2141: true,
-  uaz469: true, uaz469_police: true, uaz2206: true, nexia: true, espero: true, astraf: true, vectraa: true,
+  uaz469: true, uaz2206: true, nexia: true, espero: true, astraf: true, vectraa: true,
 };
 
 function isRef(r: unknown): r is Ref {
@@ -142,7 +142,7 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
   const info = (t: number) => s.meshes[s.mesh[t]!]!;
   const shell = (t: number): boolean => {
     const m = info(t);
-    return !m.hidden && m.zone === 'exterior' && !/mirror|light_bar|beacon|exhaust/.test(m.path);
+    return !m.hidden && m.zone === 'exterior' && !/mirror|exhaust/.test(m.path);
   };
   let s0 = Infinity, s1 = -Infinity, h = 0;
   for (let t = 0; t < s.n; t++) {

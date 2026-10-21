@@ -159,7 +159,6 @@ import { cabinOpenness, type CabinOpenness } from './audio/cabinopenness';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
 import { RivalRace, newRaceProgress } from './contracts/race';
-import { PolicePatrol } from './world/police';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
 import { SignpostProvider } from './world/signposts';
@@ -871,10 +870,6 @@ async function boot(): Promise<void> {
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
-  /** Police posts, chases and stops; see world/police.ts. */
-  const police = new PolicePatrol(world, road, traffic, (text) => hud.setToast(text));
-  /** Reused receiver for the chasing police car's position; see `PolicePatrol.sirenAt`. */
-  const sirenPoint = { x: 0, y: 0, z: 0 };
   const NO_RIVALS: readonly number[] = [];
   /** How far past a receiving post's arclength it stays the delivery target, m. */
   const DELIVERY_PAST_POST_M = 40;
@@ -1502,7 +1497,6 @@ async function boot(): Promise<void> {
         tumbleweeds,
         traffic,
         race,
-        police,
         vitals,
         autopilot,
         hud,
@@ -1654,10 +1648,12 @@ async function boot(): Promise<void> {
     // remember to call in. `computeStats` is a couple of dozen reads, `refreshLoad`
     // returns immediately when the total has not moved, and a live set is a handful
     // of cars, so one unconditional call is both cheaper and impossible to forget.
-    // The dev raw-handling levers (vehicletuning.ts `RAW_HANDLING`) apply to the car the
-    // player drives from the driver's seat and to nothing else.
+    // The car the player drives with their own hands reads THE PLAYER'S CAR figures
+    // (vehicletuning.ts `PLAYER_*`); every other car, and this one under the autopilot,
+    // keeps the catalogue's the autopilot was tuned on.
+    const playerDriven = autopilot.engaged ? null : controlled;
     for (const vehicle of vehicles.values()) {
-      vehicle.setRawHandling(vehicle === controlled);
+      vehicle.setPlayerDriven(vehicle === playerDriven);
       vehicle.refreshLoad();
     }
     syncPackMass(driving);
@@ -1689,13 +1685,6 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
-    police.fixedUpdate(dt, {
-      s: activeS,
-      lateral: activeLateral,
-      carId: drivingId,
-      speedKmh: driving?.speedKmh ?? 0,
-      halfLength: driving?.bodyHalfExtents[2] ?? 0,
-    });
     if (race.progress(activeS, raceProgress)) {
       hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);
     } else if (deliveryMinIndex !== Infinity) {
@@ -2032,12 +2021,6 @@ async function boot(): Promise<void> {
     const eye = camera.eyePosition;
     // Working a machine, the cursor's ray picks; otherwise the eyes'.
     const dir = machineFocus.ray() ?? camera.eyeDirection;
-    // A police stop waiting for the papers takes the [F] before the world does.
-    if (police.awaitingPapers && (f.mount || f.interact) && !medicineActive) {
-      police.handOver();
-      f.mount = false;
-      f.interact = false;
-    }
     const interacted = interaction.fixedUpdate(
       dt,
       medicineActive ? deathInput : f,
@@ -2051,7 +2034,7 @@ async function boot(): Promise<void> {
       camera.mode === 'cabin',
     );
     // Working a machine up close nothing is written on the screen: the machine is the text.
-    prompt = machineFocus.working ? null : police.prompt ?? interacted.prompt;
+    prompt = machineFocus.working ? null : interacted.prompt;
     actionable = !machineFocus.working && interacted.actionable;
     boot = interacted.boot;
     machineFocus.updateCursor();
@@ -2636,8 +2619,6 @@ async function boot(): Promise<void> {
       vehicle.syncContactPatches(contactPatches, patchGain(vehicle.root.position));
     });
     contactPatches.endFrame();
-    const sirenOn = police.sirenAt(sirenPoint);
-    audio.updateSiren(sirenOn, sirenPoint.x, sirenPoint.y, sirenPoint.z);
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
     vista.update(cam.x, cam.z, activeS, frameDt);
@@ -3194,7 +3175,6 @@ async function boot(): Promise<void> {
     seatInNearestCar: devTools?.seatInNearestCar,
     jumpToLake: devTools?.jumpToLake,
     giveMoney: devTools?.giveMoney,
-    rawHandling: devTools?.rawHandling,
   };
 
   /**

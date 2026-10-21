@@ -35,19 +35,21 @@ export const GRAVITY = 9.81;
 // Steering tuning.
 //
 // The driver's hands set a RACK TARGET, and the tyres decide the rest:
-//  1. A held steering key winds the KEYBOARD HOLD up over time (`KEY_STEER_WIND_S`);
-//     slowly near walking pace it is a share of the lock about the car's own axis, at
-//     speed a share of the angle that puts the front axle at its own peak slip angle
-//     (`STEER_ASSIST_SLIP_MARGIN`), measured from where it is travelling. A pad stick
-//     is a position: the same cap with the steering assist on, the whole lock with it
-//     off. Autonomy commands a rack angle directly.
+//  1. The steering keys are a pair of hands on the steering wheel (HANDS ON WHEEL
+//     below): a held key turns the rim, the road wheels follow through the steering
+//     ratio, and let go the caster brings the rim back. Nothing in it knows where the
+//     tyres' grip is. A pad stick is a position: with the steering assist on, a share
+//     of the angle that puts the front axle at its own peak slip angle
+//     (`STEER_ASSIST_SLIP_MARGIN`), measured from where it is travelling; with it off,
+//     the whole lock. Autonomy commands a rack angle directly.
 //  2. The rack moves toward the target no faster than the profile's rack speed.
 //  3. The tyres hang off the rack through the backlash window, and inside it, or
 //     everywhere when no hand is on the wheel, they are moved by their own aligning
 //     moment (`STEER_FREE_TAU_S`, `PNEUMATIC_TRAIL_M`, `SuspensionTuning.frontCasterDeg`).
 //
 // The constants immediately below are the established `classic` values. They feed
-// `HANDLING_PROFILES`; fixedUpdate reads only the selected immutable profile.
+// `HANDLING_PROFILES`; fixedUpdate reads only the selected immutable profile. The car
+// the player drives reads a few of them through THE PLAYER'S CAR below.
 // ---------------------------------------------------------------------------
 
 /**
@@ -57,120 +59,134 @@ export const GRAVITY = 9.81;
  *
  * It replaces a pair of rates blended by a speed table (2.0 rad/s parked, 0.5 at
  * 100 km/h). The high-speed one was there to keep a held key from asking for too much
- * angle too fast, and that is now the assist's job (`STEER_ASSIST_SLIP_MARGIN`), which
- * asks for a few degrees at speed instead of a share of the lock; the parked one was
- * faster than anyone turns a wheel.
+ * angle too fast; the keys now turn the rim at a hand's rate (`HANDS_WHEEL_RATE_RAD_S`)
+ * and the pad's assist asks for a few degrees at speed, and the parked one was faster
+ * than anyone turns a wheel.
  */
 export const STEER_RACK_SPEED_RAD_S = (60 * Math.PI) / 180;
 /**
- * STEERING ASSIST AT SPEED: a key held to the end of its wind-up (`KEY_STEER_WIND_S`)
- * asks for the rack angle that puts the front tyres at their own peak slip angle, and
- * this much past it.
+ * THE PAD'S STEERING ASSIST AT SPEED (`SteerMode` 'analogAssist'): a full stick asks for
+ * the rack angle that puts the front tyres at their own peak slip angle, and this much
+ * past it.
  *
  * The peak is the car's own tyre at its current load (`brushPeakTan`), and the angle is
  * measured from where the front axle is actually travelling, so it is the same rule at
- * every speed past `KEY_STEER_TYRE_KMH`: at 100 km/h it is a few degrees, under it the
- * kinematic angle of the tightest circle the grip holds takes over toward full lock;
- * with the tail out, the front axle is travelling toward the outside of the turn and
- * the countersteer key reaches past it by the same margin, so catching a slide needs
- * no special case. It replaces a fixed speed table (100% of lock
- * to 20 km/h, 44% at 100) that measured 13-22° of front slip on a held key at
- * 60-130 km/h (`tools/steer-feel.ts`) — two to three times the tyre's peak, a plough
- * that also could not be driven INTO, because the table was the limit, not the tyre.
+ * every speed: at 100 km/h it is a few degrees, lower down the kinematic angle of the
+ * tightest circle the grip holds takes over toward full lock; with the tail out, the
+ * front axle is travelling toward the outside of the turn and the countersteer stick
+ * reaches past it by the same margin, so catching a slide needs no special case. It
+ * replaces a fixed speed table (100% of lock to 20 km/h, 44% at 100) that measured
+ * 13-22° of front slip at 60-130 km/h (`tools/steer-feel.ts`) — two to three times the
+ * tyre's peak, a plough that also could not be driven INTO, because the table was the
+ * limit, not the tyre.
  *
  * The margin puts the target on the far side of the peak, never short of it: the curve
- * is flat there (a brush tyre keeps 99% of its peak force 10% past it), so a held key
+ * is flat there (a brush tyre keeps 99% of its peak force 10% past it), so a full stick
  * costs nothing and the player can still feel the front start to go.
  */
 export const STEER_ASSIST_SLIP_MARGIN = 0.1;
-/**
- * THE KEYBOARD HOLD: a steering key is a duration, not a position. How long it is
- * held is how much wheel it asks for, and the vehicle keeps that hold (-1..1) between
- * steps (`Vehicle.updateSteering`). The touch wheel's deflection is the most it winds
- * to.
+
+/* ---------------------------------------------------------------------------
+ * HANDS ON WHEEL (`SteerMode` 'keys'): a held steering key is a pair of hands turning
+ * the steering wheel, and nothing in the path knows where the tyres' grip is. The risk
+ * is holding the key too long, as it is holding a real wheel over too far. It replaced
+ * a keyboard assist that wound a "hold" toward the front tyres' peak slip angle, with
+ * its own wind-up, return and release timings and a past-the-peak wind-up: that made
+ * every car safe at speed, which is what the owner did not want.
  *
- * WIND-UP, near walking pace: the time constant of a held key's approach to the whole
- * lock. 0.25 s is 63% in a quarter second and 90% in 0.58 s, and a 40 ms tap is 15% of
- * the lock: taps add up to a parking turn. The approach is quickest off the centre, so
- * the steering box's free play (`STEER_PLAY_RAD`) is crossed by the first tap.
- */
-export const KEY_STEER_WIND_SLOW_S = 0.25;
+ *  1. The hands turn the WHEEL at HANDS_WHEEL_RATE_RAD_S, reached over HANDS_RAMP_S,
+ *     and the opposite key turns it back at the same rate through the same ramp. Both
+ *     keys down is both hands holding the rim where it is (`InputFrame.steerBothHeld`).
+ *     The touch wheel's deflection is a share of the hands' rate.
+ *  2. The road wheels follow through the steering ratio, the authored rim travel over
+ *     the car's own lock (`STEERING_WHEEL_HALF_LOCK_RAD` / `steerLock`: 12.8:1 to
+ *     18.6:1 across the catalogue, 16:1 on a Zhiguli), so the drawn wheel is the
+ *     hands' wheel and the rim stops where the road wheels reach their lock.
+ *  3. Let go, the caster's self-aligning torque spins the wheel back toward centre:
+ *     faster the further it is turned and the faster the car goes, never past centre.
+ *  4. The rack speed (`steerRackSpeed`, `PLAYER_RACK_SPEED_SCALE`) still applies after.
+ * ------------------------------------------------------------------------- */
 /**
- * WIND-UP, at speed: the time constant of a held key's approach to the full reach (the
- * front tyres' peak). 0.35 s is 90% in 0.8 s, so hold time sets the angle gradually,
- * and a 40 ms tap asks for a tenth of the reach, enough to clear the free play: a fine
- * correction, not none. The old key ramp was 0.3 s, then shaped by a power law.
+ * How fast hands turn a steering wheel, at the rim: 420°/s. A quick hand-over-hand
+ * turn is about a full turn a second and a deliberate one half that; 420 is the brisk
+ * middle, about 26°/s at the road wheels through 16:1, so from straight to a full
+ * motorway lane change (2-3° of road wheel) is a tenth of a second and full lock is
+ * just over a second.
  */
-export const KEY_STEER_WIND_S = 0.35;
+export const HANDS_WHEEL_RATE_RAD_S = (420 * Math.PI) / 180;
 /**
- * PAST THE PEAK: a key held on once the hold has wound to its reach (|hold| at least
- * `KEY_STEER_PAST_FROM`, about a second at speed) goes on winding the wheel, from the
- * front tyres' peak toward the whole lock about the car's axis over `KEY_STEER_PAST_S`
- * further seconds. This applies to turning and countersteering alike.
- * player asks for the wheel and gets it, at any speed and on any ground; where that is
- * more than the tyres can use, the front ploughs (on sand into its own bank,
- * `deformationDrag`) instead of the key being refused. Owner's report: at speed on sand
- * the held key would not turn the wheel, the car crawled sideways and the wheel was
- * pulled back. A tap, or any hold short of the reach, never gets here, so taps and a
- * held key's first second are the assist's as before; the hold's return, or the other
- * key, takes the extra wheel back with it (it never exceeds the hold).
+ * The hands' ramp from still to that rate, 0.1 s: the rim has mass and the arms have to
+ * get going. A one-frame tap moves the rim under a degree, a 0.1 s tap about 20° (1.3°
+ * at the road wheels): a nudge, not a lurch. A reversal decelerates and comes back
+ * through the same ramp, 0.2 s from one full rate to the other.
  */
-export const KEY_STEER_PAST_FROM = 0.95;
-export const KEY_STEER_PAST_S = 1;
+export const HANDS_RAMP_S = 0.1;
 /**
- * The opposite key UNWINDS the hold back toward straight at this many times the
- * wind-up's rate off the centre (1 / `KEY_STEER_WIND_S`), linearly, and stops at
- * straight: taking back a correction is quicker than making one, and one short tap of
- * the other key after a few too many is a small correction, not the opposite lock
- * (2.5× takes a whole hold back in 0.14 s at speed). Past straight it winds the new
- * way at the ordinary rate, like a fresh press, except in a slide: with the tail out
- * (`tailOut`) the countersteer side winds up to this many times faster, because
- * catching a slide needs it.
+ * THE RETURN. The self-aligning torque is the side force times the caster and
+ * pneumatic trail, and the side force a turned wheel makes grows with speed; the
+ * column's own friction holds the rim where it is at a standstill. So released, the
+ * rim comes back at |angle| / HANDS_RETURN_TAU_S scaled by the forward speed over
+ * HANDS_RETURN_REF_KMH (capped at 1 above it, nothing going backwards, where caster
+ * pushes toward the lock rather than away from it): at 100 km/h a quarter-second
+ * time constant, a real car's wheel spinning back through loose hands out of a bend;
+ * at 25 km/h a whole second; at a crawl it hardly moves. The approach is exponential,
+ * so it never overshoots centre, and at most HANDS_RETURN_MAX_RAD_S, a wheel spinning
+ * free about two turns a second, from far round.
  */
-export const KEY_STEER_COUNTER = 2.5;
+export const HANDS_RETURN_TAU_S = 0.25;
+export const HANDS_RETURN_REF_KMH = 100;
+export const HANDS_RETURN_MAX_RAD_S = (720 * Math.PI) / 180;
 /**
- * Release, near walking pace: the time constant of the hold's return. It comes back at
- * (|hold| + `KEY_STEER_RETURN_FLOOR`) / this per second, so a whole hold is back at
- * straight in 2.5 s: on a dune, in a car park, the wheel stays where the taps put it
- * and taps add up. The hand is on the wheel until the hold is back at straight, so the
- * tyres' aligning moment cannot turn it downhill under a sliding car.
+ * The column's friction band at the rim, 1°: a wheel spinning back slows into it and
+ * stops, and inside it the wheel counts as centred and the hands as off it (the tyres
+ * then swing it as they do with no key down, `STEER_FREE_TAU_S`). Without it the
+ * exponential return would never quite arrive. 1° at the rim is 0.06° at the road.
  */
-export const KEY_STEER_RETURN_SLOW_S = 1.2;
+export const HANDS_CENTRE_RAD = Math.PI / 180;
+
+/* ---------------------------------------------------------------------------
+ * THE PLAYER'S CAR: four figures the car the player drives from the driver's seat, with
+ * their own hands, reads in place of the catalogue's (`Vehicle.setPlayerDriven`).
+ * Together they are a car that turns in, rotates and lets its tail go the way a real
+ * one does, where the catalogue's figures made every car too safe at speed.
+ *
+ * Every other car — traffic, rivals, a car the player has left, and the
+ * player's own while the autopilot drives it — keeps the catalogue's. Those cars are
+ * driven by the autopilot, whose steering inverse, corner speeds and threshold braking
+ * were tuned and measured on those figures (`tools/steer-feel.ts`, `tools/reality.ts`
+ * and the traffic benches), and a car that yaws more readily and keeps less grip past
+ * the rear's peak is one a person catches with the wheel; under a controller tuned for
+ * the lazier car it would retune every AI car at once. Kept to the player's hands, the
+ * change is the player's alone.
+ * ------------------------------------------------------------------------- */
 /**
- * Release, at speed: the same time constant, 0.25 s: a whole hold is back at straight
- * in 0.5 s (0.6 s with `KEY_STEER_RELEASE_S`), against the old ease's 0.9 s to let go
- * from a full key. At speed the hold is slip on top of the travel angle, so a released
- * hold leaves the wheel following the way the car is going: with the tail out, that is
- * the countersteer.
+ * The profile's rack speed (`steerRackSpeed`), times 1.5: a driver's quick hands on a
+ * rack rather than the deliberate figure the autopilot was tuned on. The pad's stick
+ * is where it shows; the keys' hands turn the rim slower than either.
  */
-export const KEY_STEER_RETURN_S = 0.25;
+export const PLAYER_RACK_SPEED_SCALE = 1.5;
 /**
- * The return's floor, as a share of the hold: the return is proportional to the hold,
- * so a row of taps settles at a hold that grows smoothly with how long the taps are
- * (40, 55, 70 ms every 200 ms hold about 0.26, 0.41, 0.54 at speed) instead of
- * flipping between none and most; the floor keeps it from lingering near the centre
- * the way the old ease did (0.1 of a hold is gone in 0.13 s at speed).
+ * The REAR axle's past-peak plateau, at most: a dry road tyre keeps some 70-85% of its
+ * peak side force once it is past the slip peak, so 0.7 is the low end of a real tyre,
+ * not ice. The front keeps its own, so the tail lets go and the nose does not; a tyre
+ * whose own plateau is already lower keeps that.
  */
-export const KEY_STEER_RETURN_FLOOR = 0.15;
+export const PLAYER_REAR_PLATEAU = 0.7;
 /**
- * The return reaches its full rate this long after the key comes up, from nothing,
- * linearly: the hand relaxes before the wheel comes back. A gap of 0.1 s between two
- * taps at speed gives back under a twentieth of a 0.3 hold, so a row of taps holds a
- * bend with the angle sagging a little between them instead of snapping toward the
- * centre. With the tail out the return is at its full rate at once.
+ * The box gain on the kerb body's YAW inertia, in place of `INERTIA_PITCH_YAW_GAIN`:
+ * the plain uniform box. A real car's yaw inertia is about 0.9-1.0 of the box of its
+ * own size and mass (engine and axles near the ends, an empty cabin in the middle), so
+ * 2.55 is a very lazy car and 1 a real one. Pitch keeps 2.55: it is a separate term in
+ * the tensor, and that gain was raised for the nose lifting under power.
  */
-export const KEY_STEER_RELEASE_S = 0.25;
+export const PLAYER_YAW_INERTIA_GAIN = 1;
 /**
- * The hold's frame of reference, blended by forward speed with a smoothstep: under
- * `KEY_STEER_AXIS_KMH` a key turns the wheels about the car's own axis to the whole
- * lock, wherever the car is sliding; past `KEY_STEER_TYRE_KMH` it asks for slip on top
- * of where the front axle is travelling (`STEER_ASSIST_SLIP_MARGIN`). At 20 km/h it is
- * still four fifths the car's axis, half and half at 26 km/h, nine tenths the tyres'
- * at 35. The release rate is blended over the same band. Backwards, it is the car's
- * axis.
+ * The tyre-load low-pass, in place of `WHEEL_LOAD_TAU`: 8 ms, so a bump mid-corner
+ * reaches the grip as it does through a real carcass instead of being smoothed over.
+ * The contact patch's own envelope (`CONTACT_PATCH_M`, 16 cm, a real patch's 12-18) is
+ * unchanged.
  */
-export const KEY_STEER_AXIS_KMH = 12;
-export const KEY_STEER_TYRE_KMH = 40;
+export const PLAYER_WHEEL_LOAD_TAU = 0.008;
 /**
  * Steering-box free play, radians at the ROAD WHEEL.
  *
@@ -215,12 +231,12 @@ export const STEER_PLAY_RAD = 0.008;
  * a Zhiguli's +3°30′ still swings it at about a radian a second, a Volga's +0°30′ at a
  * fifth of that, which is the "light" Volga wheel. A parked car does not steer itself.
  *
- * It is used in two places. With no hand on the wheel (keys released, stick centred)
- * the whole rack is free: let go mid-corner and the wheel unwinds toward the way the
- * car is going and the car straightens; let go with the tail out and the same moment
- * countersteers, which is what a real wheel spinning through a driver's loose fingers
- * does. With a hand on it, only the backlash window is free, which replaces a constant
- * 1.2 rad/s "caster return" inside the play.
+ * It is used in two places. With no hand on the wheel (keys released with the rim back
+ * at centre, stick centred) the whole rack is free: let go mid-corner and the wheel
+ * unwinds toward the way the car is going and the car straightens; let go with the
+ * tail out and the same moment countersteers, which is what a real wheel spinning
+ * through a driver's loose fingers does. With a hand on it, only the backlash window is
+ * free, which replaces a constant 1.2 rad/s "caster return" inside the play.
  */
 export const STEER_FREE_TAU_S = 0.3;
 /**
@@ -1945,63 +1961,6 @@ export const LOAD_CARGO_HALF_HEIGHT = 0.13;
 export const LOAD_BOOT_BEHIND_REAR_AXLE = 0.5;
 /** A flatbed's payload rides further forward over its axle than a car's hold does. */
 export const LOAD_BED_BEHIND_REAR_AXLE = 0.25;
-
-/* ---------------------------------------------------------------------------
- * RAW HANDLING: a dev experiment, off by default, for a car that is less safe at
- * speed. Pause menu > developer box; persisted by app/devtools.ts.
- *
- * Five levers, each 0..1, every one a straight blend from today's constant (0) to the
- * raw end (1). The vehicle reads them only for the car the player drives
- * (`Vehicle.setRawHandling`) and only while `enabled` is set; otherwise every read
- * site takes today's constant untouched, so 'off' is today's handling to the bit.
- *
- *   assistFade     the keyboard's tyre-peak cap (`STEER_ASSIST_SLIP_MARGIN`) gives way
- *                  to the whole lock, linearly from RAW_ASSIST_FADE_FROM_KMH to
- *                  RAW_ASSIST_FADE_TO_KMH: at 1 a whole hold at 100 km/h is the lock
- *   steerSpeed     at-speed wind-up and return time constants (`KEY_STEER_WIND_S`,
- *                  `KEY_STEER_RETURN_S`) down to a third, the rack (`steerRackSpeed`)
- *                  doubled, and the release delay (`KEY_STEER_RELEASE_S`) gone
- *   rearBreakaway  the REAR axle's past-peak plateau down to RAW_REAR_PLATEAU; the
- *                  front keeps its own, so the tail lets go and the nose does not
- *   yawInertia     the box gain on YAW only (`INERTIA_PITCH_YAW_GAIN`) down to
- *                  RAW_YAW_GAIN; pitch keeps its gain, it is a separate tensor term
- *   bumpFeel       less filtering between the ground and the grip: the contact patch's
- *                  envelope (`CONTACT_PATCH_M`) and the load low-pass (`WHEEL_LOAD_TAU`)
- *                  down to RAW_CONTACT_PATCH_M and RAW_WHEEL_LOAD_TAU
- * ------------------------------------------------------------------------- */
-export interface RawHandlingTuning {
-  enabled: boolean;
-  assistFade: number;
-  steerSpeed: number;
-  rearBreakaway: number;
-  yawInertia: number;
-  bumpFeel: number;
-}
-/** 'On' at these is a noticeably rawer car that is still drivable on keys. */
-export const RAW_HANDLING_DEFAULTS: Readonly<RawHandlingTuning> = {
-  enabled: false,
-  assistFade: 0.3,
-  steerSpeed: 0.5,
-  rearBreakaway: 0.5,
-  yawInertia: 0.5,
-  bumpFeel: 0.5,
-};
-/** The live levers, written by the pause menu and read by `Vehicle` every step. */
-export const RAW_HANDLING: RawHandlingTuning = { ...RAW_HANDLING_DEFAULTS };
-export const RAW_ASSIST_FADE_FROM_KMH = 40;
-export const RAW_ASSIST_FADE_TO_KMH = 100;
-/** Wind-up and return time constants at steerSpeed 1, as a share of today's. */
-export const RAW_STEER_TIME_SCALE = 1 / 3;
-/** Rack speed at steerSpeed 1, as a multiple of the profile's. */
-export const RAW_RACK_SCALE = 2;
-export const RAW_REAR_PLATEAU = 0.5;
-export const RAW_YAW_GAIN = 1.4;
-export const RAW_CONTACT_PATCH_M = 0.04;
-export const RAW_WHEEL_LOAD_TAU = 0.008;
-/** Today's value at t = 0 exactly, the raw one at t = 1. */
-export function rawBlend(today: number, raw: number, t: number): number {
-  return today + (raw - today) * t;
-}
 
 
 export function clamp(v: number, lo: number, hi: number): number {

@@ -6,7 +6,7 @@
  * change it. The post machine releases the party as that many physical teddies
  * (`release`), each its own item with its own id and the party's id and size on it
  * (`ContractCargoItem.party`). The party is ONE contract: one of a car's contract slots,
- * one for the police, one delivery in the ledger and one pay.
+ * one delivery in the ledger and one pay.
  *
  * Teddies ride only on passenger seats — the front passenger's and either half of the
  * rear bench (vehicle/cabin.ts `layPlace`) — never in the boot, under the bonnet, on the

@@ -20,8 +20,7 @@ import {
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
 import type { Item } from '../items/items';
-import { CAR_MODELS, carModel, hasCarModel } from '../vehicle/carmodels';
-import type { CarPaint } from '../vehicle/carpaint';
+import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
 import type { WorldOrigin } from './origin';
@@ -247,38 +246,6 @@ const STUCK_RECYCLE_S = 18;
 const FELL_OUT_M = 30;
 /** Up-axis height below which a still car is a wreck (on its side, its end or its roof). */
 const WRECK_UP_MAX = 0.5;
-/** Body-to-body slack within which a traffic car's impact is counted as the player's, metres. */
-const PLAYER_IMPACT_SLACK_M = 0.5;
-/**
- * THE POLICE (world/police.ts) on the stream's cars. A car on a lay-by post stands this
- * far turned toward the road; it keeps `POLICE_DIRT_SHARE` of a traffic car's film and
- * scuffs; it follows at `POLICE_HEADWAY_S`; handed back, it drives at the released cap.
- */
-const POLICE_POST_ANGLE_RAD = (25 * Math.PI) / 180;
-// Sand-coloured dust over near-black paint reads olive in daylight: a police car is kept
-// close to clean (0.35 of a traffic car's film read as a dark green UAZ in the smoke run).
-const POLICE_DIRT_SHARE = 0.08;
-const POLICE_HEADWAY_S = 0.9;
-const POLICE_RELEASED_CAP_MPS = 95 / 3.6;
-/** The light bar's rig channels (carkit police livery), 0 dark and 1 lit, and their rate. */
-const POLICE_BEACON_LEFT = 'beacon_l';
-const POLICE_BEACON_RIGHT = 'beacon_r';
-const POLICE_FLASH_HZ = 2;
-/** Re-armed every step the bar flashes: it is drawn in full, never as the far mesh. */
-const POLICE_FULL_DETAIL_S = 0.5;
-/** Pulling over behind the player: fastest on the line; the hold line does the braking. */
-const POLICE_STOP_MPS = 30;
-/** And back into its lane after: over this much road, at this speed. */
-const POLICE_REJOIN_M = 30;
-const POLICE_REJOIN_MPS = 8;
-/** Pulling off its post after somebody: from its place up the slip at this, m/s². */
-const POLICE_EXIT_ACCEL_MPS2 = 4;
-/**
- * Its driver spends this much more of the tyres in bends than a frantic one
- * (`Autopilot.setGripShare`): the UAZ is high and soft, and at the frantic share a player
- * at 100 km/h through bends drew away from it (tools/police-bench.ts).
- */
-const POLICE_GRIP_SHARE = 1.25;
 /** An impact this hard, m/s, counts in `TrafficStatus.impacts` and shows the car in full. */
 const IMPACT_MPS = 1.8;
 /**
@@ -601,65 +568,6 @@ export interface RivalPose {
   handIn: RivalHandIn;
 }
 
-/**
- * A police car (world/police.ts) put down parked at its post: on a lay-by's pad, angled
- * with its nose to the road, or on a shoulder pull-off (`shoulderPullOff`). Like a rival
- * it is driven by the stream and owned by its caller: never trimmed, recycled, counted
- * against the density or sent into a lay-by stop. It stands until `policePullOut`.
- */
-export interface PoliceSpawn {
-  readonly id: string;
-  readonly modelId: string;
-  /** The way it faces and will drive; its post is on this direction's own side. */
-  readonly direction: 1 | -1;
-  readonly post: Layby;
-  /** Its fixed livery colour: not the model's factory draw. */
-  readonly paint: CarPaint;
-}
-
-/** A live police car's place on the road, written by `RoadTraffic.policePose`. */
-export interface PolicePose {
-  s: number;
-  /** Forward-frame lateral. */
-  lateral: number;
-  /** Along-road speed in its own direction of travel, m/s. */
-  speed: number;
-  direction: 1 | -1;
-  /** Still on its post (parked, or pulling out of it). */
-  posted: boolean;
-  /** Its body's half span along the road, metres. */
-  halfLength: number;
-}
-
-/** What a police car is doing for the police (world/police.ts); see `TrafficCar.police`. */
-interface PoliceDuty {
-  /** Its post: reserved against ambient stops while it stands there (`laybyReserved`). */
-  readonly post: Layby;
-  /** Close behind the player: it neither passes him nor goes round him. */
-  tailing: boolean;
-  /** The light bar is flashing; `flash` is its clock, seconds. */
-  lights: boolean;
-  flash: number;
-  /** Pulled over behind the player, or rejoining the lane after; see `PoliceStop`. */
-  stop: PoliceStop | null;
-  /** Handed back to the stream: the duty ends once any `rejoin` is done. */
-  released: boolean;
-}
-
-/**
- * A police car pulling over behind the player (`stop`) and later back into its lane
- * (`rejoin`), on a line built here and driven as a lay-by course: from where it was when
- * the move began (`fromS`, `fromLateral`) to `toLateral` by `toS`, and held there.
- */
-interface PoliceStop {
-  phase: 'stop' | 'rejoin';
-  fromS: number;
-  fromLateral: number;
-  toS: number;
-  toLateral: number;
-  readonly course: LaybyCourse;
-}
-
 type TrafficDirection = 1 | -1;
 export type TrafficDriverStyle = 'cautious' | 'normal' | 'hurried' | 'frantic';
 
@@ -734,17 +642,6 @@ function crossTurnShare(turn: CrossTurn, u: number): number {
         ? turn.rise - (radius - Math.sqrt(radius * radius - back * back))
         : turn.arcRise + (x - turn.arcU) * turn.slope;
   return across / turn.rise;
-}
-
-/**
- * A police stop's line at forward arclength `s`: from `fromLateral` where the move began
- * to `toLateral` at `toS`, on a smoothstep, and held there; see `PoliceStop`. Written in
- * the forward frame, so the share is the same either way the car drives.
- */
-function policeStopLine(stop: PoliceStop, s: number): number {
-  const span = stop.toS - stop.fromS;
-  const t = Math.abs(span) < 1 ? 1 : Math.min(1, Math.max(0, (s - stop.fromS) / span));
-  return stop.fromLateral + (stop.toLateral - stop.fromLateral) * t * t * (3 - 2 * t);
 }
 
 /**
@@ -946,8 +843,6 @@ interface TrafficCar {
   bypass: Bypass | null;
   /** The blocker it gave up going round (backed `BYPASS_BACK_LIMIT` times); not offered again. */
   bypassGaveUp: string | null;
-  /** On duty for the police (`spawnPolice`), or null; a police car is also `rival`. */
-  police: PoliceDuty | null;
 }
 
 /** Half the span of a rotated body box along the horizontal unit axis (`ax`, `az`). */
@@ -1011,8 +906,6 @@ interface PendingSpawn {
   readonly platoonChain?: number;
   /** Put down already parked on this lay-by's first place; see `parkedSpawnSite`. */
   readonly layby?: Layby;
-  /** A police car (`spawnPolice`): its fixed paint, and its post is `layby`. */
-  readonly policePaint?: CarPaint;
 }
 
 export interface TrafficStatus {
@@ -1144,8 +1037,6 @@ export class RoadTraffic {
   private clockSync = 0;
   private coordinationTimer = 0;
   private impactCount = 0;
-  /** Impacts (`IMPACT_MPS`) of traffic cars touching the player's car; see `playerImpacts`. */
-  private playerImpactCount = 0;
   private passCount = 0;
   private laybyStopCount = 0;
   private laybyRejoinCount = 0;
@@ -1509,9 +1400,8 @@ export class RoadTraffic {
       this.playerDriving && this.playerLateral > CROWN_CROSSING_INTRUSION_M;
     for (const car of this.carList) {
       if (car.turnS >= 0) continue;
-      // Pulling in, parked or pulling out is not the moment to overtake anybody; nor is
-      // a police car's tailing of the player the moment to overtake him.
-      if (car.layby || car.police?.tailing || car.police?.stop) {
+      // Pulling in, parked or pulling out is not the moment to overtake anybody.
+      if (car.layby) {
         car.autopilot.setPassingEnabled(false);
         continue;
       }
@@ -1789,9 +1679,8 @@ export class RoadTraffic {
       course.indicator = 'off';
       course.speed = 0;
       holdU = u;
-      // A race is about to finish here: an ordinary stop makes way. A police post's own
-      // reservation keeps everybody else off it, not the police car.
-      if (!visit.handIn && !car.police && this.laybyReserved.has(visit.layby.poiIndex)) {
+      // A race is about to finish here: an ordinary stop makes way.
+      if (!visit.handIn && this.laybyReserved.has(visit.layby.poiIndex)) {
         visit.parkFor = Math.min(visit.parkFor, LAYBY_RESERVED_PARK_S);
       }
       visit.parkFor -= dt;
@@ -1806,14 +1695,11 @@ export class RoadTraffic {
       }
       const landedU = turnOut ? turnOut.endU : visit.length;
       course.indicator = u < landedU ? (turnOut ? 'right' : 'left') : 'off';
-      // A police car sent after somebody goes from its place, and hard.
-      const exitAccel = car.police ? POLICE_EXIT_ACCEL_MPS2 : LAYBY_EXIT_ACCEL_MPS2;
-      const exitFromU = car.police ? visit.parkU : visit.padEndU;
       course.speed = Math.min(
         car.autopilot.cruisePace,
         turnOut
-          ? Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * exitAccel * Math.max(0, u - turnOut.endU))
-          : Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * exitAccel * Math.max(0, u - exitFromU)),
+          ? Math.sqrt(LAYBY_TURN_MPS * LAYBY_TURN_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - turnOut.endU))
+          : Math.sqrt(LAYBY_PAD_MPS * LAYBY_PAD_MPS + 2 * LAYBY_EXIT_ACCEL_MPS2 * Math.max(0, u - visit.padEndU)),
       );
       if (!visit.merging) {
         if (coordinate && this.laybyMergeClear(car, visit)) visit.merging = true;
@@ -1880,8 +1766,6 @@ export class RoadTraffic {
     if (count === 0) return;
     for (const car of this.carList) {
       if (car.bypass || car.layby || car.rails || car.turnS >= 0 || car.settleFor > 0) continue;
-      // The police stop behind the player, they do not go round him.
-      if (car.police?.tailing || car.police?.stop) continue;
       const fullU = -(car.roadHalfLength + BYPASS_END_MARGIN_M);
       let best: BypassBlocker | null = null;
       let bestU = -Infinity;
@@ -1916,9 +1800,6 @@ export class RoadTraffic {
 
   /** Something standing just in front of this car, overlapping it across the road: a queue. */
   private standingQueued(car: TrafficCar): boolean {
-    // A police car pulled over behind the player stands there on purpose: it is one more
-    // thing to go round, not a queue behind him.
-    if (car.police?.stop) return false;
     for (const other of this.carList) {
       if (other === car || other.vehicle.speedKmh * (1 / 3.6) > BYPASS_STILL_MPS) continue;
       const ahead = (other.forwardS - car.forwardS) * car.direction;
@@ -2558,7 +2439,6 @@ export class RoadTraffic {
       if (coordinate) {
         car.autopilot.setOncomingGap(this.nearestOncomingDistance(car.forwardS, car.direction, car.id));
       }
-      if (car.police) this.servicePolice(car, dt);
       if (car.layby) this.serviceLayby(car, dt, coordinate);
       else if (car.bypass) this.serviceBypass(car, dt);
       car.lifetimeTimer -= dt;
@@ -2706,7 +2586,7 @@ export class RoadTraffic {
    */
   private putOnRails(car: TrafficCar, playerS: number): boolean {
     // A car on a lay-by stop or a route round a standing car follows a line the rails do not have.
-    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0 || car.layby || car.bypass || car.police?.stop) return false;
+    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0 || car.layby || car.bypass) return false;
     // A driver that wants past the car in front is about to do something.
     if (car.autopilot.passUrge) return false;
     if (Math.abs(car.forwardS - playerS) < RAILS_SLEEP_M) return false;
@@ -2996,22 +2876,9 @@ export class RoadTraffic {
   }
 
   postStep(): void {
-    const player = this.playerDriving ? this.playerVehicle : null;
-    const playerAt = player?.chassis.translation();
-    const playerRadius = player ? Math.hypot(...player.bodyHalfExtents) : 0;
     for (const car of this.carList) {
       car.vehicle.postStep();
       const impact = car.vehicle.lastImpact;
-      // A hit with the player's car in reach of its body was his: the police count it
-      // (world/police.ts). The traffic car's own detector is the judge of a blow, so a
-      // nudge it shrugs off is no accident.
-      if (impact && impact.severityMps > IMPACT_MPS && playerAt) {
-        const t = car.vehicle.chassis.translation();
-        const reach = car.bodyRadius + playerRadius + PLAYER_IMPACT_SLACK_M;
-        if ((t.x - playerAt.x) ** 2 + (t.y - playerAt.y) ** 2 + (t.z - playerAt.z) ** 2 < reach * reach) {
-          this.playerImpactCount++;
-        }
-      }
       if (impact && impact.severityMps > IMPACT_MPS) {
         this.impactCount++;
         car.fullDetailFor = CRASH_FULL_DETAIL_S;
@@ -3191,11 +3058,7 @@ export class RoadTraffic {
         return null;
       }
     }
-    // A police car on a lay-by's pad stands angled with its nose to the road, watching it;
-    // on a shoulder there is no room, it stands along it. Its post is on its own side, so
-    // the same turn points it at the crown either way it faces.
-    const angle = request.policePaint && parked && parked.layby.poiIndex >= 0 ? POLICE_POST_ANGLE_RAD : 0;
-    const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0) + angle;
+    const heading = roadPoint.heading + (request.direction === -1 ? Math.PI : 0);
     // ON THE SURFACE THE WHEELS WILL TOUCH, NOT ON THE SPINE. `roadPoint.y` is the
     // centreline's geometry; the collider under a lane adds the crown, the camber and
     // the surface's own bumps, and where it stands higher the car was started inside
@@ -3227,12 +3090,6 @@ export class RoadTraffic {
     // than drawn from `random`, which would shift every later spawn decision.
     state.dirt = 0.12 + hash01(0x64697274, ...idKey) * 0.5;
     state.scratches = hash01(0x73637261, ...idKey) * 0.35;
-    // A police car keeps its livery: fixed paint, and a station's wash between shifts.
-    if (request.policePaint) {
-      state.paint = { ...request.policePaint };
-      state.dirt *= POLICE_DIRT_SHARE;
-      state.scratches *= POLICE_DIRT_SHARE;
-    }
     this.trafficWorld.apply({ t: 'car_add', car: state });
     const vehicle = new Vehicle(
       this.physics,
@@ -3305,9 +3162,8 @@ export class RoadTraffic {
       crossYield: false,
       bypass: null,
       bypassGaveUp: null,
-      police: null,
     };
-    if (parked && !request.policePaint) this.laybySeeded = parked.layby.poiIndex;
+    if (parked) this.laybySeeded = parked.layby.poiIndex;
     // The field reads the record's live arclength and direction, so it keeps working
     // as the car drives and, after a turnaround, as its direction flips.
     autopilot.setTrafficField(this.fieldFor(record, record.id));
@@ -3382,252 +3238,6 @@ export class RoadTraffic {
   private rivalCar(id: string): TrafficCar | null {
     for (const car of this.carList) if (car.rival && car.id === id) return car;
     return null;
-  }
-
-  /**
-   * Puts a police car down parked at its post (`PoliceSpawn`), on the post's first place,
-   * on the frantic driver's engine so it can catch whoever it goes after. Resolves true
-   * once it stands there, false when the post had no room or no ground yet (the police
-   * ask again). It leaves the way every car does, at the support edge, and `policePose`
-   * then answers false.
-   */
-  spawnPolice(spec: PoliceSpawn): Promise<boolean> {
-    if (!hasCarModel(spec.modelId)) return Promise.resolve(false);
-    const post = spec.post;
-    const placeS = spec.direction === 1
-      ? Math.max(post.sPadStart, post.sPadEnd) - LAYBY_SLOT_END_M
-      : Math.min(post.sPadStart, post.sPadEnd) + LAYBY_SLOT_END_M;
-    const request: PendingSpawn = {
-      generation: this.generation,
-      direction: spec.direction,
-      forwardS: placeS,
-      modelId: spec.modelId,
-      engineId: franticEngine(carModel(spec.modelId).bodyClass),
-      id: spec.id,
-      style: 'hurried',
-      headwayS: POLICE_HEADWAY_S,
-      mode: 'frantic',
-      speedCap: POLICE_RELEASED_CAP_MPS,
-      pace: 1,
-      lane: 0,
-      rear: placeS < this.playerS,
-      layby: post,
-      policePaint: spec.paint,
-    };
-    return this.prepareModel(spec.modelId).then(
-      () => {
-        if (request.generation !== this.generation) return false;
-        if (this.carList.some((car) => car.id === spec.id)) return false;
-        const record = this.placeCar(request, 0, null, true);
-        if (!record) return false;
-        record.rival = true;
-        record.police = { post, tailing: false, lights: false, flash: 0, stop: null, released: false };
-        record.autopilot.setGripShare(POLICE_GRIP_SHARE);
-        // It stands until it is sent (`policePullOut`), and nobody else stops at its post.
-        record.layby!.parkFor = Infinity;
-        this.reservePolicePost(post, true);
-        return true;
-      },
-      (error: unknown) => {
-        console.error(`failed to load police model "${spec.modelId}"`, error);
-        return false;
-      },
-    );
-  }
-
-  /** Writes a live police car's road place into `out`; false when it is not on the road. */
-  policePose(id: string, out: PolicePose): boolean {
-    const car = this.policeCar(id);
-    if (!car) return false;
-    out.s = car.forwardS;
-    out.lateral = car.roadLateral;
-    out.speed = car.forwardSpeed * car.direction;
-    out.direction = car.direction;
-    out.posted = car.layby !== null;
-    out.halfLength = car.roadHalfLength;
-    return true;
-  }
-
-  /** Sends a posted police car off its post: out of the pad or off the shoulder, into its lane. */
-  policePullOut(id: string): void {
-    const car = this.policeCar(id);
-    if (!car?.layby || car.layby.phase !== 'parked') return;
-    car.layby.parkFor = 0;
-    this.reservePolicePost(car.police!.post, false);
-  }
-
-  /**
-   * A police car driving after the player: its ceiling, m/s, and whether it is `tailing`
-   * him (close behind: no passing him, no going round him). One pulled over behind him
-   * pulls back into its lane first (`PoliceStop` `rejoin`).
-   */
-  policeChase(id: string, capMps: number, tailing: boolean): void {
-    const car = this.policeCar(id);
-    if (!car) return;
-    const duty = car.police!;
-    duty.tailing = tailing;
-    car.autopilot.setSpeedCap(capMps);
-    if (duty.stop?.phase === 'stop') this.beginPoliceRejoin(car);
-  }
-
-  /**
-   * A police car pulling over to stand at `standS`, at forward lateral `lateral` (behind
-   * the stopped player, on his line), on a lay-by course from wherever it is; asked
-   * every step, so the stand follows him. Not while it is still leaving its post.
-   */
-  policeStopBehind(id: string, standS: number, lateral: number): void {
-    const car = this.policeCar(id);
-    if (!car || car.layby || car.rails || car.turnS >= 0) return;
-    const duty = car.police!;
-    duty.tailing = true;
-    const stop = duty.stop;
-    if (stop?.phase === 'stop') {
-      stop.toS = standS;
-      stop.toLateral = lateral;
-      return;
-    }
-    duty.stop = this.policeStop(car, 'stop', standS, lateral);
-    if (car.bypass) car.bypass = null;
-    car.autopilot.setLaybyCourse(duty.stop.course);
-  }
-
-  /** The light bar flashing, or dark. */
-  setPoliceLights(id: string, on: boolean): void {
-    const car = this.policeCar(id);
-    if (!car) return;
-    const duty = car.police!;
-    duty.lights = on;
-    if (!on) this.setBeacons(car, false, false);
-  }
-
-  /**
-   * Hands a police car back to the stream as ordinary hurried traffic, lights out: at
-   * once on the road, or once it is back in its lane from behind the player. One still
-   * on its post leaves it in its own time, like any parked car.
-   */
-  releasePolice(id: string): void {
-    const car = this.policeCar(id);
-    if (!car) return;
-    const duty = car.police!;
-    duty.released = true;
-    duty.tailing = false;
-    duty.lights = false;
-    this.setBeacons(car, false, false);
-    if (duty.stop?.phase === 'stop') this.beginPoliceRejoin(car);
-    else if (!duty.stop) this.endPoliceDuty(car);
-  }
-
-  /** A live police car's vehicle (its siren is heard from it), or null. */
-  policeVehicle(id: string): Vehicle | null {
-    return this.policeCar(id)?.vehicle ?? null;
-  }
-
-  /**
-   * Impacts (`IMPACT_MPS`) of traffic cars with the player's car in reach, counted every
-   * step a blow lands: a rising count is a collision with him (world/police.ts).
-   */
-  get playerImpacts(): number {
-    return this.playerImpactCount;
-  }
-
-  private policeCar(id: string): TrafficCar | null {
-    for (const car of this.carList) if (car.police && car.id === id) return car;
-    return null;
-  }
-
-  /** A police post on a lay-by keeps ambient stops off it while the police car stands there. */
-  private reservePolicePost(post: Layby, reserved: boolean): void {
-    if (post.poiIndex < 0) return;
-    const count = (this.laybyReserved.get(post.poiIndex) ?? 0) + (reserved ? 1 : -1);
-    if (count > 0) this.laybyReserved.set(post.poiIndex, count);
-    else this.laybyReserved.delete(post.poiIndex);
-  }
-
-  /**
-   * The light bar's two halves, alternating at `POLICE_FLASH_HZ` while lit, and the car
-   * drawn in full meanwhile: the far and mid meshes have no light bar to flash.
-   */
-  private servicePolice(car: TrafficCar, dt: number): void {
-    const duty = car.police!;
-    if (duty.lights) {
-      duty.flash += dt;
-      car.fullDetailFor = Math.max(car.fullDetailFor, POLICE_FULL_DETAIL_S);
-      const left = Math.floor(duty.flash * POLICE_FLASH_HZ * 2) % 2 === 0;
-      this.setBeacons(car, left, !left);
-    }
-    const stop = duty.stop;
-    if (!stop || car.layby) return;
-    if (stop.phase === 'stop') {
-      car.autopilot.setHoldDistance((stop.toS - car.forwardS) * car.direction);
-      return;
-    }
-    car.autopilot.setHoldDistance(Infinity);
-    const lane = this.forwardLaneCentreAt(car.forwardS, car.direction, this.road.lanesPerSideAt(car.forwardS) - 1);
-    const past = (car.forwardS - stop.toS) * car.direction;
-    if (past > 0 && Math.abs(car.roadLateral - lane) < LAYBY_LANE_TOLERANCE_M) {
-      duty.stop = null;
-      car.autopilot.setLaybyCourse(null);
-      if (duty.released) this.endPoliceDuty(car);
-    }
-  }
-
-  private setBeacons(car: TrafficCar, left: boolean, right: boolean): void {
-    const kit = car.vehicle.kit;
-    if (!kit) return;
-    const l = left ? 1 : 0;
-    const r = right ? 1 : 0;
-    if (kit.get(POLICE_BEACON_LEFT) !== l) kit.set(POLICE_BEACON_LEFT, l, true);
-    if (kit.get(POLICE_BEACON_RIGHT) !== r) kit.set(POLICE_BEACON_RIGHT, r, true);
-  }
-
-  /** From standing behind the player back to its lane, over `POLICE_REJOIN_M`. */
-  private beginPoliceRejoin(car: TrafficCar): void {
-    const toS = car.forwardS + car.direction * POLICE_REJOIN_M;
-    const lane = this.forwardLaneCentreAt(toS, car.direction, this.road.lanesPerSideAt(toS) - 1);
-    const rejoin = this.policeStop(car, 'rejoin', toS, lane);
-    car.police!.stop = rejoin;
-    car.autopilot.setHoldDistance(Infinity);
-    car.autopilot.setLaybyCourse(rejoin.course);
-  }
-
-  private policeStop(car: TrafficCar, phase: PoliceStop['phase'], toS: number, toLateral: number): PoliceStop {
-    const direction = car.direction;
-    const road = this.road;
-    const across = (toLateral - car.roadLateral) * direction;
-    const course: LaybyCourse = {
-      // The driver asks in its own frame: the reversed road runs s backwards and
-      // mirrors lateral (`ReversedRoad`), as a lay-by visit's line does.
-      lineAt: (ownS) => direction === 1 ? policeStopLine(stop, ownS) : -policeStopLine(stop, road.length - ownS),
-      speed: phase === 'stop' ? POLICE_STOP_MPS : POLICE_REJOIN_MPS,
-      indicator: Math.abs(across) < 0.5 ? 'off' : across < 0 ? 'right' : 'left',
-      lookahead: Infinity,
-    };
-    const stop: PoliceStop = {
-      phase,
-      fromS: car.forwardS,
-      fromLateral: car.roadLateral,
-      toS,
-      toLateral,
-      course,
-    };
-    return stop;
-  }
-
-  /** The police are done with it: ordinary hurried traffic from here, its post freed. */
-  private endPoliceDuty(car: TrafficCar): void {
-    const duty = car.police!;
-    if (car.layby) {
-      // Still on its post: it leaves in its own time, like any stop.
-      if (car.layby.phase === 'parked' && car.layby.parkFor === Infinity) {
-        car.layby.parkFor = LAYBY_PARK_MIN_S;
-        this.reservePolicePost(duty.post, false);
-      }
-    }
-    car.police = null;
-    car.rival = false;
-    car.autopilot.setMode('hurried');
-    car.autopilot.setGripShare(1);
-    car.autopilot.setSpeedCap(car.speedCap);
   }
 
   /**
@@ -4080,8 +3690,6 @@ export class RoadTraffic {
 
   private removeAt(index: number): void {
     const car = this.carList[index]!;
-    // A police car dropped while it still stands on its post gives the post back.
-    if (car.police && car.layby?.parkFor === Infinity) this.reservePolicePost(car.police.post, false);
     car.autopilot.setEngaged(false);
     this.railBodies.delete(car.vehicle.chassis.handle);
     car.vehicle.dispose();

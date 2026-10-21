@@ -845,9 +845,8 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   const w = spec.wheels;
   const cowl = frame.cowl;
 
-  // The UAZ bodies (the 469, its police twin, the 2206) have their own closed sill/arch
-  // envelope; the generic floor rails otherwise show as a black shelf outside the front
-  // wheel arch.
+  // The UAZ bodies (the 469, the 2206) have their own closed sill/arch envelope; the
+  // generic floor rails otherwise show as a black shelf outside the front wheel arch.
   if (!spec.id.startsWith('uaz')) {
     b.color(COLOURS.underseal);
     const railEnd = w.rear - 0.85;

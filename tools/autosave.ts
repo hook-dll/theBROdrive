@@ -151,8 +151,6 @@ check('re-entering autosaves', calls.length === 5, `${calls.length} writes`);
 world.apply({ t: 'car_body_condition', carId: 'car:test', dirt: 0.42, scratches: 0.17 });
 world.apply({ t: 'car_lights', carId: 'car:test', headlightMode: 'low', taillightsOn: true, reverseLightsOn: false });
 world.apply({ t: 'inventory', items: [], selected: 0 });
-// A police stop at the wheel (world/police.ts): the fine's pack change and the heat.
-world.apply({ t: 'police_heat', heat: 2, heatUntil: 777 });
 await Promise.resolve();
 check('nothing at the wheel saves', calls.length === 5, `${calls.length} writes`);
 world.apply({ t: 'exit_car' });
@@ -164,16 +162,10 @@ check(
   exited?.dirt === 0.42 && exited.scratches === 0.17 && exited.headlightMode === 'low',
   `dirt ${exited?.dirt}, scratches ${exited?.scratches}, lamps ${exited?.headlightMode}`,
 );
-const heatRoundTrip = decodeSaveCode(encodeSaveCode(calls[5]!.state)).player.police;
-check(
-  'the exit carries the police heat',
-  heatRoundTrip.heat === 2 && heatRoundTrip.heatUntil === 777,
-  `heat ${heatRoundTrip.heat}, until ${heatRoundTrip.heatUntil}`,
-);
-const legacyPlayer: Record<string, unknown> = { ...calls[5]!.state.player };
-delete legacyPlayer.police;
-const legacy = decodeSaveCode(encodeSaveCode({ ...calls[5]!.state, player: legacyPlayer as unknown as WorldState['player'] }));
-check('a save from before the police has no heat', legacy.player.police.heat === 0, `heat ${legacy.player.police.heat}`);
+// A save from the police days carries the player's police record; it loads without it.
+const policeDays = { ...calls[5]!.state, player: { ...calls[5]!.state.player, police: { heat: 2, heatUntil: 777 } } };
+const policeDropped = decodeSaveCode(encodeSaveCode(policeDays as WorldState)).player;
+check('a save from the police days drops their record', !('police' in policeDropped), Object.keys(policeDropped).join(', '));
 const bodyRoundTrip = decodeSaveCode(encodeSaveCode(calls[5]!.state)).cars['car:test'];
 check(
   'save code keeps dust',

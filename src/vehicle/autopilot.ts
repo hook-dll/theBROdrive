@@ -1025,8 +1025,6 @@ const VERGE_BEND_SAMPLES = 4;
 const VERGE_BYPASS_STILL_MPS = 60 / 3.6;
 /** Braking a driver plans with to stop at a hold line (`setHoldDistance`), m/s². */
 const HOLD_LINE_DECEL_MPS2 = 3;
-/** Most a driver's `gripReserve` may be raised (`setGripShare`): 0.72 becomes 0.9 at most. */
-const GRIP_SHARE_MAX = 1.25;
 /**
  * DRIVING A LAY-BY (`Autopilot.setLaybyCourse`). The preview is the road controller's
  * own, capped so a slip's taper is not previewed past; the pedals are softer than any
@@ -2123,8 +2121,6 @@ export class Autopilot {
   private laybyScanSpeed = 0;
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
-  /** Multiplies the mode's `gripReserve` where bends are planned; see `setGripShare`. */
-  private gripShareValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
   private followingHeadwayValue: number | null = null;
   private oncomingGap = Infinity;
@@ -2805,15 +2801,6 @@ export class Autopilot {
    */
   setPace(fraction: number): void {
     this.paceValue = clamp(fraction, 0.4, 1);
-  }
-  /**
-   * A driver who spends more of its tyres in bends than its mode does: the police car
-   * (world/police.ts) chasing a player through them. Multiplies `gripReserve` in the
-   * bend planning, the steady cornering budget and the bend-brake share, never past
-   * `GRIP_SHARE_MAX`; 1 is the mode's own.
-   */
-  setGripShare(share: number): void {
-    this.gripShareValue = clamp(share, 1, GRIP_SHARE_MAX);
   }
   setFollowingHeadway(seconds: number): void {
     this.followingHeadwayValue = clamp(seconds, 0.9, 3.4);
@@ -3499,7 +3486,7 @@ export class Autopilot {
     );
     const currentLateralAccel = Math.min(
       config.lateralAccel,
-      physicalLateralAccel * config.gripReserve * this.gripShareValue,
+      physicalLateralAccel * config.gripReserve,
     );
     // The same, on the graded strip past the paint. See VERGE_CROSS_FALL.
     this.vergeLateralAccel = Math.max(
@@ -5296,7 +5283,7 @@ export class Autopilot {
         vehicle.estimatedLateralAccel(surface, Math.max(speed, clearRoadSpeed)) *
         Math.sqrt(Math.max(0.35, 1 - sampleGradeLoad * sampleGradeLoad));
       const lateralAccel =
-        Math.min(config.lateralAccel, physicalLateral * config.gripReserve * this.gripShareValue) * manoeuvreShare;
+        Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
       // On the racing line a bend is taken at the LINE's curvature, which is the
       // whole point of it; past the solved window, at the road's. A tight bend is the
       // exception, and `bendSpeed` says how.
@@ -6000,7 +5987,7 @@ export class Autopilot {
     const bendBrakeShare = Math.max(
       BEND_BRAKE_SHARE_FLOOR,
       Math.sqrt(
-        Math.max(0, 1 - Math.min(1, (lateralUse / (physicalLateralAccel * config.gripReserve * this.gripShareValue)) ** 2)),
+        Math.max(0, 1 - Math.min(1, (lateralUse / (physicalLateralAccel * config.gripReserve)) ** 2)),
       ),
     );
     // …UNLESS HALF A PEDAL CANNOT LOSE THE SPEED IN THE ROOM THERE IS. Behind a MOVING

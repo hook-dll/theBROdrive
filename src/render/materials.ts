@@ -640,15 +640,10 @@ function patchCarBodyShader(
  * (vehicle/vehiclelamps.ts: head, tail, stop, reverse, left and right blinker);
  * `CAR_LAMP_INERT` a lens nothing switches; `CAR_LAMP_UNLIT` a lit face drawn in its own
  * colour at any hour (a kit cluster's warning lamp, the courtesy lamp). Only 1-6 glow.
- * `CAR_LAMP_LIVERY` is no lamp: livery paint (a police car's white doors and their
- * lettering, carkit/police.ts), paint share 1 in its own vertex colour instead of the
- * car's, so it keeps the paint's finish, dust, scratches and stickers; the far mesh
- * draws it as a plain surface in that colour.
  */
 export const CAR_SURFACE_ATTRIBUTE = 'carSurface';
 export const CAR_LAMP_INERT = 7;
 export const CAR_LAMP_UNLIT = 8;
-export const CAR_LAMP_LIVERY = 9;
 /** Per kit vertex: whether its part casts a shadow and whether it receives one (bytes). */
 export const KIT_SHADOW_ATTRIBUTE = 'kitShadow';
 /**
@@ -714,26 +709,21 @@ attribute vec2 ${KIT_SHADOW_ATTRIBUTE};
 uniform vec3 uKitLensColor[ 6 ];
 uniform float uKitLensLevel[ 6 ];
 varying vec4 vKitSurface;
-varying vec3 vKitRole;
+varying vec2 vKitRole;
 varying vec3 vKitGlow;`;
 
 /**
  * The surface bytes to the fragment: paint share, roughness, metalness, and whether the
- * part receives shadows; whether it is a switched lens, whether it is unlit and whether
- * it is livery paint; and its glow, this car's level of its role in that role's colour,
- * as a lens material's `emissive * emissiveIntensity`. Roles pick by masks, as the far
- * mesh's do.
+ * part receives shadows; whether it is a switched lens and whether it is unlit; and its
+ * glow, this car's level of its role in that role's colour, as a lens material's
+ * `emissive * emissiveIntensity`. Roles pick by masks, as the far mesh's do.
  */
 const KIT_BODY_VERTEX_COLOR = `#include <color_vertex>
 vKitSurface = vec4( ${CAR_SURFACE_ATTRIBUTE}.xyz, ${KIT_SHADOW_ATTRIBUTE}.y );
 float kitRole = floor( ${CAR_SURFACE_ATTRIBUTE}.w * 255.0 + 0.5 );
 vec3 kitRoleA = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 1.0, 2.0, 3.0 ) ) );
 vec3 kitRoleB = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 4.0, 5.0, 6.0 ) ) );
-vKitRole = vec3(
-  dot( kitRoleA + kitRoleB, vec3( 1.0 ) ),
-  1.0 - step( 0.5, abs( kitRole - ${CAR_LAMP_UNLIT}.0 ) ),
-  1.0 - step( 0.5, abs( kitRole - ${CAR_LAMP_LIVERY}.0 ) )
-);
+vKitRole = vec2( dot( kitRoleA + kitRoleB, vec3( 1.0 ) ), 1.0 - step( 0.5, abs( kitRole - ${CAR_LAMP_UNLIT}.0 ) ) );
 vKitGlow = uKitLensColor[ 0 ] * ( uKitLensLevel[ 0 ] * kitRoleA.x )
   + uKitLensColor[ 1 ] * ( uKitLensLevel[ 1 ] * kitRoleA.y )
   + uKitLensColor[ 2 ] * ( uKitLensLevel[ 2 ] * kitRoleA.z )
@@ -744,7 +734,7 @@ vKitGlow = uKitLensColor[ 0 ] * ( uKitLensLevel[ 0 ] * kitRoleA.x )
 const KIT_BODY_PARS = `${CAR_BODY_PARS}
 uniform float uKitLensGrime;
 varying vec4 vKitSurface;
-varying vec3 vKitRole;
+varying vec2 vKitRole;
 varying vec3 vKitGlow;
 ${KIT_SPOT_REACH_PARS}`;
 
@@ -755,11 +745,10 @@ float carPaintShare = vKitSurface.x;
 
 /**
  * Paint takes the material's colour (the car's, `setCarBodyPaintColor`); every other part
- * its vertex colour, which is its slot's colour (carkit/materials.ts), and so does livery
- * paint (`CAR_LAMP_LIVERY`), which is paint in every other respect. A switched lens
+ * its vertex colour, which is its slot's colour (carkit/materials.ts). A switched lens
  * takes the lens film (materials.ts GRIME_COLOR) from the car's lens dust.
  */
-const KIT_BODY_COLOR = `diffuseColor.rgb = mix( vColor.rgb, diffuseColor.rgb, carPaintShare * ( 1.0 - vKitRole.z ) );
+const KIT_BODY_COLOR = `diffuseColor.rgb = mix( vColor.rgb, diffuseColor.rgb, carPaintShare );
 float kitLensFilm = saturate( 1.1 * uKitLensGrime ) * vKitRole.x;
 diffuseColor.rgb = mix( diffuseColor.rgb, mix( uDustLight, uDustCrust, 0.15 ), kitLensFilm * 0.85 );`;
 

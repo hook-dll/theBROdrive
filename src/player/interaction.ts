@@ -2558,7 +2558,9 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
-      if (held && !cells[t.cell] && bootRefusal(held)) {
+      // The boot's length limit is the boot's: a bonnet cell is gated by its slot kind
+      // alone (`bonnetAccepts` above), and an engine is longer than any boot cell.
+      if (t.side !== 'bonnet' && held && !cells[t.cell] && bootRefusal(held)) {
         this.sound = 'refused';
         return;
       }

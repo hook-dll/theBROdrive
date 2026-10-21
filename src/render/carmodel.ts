@@ -473,12 +473,11 @@ function markStickerSurfaces(root: THREE.Object3D, def: CarModelDef, glass: read
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     const materials = materialsOf(child);
-    // A kit car is one material: its paint is the parts built in the paint slot (livery
-    // paint included: a police car's doors), and only the parts it was built of (the pick
-    // proxies, render/kitdraw.ts) carry stickers.
+    // A kit car is one material: its paint is the parts built in the paint slot, and only
+    // the parts it was built of (the pick proxies, render/kitdraw.ts) carry stickers.
     const slot = child.userData.kitSlot as string | undefined;
     const kitPart = def.kit === undefined || slot !== undefined;
-    const paintMesh = isRandomPaintMesh(child, def) && (def.kit === undefined || slot === 'paint' || slot === 'livery');
+    const paintMesh = isRandomPaintMesh(child, def) && (def.kit === undefined || slot === 'paint');
     child.userData.stickerMaterialIndices = materials
       .map((material, index) =>
         kitPart && (glass.includes(material) || (paintMesh && isPaintSlot(material, def))) ? index : -1,

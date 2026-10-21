@@ -2,17 +2,51 @@
 
 ## Unreleased
 
-- Dev: a raw-handling experiment in the pause menu's developer box: a `Raw handling`
-  switch and five 0..1 levers, applied as they move and kept per browser
-  (`bro.rawHandling`). It touches only the car the player drives from the driver's seat;
-  off, every read takes today's constant, so the handling is unchanged. The levers
-  (vehicletuning.ts `RAW_HANDLING`): key assist fade (the keyboard's tyre-peak cap gives
-  way to the whole lock from 40 km/h, all of it by 100 km/h at 1), steering speed (at-speed
-  wind-up and return down to a third, rack doubled, no release delay at 1), rear breakaway
-  (the rear axle's past-peak plateau down to 0.5, front unchanged), less yaw inertia (the
-  yaw box gain 2.55 → 1.4, pitch unchanged; the chassis tensor is rebuilt live) and bump
-  feel (contact patch 0.16 → 0.04 m, load filter 25 → 8 ms). Defaults when switched on:
-  0.3, 0.5, 0.5, 0.5, 0.5.
+- The police are gone (owner). No posts on the shoulder or the lay-bys, no UAZ-469 in the
+  militia's livery, no radar, chase, siren, stop, fine or heat. Removed with them:
+  `src/world/police.ts`, `src/audio/sirenvoice.ts`, `src/carkit/police.ts`,
+  `tools/police-bench.ts`; the traffic stream's police duty (`spawnPolice` and the rest,
+  the police car's grip share in the autopilot, the player-impact count that told the
+  police of a collision), the shoulder pull-off (world/layby.ts), the `[F]` papers prompt,
+  `__bro.police`, the `police_heat` delta and `PlayerState.police`. The police UAZ's
+  catalogue, factory, price and fit rows went too, with the kit machinery only it used:
+  livery paint (slot `livery`, `CAR_LAMP_LIVERY`; the kit shader's role is a `vec2`
+  again) and the light bar's beacon channels. A save from the police days loads with its
+  heat dropped, and a car saved on `kit_uaz469_police` loads on the plain `kit_uaz469`.
+
+- A handbrake slide that touches another car carries on. The parking hold, which pins
+  a stopped car where it stands, latched on the speed along the nose alone, and a car
+  sliding broadside has almost none: the moment a glancing contact swung its heading
+  square to its path, the hold took and zeroed its motion every step, so the car
+  stopped dead against the traffic car it had brushed. The hold now latches only when
+  the whole ground speed, and the yaw at the axles, are both down to a creep (0.12 m/s).
+
+- An engine goes back into the bay again. The boot's 0.8 m length limit (which sends a
+  rolled carpet to the back seat) was also checked on the bonnet's cells, and nearly
+  every engine is longer than that (a 1.6 four is 0.88 m), so [F] install was offered
+  and then refused.
+  The limit now applies to the boot only; a bonnet cell takes what its slot kind takes.
+
+- The car the player drives is a real car now, not a safe one. The steering keys are
+  hands on the steering wheel (vehicletuning.ts HANDS ON WHEEL): a held key turns the
+  rim at 420°/s, ramping up over 0.1 s, the opposite key turns it back through the same
+  ramp, both keys together hold it where it is, and the road wheels follow through the
+  car's own ratio (970° lock to lock over its lock: 12.8:1 to 18.6:1) up to the lock.
+  Let go, the caster spins the rim back toward centre at |angle| / 0.25 s scaled by
+  speed up to 100 km/h (at most 720°/s, never past centre, hardly at all at a crawl,
+  nothing backwards). Nothing in it knows where the tyres' grip is: hold a key too long
+  and the front ploughs or the tail goes. It replaces the keyboard assist that wound a
+  hold toward the front tyres' peak slip angle (`KEY_STEER_*`, its wind-up, return,
+  release delay and past-peak wind-up, all removed). The pad and the precise-control
+  wheel keep their own steering, assist included. The car also reads four figures of
+  its own (`PLAYER_*`): rack speed ×1.5, the rear axle's past-peak plateau at most 0.7
+  (a dry tyre's low end; the front keeps its own), yaw inertia on the plain box (gain
+  1.0 for 2.55; pitch unchanged) and an 8 ms tyre-load filter for 25 ms, so bumps
+  mid-corner reach the grip (the 16 cm contact patch is unchanged). They apply only
+  while the player drives with their own hands (`Vehicle.setPlayerDriven`, rebuilding
+  the yaw inertia on a change of driver): traffic, rivals and the autopilot keep
+  the catalogue's figures they were tuned on. `tools/steer-feel.ts` and
+  `tools/tap-response.ts` now drive the player's car with the hands.
 
 - Money is rubles and kopecks, held in a purse instead of coin items
   (`src/economy/economy.ts`, `src/render/purse.ts`, `src/ui/purse.ts`). Every amount is

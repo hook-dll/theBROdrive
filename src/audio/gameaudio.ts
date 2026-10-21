@@ -15,7 +15,6 @@ import { AudioMixer, setListenerPose, setPannerPosition, sliderGain } from './mi
 import { playCrash, VehicleAudio, type CarPose } from './vehicleaudio';
 import { TrafficAudio } from './trafficaudio';
 import type { SampleName } from './samples';
-import { SirenVoice } from './sirenvoice';
 import { Ambience, type AmbienceFrame } from './ambience';
 import type { CabinOpenness } from './cabinopenness';
 import { Foley, type BubbleGumAudioPhase, type FoleyContinuous, type FoleyEvent } from './foley';
@@ -57,8 +56,6 @@ export class GameAudio {
   private readonly ambience = new Ambience(this.mixer);
   private readonly radios = new Map<string, Radio>();
   private readonly trafficVoices = new Map<string, TrafficAudio>();
-  /** The chasing police car's siren, while there is one; see `updateSiren`. */
-  private sirenVoice: SirenVoice | null = null;
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
   /** Per traffic car, when its last crash was heard; pruned to the cars still offered. */
@@ -312,20 +309,6 @@ export class GameAudio {
   }
 
   /**
-   * The police siren (world/police.ts), or `on` false when no chase is sounding one.
-   * Position is the car's in the relative (listener) frame.
-   */
-  updateSiren(on: boolean, x: number, y: number, z: number): void {
-    if (!on) {
-      this.sirenVoice?.release();
-      this.sirenVoice = null;
-      return;
-    }
-    this.sirenVoice ??= new SirenVoice(this.mixer);
-    this.sirenVoice.update(x, y, z);
-  }
-
-  /**
    * Pose of the single AudioListener. Traffic engines need the same listener even
    * before a radio has ever been switched on.
    */
@@ -447,8 +430,6 @@ export class GameAudio {
     this.radios.clear();
     for (const voice of this.trafficVoices.values()) voice.dispose();
     this.trafficVoices.clear();
-    this.sirenVoice?.dispose();
-    this.sirenVoice = null;
     this.mixer.dispose();
   }
 }

@@ -1079,6 +1079,13 @@ each measurements file's "Review 2".
   of the side within 45° (skin, shoulder, the frame's outer face) are livery
   (`${door}_livery`); the edges keep the car's paint (`${door}_paint`), like the jambs
   they face. *police.ts `paintDoors`, `SKIN_FACING`*.
+- **Removed with the police (owner, 2026-10-21).** → The game has no police any more, so
+  nothing spawns the car. → `police.ts`, `KIT_SPECS.uaz469_police`, its catalogue row,
+  factory row, fit row and reference file are gone, and so is the machinery only it used:
+  slot `livery` and `CAR_LAMP_LIVERY` (the kit shader's role is a `vec2` again), the
+  beacon channels, the negative-`amount` `visible` motion and `collectPieces` taking a node
+  hidden as built. A save naming `kit_uaz469_police` loads on `kit_uaz469`. The plain
+  UAZ-469 is unchanged.
 
 ## Failed approaches (do not retry)
 

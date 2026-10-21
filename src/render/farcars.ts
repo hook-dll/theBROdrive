@@ -24,9 +24,9 @@
  */
 
 import * as THREE from 'three';
-import { KIT_DETAIL_GROUPS, KIT_DETAIL_M, type KitMotion } from '../carkit/rig';
+import { KIT_DETAIL_GROUPS, KIT_DETAIL_M } from '../carkit/rig';
 import { LENS_ROLE_EMISSIVE, type VehicleLamps } from '../vehicle/vehiclelamps';
-import { CAR_LAMP_LIVERY, CAR_SURFACE_ATTRIBUTE } from './materials';
+import { CAR_SURFACE_ATTRIBUTE } from './materials';
 
 /** A traffic car goes far beyond this distance from the eye, metres... */
 export const FAR_CAR_ENTER_M = 110;
@@ -145,11 +145,7 @@ function toByte(value: number): number {
 /**
  * Every visible material slot under `roots` that `describe` keeps, with its mesh's
  * chassis-local matrix (each root's own transform included), minus the kit groups a car
- * past `KIT_DETAIL_M` stops drawing unless `whole`. `whole` (a kit car's merged near
- * mesh, render/kitdraw.ts) also takes a part the rig shows and hides (`kitMotion` kind
- * `visible`) that is hidden as built: a beacon's lit face (carkit/police.ts), which the
- * mid and far meshes, baked in the built pose, leave out. Reads the template without
- * changing it.
+ * past `KIT_DETAIL_M` stops drawing unless `whole`. Reads the template without changing it.
  */
 export function collectPieces<S>(
   roots: readonly THREE.Object3D[],
@@ -158,8 +154,7 @@ export function collectPieces<S>(
 ): Piece<S>[] {
   const pieces: Piece<S>[] = [];
   const walk = (node: THREE.Object3D, parent: THREE.Matrix4): void => {
-    const shown = node.visible || (whole && (node.userData.kitMotion as KitMotion | undefined)?.kind === 'visible');
-    if (!shown || (!whole && KIT_DETAIL_GROUPS.has(node.name))) return;
+    if (!node.visible || (!whole && KIT_DETAIL_GROUPS.has(node.name))) return;
     const local = node.matrixAutoUpdate ? _local.compose(node.position, node.quaternion, node.scale) : node.matrix;
     const matrix = new THREE.Matrix4().multiplyMatrices(parent, local);
     if (node instanceof THREE.Mesh) {
@@ -255,8 +250,6 @@ export function bakeFarCarGeometry(
         colors[v * 3 + 2] = toByte(_color.b);
         if (own) {
           for (let c = 0; c < 4; c++) surfaces[v * 4 + c] = toByte(own.getComponent(source, c));
-          // Livery paint is drawn in its own colour: the far mesh tints only paint share.
-          if (surfaces[v * 4 + 3] === CAR_LAMP_LIVERY) surfaces[v * 4] = 0;
         } else {
           surfaces[v * 4] = paint;
           surfaces[v * 4 + 1] = roughness;

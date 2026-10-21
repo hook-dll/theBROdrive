@@ -191,17 +191,6 @@ import {
   SLIP_REFERENCE_MPS,
   STEERING_WHEEL_HALF_LOCK_RAD,
   STEER_ASSIST_SLIP_MARGIN,
-  KEY_STEER_AXIS_KMH,
-  KEY_STEER_COUNTER,
-  KEY_STEER_PAST_FROM,
-  KEY_STEER_PAST_S,
-  KEY_STEER_RETURN_S,
-  KEY_STEER_RETURN_FLOOR,
-  KEY_STEER_RETURN_SLOW_S,
-  KEY_STEER_RELEASE_S,
-  KEY_STEER_TYRE_KMH,
-  KEY_STEER_WIND_S,
-  KEY_STEER_WIND_SLOW_S,
   STEER_FREE_TAU_S,
   SUSPENSION_FORCE_HEADROOM,
   TRANSFORM_EMIT_INTERVAL,
@@ -224,17 +213,16 @@ import {
   tyreTemperatureGrip,
   tyreVerticalRate,
   unsprungMass,
-  RAW_ASSIST_FADE_FROM_KMH,
-  RAW_ASSIST_FADE_TO_KMH,
-  RAW_CONTACT_PATCH_M,
-  RAW_HANDLING,
-  RAW_RACK_SCALE,
-  RAW_REAR_PLATEAU,
-  RAW_STEER_TIME_SCALE,
-  RAW_WHEEL_LOAD_TAU,
-  RAW_YAW_GAIN,
-  type RawHandlingTuning,
-  rawBlend,
+  HANDS_CENTRE_RAD,
+  HANDS_RAMP_S,
+  HANDS_RETURN_MAX_RAD_S,
+  HANDS_RETURN_REF_KMH,
+  HANDS_RETURN_TAU_S,
+  HANDS_WHEEL_RATE_RAD_S,
+  PLAYER_RACK_SPEED_SCALE,
+  PLAYER_REAR_PLATEAU,
+  PLAYER_WHEEL_LOAD_TAU,
+  PLAYER_YAW_INERTIA_GAIN,
 } from './vehicletuning';
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
@@ -1094,26 +1082,19 @@ export class Vehicle implements Rebasable {
   private steerCommand = 0;
   private steerAngle = 0;
   /**
-   * The keyboard's hold, -1..1 with positive RIGHT like `InputFrame.steer`: how much
-   * wheel the steering keys have wound in so far (`SteerMode` 'keys', see
-   * `KEY_STEER_WIND_S`). Zero, with no key down, is no hand on the wheel.
+   * HANDS ON WHEEL (`SteerMode` 'keys', vehicletuning.ts): the steering wheel's angle,
+   * radians at the rim and positive to the left like the rack, and how fast the hands
+   * are turning it. Both zero whenever the hands are off it or the keys are not in use.
    */
-  private keySteerHold = 0;
-  /** Seconds since the steering keys last went up: see `KEY_STEER_RELEASE_S`. */
-  private keySteerReleasedS = 0;
+  private handsWheelRad = 0;
+  private handsWheelRate = 0;
   /**
-   * How far a held key has wound the wheel PAST the front tyres' peak toward the whole
-   * lock, 0..1 and never more than |hold|: see `KEY_STEER_PAST_FROM`.
+   * The player drives this car from the driver's seat, so it reads THE PLAYER'S CAR
+   * figures (vehicletuning.ts `PLAYER_*`) in place of the catalogue's: see
+   * `setPlayerDriven`.
    */
-  private keySteerPast = 0;
-  /**
-   * This is the car the player drives, so the dev raw-handling levers apply to it
-   * (`RAW_HANDLING`, `setRawHandling`). Everything else keeps today's handling.
-   */
-  private rawHandlingCar = false;
-  /** The yaw box gain the chassis tensor was last built with (`applyChassisMass`). */
-  private appliedYawGain = INERTIA_PITCH_YAW_GAIN;
-  /** The stats `applyChassisMass` last built the chassis from, for a live yaw re-apply. */
+  private playerDriven = false;
+  /** The stats `applyChassisMass` last built the chassis from, for `setPlayerDriven`. */
   private chassisMassStats: VehicleStats | null = null;
   /** Load-sensitive front bump-steer disturbance, filtered in fixedUpdate. */
   private bumpSteerAngle = 0;
@@ -1931,8 +1912,8 @@ export class Vehicle implements Rebasable {
     this.beamAxles = [];
     this.steerCommand = 0;
     this.steerAngle = 0;
-    this.keySteerHold = 0;
-    this.keySteerPast = 0;
+    this.handsWheelRad = 0;
+    this.handsWheelRate = 0;
     this.bumpSteerAngle = 0;
     this.sustainedImbalance = 0;
     this.frontRollRad = 0;
@@ -2799,12 +2780,26 @@ export class Vehicle implements Rebasable {
     // reaching the ground says nothing about whether the car is resting on it. A car
     // still in the air holds its wheels at full droop against long rays and reports
     // every one of them grounded with the springs carrying nothing.
+    //
+    // And only on a car that has actually STOPPED: the whole horizontal velocity and the
+    // yaw, not the forward component. `fwd` is the speed along the nose, which a car
+    // sliding broadside on the handbrake carries almost none of, and which passes
+    // through zero whenever the slide's heading swings past square to its path — as a
+    // glancing touch on another car's flank makes it do. Gated on `fwd` alone, that
+    // instant latched the hold, and the hold re-placed the car where it stood and
+    // zeroed its horizontal velocity every step after: a car sliding at 40 km/h
+    // touched a traffic car and stopped dead, without a bounce, for as long as the
+    // lever stayed up. The yaw is measured at the axles (half the wheelbase out), so a
+    // car pirouetting on the spot is not frozen mid-turn either.
     let holdLoadN = 0;
     for (const w of this.wheels) holdLoadN += w.loadN;
     const onWheels = holdLoadN > PARK_HOLD_MIN_LOAD_FRACTION * stats.mass * GRAVITY;
+    const yawRate = this.chassisBody.angvel(this.holdVelocity).y;
+    const stopped =
+      Math.hypot(this.stepStartLinvel.x, this.stepStartLinvel.z) < PARK_HOLD_SPEED_MPS &&
+      Math.abs(yawRate) * 0.5 * this.wheelbaseM < PARK_HOLD_SPEED_MPS;
     this.parkingHoldRequested =
-      input.handbrake &&
-      (this.parkingHoldActive || (Math.abs(fwd) < PARK_HOLD_SPEED_MPS && onWheels));
+      input.handbrake && (this.parkingHoldActive || (stopped && onWheels));
 
     // Manual shift request; with driver assist on this is a +/- gate — the
     // request applies now and the next automatic decision may override it.
@@ -3100,7 +3095,6 @@ export class Vehicle implements Rebasable {
     // suspension has pushed: see `geometricSlipRad`.
     this.chassisBody.rotation(this.rotationScratch);
 
-    const raw = this.rawLevers();
     for (const w of this.wheels) {
       // Surface under this wheel drives traction and rolling resistance. The type is
       // kept alongside its properties because the spray needs the identity, not just
@@ -3157,8 +3151,9 @@ export class Vehicle implements Rebasable {
       const staticPeakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
       const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
       let plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
-      // Raw handling: the rear lets go further past its peak; the front keeps its own.
-      if (raw && !w.isFront) plateau = Math.min(plateau, rawBlend(plateau, RAW_REAR_PLATEAU, raw.rearBreakaway));
+      // The player's car: the rear lets go further past its peak, the front keeps its
+      // own (`PLAYER_REAR_PLATEAU`).
+      if (this.playerDriven && !w.isFront) plateau = Math.min(plateau, PLAYER_REAR_PLATEAU);
       // The brush tyre's peak moves with load (`brushPeakTan`); the curve's is fixed.
       // The brush's own peak is held a degree short of the full angle for the fade.
       const brush = TYRE_MODEL.brush && this.model.tyre !== undefined;
@@ -3235,9 +3230,7 @@ export class Vehicle implements Rebasable {
               )
           : 0;
       const rolled = Math.abs(fwdSpeed) * dt;
-      const envelope = 1 - Math.exp(
-        -rolled / (raw ? rawBlend(CONTACT_PATCH_M, RAW_CONTACT_PATCH_M, raw.bumpFeel) : CONTACT_PATCH_M),
-      );
+      const envelope = 1 - Math.exp(-rolled / CONTACT_PATCH_M);
       const beforeProfile = w.profileHeight;
       w.profileHeight += (profileTarget - w.profileHeight) * envelope;
       w.profileRate = w.grounded ? (w.profileHeight - beforeProfile) / dt : 0;
@@ -4266,9 +4259,7 @@ export class Vehicle implements Rebasable {
     const bodyOrigin = this.chassisBody.translation();
     const bodyMass = this.chassisBody.mass();
     this.updateBeamLean(controller);
-    const raw = this.rawLevers();
-    const loadTau = raw ? rawBlend(WHEEL_LOAD_TAU, RAW_WHEEL_LOAD_TAU, raw.bumpFeel) : WHEEL_LOAD_TAU;
-    const loadBlend = dt / (loadTau + dt);
+    const loadBlend = dt / ((this.playerDriven ? PLAYER_WHEEL_LOAD_TAU : WHEEL_LOAD_TAU) + dt);
     // Grip leaves slowly and comes back quickly: see SLIDE_ONSET_TAU.
     const slideOnsetBlend = dt / (SLIDE_ONSET_TAU + dt);
     const slideRecoverBlend = dt / (SLIDE_RECOVER_TAU + dt);
@@ -5278,30 +5269,19 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Marks this as the car the player drives, so the dev raw-handling levers
-   * (`RAW_HANDLING`) apply to it; called every fixed step for every car, before the
-   * physics step. The levers read at each step take effect by themselves; the one
-   * that lives in the rigid body, the yaw inertia, is re-applied here whenever the gain
-   * it asks for differs from the one the chassis was built with, so a slider, the
-   * toggle, getting into a car and getting out all take effect on the next step. With
-   * the levers off the gain asked for is `INERTIA_PITCH_YAW_GAIN`, which is what every
-   * car was built with, so nothing is re-applied.
+   * Whether the player drives this car from the driver's seat with their own hands (not
+   * the autopilot), which makes it read THE PLAYER'S CAR figures (vehicletuning.ts
+   * `PLAYER_*`: rack speed, rear plateau, yaw inertia, load filter) in place of the
+   * catalogue's; every other car keeps those, which its autopilot was tuned on. Called
+   * every fixed step for every car, before the physics step. Three of the figures are
+   * read each step and follow by themselves; the yaw inertia lives in the rigid body,
+   * so a change of driver rebuilds the chassis tensor from the same load, and getting
+   * in or out takes effect on the next step.
    */
-  setRawHandling(playerCar: boolean): void {
-    this.rawHandlingCar = playerCar;
-    const stats = this.chassisMassStats;
-    if (stats && this.yawInertiaGain() !== this.appliedYawGain) this.applyChassisMass(stats);
-  }
-
-  /** The dev raw-handling levers for this car this step, or null for today's handling. */
-  private rawLevers(): Readonly<RawHandlingTuning> | null {
-    return this.rawHandlingCar && RAW_HANDLING.enabled ? RAW_HANDLING : null;
-  }
-
-  /** The box gain on the kerb body's YAW inertia: see `INERTIA_PITCH_YAW_GAIN`. */
-  private yawInertiaGain(): number {
-    const raw = this.rawLevers();
-    return raw ? rawBlend(INERTIA_PITCH_YAW_GAIN, RAW_YAW_GAIN, raw.yawInertia) : INERTIA_PITCH_YAW_GAIN;
+  setPlayerDriven(playerDriven: boolean): void {
+    if (playerDriven === this.playerDriven) return;
+    this.playerDriven = playerDriven;
+    if (this.chassisMassStats) this.applyChassisMass(this.chassisMassStats);
   }
 
   /**
@@ -5394,27 +5374,26 @@ export class Vehicle implements Rebasable {
    * steer) and camber thrust already add to the rack's. Weighted by load across the
    * axle, that is the TRAVEL angle: no side force at all, and no aligning moment.
    *
-   * THE ASSIST. A keyboard key asks for slip ON TOP of the travel angle, a share of the
-   * front tyres' own peak (`sidePeakTan`, their brush peak at their current load) plus
-   * `STEER_ASSIST_SLIP_MARGIN`, so a held key runs the front axle at its peak at any
-   * speed, and the key the tail is stepping toward reaches past where the front axle is
-   * going without a special case — that is a countersteer. It never asks for less than
-   * the same share of the KINEMATIC angle of the tightest circle the front axle's grip
-   * can hold at this speed, `atan(L · a / v²)`, which is the whole lock at parking
-   * speeds, where the slip angle cannot get near its peak; nor, about the car's own
-   * axis, for less than that share of the reach a car running straight is given, so a
-   * slide that carries the front axle's travel outward cannot carry the held wheel back
-   * with it. A key held on past its reach winds the wheel on to the whole lock
-   * (`KEY_STEER_PAST_FROM`): the key is obeyed, and the tyres plough. A stick with the
-   * assist on is a position against the same reach, measured from straight ahead, so
-   * the stick's edge is the peak. Backwards or airborne there is nothing to measure and
-   * the reach is the lock.
+   * THE KEYS are hands on the steering wheel (HANDS ON WHEEL in vehicletuning.ts): a
+   * held key turns the rim at a hand's rate, the rack target is the rim over the
+   * steering ratio, and let go the caster spins the rim back toward centre. Nothing in
+   * it reads the tyres, so a key held too long is too much wheel.
    *
-   * HANDS ON AND OFF. A player's steer of exactly 0 is no hand on the wheel: the rack is
-   * free and the tyres swing toward their travel angle on their aligning moment
-   * (`STEER_FREE_TAU_S`), never past it, and the rim follows them. A hand on the wheel
-   * moves the rack at the rack speed, and only the backlash window is left to the
-   * moment.
+   * THE PAD'S ASSIST. A stick with the assist on is a position against a reach: the
+   * front tyres' own peak (`sidePeakTan`, their brush peak at their current load) plus
+   * `STEER_ASSIST_SLIP_MARGIN`, measured from where the front axle is going, so the
+   * stick's edge runs the front axle at its peak at any speed and the stick the tail is
+   * stepping toward reaches past the travel angle without a special case — that is a
+   * countersteer. It never asks for less than the same share of the KINEMATIC angle of
+   * the tightest circle the front axle's grip can hold at this speed, `atan(L · a / v²)`,
+   * which is the whole lock at parking speeds, where the slip angle cannot get near its
+   * peak. Backwards or airborne there is nothing to measure and the reach is the lock.
+   *
+   * HANDS ON AND OFF. No hand on the wheel — a stick at exactly 0, or the keys up with
+   * the rim back at centre — leaves the rack free: the tyres swing toward their travel
+   * angle on their aligning moment (`STEER_FREE_TAU_S`), never past it, and the rim
+   * follows them. A hand on the wheel moves the rack at the rack speed, and only the
+   * backlash window is left to the moment.
    *
    * The negation converts our basis into Rapier's steering sign. Forward is +Z and the
    * axle is set to (-1, 0, 0), and with that pairing a POSITIVE steering angle yaws the
@@ -5431,8 +5410,6 @@ export class Vehicle implements Rebasable {
     const right = this.bodyRightScratch;
     const forward = this.bodyForwardScratch;
     const rolling = fwd < 0 ? -1 : 1;
-    // The dev raw-handling levers, or null: today's steering (`RAW_HANDLING`).
-    const raw = this.rawLevers();
 
     // One pass over the front tyres as the last step left them: the moment about the
     // steering axes and the one it is measured against (`STEER_FREE_TAU_S`), the travel
@@ -5493,96 +5470,41 @@ export class Vehicle implements Rebasable {
     let target: number;
     let handsOff = steer === 0 && input.steerMode !== 'direct';
     if (input.steerMode === 'keys') {
-      // How far along the band from the car's axis to the tyres' travel the speed is.
-      const band = clamp(
-        (fwd * 3.6 - KEY_STEER_AXIS_KMH) / (KEY_STEER_TYRE_KMH - KEY_STEER_AXIS_KMH),
-        0,
-        1,
-      );
-      const tyreShare = band * band * (3 - 2 * band);
-      // The hold: wound in by a held key (an approach, quick off the centre and slowing
-      // toward the full reach), faster by the opposite one until it is back through
-      // straight, and given back on release, slowly at walking pace and quickly at
-      // speed. With grip, it comes back from nothing at the moment the key comes up to
-      // the full rate `KEY_STEER_RELEASE_S` later, so taps hold a bend; with the tail out
-      // (`tailOut`) it comes back at the full rate at once, the way a driver lets the
-      // wheel unwind out of a slide.
-      this.keySteerReleasedS = steer === 0 ? this.keySteerReleasedS + dt : 0;
-      const held = this.keySteerHold;
-      // Raw handling (`RAW_HANDLING.steerSpeed`): quicker at-speed wind-up and return,
-      // and less of the release delay. Today's constants when it is off.
-      const quicken = raw ? rawBlend(1, RAW_STEER_TIME_SCALE, raw.steerSpeed) : 1;
-      const windS = raw ? KEY_STEER_WIND_S * quicken : KEY_STEER_WIND_S;
-      const returnS = raw ? KEY_STEER_RETURN_S * quicken : KEY_STEER_RETURN_S;
-      const releaseS = raw ? KEY_STEER_RELEASE_S * (1 - raw.steerSpeed) : KEY_STEER_RELEASE_S;
-      const wind = 1 / KEY_STEER_WIND_SLOW_S + tyreShare * (1 / windS - 1 / KEY_STEER_WIND_SLOW_S);
-      const relaxed =
-        steer !== 0
-          ? 1
-          : Math.max(tailOut, releaseS > 0 ? Math.min(1, this.keySteerReleasedS / releaseS) : 1);
-      let hold: number;
-      if (steer !== 0 && held * steer < 0) {
-        // The opposite key unwinds quickly, and stops at straight.
-        const step = KEY_STEER_COUNTER * wind * dt;
-        hold = held > 0 ? Math.max(0, held - step) : Math.min(0, held + step);
-      } else if (Math.abs(steer) > Math.abs(held)) {
-        // Winding in, as a fresh press; on the countersteer side of a slide (the rear's
-        // side force pointing away from the key's turn) up to `KEY_STEER_COUNTER` faster.
-        const countersteer = (steer > 0 ? -1 : 1) * rearForce < 0;
-        const boost = countersteer ? 1 + (KEY_STEER_COUNTER - 1) * tailOut : 1;
-        hold = held + (steer - held) * Math.min(1, wind * boost * dt);
+      // HANDS ON WHEEL (vehicletuning.ts): the keys turn a steering wheel at the hands'
+      // rate and the road wheels follow through the ratio; let go, the caster brings it
+      // back toward centre. Nothing here reads the tyres: the risk is holding too long.
+      // The wheel is signed like the rack, positive to the left; input is positive right.
+      const ratio = STEERING_WHEEL_HALF_LOCK_RAD / lock;
+      // Both keys down is both hands on the rim, holding it: steer is 0, but held.
+      const gripped = steer !== 0 || input.steerBothHeld;
+      if (gripped) {
+        // Taken from rest, the hands grip the wheel where the tyres left it.
+        if (this.handsWheelRad === 0 && this.handsWheelRate === 0) this.handsWheelRad = this.steerCommand * ratio;
+        const ramp = (HANDS_WHEEL_RATE_RAD_S / HANDS_RAMP_S) * dt;
+        this.handsWheelRate += clamp(-steer * HANDS_WHEEL_RATE_RAD_S - this.handsWheelRate, -ramp, ramp);
+        const turned = this.handsWheelRad + this.handsWheelRate * dt;
+        this.handsWheelRad = clamp(turned, -STEERING_WHEEL_HALF_LOCK_RAD, STEERING_WHEEL_HALF_LOCK_RAD);
+        // Against the stop the hands are still, so a reversal starts from rest.
+        if (this.handsWheelRad !== turned) this.handsWheelRate = 0;
       } else {
-        const rate =
-          (1 / KEY_STEER_RETURN_SLOW_S + tyreShare * (1 / returnS - 1 / KEY_STEER_RETURN_SLOW_S)) *
-          (Math.abs(held) + KEY_STEER_RETURN_FLOOR) *
-          relaxed;
-        hold = held + clamp(steer - held, -rate * dt, rate * dt);
+        // Let go: the self-aligning torque spins the wheel back, harder with speed, as
+        // an exponential approach that cannot pass centre; inside the column's friction
+        // band it is centre.
+        this.handsWheelRate = 0;
+        const speedShare = clamp((fwd * 3.6) / HANDS_RETURN_REF_KMH, 0, 1);
+        const angle = Math.abs(this.handsWheelRad);
+        const back = Math.min(
+          -angle * Math.expm1((-speedShare / HANDS_RETURN_TAU_S) * dt),
+          HANDS_RETURN_MAX_RAD_S * dt,
+        );
+        const left = angle - back;
+        this.handsWheelRad = left <= HANDS_CENTRE_RAD ? 0 : Math.sign(this.handsWheelRad) * left;
       }
-      this.keySteerHold = hold;
-      // A sustained key winds past the tyre peak toward physical lock. Travel direction
-      // must not veto a held input: that was the wheel pulling against the player in a slide.
-      this.keySteerPast =
-        steer !== 0 && hold * steer > 0 && Math.abs(hold) >= KEY_STEER_PAST_FROM
-          ? Math.min(1, this.keySteerPast + dt / KEY_STEER_PAST_S)
-          : Math.min(this.keySteerPast, Math.abs(hold));
-      handsOff = steer === 0 && hold === 0;
-      // About the car's axis: a share of the whole lock, wherever the car is going.
-      const axisTarget = -hold * lock;
-      let tyreTarget = axisTarget;
-      if (load > 0 && fwd > 0) {
-        // About the travel angle: a share of the reach past it, which is the front
-        // tyres' peak or the kinematic angle of the tightest circle their grip holds,
-        // whichever goes further, so a whole hold is today's assist cap.
-        const side = hold > 0 ? -1 : 1;
-        const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
-        const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
-        const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (fwd * fwd));
-        let reach = Math.max(tyrePeak, kinematic - side * centre);
-        let floor = Math.max(tyrePeak, kinematic);
-        // Raw handling (`RAW_HANDLING.assistFade`): past RAW_ASSIST_FADE_FROM_KMH the
-        // cap gives way to the whole lock, all of it by RAW_ASSIST_FADE_TO_KMH at 1.
-        const capFade = raw
-          ? raw.assistFade *
-            clamp((fwd * 3.6 - RAW_ASSIST_FADE_FROM_KMH) / (RAW_ASSIST_FADE_TO_KMH - RAW_ASSIST_FADE_FROM_KMH), 0, 1)
-          : 0;
-        if (capFade > 0) {
-          reach += capFade * Math.max(0, lock - reach);
-          floor += capFade * Math.max(0, lock - floor);
-        }
-        // Never less, about the car's own axis, than the same share of the reach a car
-        // running straight is given. With the tail stepping out the front axle travels
-        // toward the outside of the turn, and a demand measured from that travel alone
-        // turned the held wheel back toward straight as the car slid: on sand at 80 km/h
-        // 5.2° fell to 3.4° with the key still down. That, and a give-way that handed
-        // the turn-side key to the travel angle outright in a rotating slide, was the
-        // wheel pulling against the player's hand; a held key now only ever adds wheel.
-        tyreTarget = side * Math.max(side * centre + Math.abs(hold) * reach, Math.abs(hold) * floor);
-        tyreTarget += this.keySteerPast * (side * lock - tyreTarget);
-      }
-      target = clamp(axisTarget + tyreShare * (tyreTarget - axisTarget), -lock, lock);
+      handsOff = !gripped && this.handsWheelRad === 0;
+      target = clamp(this.handsWheelRad / ratio, -lock, lock);
     } else {
-      this.keySteerHold = 0;
-      this.keySteerPast = 0;
+      this.handsWheelRad = 0;
+      this.handsWheelRate = 0;
       if (input.steerMode === 'analogAssist') {
         const side = steer > 0 ? -1 : 1;
         const share = Math.abs(steer);
@@ -5591,7 +5513,10 @@ export class Vehicle implements Rebasable {
           const tyrePeak = (peak / load) * (1 + STEER_ASSIST_SLIP_MARGIN);
           const gripAccel = staticLoad > 0 ? (capacity * GRAVITY) / staticLoad : 0;
           const kinematic = Math.atan((this.wheelbaseM * gripAccel) / (fwd * fwd));
-          // A position against the reach, and the same tail-out give as the keys'.
+          // A position against the reach, the front tyres' peak past where the front axle
+          // is travelling or the kinematic angle of the tightest circle their grip holds,
+          // whichever goes further; with the tail out, the turn-side stick gives way to
+          // the travel angle (`tailOut`).
           const held = share * Math.max(side * centre + tyrePeak, kinematic);
           const turning = side * rearForce > 0 ? 1 - tailOut : 1;
           reach = turning * held + (1 - turning) * share * side * centre;
@@ -5613,9 +5538,9 @@ export class Vehicle implements Rebasable {
       this.steerCommand = this.steerAngle;
       return;
     }
-    // Raw handling (`RAW_HANDLING.steerSpeed`) speeds the rack up.
-    const rackSpeed = raw
-      ? this.handling.steerRackSpeed * rawBlend(1, RAW_RACK_SCALE, raw.steerSpeed)
+    // The player's car has quicker hands on the rack (`PLAYER_RACK_SPEED_SCALE`).
+    const rackSpeed = this.playerDriven
+      ? this.handling.steerRackSpeed * PLAYER_RACK_SPEED_SCALE
       : this.handling.steerRackSpeed;
     const maxDelta = rackSpeed * dt;
     this.steerCommand += clamp(target - this.steerCommand, -maxDelta, maxDelta);
@@ -6269,11 +6194,12 @@ export class Vehicle implements Rebasable {
    * static load come out exactly where they were before any of this existed.
    */
   private applyChassisMass(stats: VehicleStats): void {
-    // Kept so a live yaw-gain change (`setRawHandling`) rebuilds the same tensor from the
+    // Kept so a change of driver (`setPlayerDriven`) rebuilds the same tensor from the
     // same load, without the spring re-solve a load change needs.
     this.chassisMassStats = stats;
-    const yawGain = this.yawInertiaGain();
-    this.appliedYawGain = yawGain;
+    // The player's car turns on a real car's yaw inertia (`PLAYER_YAW_INERTIA_GAIN`);
+    // pitch keeps its own gain either way.
+    const yawGain = this.playerDriven ? PLAYER_YAW_INERTIA_GAIN : INERTIA_PITCH_YAW_GAIN;
     const half = this.measure.halfExtents;
     const hx = half[0];
     const hy = half[1];

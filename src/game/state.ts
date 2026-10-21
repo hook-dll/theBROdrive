@@ -212,29 +212,12 @@ export interface PlayerState {
   carriedSelected: number;
   /** Shades currently on the player's face; absent from the carried pack while worn. */
   wornSunShades: SunShadesItem | null;
-  /** The police's view of him; see `PoliceRecord`. */
-  police: PoliceRecord;
   /**
    * The purse's balance, KOPECKS (economy/economy.ts). The purse is not an item: it is
    * always carried, and money machines take it into their slot to debit or pay it.
    */
   money: number;
 }
-
-/**
- * What the police remember of the player (world/police.ts). `heat` is the escalation
- * level a fled stop raises (0 none, up to `POLICE_HEAT_MAX`): more police on the road
- * and a larger fine at the next stop. It cools to 0 at `heatUntil`, in `playedSeconds`,
- * and a stop paid in full clears it. Written by the `police_heat` delta, which is not a
- * save trigger: it rides along with the next exit like everything else behind the wheel.
- */
-export interface PoliceRecord {
-  heat: number;
-  heatUntil: number;
-}
-
-/** Highest escalation level a flight from the police can reach. */
-export const POLICE_HEAT_MAX = 3;
 
 /**
  * A towed trailer. Not a car: no engine, no gearbox, no driver — a bed on two
@@ -457,9 +440,7 @@ export type WorldDelta =
   /** Kopecks paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `kopecks`. */
   | { t: 'lot_pay'; carId: string; kopecks: number }
   /** The purse's balance is now `kopecks` (economy/economy.ts `debit`, `credit`). */
-  | { t: 'money'; kopecks: number }
-  /** The police's escalation level and when it cools (world/police.ts); not a save trigger. */
-  | { t: 'police_heat'; heat: number; heatUntil: number };
+  | { t: 'money'; kopecks: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
@@ -495,7 +476,6 @@ export function newWorldState(seed: number): WorldState {
       carried: [],
       carriedSelected: 0,
       wornSunShades: null,
-      police: { heat: 0, heatUntil: 0 },
       money: 0,
     },
     cars: {},
@@ -896,12 +876,6 @@ export class GameWorld {
         s.player.money = Math.max(0, Math.round(delta.kopecks));
         break;
       }
-      case 'police_heat':
-        s.player.police = {
-          heat: Math.min(POLICE_HEAT_MAX, Math.max(0, Math.round(delta.heat))),
-          heatUntil: delta.heatUntil,
-        };
-        break;
       case 'courier_storage':
         if (
           delta.completedContractId
