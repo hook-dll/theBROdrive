@@ -317,7 +317,14 @@ const HEAT_HAZE_ID = 'menu-heat-haze';
 /** Height of one noise tile, px: the air climbs one of these per `HAZE_RISE`. */
 const HAZE_BAND = 160;
 /** Six bands per tile at about 27 px each, so roughly two and a half bands a second. */
-const HAZE_RISE = '2.4s';
+const HAZE_RISE_S = 2.4;
+/**
+ * How often the rising air is redrawn, frames a second. Every step redraws the whole
+ * filter — noise, blur and displacement — and animated by SMIL it did so on every
+ * display frame: on the M2 Pro that alone held the GPU at a tenth of its time on a
+ * title screen where nothing else moved. A shimmer reads as well at a film's rate.
+ */
+const HAZE_FPS = 24;
 
 /**
  * The game's name, with the joke in it: the word that shimmers is not `Mirage` but
@@ -328,7 +335,7 @@ const HAZE_RISE = '2.4s';
  * The shimmer is an SVG displacement over noise that RISES, horizontal bands of hot air
  * climbing through the letters the way they climb off a road at noon: each band bends
  * the word sideways as it passes, so the wobble travels up the word instead of breathing
- * in place. It runs only while the title screen exists.
+ * in place. It runs only while the title screen exists, stepped at `HAZE_FPS`.
  */
 function wordmark(): HTMLElement {
   const mark = el('h1', 'menu-wordmark');
@@ -361,20 +368,21 @@ function wordmark(): HTMLElement {
     height: String(HAZE_BAND),
     result: 'tile',
   });
-  const rising = (from: number, result: string): SVGElement => {
-    const offset = svgNode('feOffset', { in: 'air', dy: String(from), result });
-    offset.appendChild(
-      svgNode('animate', {
-        attributeName: 'dy',
-        values: `${from};${from - HAZE_BAND}`,
-        dur: HAZE_RISE,
-        repeatCount: 'indefinite',
-      }),
-    );
-    return offset;
-  };
-  const low = rising(0, 'low');
-  const high = rising(HAZE_BAND, 'high');
+  const low = svgNode('feOffset', { in: 'air', dy: '0', result: 'low' });
+  const high = svgNode('feOffset', { in: 'air', dy: String(HAZE_BAND), result: 'high' });
+  const start = performance.now();
+  let shown = false;
+  const haze = window.setInterval(() => {
+    if (!mark.isConnected) {
+      // Made before it is shown; gone for good once it has been.
+      if (shown) window.clearInterval(haze);
+      return;
+    }
+    shown = true;
+    const rise = (((performance.now() - start) / 1000 / HAZE_RISE_S) % 1) * HAZE_BAND;
+    low.setAttribute('dy', String(-rise));
+    high.setAttribute('dy', String(HAZE_BAND - rise));
+  }, 1000 / HAZE_FPS);
   const merge = svgNode('feMerge', {});
   merge.append(svgNode('feMergeNode', { in: 'low' }), svgNode('feMergeNode', { in: 'high' }));
   filter.append(
@@ -2508,9 +2516,12 @@ export class MainMenu {
     };
 
     // The launch cover stays up until the list has answered, so the first frame of the
-    // title is the real one: Continue does not appear a moment after New drive did.
-    void refresh().then(() => {
+    // title is the real one: Continue does not appear a moment after New drive did. And
+    // until the room has linked its programs and drawn its first frame, under the cover,
+    // so the title never opens on a blank canvas or a frozen one.
+    void refresh().then(async () => {
       this.root.appendChild(overlay);
+      await room?.ready;
       this.loading.classList.add('is-hidden');
       if (view === 'front') room?.focusFirst();
       else sheet.querySelector<HTMLButtonElement>('[data-nav]')?.focus();

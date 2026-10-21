@@ -1,10 +1,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { buildKitCar } from '../carkit/kit';
-import { CAR_SURFACE_ATTRIBUTE } from '../render/materials';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../vehicle/carmodels';
 import { factoryPaintHex } from '../vehicle/carpaint';
+import { dieCastArrays, type DieCastArrays, type DieCastRequest, type DieCastResponse } from './diecast';
 import {
   calendarPage,
   clockFace,
@@ -79,12 +77,12 @@ export interface RoomScene {
   /** Animate the clock, the lamp, the dust and the curtains; `t` seconds. */
   tick(t: number, dt: number): void;
   /**
-   * The next piece of slow work — a die-cast model, the calendar's photograph — if any
-   * is left: one kit car per call, so the work is spread over idle moments. False when
-   * all is done.
+   * Start the slow work — the toy on the mat, the calendar's photograph, the die-cast
+   * models on the case — built in a worker one at a time (`DieCastShop`). `changed` is
+   * called each time something new stands in the room, for the caller to draw it.
    */
-  buildNext(renderer: THREE.WebGLRenderer): boolean;
-  /** Build the model of `modelId` on the case now if it is not there yet: it is being looked at. */
+  startWork(renderer: THREE.WebGLRenderer, changed: () => void): void;
+  /** Have the model of `modelId` built next if it is not there yet: it is being looked at. */
   buildModel(modelId: string): void;
   dispose(): void;
 }
@@ -214,38 +212,108 @@ function extrudeKey(k: Kit, shape: THREE.Shape, thickness: number, material: THR
   return k.mesh(geometry, material);
 }
 
-/** A die-cast model of a kit car: the built car merged into one draw, its paint in `color`, at `scale`. */
-function dieCast(k: Kit, modelId: string, color: number, scale: number, material: THREE.Material): THREE.Mesh {
-  const root = buildKitCar(modelId.replace(/^kit_/, ''));
-  root.updateMatrixWorld(true);
-  const paint = new THREE.Color(color);
-  const parts: THREE.BufferGeometry[] = [];
-  root.traverse((node) => {
-    const m = node as THREE.Mesh;
-    if (!m.isMesh) return;
-    const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-    g.applyMatrix4(m.matrixWorld);
-    if (!g.getAttribute('normal')) g.computeVertexNormals();
-    const count = g.getAttribute('position').count;
-    const colors = new Float32Array(count * 3);
-    const built = g.getAttribute('color');
-    const surface = g.getAttribute(CAR_SURFACE_ATTRIBUTE);
-    for (let i = 0; i < count; i++) {
-      if (!built) colors.set([0.05, 0.07, 0.09], i * 3); // the glass: dark and glossy
-      else if (surface && surface.getX(i) > 0.5) colors.set([paint.r, paint.g, paint.b], i * 3);
-      else colors.set([built.getX(i), built.getY(i), built.getZ(i)], i * 3);
+/** One kit car to be built, and what becomes of it. */
+interface DieCastOrder extends DieCastRequest {
+  readonly done: (arrays: DieCastArrays) => void;
+}
+
+/**
+ * The die-cast models' workshop: each kit car is built, flattened and painted in a
+ * worker (ui/diecastworker.ts), one at a time and in the order asked, and handed back
+ * as arrays. A kit car is 100-300 ms of building, 28 of them in the room, and on the
+ * main thread every one was a frozen frame of the title screen.
+ *
+ * A worker that cannot start or load leaves the rest of the orders to the main thread,
+ * one per pause between frames: the case still fills, only less smoothly.
+ */
+class DieCastShop {
+  private worker: Worker | null = null;
+  private readonly queue: DieCastOrder[] = [];
+  private current: DieCastOrder | null = null;
+  private timer = 0;
+  private closed = false;
+
+  constructor() {
+    try {
+      const worker = new Worker(new URL('./diecastworker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (event: MessageEvent<DieCastResponse>) => this.receive(event.data);
+      worker.onerror = (event) => {
+        event.preventDefault();
+        console.error('title room: die-cast worker failed, building on the main thread', event.message);
+        this.dropWorker();
+      };
+      this.worker = worker;
+    } catch (error) {
+      console.error('title room: no die-cast worker, building on the main thread', error);
     }
-    const out = new THREE.BufferGeometry();
-    out.setAttribute('position', g.getAttribute('position'));
-    out.setAttribute('normal', g.getAttribute('normal'));
-    out.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    parts.push(out);
-    g.dispose();
-  });
-  const merged = mergeGeometries(parts, false)!;
-  for (const part of parts) part.dispose();
-  merged.scale(scale, scale, scale);
-  return k.mesh(merged, material);
+  }
+
+  order(order: DieCastOrder): void {
+    this.queue.push(order);
+    this.pump();
+  }
+
+  /** Move the order for `modelId` to the front of the queue, if it is still waiting. */
+  hurry(modelId: string): void {
+    const i = this.queue.findIndex((order) => order.modelId === modelId);
+    if (i > 0) this.queue.unshift(...this.queue.splice(i, 1));
+  }
+
+  close(): void {
+    this.closed = true;
+    this.queue.length = 0;
+    this.current = null;
+    window.clearTimeout(this.timer);
+    this.worker?.terminate();
+    this.worker = null;
+  }
+
+  private pump(): void {
+    if (this.closed || this.current || this.queue.length === 0) return;
+    const order = this.queue.shift()!;
+    this.current = order;
+    if (this.worker) {
+      const request: DieCastRequest = { modelId: order.modelId, color: order.color, scale: order.scale };
+      this.worker.postMessage(request);
+      return;
+    }
+    this.timer = window.setTimeout(() => {
+      if (this.closed) return;
+      this.current = null;
+      try {
+        order.done(dieCastArrays(order));
+      } catch (error) {
+        console.error(`title room: die-cast ${order.modelId} failed`, error);
+      }
+      this.pump();
+    }, 60);
+  }
+
+  private receive(response: DieCastResponse): void {
+    const order = this.current;
+    if (this.closed || !order) return;
+    this.current = null;
+    if ('error' in response) console.error(`title room: die-cast ${order.modelId} failed`, response.error);
+    else order.done({ position: new Float32Array(response.position), normal: new Float32Array(response.normal), color: new Float32Array(response.color) });
+    this.pump();
+  }
+
+  private dropWorker(): void {
+    this.worker?.terminate();
+    this.worker = null;
+    if (this.current) this.queue.unshift(this.current);
+    this.current = null;
+    this.pump();
+  }
+}
+
+function dieCastGeometry(arrays: DieCastArrays): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(arrays.position, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(arrays.normal, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(arrays.color, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
 }
 
 /* ------------------------------------------------------------------ *
@@ -863,7 +931,13 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
   const photoW = calW * (464 / 512);
   const photoH = calH * (330 / 768);
   const photoAt = new THREE.Vector3(calAt.x, calAt.y + calH / 2 - calH * (24 / 768) - photoH / 2, calAt.z + 0.0015);
-  const photoMat = new THREE.MeshBasicMaterial({ color: 0x9a9080 });
+  // Blank until the photograph is taken (the slow work), but already carrying a map: the
+  // photograph then only swaps the texture, and the program the room was compiled with
+  // still draws it. Gaining a map would link a new one on the frame it arrived.
+  const photoBlank = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  photoBlank.needsUpdate = true;
+  k.disposables.push(photoBlank);
+  const photoMat = new THREE.MeshBasicMaterial({ color: 0x9a9080, map: photoBlank });
   photoMat.polygonOffset = true;
   photoMat.polygonOffsetFactor = -4;
   photoMat.polygonOffsetUnits = -4;
@@ -1092,18 +1166,30 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
 
   /* --- The slow work: toys and the calendar's photograph ------------------ */
 
-  const work: ((renderer: THREE.WebGLRenderer) => void)[] = [];
-  work.push(() => {
-    const toy = dieCast(k, DEFAULT_CAR_MODEL_ID, factoryPaintHex(DEFAULT_CAR_MODEL_ID, ROOM_CAR_KEY), 1 / 24, toyMat);
-    // On the mat's road, its left side, driving away towards the window.
-    toy.position.copy(toyAt);
-    toy.rotation.y = 0.04;
-    scene.add(toy);
-  });
-  // The calendar's photograph: the kit's own 2106 in the sun, photographed once into a
-  // texture, as a Soviet export calendar showed it.
+  // The die-cast models' program, linked with the rest of the room before its first frame
+  // (ui/titleroom.ts compiles the scene): a model arriving later draws with it at once
+  // instead of linking its own mid-title, and the first shadow pass links its depth
+  // program. One triangle of no area, so it draws nothing; never culled, so every pass
+  // meets it.
+  {
+    const anchor = new THREE.BufferGeometry();
+    anchor.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+    anchor.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+    anchor.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3));
+    const mesh = k.mesh(anchor, toyMat);
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+  }
+  const shop = new DieCastShop();
   let photoTarget: THREE.WebGLRenderTarget | null = null;
-  work.push((renderer) => {
+  let disposed = false;
+
+  /**
+   * The calendar's photograph: the kit's own 2106 in the sun, photographed once into a
+   * texture, as a Soviet export calendar showed it. The studio's programs are linked off
+   * the main thread first (`compileAsync`, into the photograph's target, as it is drawn).
+   */
+  const takePhoto = (renderer: THREE.WebGLRenderer, arrays: DieCastArrays, changed: () => void): void => {
     const studio = new THREE.Scene();
     studio.background = new THREE.Color(0x8fb4d6);
     studio.add(new THREE.HemisphereLight(0xcfe2f5, 0x6a7a4a, 2.2));
@@ -1123,46 +1209,42 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
       tree.scale.y = 1.6;
       studio.add(tree);
     }
-    const car = dieCast(k, 'kit_vaz2106', 0xc0392b, 1, toyMat);
+    const car = new THREE.Mesh(dieCastGeometry(arrays), toyMat);
     car.rotation.y = -0.6;
     studio.add(car);
     const cam = new THREE.PerspectiveCamera(24, photoW / photoH, 0.1, 400);
     cam.position.set(4.6, 1.1, 5.6);
     cam.lookAt(0, 0.7, 0);
-    photoTarget = new THREE.WebGLRenderTarget(640, Math.round((640 * photoH) / photoW), { samples: 4 });
-    photoTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
-    const before = renderer.getRenderTarget();
-    renderer.setRenderTarget(photoTarget);
-    renderer.render(studio, cam);
-    renderer.setRenderTarget(before);
-    photoMat.map = photoTarget.texture;
-    photoMat.color.set(0xffffff);
-    photoMat.needsUpdate = true;
-    studio.traverse((node) => {
-      const m = node as THREE.Mesh;
-      if (m.isMesh && m !== car) {
+    const target = new THREE.WebGLRenderTarget(640, Math.round((640 * photoH) / photoW), { samples: 4 });
+    target.texture.colorSpace = THREE.LinearSRGBColorSpace;
+    photoTarget = target;
+    const clearStudio = (): void => {
+      studio.traverse((node) => {
+        const m = node as THREE.Mesh;
+        if (!m.isMesh) return;
         m.geometry.dispose();
-        (m.material as THREE.Material).dispose();
-      }
-    });
-    studio.remove(car);
-    car.geometry.dispose();
-  });
-  // The case: a 1:43 model of every car in the game, in its factory colour, turned a
-  // little to the room.
-  // A model asked for before its turn (`buildModel`) is built at once and leaves the queue.
-  const pendingModels = new Map<string, () => void>();
-  for (const [modelId, at] of models) {
-    const build = (): void => {
-      if (!pendingModels.delete(modelId)) return;
-      const model = dieCast(k, modelId, factoryPaintHex(modelId, ROOM_CAR_KEY), 1 / 43, toyMat);
-      model.position.copy(at);
-      model.rotation.y = Math.PI / 2 - 0.35;
-      scene.add(model);
+        if (m !== car) (m.material as THREE.Material).dispose();
+      });
     };
-    pendingModels.set(modelId, build);
-    work.push(build);
-  }
+    const before = renderer.getRenderTarget();
+    renderer.setRenderTarget(target);
+    const linked = renderer.compileAsync(studio, cam);
+    renderer.setRenderTarget(before);
+    void linked.then(() => {
+      if (disposed) {
+        clearStudio();
+        return;
+      }
+      const current = renderer.getRenderTarget();
+      renderer.setRenderTarget(target);
+      renderer.render(studio, cam);
+      renderer.setRenderTarget(current);
+      clearStudio();
+      photoMat.map = target.texture;
+      photoMat.color.set(0xffffff);
+      changed();
+    });
+  };
 
   const now = new Date();
   return {
@@ -1188,16 +1270,46 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
       }
       p.needsUpdate = true;
     },
-    buildModel(modelId: string): void {
-      pendingModels.get(modelId)?.();
+    startWork(renderer: THREE.WebGLRenderer, changed: () => void): void {
+      const place = (mesh: THREE.Mesh): void => {
+        scene.add(mesh);
+        changed();
+      };
+      // The toy on the mat's road, its left side, driving away towards the window.
+      shop.order({
+        modelId: DEFAULT_CAR_MODEL_ID,
+        color: factoryPaintHex(DEFAULT_CAR_MODEL_ID, ROOM_CAR_KEY),
+        scale: 1 / 24,
+        done: (arrays) => {
+          const toy = k.mesh(dieCastGeometry(arrays), toyMat);
+          toy.position.copy(toyAt);
+          toy.rotation.y = 0.04;
+          place(toy);
+        },
+      });
+      shop.order({ modelId: 'kit_vaz2106', color: 0xc0392b, scale: 1, done: (arrays) => takePhoto(renderer, arrays, changed) });
+      // The case: a 1:43 model of every car in the game, in its factory colour, turned a
+      // little to the room.
+      for (const [modelId, at] of models) {
+        shop.order({
+          modelId,
+          color: factoryPaintHex(modelId, ROOM_CAR_KEY),
+          scale: 1 / 43,
+          done: (arrays) => {
+            const model = k.mesh(dieCastGeometry(arrays), toyMat);
+            model.position.copy(at);
+            model.rotation.y = Math.PI / 2 - 0.35;
+            place(model);
+          },
+        });
+      }
     },
-    buildNext(renderer: THREE.WebGLRenderer): boolean {
-      const next = work.shift();
-      if (!next) return false;
-      next(renderer);
-      return work.length > 0;
+    buildModel(modelId: string): void {
+      shop.hurry(modelId);
     },
     dispose(): void {
+      disposed = true;
+      shop.close();
       for (const d of k.disposables) d.dispose();
       k.disposables.length = 0;
       photoTarget?.dispose();

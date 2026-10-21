@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- The title room stops lagging and costs a fraction of what it did (ui/titleroom.ts,
+  ui/roomscene.ts, ui/diecast.ts). Measured on the M2 Pro, a still title screen held the
+  GPU at ~42% and froze the main thread 29 times in its first seven seconds (5.3 s in
+  all, up to 325 ms each); it now sits at ~26% (~11% with no tab) with one 145 ms task
+  under the launch cover. THE DIE-CAST MODELS are built in a worker
+  (ui/diecastworker.ts), one kit car per message, handed back as transferred arrays;
+  a model the Carcyclopedia asks for jumps the queue, and a worker that cannot start
+  leaves the orders to the main thread as before. THE SHADOWS are drawn once, and again
+  only when a model joins the case (`shadowMap.autoUpdate` off): the lights and the
+  furniture never move, and the two shadow passes were three quarters of the frame's
+  draws (349 → 76). THE FRAME is drawn only as often as it changes: full rate while the
+  camera sweeps, leans (now easing after the pointer) or opens its exposure, 30 a second
+  while only the dust, the lamp and the camera's breath live, and not at all behind a
+  dimmed panel (settings, drives); the room's own clock advances only with drawn frames,
+  so a rest never jumps. THE CANVAS has an absolute budget of 1920 × 1080 (1280 × 720 at
+  low detail), so a 4K television asks for 2 megapixels instead of 8.3. EVERY PROGRAM is
+  linked off the main thread before the cover lifts (`TitleRoom.ready`, `compileAsync`):
+  the die-cast material through a zero-area anchor, the calendar photograph's material
+  already carrying a blank map so the photograph only swaps the texture, and the
+  photograph's studio compiled into its own target before it is shot. The shadow type is
+  PCF: three r185 draws PCFSoft as PCF and switches the type on the first pass, so every
+  program compiled ahead under PCFSoft went unused. THE WORDMARK's heat haze is stepped
+  at 24 frames a second instead of animated by SMIL, which redrew the whole filter on
+  every display frame.
+
 - Mouse driving replaces precise control (owner). `M` while driving switches it on and
   off (toast "Mouse driving: on/off"; Settings → Controls → Mouse driving; saved like
   every setting and kept after leaving the car; on foot `M` does nothing). Horizontal

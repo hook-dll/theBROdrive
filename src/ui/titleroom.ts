@@ -18,6 +18,15 @@ import { buildRoomScene, type RoomScene } from './roomscene';
  * context lost on purpose) before the drive builds its renderer, so nothing of the room
  * stays on the GPU or in the drive's program cache. The list is plain DOM rows: the
  * menu's keyboard and pad navigation walks it as any other.
+ *
+ * CHEAP TO SIT IN FRONT OF. A title screen is looked at for minutes with nothing
+ * happening, so the room is drawn only as often as it changes: at full rate while the
+ * camera sweeps or leans, at `IDLE_FRAME_MS` while only the dust and the lamp live, and
+ * not at all behind a dimmed panel. The lights and the furniture never move, so the two
+ * shadow maps are drawn once and again only when a model joins the case. The canvas
+ * has an absolute pixel budget (`MAX_PIXELS`), so a 4K television does not ask for 8
+ * megapixels of it. Every program is linked off the main thread before the first frame
+ * (`ready`), and the die-cast models are built in a worker (ui/roomscene.ts).
  */
 
 export type RoomSpot = 'window' | 'desk' | 'keys' | 'shelf' | 'toolbox';
@@ -59,9 +68,28 @@ const MODEL_VIEW = { back: 0.5, up: 0.08, right: 0.09, fov: 30 };
  */
 const EXPOSURE = 1.15;
 const EXPOSURE_MODEL = 2.6;
+/**
+ * The most pixels the canvas is drawn at, whatever the screen: about 1920 × 1080, and
+ * 1280 × 720 at low detail. A dark room of soft light loses nothing to a gentle upscale;
+ * at a device pixel ratio of 1 a 4K television otherwise asks for 8.3 megapixels.
+ */
+const MAX_PIXELS = 1920 * 1080;
+const MAX_PIXELS_LOW = 1280 * 720;
+/**
+ * The frame interval while the camera is still, ms: the dust, the lamp and the camera's
+ * breath are slow enough that 30 frames a second shows them as well as 60 or 144.
+ */
+const IDLE_FRAME_MS = 1000 / 30;
+/** How quickly the camera's lean catches up with the pointer, per second. */
+const LEAN_RATE = 6;
 
 export class TitleRoom {
   readonly element: HTMLElement;
+  /**
+   * Resolves once every program of the room is linked and its first frame drawn: until
+   * then the canvas is blank, and the launch cover should stay up.
+   */
+  readonly ready: Promise<void>;
   private readonly list: HTMLElement;
   private readonly rows = new Map<RoomSpot, HTMLButtonElement>();
   private readonly details = new Map<RoomSpot, HTMLElement>();
@@ -69,12 +97,19 @@ export class TitleRoom {
   /** Far enough for the sky and the mesas outside the window. */
   private readonly camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.03, 400);
   private readonly room: RoomScene | null;
+  /** The pending animation frame, 0 when the loop is stopped. */
   private frame = 0;
+  /** When the last frame was drawn, ms (the rAF clock). */
   private lastMs = 0;
-  private startMs = 0;
-  private workTimer = 0;
+  /** The room's own time, s: advances only as frames are drawn, so a rest is not a jump. */
+  private clock = 0;
+  private started = false;
   private disposed = false;
-  /** The move in progress: from, to, when it began (s). */
+  /** A panel is open and the room dimmed behind it: nothing is drawn while it is still. */
+  private resting = false;
+  /** One frame is owed whatever the pace: something new in the room, a resize. */
+  private dirty = false;
+  /** The move in progress: from, to, when it began (`clock`, s). */
   private readonly from = { at: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private readonly to = { at: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private moveStart = -Infinity;
@@ -82,15 +117,18 @@ export class TitleRoom {
   private exposure = EXPOSURE;
   private readonly look = new THREE.Vector3();
   private readonly pointer = new THREE.Vector2();
+  /** The lean the camera has, easing after `pointer`. */
+  private readonly lean = new THREE.Vector2();
   private readonly onResize = (): void => this.resize();
   private readonly onPointer = (ev: PointerEvent): void => {
     this.pointer.set((ev.clientX / window.innerWidth) * 2 - 1, (ev.clientY / window.innerHeight) * 2 - 1);
+    this.wake();
   };
 
   constructor(
     items: Readonly<Record<RoomSpot, RoomItem>>,
     private readonly act: (spot: RoomSpot) => void,
-    lowDetail: boolean,
+    private readonly lowDetail: boolean,
   ) {
     this.element = document.createElement('div');
     this.element.className = 'menu-room3d';
@@ -105,12 +143,16 @@ export class TitleRoom {
     }
     this.renderer = renderer;
     if (renderer) {
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, lowDetail ? 1 : 1.5));
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = EXPOSURE;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // PCF, not PCFSoft: three r185 draws PCFSoft as PCF and switches the type on the
+      // first shadow pass, so every program compiled ahead under PCFSoft went unused.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      // Drawn on the first frame and whenever something new stands in the room.
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
       this.element.appendChild(canvas);
     }
     this.room = renderer ? buildRoomScene(lowDetail) : null;
@@ -153,10 +195,8 @@ export class TitleRoom {
     this.to.fov = wide.fov;
     window.addEventListener('resize', this.onResize);
     window.addEventListener('pointermove', this.onPointer);
-    this.startMs = performance.now();
-    this.lastMs = this.startMs;
     this.resize();
-    this.loop(this.startMs);
+    this.ready = renderer && this.room ? this.prepare(renderer, this.room) : Promise.resolve();
     // Dev only: the look tools pose the camera through this.
     if (import.meta.env.DEV) Object.assign(window, { __titleRoom: this });
   }
@@ -177,17 +217,20 @@ export class TitleRoom {
   /**
    * A panel is open over the room: the list rests and the camera stays where it is.
    * `dim` false keeps the room at full light: the panel is about what is in the room.
+   * Dimmed, the room stops being drawn once the camera has settled.
    */
   setAway(away: boolean, dim = true): void {
     this.element.classList.toggle('is-away', away);
     this.element.classList.toggle('is-dim', away && dim);
+    this.resting = away && dim;
+    this.wake();
   }
 
   focus(spot: RoomSpot): void {
     this.rows.get(spot)?.focus();
   }
 
-  /** Bring the camera to the model of `modelId` on the case, and have it built if it is not yet. */
+  /** Bring the camera to the model of `modelId` on the case, and have it built next if it is not yet. */
   showModel(modelId: string): void {
     const at = this.room?.models.get(modelId);
     if (!at) return;
@@ -215,7 +258,7 @@ export class TitleRoom {
     if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.frame);
-    window.clearTimeout(this.workTimer);
+    this.frame = 0;
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('pointermove', this.onPointer);
     this.room?.dispose();
@@ -226,6 +269,29 @@ export class TitleRoom {
       this.renderer.forceContextLoss();
     }
     this.element.remove();
+  }
+
+  /**
+   * Link every program off the main thread (`compileAsync`; on ANGLE one lit program is
+   * hundreds of milliseconds when linked on first draw), then draw the first frame —
+   * shadow maps and their depth programs with it — and start the slow work.
+   */
+  private async prepare(renderer: THREE.WebGLRenderer, room: RoomScene): Promise<void> {
+    try {
+      await renderer.compileAsync(room.scene, this.camera);
+    } catch (error) {
+      console.error('title room: compiling the room failed', error);
+    }
+    if (this.disposed) return;
+    this.started = true;
+    this.lastMs = performance.now();
+    this.draw(0);
+    room.startWork(renderer, () => {
+      renderer.shadowMap.needsUpdate = true;
+      this.dirty = true;
+      this.wake();
+    });
+    this.wake();
   }
 
   /** Sweep the camera to `spot`'s thing. */
@@ -242,26 +308,56 @@ export class TitleRoom {
     this.to.at.copy(at);
     this.to.look.copy(look);
     this.to.fov = fov;
-    this.moveStart = (performance.now() - this.startMs) / 1000;
+    this.wake();
+    this.moveStart = this.clock;
   }
 
   private resize(): void {
     if (!this.renderer) return;
     const w = window.innerWidth;
     const h = window.innerHeight;
+    const budget = Math.sqrt((this.lowDetail ? MAX_PIXELS_LOW : MAX_PIXELS) / Math.max(1, w * h));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.lowDetail ? 1 : 1.5, budget));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    // A resized canvas is a cleared one.
+    this.dirty = true;
+    this.wake();
+  }
+
+  /** Start the loop if it has stopped. */
+  private wake(): void {
+    if (this.frame !== 0 || !this.started || this.disposed) return;
+    // Stopped for a while: the next frame steps as one frame, not as the whole rest.
+    this.lastMs = Math.max(this.lastMs, performance.now() - IDLE_FRAME_MS);
+    this.frame = requestAnimationFrame(this.loop);
   }
 
   private readonly loop = (ms: number): void => {
+    this.frame = 0;
     if (this.disposed) return;
+    // The camera still on its way somewhere: a sweep, the lean, the exposure.
+    const moving =
+      this.clock - this.moveStart < MOVE_S ||
+      Math.abs(this.pointer.x - this.lean.x) > 0.002 ||
+      Math.abs(this.pointer.y - this.lean.y) > 0.002 ||
+      (this.renderer !== null && Math.abs(this.exposure - this.renderer.toneMappingExposure) > 0.003);
+    // Dimmed behind a panel with nothing on its way: stop until something wakes it.
+    if (this.resting && !moving && !this.dirty) return;
+    if (moving || this.dirty || ms - this.lastMs >= IDLE_FRAME_MS - 4) {
+      const dt = Math.min(0.1, Math.max(0, ms - this.lastMs) / 1000);
+      this.lastMs = ms;
+      this.clock += dt;
+      this.dirty = false;
+      this.draw(dt);
+    }
     this.frame = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.1, (ms - this.lastMs) / 1000);
-    this.lastMs = ms;
-    const t = (ms - this.startMs) / 1000;
-    if (!this.renderer || !this.room) return;
+  };
 
+  private draw(dt: number): void {
+    if (!this.renderer || !this.room) return;
+    const t = this.clock;
     // The move: smootherstep along the way, a dip in the middle.
     const k = Math.min(1, Math.max(0, (t - this.moveStart) / MOVE_S));
     const e = k * k * k * (k * (k * 6 - 15) + 10);
@@ -271,32 +367,20 @@ export class TitleRoom {
     this.camera.fov = this.from.fov + (this.to.fov - this.from.fov) * e;
     // Held still, the camera breathes, and leans a touch after the pointer: less when it
     // is close to something small.
+    this.lean.lerp(this.pointer, Math.min(1, dt * LEAN_RATE));
     const lean = Math.min(1, this.to.at.distanceTo(this.to.look) / 1.2);
-    this.camera.position.x += (Math.sin(t * 0.23) * 0.02 + this.pointer.x * 0.04) * lean;
-    this.camera.position.y += (Math.sin(t * 0.31) * 0.012 - this.pointer.y * 0.025) * lean;
+    this.camera.position.x += (Math.sin(t * 0.23) * 0.02 + this.lean.x * 0.04) * lean;
+    this.camera.position.y += (Math.sin(t * 0.31) * 0.012 - this.lean.y * 0.025) * lean;
     this.camera.updateProjectionMatrix();
     this.camera.lookAt(this.look);
     this.renderer.toneMappingExposure += (this.exposure - this.renderer.toneMappingExposure) * Math.min(1, dt * 2.5);
 
     this.room.tick(t, dt);
     this.renderer.render(this.room.scene, this.camera);
-
-    // The slow work (the die-cast models, the calendar's photograph) after the room is on screen, one
-    // piece at a time between frames.
-    if (this.workTimer === 0 && t > 0.3) this.scheduleWork();
-  };
+  }
 
   /** No dip between two neighbours on the case: the camera slides along it instead. */
   private dipScale(): number {
     return Math.min(1, this.from.at.distanceTo(this.to.at) / 1.5);
-  }
-
-  private scheduleWork(): void {
-    this.workTimer = window.setTimeout(() => {
-      if (this.disposed || !this.room || !this.renderer) return;
-      const more = this.room.buildNext(this.renderer);
-      if (more) this.scheduleWork();
-      else this.workTimer = -1;
-    }, 60);
   }
 }
