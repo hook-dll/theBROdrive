@@ -142,7 +142,7 @@ export interface DevTools {
   seatInNearestCar(): void;
   /** Puts the player on the road side of one lake site. */
   jumpToLake(index: number): void;
-  /** Puts 100 rubles in the purse. */
+  /** Adds 100 rubles to the player's money. */
   giveMoney(): void;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
   updateLakeSeek(activeS: number): void;
@@ -319,11 +319,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);
   };
 
-  /** The dev money behind `PauseHooks.giveMoney`: 100 rubles into the purse. */
+  /** The dev money behind `PauseHooks.giveMoney`: 100 rubles added. */
   const devGiveMoney = (): void => {
     const amount = 100 * RUB;
     credit(ctx.world, amount);
-    ctx.hud.setToast(`+${formatMoney(amount)} in the purse`);
+    ctx.hud.setToast(`+${formatMoney(amount)}`);
   };
 
   /**

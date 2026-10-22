@@ -21,17 +21,9 @@
   --hud-telltale-green: #4fd86a;
   --hud-telltale-blue: #4b8dff;
   --hud-lcd-off: rgba(224, 122, 74, 0.1);
-  /* INSTRUMENT FACES, as properties rather than fills, because the autopilot paints
-     them: black is the player's own car and a coloured face is a car driving itself.
-     The ink travels with the face — a near-white needle on cream is not a needle — so
-     the tick, needle and track colours are here too and the mode classes rewrite the
-     whole set together. See `.hud-driving.is-autopilot-*` below. */
-  --hud-dial-face: #171714;
-  --hud-aux-dial-face: #141412;
-  --hud-dial-ink: #dbd7cc;
-  --hud-dial-ink-strong: #f0ede5;
-  --hud-dial-needle: #e4e1d9;
-  --hud-dial-track: rgba(232, 228, 218, 0.6);
+  /* The panel's frame, rewritten by the autopilot mode classes: plain is the player's
+     own car, a coloured frame is a car driving itself. See `.hud-driving.is-autopilot-*`. */
+  --hud-frame: rgba(232, 221, 196, 0.22);
   --hud-font: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -275,7 +267,6 @@ body.is-cinematic #ui {
    bar and the crosshair all stand down until the player steps back. */
 body.is-machine-focus .hud-prompt,
 body.is-machine-focus .hud-toasts,
-body.is-machine-focus .hud-race,
 body.is-machine-focus .hud-crosshair {
   display: none;
 }
@@ -331,430 +322,73 @@ body.is-machine-focus .hud-crosshair {
 
 /* THE PANEL IS OPAQUE. It used to be translucent, and the world behind it — sky on
    one side of the screen, sand or a dark verge on the other — tinted it unevenly,
-   which read as a gradient on the panel and as lopsided margins.
-   The layout is one margin, kept everywhere: the main faces' circle stands about
-   10 px from the top and side edges, and their flat chord about 10 px from the bottom
-   (the dial's own empty wedge is taken out by its negative bottom margin). */
+   which read as a gradient on the panel and as lopsided margins. The car's own
+   instruments are in the car; the panel carries only what the car does not: the
+   G-force, the display, the money, the pedal lever and the mini-map. */
 .hud-dashboard-shell {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 3px 4px 8px;
+  align-items: stretch;
+  gap: 6px;
+  padding: 7px 8px 6px;
   background: #1b1915;
-  border: 1px solid rgba(232, 221, 196, 0.22);
+  border: 1px solid var(--hud-frame);
   border-radius: 10px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
-.hud-gauge-row {
+.hud-panel-row {
   display: flex;
-  align-items: stretch;
-  gap: 6px;
-}
-
-/* The half-moons on top, level with the main faces' tops; the display and the
-   steering strip at the bottom, the strip's foot on the main faces' chord line. */
-.hud-centre-block {
-  display: flex;
-  width: 254px;
-  padding: 7px 0 2px;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 8px;
 }
 
-.hud-centre-block .hud-lcd {
-  margin-top: auto;
-}
-
-.hud-centre-top {
+.hud-panel-centre {
   display: flex;
-  width: 100%;
-  align-items: flex-start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 5px;
 }
 
-.hud-dial {
-  display: block;
-  overflow: visible;
-}
-
-/* The face's flat chord sits at 98/120 of the box; the negative bottom margin pulls the
-   empty wedge under it out of the layout, so the chord rests just above the shell's
-   lower edge and the dials can be larger without growing the panel. */
-.hud-main-dial {
-  width: 134px;
-  height: 134px;
-  margin-bottom: -22px;
-}
-
-
-.hud-main-dial-face {
-  fill: var(--hud-dial-face);
-  stroke: #5c5951;
-  stroke-width: 2;
-}
-
-.hud-main-dial-rim {
-  fill: none;
-  stroke: rgba(232, 221, 196, 0.58);
-  stroke-width: 1.35;
-}
-
-.hud-dial-tick {
-  stroke: var(--hud-dial-ink);
-  stroke-width: 0.7;
-  opacity: 0.86;
-}
-
-.hud-dial-tick.is-half {
-  stroke-width: 1.05;
-  opacity: 0.95;
-}
-
-.hud-dial-tick.is-major {
-  stroke: var(--hud-dial-ink-strong);
-  stroke-width: 1.7;
-  opacity: 1;
-}
-
-.hud-dial-tick.is-red {
-  stroke: var(--hud-alarm-strong);
-  opacity: 1;
-}
-
-
-.hud-dial-needle {
-  stroke: var(--hud-dial-needle);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-}
-
-.hud-dial-hub {
-  fill: #292824;
-  stroke: #aaa69c;
-  stroke-width: 1.4;
-}
-
-.hud-aux-cluster {
+.hud-money-slot {
   display: flex;
-  width: 84px;
-  flex-direction: column;
-  align-items: center;
+  justify-content: flex-end;
 }
 
-.hud-aux-dial {
-  width: 84px;
-  height: 50px;
+/* The money: a plain line of text, on the panel under the display while driving and
+   above the pack's slots on foot. */
+.hud-money {
+  color: var(--hud-fg);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.hud-aux-face {
-  fill: var(--hud-aux-dial-face);
-  stroke: #47453f;
-  stroke-width: 2;
+.hud-inventory .hud-money {
+  background: var(--hud-panel);
+  padding: 3px 10px;
 }
 
-.hud-aux-track {
-  fill: none;
-  stroke: var(--hud-dial-track);
-  stroke-width: 5;
-}
-
-/* AUTOPILOT FACES. One class per mode on the driving cluster, each rewriting the face
-   and its ink together: the two pale modes need dark ink to keep a needle readable, and
-   frantic's crimson is dark enough to keep the authored light one. The mode is worth the
-   whole face rather than a lamp because `sleeper` keeps its lane well inside the tyres
-   and `frantic` races the whole road at their limit, and a driver about to take the
-   wheel back needs to know which one he is interrupting before he looks for an
-   indicator. */
+/* AUTOPILOT FRAMES. One class per mode on the driving cluster: the frame takes the
+   mode's colour, so a driver about to take the wheel back knows which one he is
+   interrupting — `sleeper` keeps its lane well inside the tyres, `frantic` races the
+   whole road at their limit. */
 .hud-driving.is-autopilot-sleeper {
-  --hud-dial-face: #fffdd0;
-  --hud-aux-dial-face: #fffdd0;
-  --hud-dial-ink: rgba(26, 24, 14, 0.7);
-  --hud-dial-ink-strong: #191708;
-  --hud-dial-needle: #221f0e;
-  --hud-dial-track: rgba(26, 24, 14, 0.5);
+  --hud-frame: #fffdd0;
 }
 
 .hud-driving.is-autopilot-hurried {
-  --hud-dial-face: #ccff00;
-  --hud-aux-dial-face: #ccff00;
-  --hud-dial-ink: rgba(18, 26, 0, 0.7);
-  --hud-dial-ink-strong: #121a00;
-  --hud-dial-needle: #16200a;
-  --hud-dial-track: rgba(18, 26, 0, 0.5);
+  --hud-frame: #ccff00;
 }
 
 .hud-driving.is-autopilot-frantic {
-  --hud-dial-face: #91032b;
-  --hud-aux-dial-face: #91032b;
+  --hud-frame: #d4174b;
 }
 
-.hud-aux-zone {
-  fill: none;
-  stroke-width: 5;
-  stroke-linecap: butt;
-}
-
-.hud-aux-zone.is-green {
-  stroke: #49a96b;
-}
-
-.hud-aux-zone.is-neutral {
-  stroke: #8b8982;
-}
-
-.hud-aux-zone.is-red {
-  stroke: #c84837;
-}
-
-.hud-aux-tick {
-  stroke: #f0ede5;
-  stroke-width: 0.8;
-}
-
-.hud-aux-tick.is-major {
-  stroke-width: 1.5;
-}
-
-
-.hud-aux-needle {
-  stroke: #e9e5dc;
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.hud-aux-hub {
-  fill: #22211e;
-  stroke: #aaa69c;
-  stroke-width: 1.2;
-}
-
-
-.hud-icon-panel {
-  display: flex;
-  width: 76px;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-
-.hud-indicator-row {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-}
-
-.hud-indicator-lamp,
-.hud-gear,
-.hud-handbrake {
-  display: flex;
-  box-sizing: border-box;
-  width: 22px;
-  height: 20px;
-  align-items: center;
-  justify-content: center;
-  color: var(--hud-fg);
-  background: rgba(31, 29, 25, 0.82);
-  border: 1px inset rgba(232, 221, 196, 0.24);
-  font-weight: 800;
-  line-height: 18px;
-  text-align: center;
-}
-
-.hud-indicator-lamp {
-  opacity: 0.16;
-}
-
-.hud-indicator-lamp svg {
-  width: 17px;
-  height: 13px;
-}
-
-.hud-indicator-lamp path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.hud-check-engine {
-  color: var(--hud-amber);
-}
-
-.hud-oil-warning {
-  color: var(--hud-alarm);
-}
-
-.hud-indicator-lamp.is-active {
-  opacity: 1;
-  background: rgba(80, 50, 18, 0.76);
-  text-shadow: 0 0 6px currentColor;
-}
-
-.hud-oil-warning.is-active {
-  background: rgba(106, 32, 22, 0.76);
-}
-
-.hud-gear {
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-}
-
-.hud-gear.is-parked {
-  color: var(--hud-red);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-red) 70%, transparent);
-}
-
-/* The telltale columns between the big dials and the half-moons, centred on the
-   half-moons' height. They tuck 6 px into the empty top corner of the dial's square
-   box; the round face still clears the lower lamp by the row gap. */
-.hud-telltale-column {
-  display: flex;
-  align-self: flex-start;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-}
-
-.hud-telltale-column:first-of-type {
-  margin-left: -6px;
-}
-
-.hud-telltale-column:last-of-type {
-  margin-right: -6px;
-}
-
-.hud-turn {
-  color: var(--hud-telltale-green);
-}
-
-.hud-turn.is-active path {
-  fill: currentColor;
-}
-
-.hud-dipped-beam {
-  color: var(--hud-telltale-green);
-}
-
-.hud-main-beam {
-  color: var(--hud-telltale-blue);
-}
-
-.hud-turn.is-active,
-.hud-dipped-beam.is-active {
-  background: rgba(22, 74, 34, 0.78);
-}
-
-.hud-main-beam.is-active {
-  background: rgba(20, 42, 104, 0.8);
-}
-
-/* The insets in the main dials' lower wedge: inclinometer (tachometer) and wind
-   (speedometer). Drawn in the dial's own ink so the autopilot faces carry them too. */
-.hud-inset-ring {
-  fill: none;
-  stroke: var(--hud-dial-ink);
-  stroke-width: 0.7;
-  opacity: 0.6;
-}
-
-.hud-inset-tick {
-  stroke: var(--hud-dial-ink);
-  stroke-width: 0.8;
-}
-
-.hud-inset-tick.is-level {
-  stroke: var(--hud-dial-ink-strong);
-  stroke-width: 1.2;
-}
-
-.hud-inset-car {
-  fill: var(--hud-dial-needle);
-}
-
-.hud-wind-band {
-  fill: #f2eee4;
-}
-
-.hud-wind-band.is-orange {
-  fill: #ff7a1a;
-}
-
-/* A band the wind is not strong enough to fill hangs as a faint outline. */
-.hud-wind-band.is-limp {
-  fill: none;
-  stroke: var(--hud-dial-ink);
-  stroke-width: 0.4;
-  opacity: 0.35;
-}
-
-.hud-wind-sock.is-calm {
-  opacity: 0;
-}
-
-.hud-wind-sock.is-strong .hud-wind-band.is-orange {
-  fill: var(--hud-alarm-strong);
-}
-
-.hud-wind-mast {
-  fill: var(--hud-dial-needle);
-}
-
-/*
- * Tyre temperature: two dots each side of the gear digit, front on top. The left
- * column is the left of the car, so the digit reads as the car itself. Deliberately
- * unlabelled — the colour IS the reading, and a legend would take more room than the
- * instrument it explains.
- */
-.hud-tyre-column {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 3px;
-}
-
-.hud-tyre-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: rgb(138, 143, 148);
-  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
-}
-
-.hud-handbrake {
-  color: var(--hud-red);
-  font-size: 15px;
-  opacity: 0.16;
-}
-
-.hud-handbrake.is-active {
-  opacity: 1;
-  background: rgba(120, 14, 10, 0.78);
-  text-shadow: 0 0 6px color-mix(in srgb, var(--hud-red) 75%, transparent);
-}
-
-.hud-fuel.is-alarm .hud-aux-needle,
-.hud-fuel.is-alarm .hud-aux-hub {
-  stroke: var(--hud-alarm-strong);
-}
-
-.hud-temperature.is-hot .hud-aux-needle,
-.hud-temperature.is-critical .hud-aux-needle {
-  stroke: var(--hud-alarm);
-}
-
-.hud-temperature.is-critical .hud-aux-needle {
-  stroke: var(--hud-alarm-strong);
-  animation: hud-temperature-critical 0.75s steps(2, end) infinite;
-}
-
-@keyframes hud-temperature-critical {
-  50% { opacity: 0.35; }
+.hud-driving[class*='is-autopilot-'] .hud-dashboard-shell {
+  border-width: 2px;
 }
 
 .hud-lcd {
@@ -773,62 +407,14 @@ body.is-machine-focus .hud-crosshair {
   --hud-lcd-on: var(--hud-alarm);
 }
 
-/*
- * The steering-position strip, under the segment display.
- *
- * It takes no height from the cluster: the gauge row is 124 px tall because of the two
- * main dials and the centre column only reaches 84, so the strip sits in space that was
- * already empty. `align-self: center` keeps it on the same centre line as everything
- * above it.
- *
- * The panel is the display's own inset treatment so the two read as one instrument, and
- * the marker is deliberately the largest thing on the strip — at a glance, in a bright
- * desert, the position is what has to be legible, not the scale.
- */
-.hud-steer-strip {
-  display: block;
-  width: 254px;
-  height: 10px;
-  margin-top: 1px;
-  box-sizing: border-box;
-  background: #11160d;
-  border: 2px inset rgba(176, 166, 140, 0.5);
-  box-shadow:
-    inset 0 0 6px rgba(0, 0, 0, 0.82),
-    0 1px 0 rgba(232, 221, 196, 0.12);
-}
-
-.hud-steer-bracket {
-  stroke: var(--hud-fg-dim);
-  stroke-width: 1.2;
-}
-
-.hud-steer-track {
-  stroke: rgba(232, 221, 196, 0.3);
-  stroke-width: 1;
-}
-
-/* The notch is brighter than the track because it is the answer to the question the
-   strip exists for: is the wheel straight? */
-.hud-steer-centre {
-  stroke: rgba(232, 221, 196, 0.62);
-  stroke-width: 1;
-}
-
-.hud-steer-thumb {
-  stroke: var(--hud-fg);
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-
-/* THE PEDAL LEVER (core/pedallever.ts) beside the speedometer, in the steering strip's
+/* THE PEDAL LEVER (core/pedallever.ts) at the panel's right end, in the display's
    inset: seven cells, throttle notches over neutral over the two brakes. The frame is
    the notch the lever is on; the fills are the pedals as they are now. */
 .hud-pedal-lever {
   display: block;
   align-self: center;
   width: 12px;
-  height: 105px;
+  height: 63px;
   box-sizing: content-box;
   background: #11160d;
   border: 2px inset rgba(176, 166, 140, 0.5);
@@ -897,18 +483,14 @@ body.is-machine-focus .hud-crosshair {
 }
 
 /*
- * The G-force widget (hud.ts `setRide`): a small round instrument in the bottom-right
- * corner, out of the dashboard's way and still there in the cabin view, where the
- * on-screen cluster stands down. Up only while a ride-sensitive thing is aboard.
- * The dot is the push on the load; the rings are calm / uncomfortable / harsh.
+ * The G-force widget (hud.ts `setRide`): a small round instrument at the panel's left
+ * end. The dot is the push on the load; the rings are calm / uncomfortable / harsh.
  */
 .hud-ride {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  width: 84px;
-  height: 84px;
-  pointer-events: none;
+  display: block;
+  flex: none;
+  width: 62px;
+  height: 62px;
   overflow: visible;
 }
 
@@ -969,43 +551,11 @@ body.is-machine-focus .hud-crosshair {
   transform-origin: center;
 }
 
-/*
- * The purse (hud.ts `setPurse`, drawn by ui/purse.ts): an image in the top-right corner,
- * up only on foot near a money machine. Its canvas is drawn at twice this size.
- */
-.hud-purse {
-  position: absolute;
-  top: calc(14px + env(safe-area-inset-top));
-  right: calc(16px + env(safe-area-inset-right));
-  width: 220px;
-  height: 110px;
-  pointer-events: none;
-}
-
-.hud-purse canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
 
 @media (pointer: coarse) {
-  /* Mobile retains its old compact footprint; the requested increase is desktop-only. */
+  /* Phones draw the panel smaller: it has the touch pedals and wheel to clear. */
   .hud-driving {
-    transform: translateX(-50%) scale(calc(0.375 * var(--hud-dash-scale, 1)));
-  }
-
-  /* Clear of the touch pedals in the bottom-right corner. */
-  .hud-ride {
-    bottom: auto;
-    top: calc(12px + env(safe-area-inset-top));
-    right: calc(12px + env(safe-area-inset-right));
-    width: 64px;
-    height: 64px;
-  }
-
-  .hud-purse {
-    width: 160px;
-    height: 80px;
+    transform: translateX(-50%) scale(calc(0.6 * var(--hud-dash-scale, 1)));
   }
 }
 
@@ -1067,29 +617,25 @@ body.is-machine-focus .hud-crosshair {
 
 
 
-/* Route progress: a pill from the last courier to the next one. The sky behind it is
-   anything from noon sand to storm to night, so it carries its own dark plate and
-   every mark has a dark edge. Race: the player a filled amber bead, each rival a
-   hollow one, a chequered flag at the finish. Delivery: the player alone, the
-   receiving courier as an amber pin, the distance beside it. Beads move by transform. */
+/* THE MINI-MAP: the bead line across the panel's foot, from the post behind to the one
+   ahead. Race: the player a filled bead, each rival a hollow one, a chequered flag at
+   the finish. Delivery: the player alone, the receiving post as an amber pin, the
+   distance beside it. Idle (no contract): the same line to the next post, grey and
+   faint, there to be watched rather than followed. Beads move by transform. */
 .hud-race {
-  position: absolute;
-  top: 14px;
-  left: 50%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 7px 12px 7px 16px;
-  transform: translateX(-50%);
-  background: var(--hud-panel-strong);
-  border: 1px solid var(--hud-border);
-  border-radius: 14px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
+  gap: 10px;
+  padding: 0 4px 0 6px;
+}
+.hud-race.is-idle {
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 .hud-race-track {
   position: relative;
-  width: 260px;
+  flex: none;
+  width: 236px;
   height: 14px;
 }
 .hud-race-line {

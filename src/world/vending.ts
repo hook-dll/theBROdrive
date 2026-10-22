@@ -19,9 +19,9 @@ import { box, C } from './poi/kit';
  *
  * A card machine (world/cardmachine.ts), the post's twin: the crank turns through a card
  * for each thing still in it, the showcase beside the button holds the one the card
- * names, and BUY takes its price from the purse sitting in the machine's slot and drops
+ * names, and BUY takes its price from the player's money and drops
  * it into the tray. Short, the button springs back with a rattle, nothing drops, and the
- * card says the purse is short.
+ * card says the money is short.
  *
  * What a machine holds is a pure function of the stop's seed, so it needs no saved stock
  * of its own: `vendingSold` records which slots were paid for, and those stay empty for
@@ -224,7 +224,7 @@ class ShopMachine extends CardMachine {
   protected readonly title = 'SHOP';
   /** The slots still for sale, in window order: the cards. */
   private readonly available: number[];
-  /** The slot whose BUY the purse was too short for, painted on its card until it turns. */
+  /** The slot whose BUY the money was too short for, painted on its card until it turns. */
   private short: number | null = null;
 
   constructor(
@@ -282,7 +282,7 @@ class ShopMachine extends CardMachine {
       headline: itemLabel(item),
       lines: [
         formatMoney(price),
-        slot === this.short ? 'NOT ENOUGH IN THE PURSE' : card.line,
+        slot === this.short ? 'NOT ENOUGH MONEY' : card.line,
       ],
       footer: '',
     });

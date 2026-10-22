@@ -1,15 +1,10 @@
 import { itemLabel } from '../items/items';
 import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
-import type { WheelRideState } from '../vehicle/vehicle';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
 import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
-import { drawPurse } from './purse';
-
-/** The purse image's canvas, pixels: twice its CSS size (hud.css `.hud-purse`), for sharp edges. */
-const PURSE_PX_W = 440;
-const PURSE_PX_H = 220;
+import { formatMoney } from '../economy/economy';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -19,15 +14,10 @@ const PURSE_PX_H = 220;
  */
 
 export interface DrivingReadout {
-  speedKmh: number;
-  rpm: number;
-  gearLabel: string;
   fuelLitres: number;
   tankCapacity: number;
   engineRunning: boolean;
   engineDestroyed: boolean;
-  /** Missing engine, incompatible fuel, or an engine with no oil. */
-  checkEngine: boolean;
   /**
    * Engine coolant temperature, or null when the car has no engine fitted (the
    * gauge then reads nothing rather than lying about a cold engine).
@@ -41,52 +31,9 @@ export interface DrivingReadout {
   waterFraction: number;
   oilFraction: number;
   /**
-   * Parking brake state. Keyboard and touch controls both latch it. Lights the red P
-   * lamp and puts a P in the gear cell, where a driver about to pull away looks.
-   */
-  handbrake: boolean;
-  /** Each indicator's dash arrow, lit at this instant of the car's own blink. */
-  blinkerLeft: boolean;
-  blinkerRight: boolean;
-  /** The beam selected. The dash is the only place it is reported: there is no toast. */
-  headlights: 'off' | 'low' | 'high';
-  /** Ground grade along the heading, rise over run, positive uphill; null in the air. */
-  grade: number | null;
-  /**
-   * The wind at the car in the car's own frame, m/s, the direction it blows TOWARD:
-   * `windRightMps` to the right, `windForwardMps` along the nose. The true wind, not
-   * the airflow the car's own speed makes: that is a headwind on every drive and says
-   * nothing, while the crosswind share is the same in both and is what pushes the car.
-   */
-  windRightMps: number;
-  windForwardMps: number;
-  /**
-   * Where the steering RIM is, as a fraction of full lock, positive to the left.
-   *
-   * The rim's angle, not the road wheels': see `Vehicle.steeringFraction`. Drawn as the
-   * strip under the segment display, because with a keyboard there is no force on the
-   * hands to say where the wheel is pointing and no way to glance down at it — the
-   * whole of the missing feedback is this one number.
-   */
-  steering: number;
-  /**
-   * Live per-wheel tyre state, the vehicle's own buffer (never retained here).
-   *
-   * Drawn as four dots in wheel layout beside the gear, because tread temperature is
-   * a real part of how the car behaves — cold is a little off, hot is best, abused is
-   * greasy — and a keyboard driver has no hands on the wheel to feel any of it.
-   */
-  tyres: readonly WheelRideState[];
-  /**
-   * The autopilot mode driving this car, or null while the PLAYER is driving it.
-   *
-   * The instrument faces carry it. Who is steering is the single most important thing
-   * a driver can be unsure about — a black dash is the player's own car, and a coloured
-   * one is a car going somewhere without him — and the mode matters as much as the fact,
-   * because `sleeper` keeps its lane well inside the tyres and `frantic` races the whole
-   * road at their limit. It is on the FACES rather than in a lamp for the same reason
-   * the steering strip exists: it is read from the corner of the eye, without looking
-   * for it.
+   * The autopilot mode driving this car, or null while the PLAYER is driving it. The
+   * panel's frame takes the mode's colour: who is steering is the single most important
+   * thing a driver can be unsure about, and it is read from the corner of the eye.
    */
   autopilotMode: AutopilotMode | null;
   /**
@@ -110,153 +57,23 @@ export interface RideReadout {
   readonly harshMoments: number;
 }
 
-/**
- * TYRE DOT COLOURS, and the temperatures are the model's, not a designer's.
- *
- * `tyreTemperatureGrip` in `vehicle.ts` has exactly three landmarks: the reference
- * (grip 1.0), the optimum at +8%, and the maximum at -22%. So the dot is grey at the
- * reference, green at the optimum and red at the maximum, interpolated between —
- * which means the colour is the grip curve rather than a decoration of it. Reading
- * them from the same constants would couple the HUD to the tyre model's internals, so
- * they are duplicated here as THREE NUMBERS with this comment — which means a change
- * to the tyre curve has to be reflected here by hand.
- */
-const TYRE_COLD_C = 30;
-const TYRE_OPTIMUM_C = 60;
-const TYRE_MAX_C = 120;
-const TYRE_COLD_RGB = [138, 143, 148] as const;
-const TYRE_GOOD_RGB = [63, 191, 90] as const;
-const TYRE_HOT_RGB = [210, 59, 47] as const;
-
-function mixRgb(a: readonly number[], b: readonly number[], t: number): string {
-  const u = t * t * (3 - 2 * t);
-  const r = Math.round(a[0]! + (b[0]! - a[0]!) * u);
-  const g = Math.round(a[1]! + (b[1]! - a[1]!) * u);
-  const bl = Math.round(a[2]! + (b[2]! - a[2]!) * u);
-  return `rgb(${r}, ${g}, ${bl})`;
-}
-
-/** Dot colour for a tread temperature. Exported for the dash bench. */
-export function tyreDotColour(tempC: number): string {
-  if (tempC <= TYRE_COLD_C) return mixRgb(TYRE_COLD_RGB, TYRE_COLD_RGB, 0);
-  if (tempC <= TYRE_OPTIMUM_C) {
-    return mixRgb(TYRE_COLD_RGB, TYRE_GOOD_RGB, (tempC - TYRE_COLD_C) / (TYRE_OPTIMUM_C - TYRE_COLD_C));
-  }
-  const t = Math.min(1, (tempC - TYRE_OPTIMUM_C) / (TYRE_MAX_C - TYRE_OPTIMUM_C));
-  return mixRgb(TYRE_GOOD_RGB, TYRE_HOT_RGB, t);
-}
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Both primary instruments use the same 270° sweep. Its missing lower quarter
-// keeps the existing cut-off-circle silhouette; half scale lands at 12 o'clock.
-const DIAL_SIZE = 120;
-const CX = DIAL_SIZE / 2;
-const CY = DIAL_SIZE / 2;
-const MAIN_FACE_R = 54;
-const MAIN_NEEDLE_R = 37;
-const AUX_CX = 60;
-const AUX_CY = 62;
-const AUX_R = 44;
-const AUX_NEEDLE_R = 35;
-const AUX_START_ANGLE = 200;
-const AUX_SWEEP_ANGLE = 140;
-const AUX_END_ANGLE = AUX_START_ANGLE + AUX_SWEEP_ANGLE;
-const START_ANGLE = 135;
-const SWEEP_ANGLE = 270;
-const END_ANGLE = START_ANGLE + SWEEP_ANGLE;
-
-interface MainDialScale {
-  readonly max: number;
-  readonly minorStep: number;
-  readonly halfStep: number;
-  readonly majorStep: number;
-  readonly redFrom: number;
-}
-
-const SPEEDOMETER_SCALE: MainDialScale = {
-  max: 200,
-  minorStep: 10,
-  halfStep: 10,
-  majorStep: 20,
-  redFrom: 180,
-};
-const TACHOMETER_SCALE: MainDialScale = {
-  max: 8000,
-  minorStep: 1000,
-  halfStep: 1000,
-  majorStep: 1000,
-  redFrom: 6000,
-};
-
 const LCD_DIGITS = 16;
 
-/**
- * Steering-position strip, drawn under the segment display.
- *
- * Sized to the display's own width so the cluster keeps one bottom edge, and it costs
- * the dashboard no height: the gauge row is already 124 px tall because of the two main
- * dials, and the centre column — two auxiliary dials, the lamp panel and the display —
- * reaches 84. The strip lives in the 40 px that was empty below it.
- *
- * The travel is inset from the panel edges so the end brackets have somewhere to sit,
- * and the marker is a thick round-capped line rather than a dot so that a small
- * deflection is still a readable position rather than a smudge.
- */
-const STEER_STRIP_W = 254;
-const STEER_STRIP_H = 10;
-const STEER_STRIP_X0 = 9;
-const STEER_STRIP_X1 = STEER_STRIP_W - 9;
-const STEER_STRIP_Y = 5;
-const STEER_STRIP_CX = (STEER_STRIP_X0 + STEER_STRIP_X1) / 2;
-const STEER_STRIP_HALF_SPAN = (STEER_STRIP_X1 - STEER_STRIP_X0) / 2;
 /**
  * THE PEDAL LEVER SCALE: seven sections stacked, the four throttle notches over neutral
  * over the gentle and the full brake (core/pedallever.ts), each `LEVER_CELL` tall.
  */
 const LEVER_W = 12;
-const LEVER_CELL = 15;
+const LEVER_CELL = 9;
 const LEVER_THROTTLE_CELLS = 4;
 const LEVER_BRAKE_CELLS = 2;
 const LEVER_H = (LEVER_THROTTLE_CELLS + 1 + LEVER_BRAKE_CELLS) * LEVER_CELL;
 /** The top of the neutral cell and its foot: the throttle fills up, the brake down. */
 const LEVER_NEUTRAL_TOP = LEVER_THROTTLE_CELLS * LEVER_CELL;
 const LEVER_NEUTRAL_FOOT = LEVER_NEUTRAL_TOP + LEVER_CELL;
-/**
- * THE TWO INSET INSTRUMENTS — the inclinometer in the tachometer, the wind gauge in the
- * speedometer — sit in the wedge under each hub. The needles sweep 270° over the top
- * and never enter it, and it was empty face. Centre and radius in dial units: the ring
- * clears the face's chord (y 98) and the needle's zero line (x + y = 120) by 1 and 4.
- */
-const INSET_CX = CX;
-const INSET_CY = 84;
-const INSET_R = 13;
-/**
- * The inclinometer's exaggeration. This world's roads climb at most 22%, which is 12°:
- * drawn true, an ordinary 5% hill is a 3° tilt nobody sees at this size. Three times,
- * clamped, makes a hill a hill. The face ticks are at ±10% so the size can be read.
- */
-const GRADE_GAIN = 3;
-const GRADE_MAX_DEG = 40;
-const GRADE_TICK = 0.1;
-/** Below this the windsock is gone: a direction for a breath of air is noise. */
-const WIND_CALM_MPS = 0.8;
-/** At and above this all five bands fill and turn alarm-coloured: it moves the car. */
-const WIND_STRONG_MPS = 10;
-/** Windsock bands; each lights at another fifth of WIND_STRONG_MPS, as on an airfield. */
-const WIND_SOCK_BANDS = 5;
-/**
- * Smoothing time constant of both insets, seconds. The grade comes off contact normals
- * that chatter over every pebble and the wind carries its gusts; a needle that jitters
- * is read as noise, and both readings matter over seconds, not frames.
- */
-const INSET_SMOOTH_S = 0.4;
-const TURN_LEFT_PATH = 'M 2.5 9 L 10 2.5 V 6.2 H 21 V 11.8 H 10 V 15.5 Z';
-const TURN_RIGHT_PATH = 'M 21.5 9 L 14 2.5 V 6.2 H 3 V 11.8 H 14 V 15.5 Z';
-const HEADLAMP_PATH = 'M 13 3.5 C 19.5 3.5 21.5 6.5 21.5 9 C 21.5 11.5 19.5 14.5 13 14.5 Z';
-/** ISO 7000 symbols: the dipped beam's rays slant down, the main beam's run level. */
-const DIPPED_BEAM_PATH = `${HEADLAMP_PATH} M 10 4.5 L 3 7 M 10 8.5 L 3 11 M 10 12.5 L 3 15`;
-const MAIN_BEAM_PATH = `${HEADLAMP_PATH} M 10 5 H 3 M 10 9 H 3 M 10 13 H 3`;
 const LCD_STEP_MS = 180;
 const LCD_INITIAL_PAUSE_STEPS = 4;
 const RADIO_OFF_MESSAGE = 'RADIO OFF';
@@ -298,19 +115,19 @@ const MASS_ALARM_FRACTION = 0.9;
 const TOAST_DURATION_MS = 3200;
 const TOAST_LEAVE_MS = 300;
 const MAX_TOASTS = 4;
-/** Length of the race bead line, px; matches `.hud-race` width in hud.css. */
-const RACE_LINE_PX = 260;
+/** Length of the mini-map's bead line, px; matches `.hud-race-track` width in hud.css. */
+const RACE_LINE_PX = 236;
 /**
  * The crosshair fades this long after the view was last turned: long enough to read
  * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
  */
 const CROSSHAIR_IDLE_MS = 4000;
 /**
- * THE G-FORCE WIDGET: a small round instrument that shows how hard the car pushes what
- * it carries. The dot is the push itself, where the load is thrown — up the face when
- * braking, to the right in a left bend — and the rings are the ride's thresholds
- * (trip/ride.ts): calm inside, uncomfortable between, harsh outside. Radius in the
- * widget's own units; the face's edge is `RIDE_FULL_MPS2`.
+ * THE G-FORCE WIDGET: a small round instrument on the panel that shows how hard the car
+ * pushes what it carries. The dot is the push itself, where the load is thrown — up the
+ * face when braking, to the right in a left bend — and the rings are the ride's
+ * thresholds (trip/ride.ts): calm inside, uncomfortable between, harsh outside. Radius
+ * in the widget's own units; the face's edge is `RIDE_FULL_MPS2`.
  */
 const RIDE_R = 26;
 const RIDE_FULL_MPS2 = 5;
@@ -325,10 +142,6 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K): SVGElementTagNameM
   return document.createElementNS(SVG_NS, tag);
 }
 
-function polar(cx: number, cy: number, r: number, deg: number): { x: number; y: number } {
-  const rad = (deg * Math.PI) / 180;
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-}
 
 /**
  * The glyph table as CSS, installed once per document.
@@ -359,12 +172,6 @@ function installSegmentGlyphRules(): void {
 }
 
 
-function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
-  const s = polar(cx, cy, r, startDeg);
-  const e = polar(cx, cy, r, endDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
-}
 
 export class Hud {
   private readonly tops: Element[] = [];
@@ -372,37 +179,14 @@ export class Hud {
   private readonly crosshairEl: HTMLElement;
   /** When the view was last turned, ms (`noteLook`); the crosshair fades after it. */
   private lastLookMs = -Infinity;
-  /** The cabin view shows the car's own cluster; see `setCabinInstruments`. */
-  private cabinInstruments = false;
   private readonly promptEl: HTMLElement;
   /** The cabin-camera editor's axis and eye readout; see vehicle/cabincamera.ts. */
   private readonly cabinEditorEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
-  private readonly tachNeedle: SVGLineElement;
-  private readonly speedNeedle: SVGLineElement;
-  private readonly gearEl: HTMLElement;
-  /** Front-left, front-right, rear-left, rear-right. */
-  private readonly tyreDots: HTMLElement[];
-  private readonly tyreColours: string[] = ['', '', '', ''];
-  private readonly fuelEl: SVGSVGElement;
-  private readonly fuelNeedle: SVGLineElement;
-  private readonly temperatureCluster: HTMLElement;
-  private readonly temperatureEl: SVGSVGElement;
-  private readonly temperatureNeedle: SVGLineElement;
-  private readonly handbrakeEl: HTMLElement;
-  private readonly turnLeftEl: HTMLElement;
-  private readonly turnRightEl: HTMLElement;
-  private readonly dippedBeamEl: HTMLElement;
-  private readonly mainBeamEl: HTMLElement;
-  /** The inclinometer's car, rotated to the grade. */
-  private readonly gradeCar: SVGGElement;
-  /** The windsock, rotated to the wind, and its five bands, root first. */
-  private readonly windSock: SVGGElement;
-  private readonly windBands: SVGPathElement[] = [];
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
-  /** Route bead line at the top; see `setRouteProgress`. */
+  /** The mini-map's bead line under the panel; see `setRouteProgress`. */
   private readonly raceEl: HTMLElement;
   private readonly raceTrackEl: HTMLElement;
   private readonly raceLabelEl: HTMLElement;
@@ -410,14 +194,13 @@ export class Hud {
   private readonly raceBeads: HTMLElement[] = [];
   /** Last written x per bead, px; NaN forces a write. */
   private readonly raceBeadX: number[] = [];
-  private raceKind: 'race' | 'delivery' | null = null;
-  private readonly checkEngineEl: HTMLElement;
-  private readonly oilWarningEl: HTMLElement;
+  private raceKind: 'race' | 'delivery' | 'idle' | null = null;
   private readonly lcdEl: SVGSVGElement;
-  private readonly steerStripEl: SVGSVGElement;
-  private readonly steerThumb: SVGLineElement;
-  /** Last placed marker position, so a still wheel writes no attributes. */
-  private steerStripX = -1;
+  /** The money readout (`setMoney`): on the panel while driving, by the pack on foot. */
+  private readonly moneyEl: HTMLElement;
+  private readonly moneySlot: HTMLElement;
+  private readonly inventoryEl: HTMLElement;
+  private moneyShown = -1;
   /** The pedal lever scale (`DrivingReadout.pedalLever`): the svg, the notch frame, the fills. */
   private readonly leverEl: SVGSVGElement;
   private readonly leverNotch: SVGRectElement;
@@ -442,24 +225,6 @@ export class Hud {
   private damageStrength = -1;
   private deathFade = -1;
   private gumBubbleProgress = -1;
-  /** The purse image in the top-right corner (`setPurse`), and the balance it shows (-1 hidden). */
-  private readonly purseEl: HTMLElement;
-  private readonly purseCanvas: HTMLCanvasElement;
-  private purseShown = -1;
-
-  private tachDeg = -1;
-  private speedDeg = -1;
-  private fuelDeg = -1;
-  private temperatureDeg = -1;
-  /** Smoothed inset readings, and the clock they were last advanced at (-1 never). */
-  private gradeSmooth = 0;
-  private windRightSmooth = 0;
-  private windForwardSmooth = 0;
-  private insetClockMs = -1;
-  /** Last written rotations and lit windsock bands; NaN forces a write. */
-  private gradeRotation = Number.NaN;
-  private windRotation = Number.NaN;
-  private windStrength = Number.NaN;
   /** Delivery distance in tens of metres last written to the route label. */
   private raceLabelKey = Number.NaN;
   /** The destination post's place name last written to the route label. */
@@ -499,156 +264,66 @@ export class Hud {
 
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
-    const tach = this.buildMainDial('hud-tach', TACHOMETER_SCALE);
-    this.tachNeedle = tach.needle;
-    this.gradeCar = this.buildInclinometer(tach.svg, tach.needle);
-
-    const speed = this.buildMainDial('hud-speedometer', SPEEDOMETER_SCALE);
-    this.speedNeedle = speed.needle;
-    this.windSock = this.buildWindGauge(speed.svg, speed.needle);
-
-
-    const fuel = this.buildAuxDial('hud-fuel', 'fuel');
-    this.fuelEl = fuel.svg;
-    this.fuelNeedle = fuel.needle;
-    const fuelCluster = el('div', 'hud-aux-cluster');
-    fuelCluster.append(fuel.svg);
-
-    const temperature = this.buildAuxDial('hud-temperature', 'temperature');
-    this.temperatureEl = temperature.svg;
-    this.temperatureNeedle = temperature.needle;
-    this.temperatureCluster = el('div', 'hud-aux-cluster');
-    this.temperatureCluster.append(temperature.svg);
-
     const display = this.buildSegmentDisplay();
     this.lcdEl = display.svg;
     this.lcdDigits = display.digits;
-
-    const steer = this.buildSteerStrip();
-    this.steerStripEl = steer.svg;
-    this.steerThumb = steer.thumb;
     const lever = this.buildPedalLever();
     this.leverEl = lever.svg;
     this.leverNotch = lever.notch;
     this.leverThrottle = lever.throttle;
     this.leverBrake = lever.brake;
-
-    this.gearEl = el('div', 'hud-gear');
-    this.handbrakeEl = el('div', 'hud-handbrake');
-    this.handbrakeEl.textContent = 'P';
-    this.checkEngineEl = this.buildIconLamp(
-      'hud-check-engine',
-      'Check engine',
-      'M 4 5 H 7 L 9 3 H 16 L 18 5 H 21 V 14 H 18 L 16 16 H 7 L 5 14 H 2 V 7 H 4 Z M 9 8 H 16 M 12.5 6 V 11',
-    );
-    this.oilWarningEl = this.buildIconLamp(
-      'hud-oil-warning',
-      'Oil low',
-      'M 3 8 H 14 L 18 11 V 15 H 7 Q 3 15 3 11 Z M 14 8 L 18 5 H 21 M 20 12 Q 23 14 20 16',
-    );
-    this.turnLeftEl = this.buildIconLamp('hud-turn hud-turn-left', 'Left indicator', TURN_LEFT_PATH);
-    this.turnRightEl = this.buildIconLamp('hud-turn hud-turn-right', 'Right indicator', TURN_RIGHT_PATH);
-    this.dippedBeamEl = this.buildIconLamp('hud-dipped-beam', 'Dipped beam', DIPPED_BEAM_PATH);
-    this.mainBeamEl = this.buildIconLamp('hud-main-beam', 'Main beam', MAIN_BEAM_PATH);
-
-    const indicatorTop = el('div', 'hud-indicator-row');
-    indicatorTop.append(this.checkEngineEl, this.oilWarningEl, this.handbrakeEl);
-    // FOUR DOTS IN WHEEL LAYOUT, WITH THE GEAR BETWEEN THEM: the left column sits to
-    // the left of the digit and the right column to its right, front on top. The
-    // digit is then the car, and a hot corner reads as a corner of it rather than as
-    // an index into a list.
-    this.tyreDots = [];
-    const leftColumn = el('div', 'hud-tyre-column');
-    const rightColumn = el('div', 'hud-tyre-column');
-    // Slot order is front-left, front-right, rear-left, rear-right; see `updateTyreDots`.
-    for (let i = 0; i < 4; i++) {
-      const dot = el('div', 'hud-tyre-dot');
-      this.tyreDots.push(dot);
-      (i % 2 === 0 ? leftColumn : rightColumn).append(dot);
-    }
-    const indicatorBottom = el('div', 'hud-indicator-row');
-    indicatorBottom.append(leftColumn, this.gearEl, rightColumn);
-    const indicators = el('div', 'hud-icon-panel');
-    indicators.append(indicatorTop, indicatorBottom);
-
-    const centreTop = el('div', 'hud-centre-top');
-    centreTop.append(this.temperatureCluster, indicators, fuelCluster);
-    const centreBlock = el('div', 'hud-centre-block');
-    centreBlock.append(centreTop, this.lcdEl, this.steerStripEl);
-    // The telltales stand in the gaps between the big dials and the half-moons: the
-    // left arrow and the dipped beam by the tachometer, the right arrow and the main
-    // beam by the speedometer, so left and right are read by where they are.
-    const telltalesLeft = el('div', 'hud-telltale-column');
-    telltalesLeft.append(this.turnLeftEl, this.dippedBeamEl);
-    const telltalesRight = el('div', 'hud-telltale-column');
-    telltalesRight.append(this.turnRightEl, this.mainBeamEl);
-
-    const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, telltalesLeft, centreBlock, telltalesRight, speed.svg, this.leverEl);
-
-    const dashboard = el('div', 'hud-dashboard-shell');
-    dashboard.append(gaugeRow);
-    this.drivingCluster.append(dashboard);
-
-    this.invMassEl = el('div', 'hud-inv-mass');
-    this.invSlotsEl = el('div', 'hud-inv-items');
-    const inventoryEl = el('div', 'hud-inventory');
-    inventoryEl.append(this.invSlotsEl);
-
-
-    this.toastEl = el('div', 'hud-toasts');
-    this.raceEl = el('div', 'hud-race is-hidden');
-    this.raceTrackEl = el('div', 'hud-race-track');
-    this.raceTrackEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-start'), el('div', 'hud-race-finish'));
-    this.raceLabelEl = el('div', 'hud-race-label');
-    this.raceEl.append(this.raceTrackEl, this.raceLabelEl);
-    this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
-    this.damageVignetteEl = el('div', 'hud-damage-vignette');
-    this.deathFadeEl = el('div', 'hud-death-fade');
     const ride = this.buildRideWidget();
     this.rideEl = ride.svg;
     this.rideDot = ride.dot;
     this.ridePulse = ride.pulse;
-    this.purseEl = el('div', 'hud-purse is-hidden');
-    this.purseCanvas = document.createElement('canvas');
-    this.purseCanvas.width = PURSE_PX_W;
-    this.purseCanvas.height = PURSE_PX_H;
-    this.purseEl.append(this.purseCanvas);
+    this.moneyEl = el('div', 'hud-money');
+    this.moneySlot = el('div', 'hud-money-slot');
+
+    // THE MINI-MAP: the route bead line, from the post behind to the one ahead (or a
+    // race's start to its finish), under the panel's row.
+    this.raceEl = el('div', 'hud-race is-idle');
+    this.raceTrackEl = el('div', 'hud-race-track');
+    this.raceTrackEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-start'), el('div', 'hud-race-finish'));
+    this.raceLabelEl = el('div', 'hud-race-label');
+    this.raceEl.append(this.raceTrackEl, this.raceLabelEl);
+
+    // THE PANEL: the G-force widget, the display with the money under it, the pedal
+    // lever; the mini-map across the foot. The car's own instruments are in the car.
+    const centre = el('div', 'hud-panel-centre');
+    centre.append(this.lcdEl, this.moneySlot);
+    const row = el('div', 'hud-panel-row');
+    row.append(this.rideEl, centre, this.leverEl);
+    const dashboard = el('div', 'hud-dashboard-shell');
+    dashboard.append(row, this.raceEl);
+    this.drivingCluster.append(dashboard);
+
+    this.invMassEl = el('div', 'hud-inv-mass');
+    this.invSlotsEl = el('div', 'hud-inv-items');
+    this.inventoryEl = el('div', 'hud-inventory');
+    this.inventoryEl.append(this.moneyEl, this.invSlotsEl);
+
+    this.toastEl = el('div', 'hud-toasts');
+    this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
+    this.damageVignetteEl = el('div', 'hud-damage-vignette');
+    this.deathFadeEl = el('div', 'hud-death-fade');
 
     this.tops = [
       this.crosshairEl,
       this.promptEl,
       this.cabinEditorEl,
       this.drivingCluster,
-      inventoryEl,
+      this.inventoryEl,
       this.toastEl,
-      this.raceEl,
       this.gumBubbleEl,
-      this.rideEl,
-      this.purseEl,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
     root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
   }
 
-  private buildIconLamp(className: string, label: string, pathData: string): HTMLElement {
-    const lamp = el('div', `hud-indicator-lamp ${className}`);
-    lamp.setAttribute('role', 'img');
-    lamp.setAttribute('aria-label', label);
-    const svg = svgEl('svg');
-    svg.setAttribute('viewBox', '0 0 24 18');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = svgEl('path');
-    path.setAttribute('d', pathData);
-    svg.appendChild(path);
-    lamp.appendChild(svg);
-    return lamp;
-  }
-
   private buildRideWidget(): { svg: SVGSVGElement; dot: SVGCircleElement; pulse: SVGCircleElement } {
     const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-ride is-hidden');
+    svg.setAttribute('class', 'hud-ride');
     svg.setAttribute('viewBox', `${-RIDE_R - 4} ${-RIDE_R - 4} ${2 * RIDE_R + 8} ${2 * RIDE_R + 8}`);
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', 'Ride: G-force');
@@ -672,7 +347,7 @@ export class Hud {
       line.setAttribute('y2', String(y2));
       svg.appendChild(line);
     }
-    // The car's nose, at the top of the face, as on the wind gauge.
+    // The car's nose, at the top of the face.
     const nose = svgEl('path');
     nose.setAttribute('class', 'hud-ride-nose');
     nose.setAttribute('d', `M 0 ${-RIDE_R - 2.6} L 2.6 ${-RIDE_R + 1.4} H -2.6 Z`);
@@ -680,291 +355,6 @@ export class Hud {
     const pulse = ring('hud-ride-pulse', RIDE_R);
     const dot = ring('hud-ride-dot', 3.4);
     return { svg, dot, pulse };
-  }
-
-  /** The ring an inset instrument is drawn in, placed under the dial's needle. */
-  private buildInset(dial: SVGSVGElement, needle: SVGElement, className: string, label: string): SVGGElement {
-    const group = svgEl('g');
-    group.setAttribute('class', `hud-inset ${className}`);
-    group.setAttribute('role', 'img');
-    group.setAttribute('aria-label', label);
-    const ring = svgEl('circle');
-    ring.setAttribute('class', 'hud-inset-ring');
-    ring.setAttribute('cx', String(INSET_CX));
-    ring.setAttribute('cy', String(INSET_CY));
-    ring.setAttribute('r', String(INSET_R));
-    group.appendChild(ring);
-    dial.insertBefore(group, needle);
-    return group;
-  }
-
-  /**
-   * The inclinometer: a car in side view, nose to the right, tilted with the ground
-   * under it. Ticks on the ring mark level and ±10% at both ends of the car.
-   */
-  private buildInclinometer(dial: SVGSVGElement, needle: SVGElement): SVGGElement {
-    const inset = this.buildInset(dial, needle, 'hud-inclinometer', 'Slope');
-    const tickDeg = (Math.atan(GRADE_TICK) * GRADE_GAIN * 180) / Math.PI;
-    for (const [deg, level] of [
-      [0, true], [180, true],
-      [-tickDeg, false], [tickDeg, false], [180 - tickDeg, false], [180 + tickDeg, false],
-    ] as const) {
-      const inner = polar(INSET_CX, INSET_CY, level ? INSET_R - 4 : INSET_R - 2.5, deg);
-      const outer = polar(INSET_CX, INSET_CY, INSET_R, deg);
-      const tick = svgEl('line');
-      tick.setAttribute('class', `hud-inset-tick${level ? ' is-level' : ''}`);
-      tick.setAttribute('x1', inner.x.toFixed(2));
-      tick.setAttribute('y1', inner.y.toFixed(2));
-      tick.setAttribute('x2', outer.x.toFixed(2));
-      tick.setAttribute('y2', outer.y.toFixed(2));
-      inset.appendChild(tick);
-    }
-    const car = svgEl('g');
-    car.setAttribute('class', 'hud-inset-car');
-    const body = svgEl('path');
-    // Hatch at the back (left), bonnet lower than the roof at the front (right).
-    body.setAttribute(
-      'd',
-      `M ${INSET_CX - 8} ${INSET_CY + 2} V ${INSET_CY - 1} L ${INSET_CX - 5.5} ${INSET_CY - 4.5} `
-        + `H ${INSET_CX + 2.5} L ${INSET_CX + 5} ${INSET_CY - 1.5} L ${INSET_CX + 8} ${INSET_CY - 0.8} `
-        + `V ${INSET_CY + 2} Z`,
-    );
-    car.appendChild(body);
-    for (const x of [INSET_CX - 4.5, INSET_CX + 4.5]) {
-      const wheel = svgEl('circle');
-      wheel.setAttribute('cx', String(x));
-      wheel.setAttribute('cy', String(INSET_CY + 2.4));
-      wheel.setAttribute('r', '1.9');
-      car.appendChild(wheel);
-    }
-    inset.appendChild(car);
-    return car;
-  }
-
-  /**
-   * The wind gauge: an airfield windsock seen from above, the car's nose at the top of
-   * the ring. The mast is the hub; the sock streams the way the wind blows, and like
-   * a real one it fills band by band — five orange-and-white bands, one per fifth of
-   * WIND_STRONG_MPS — so a glance gives both the direction and the strength. Built
-   * streaming down the screen (a tailwind) and turned to the wind.
-   */
-  private buildWindGauge(dial: SVGSVGElement, needle: SVGElement): SVGGElement {
-    const inset = this.buildInset(dial, needle, 'hud-wind', 'Wind');
-    const nose = svgEl('path');
-    nose.setAttribute('class', 'hud-inset-car');
-    nose.setAttribute(
-      'd',
-      `M ${INSET_CX} ${INSET_CY - INSET_R + 0.6} L ${INSET_CX + 2} ${INSET_CY - INSET_R + 3.6} `
-        + `H ${INSET_CX - 2} Z`,
-    );
-    inset.appendChild(nose);
-    const sock = svgEl('g');
-    sock.setAttribute('class', 'hud-wind-sock');
-    const y0 = INSET_CY + 1.4;
-    const bandLength = 2.2;
-    const halfWidth = (y: number): number => 3.1 - ((y - y0) / (bandLength * WIND_SOCK_BANDS)) * 1.8;
-    for (let i = 0; i < WIND_SOCK_BANDS; i++) {
-      const a = y0 + i * bandLength;
-      const b = a + bandLength;
-      const band = svgEl('path');
-      band.setAttribute('class', `hud-wind-band${i % 2 === 0 ? ' is-orange' : ''}`);
-      band.setAttribute(
-        'd',
-        `M ${(INSET_CX - halfWidth(a)).toFixed(2)} ${a.toFixed(2)} H ${(INSET_CX + halfWidth(a)).toFixed(2)} `
-          + `L ${(INSET_CX + halfWidth(b)).toFixed(2)} ${b.toFixed(2)} H ${(INSET_CX - halfWidth(b)).toFixed(2)} Z`,
-      );
-      sock.appendChild(band);
-      this.windBands.push(band);
-    }
-    inset.appendChild(sock);
-    const mast = svgEl('circle');
-    mast.setAttribute('class', 'hud-wind-mast');
-    mast.setAttribute('cx', String(INSET_CX));
-    mast.setAttribute('cy', String(INSET_CY));
-    mast.setAttribute('r', '1.5');
-    inset.appendChild(mast);
-    return sock;
-  }
-
-  /** Advances both insets' smoothing and writes their pose when it visibly changed. */
-  private updateInsets(readout: DrivingReadout): void {
-    const now = performance.now();
-    // A first frame, or the first after the cluster was hidden, snaps to the reading.
-    const dt = this.insetClockMs < 0 ? Infinity : (now - this.insetClockMs) / 1000;
-    this.insetClockMs = now;
-    const k = 1 - Math.exp(-dt / INSET_SMOOTH_S);
-
-    // In the air there is no ground to read; the car keeps its last tilt.
-    if (readout.grade !== null) this.gradeSmooth += (readout.grade - this.gradeSmooth) * k;
-    const tilt = Math.min(
-      GRADE_MAX_DEG,
-      Math.max(-GRADE_MAX_DEG, (Math.atan(this.gradeSmooth) * GRADE_GAIN * 180) / Math.PI),
-    );
-    // Nose up is anticlockwise on screen, which is a negative SVG rotation.
-    const gradeRotation = Math.round(-tilt * 2) / 2;
-    if (gradeRotation !== this.gradeRotation) {
-      this.gradeRotation = gradeRotation;
-      this.gradeCar.setAttribute('transform', `rotate(${gradeRotation} ${INSET_CX} ${INSET_CY})`);
-    }
-
-    this.windRightSmooth += (readout.windRightMps - this.windRightSmooth) * k;
-    this.windForwardSmooth += (readout.windForwardMps - this.windForwardSmooth) * k;
-    const speed = Math.hypot(this.windRightSmooth, this.windForwardSmooth);
-    // Lit bands, one per fifth of a strong wind, so a steady wind writes nothing.
-    const strength = speed < WIND_CALM_MPS
-      ? 0
-      : Math.max(1, Math.min(WIND_SOCK_BANDS, Math.ceil((speed / WIND_STRONG_MPS) * WIND_SOCK_BANDS)));
-    if (strength !== this.windStrength) {
-      this.windStrength = strength;
-      this.windSock.classList.toggle('is-calm', strength === 0);
-      this.windSock.classList.toggle('is-strong', strength === WIND_SOCK_BANDS);
-      for (let i = 0; i < WIND_SOCK_BANDS; i++) this.windBands[i]!.classList.toggle('is-limp', i >= strength);
-    }
-    if (strength === 0) return;
-    // The arrow is built pointing down the screen; on screen the wind blows toward
-    // (right, -forward).
-    const windRotation = Math.round(
-      (Math.atan2(-this.windForwardSmooth, this.windRightSmooth) * 180) / Math.PI - 90,
-    );
-    if (windRotation !== this.windRotation) {
-      this.windRotation = windRotation;
-      this.windSock.setAttribute('transform', `rotate(${windRotation} ${INSET_CX} ${INSET_CY})`);
-    }
-  }
-
-  private buildMainDial(
-    className: string,
-    scale: MainDialScale,
-  ): { svg: SVGSVGElement; needle: SVGLineElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', `hud-dial hud-main-dial ${className}`);
-    svg.setAttribute('viewBox', `0 0 ${DIAL_SIZE} ${DIAL_SIZE}`);
-    svg.setAttribute('width', String(DIAL_SIZE));
-    svg.setAttribute('height', String(DIAL_SIZE));
-
-    const faceStart = polar(CX, CY, MAIN_FACE_R, START_ANGLE);
-    const face = svgEl('path');
-    face.setAttribute('class', 'hud-main-dial-face');
-    face.setAttribute(
-      'd',
-      `${arcPath(CX, CY, MAIN_FACE_R, START_ANGLE, END_ANGLE)} L ${faceStart.x.toFixed(2)} ${faceStart.y.toFixed(2)} Z`,
-    );
-    svg.appendChild(face);
-    const rim = svgEl('path');
-    rim.setAttribute('class', 'hud-main-dial-rim');
-    rim.setAttribute('d', arcPath(CX, CY, 51.5, START_ANGLE, END_ANGLE));
-    svg.appendChild(rim);
-
-    for (let value = 0; value <= scale.max; value += scale.minorStep) {
-      const fraction = value / scale.max;
-      const deg = START_ANGLE + fraction * SWEEP_ANGLE;
-      const major = value % scale.majorStep === 0;
-      const half = !major && value % scale.halfStep === 0;
-      const outer = polar(CX, CY, 50, deg);
-      const inner = polar(CX, CY, major ? 40 : half ? 43 : 46.5, deg);
-      const tick = svgEl('line');
-      tick.setAttribute(
-        'class',
-        `hud-dial-tick${major ? ' is-major' : half ? ' is-half' : ''}${value >= scale.redFrom ? ' is-red' : ''}`,
-      );
-      tick.setAttribute('x1', inner.x.toFixed(2));
-      tick.setAttribute('y1', inner.y.toFixed(2));
-      tick.setAttribute('x2', outer.x.toFixed(2));
-      tick.setAttribute('y2', outer.y.toFixed(2));
-      svg.appendChild(tick);
-
-    }
-
-
-    const needle = svgEl('line');
-    needle.setAttribute('class', 'hud-dial-needle');
-    needle.setAttribute('x1', String(CX));
-    needle.setAttribute('y1', String(CY));
-    svg.appendChild(needle);
-    const hub = svgEl('circle');
-    hub.setAttribute('class', 'hud-dial-hub');
-    hub.setAttribute('cx', String(CX));
-    hub.setAttribute('cy', String(CY));
-    hub.setAttribute('r', '2.6');
-    svg.appendChild(hub);
-
-    return { svg, needle };
-  }
-
-  private buildAuxDial(
-    className: string,
-    kind: 'fuel' | 'temperature',
-  ): { svg: SVGSVGElement; needle: SVGLineElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', `hud-dial hud-aux-dial ${className}`);
-    svg.setAttribute('viewBox', '0 0 120 72');
-    svg.setAttribute('width', '120');
-    svg.setAttribute('height', '72');
-
-    const face = svgEl('path');
-    face.setAttribute('class', 'hud-aux-face');
-    face.setAttribute('d', 'M 5 67 Q 11 7 60 5 Q 109 7 115 67 Z');
-    svg.appendChild(face);
-
-    const track = svgEl('path');
-    track.setAttribute('class', 'hud-aux-track');
-    track.setAttribute('d', arcPath(AUX_CX, AUX_CY, AUX_R, AUX_START_ANGLE, AUX_END_ANGLE));
-    svg.appendChild(track);
-
-    const zones = kind === 'fuel'
-      ? [
-          ['is-red', 0, 0.18],
-          ['is-neutral', 0.45, 1],
-        ] as const
-      : [
-          ['is-green', 0.27, 0.68],
-          ['is-red', 0.8, 1],
-        ] as const;
-    for (const [zoneClass, start, end] of zones) {
-      const zone = svgEl('path');
-      zone.setAttribute('class', `hud-aux-zone ${zoneClass}`);
-      zone.setAttribute(
-        'd',
-        arcPath(
-          AUX_CX,
-          AUX_CY,
-          AUX_R,
-          AUX_START_ANGLE + start * AUX_SWEEP_ANGLE,
-          AUX_START_ANGLE + end * AUX_SWEEP_ANGLE,
-        ),
-      );
-      svg.appendChild(zone);
-    }
-
-    for (let step = 0; step <= 10; step += 5) {
-      const fraction = step / 10;
-      const deg = AUX_START_ANGLE + fraction * AUX_SWEEP_ANGLE;
-      const major = step % 5 === 0;
-      const outer = polar(AUX_CX, AUX_CY, AUX_R, deg);
-      const inner = polar(AUX_CX, AUX_CY, major ? 36.5 : 40, deg);
-      const tick = svgEl('line');
-      tick.setAttribute('class', `hud-aux-tick${major ? ' is-major' : ''}`);
-      tick.setAttribute('x1', inner.x.toFixed(2));
-      tick.setAttribute('y1', inner.y.toFixed(2));
-      tick.setAttribute('x2', outer.x.toFixed(2));
-      tick.setAttribute('y2', outer.y.toFixed(2));
-      svg.appendChild(tick);
-    }
-
-
-    const needle = svgEl('line');
-    needle.setAttribute('class', 'hud-aux-needle');
-    needle.setAttribute('x1', String(AUX_CX));
-    needle.setAttribute('y1', String(AUX_CY));
-    svg.appendChild(needle);
-    const hub = svgEl('circle');
-    hub.setAttribute('class', 'hud-aux-hub');
-    hub.setAttribute('cx', String(AUX_CX));
-    hub.setAttribute('cy', String(AUX_CY));
-    hub.setAttribute('r', '3');
-    svg.appendChild(hub);
-
-    return { svg, needle };
   }
 
   private buildSegmentDisplay(): {
@@ -1028,26 +418,18 @@ export class Hud {
     this.root.classList.toggle('is-death-sequence', dying);
   }
 
-  /**
-   * The view is the cabin, where the car's own instruments read the same values: the
-   * on-screen cluster stands down while it holds (`setDriving` draws nothing).
-   */
-  setCabinInstruments(inView: boolean): void {
-    this.cabinInstruments = inView;
-  }
-
   setDriving(readout: DrivingReadout | null): void {
-    if (readout === null || this.cabinInstruments) {
+    // The money sits on the panel while driving and beside the pack on foot.
+    const moneyHome = readout === null ? this.inventoryEl : this.moneySlot;
+    if (this.moneyEl.parentElement !== moneyHome) moneyHome.prepend(this.moneyEl);
+    if (readout === null) {
       this.setVisible(this.drivingCluster, false);
-      this.insetClockMs = -1;
       return;
     }
     this.setVisible(this.drivingCluster, true);
 
-    // WHOSE CAR THIS IS, said by the instrument faces: black while the player drives,
-    // the mode's own colour while the autopilot does. The ink follows the face — a
-    // near-white needle on cream or chartreuse is not a needle — so the tick, needle
-    // and track colours are custom properties the mode class rewrites.
+    // WHOSE CAR THIS IS, said by the panel's frame: plain while the player drives, the
+    // mode's own colour while the autopilot does.
     const mode = readout.autopilotMode;
     if (mode !== this.autopilotFaces) {
       this.autopilotFaces = mode;
@@ -1056,49 +438,9 @@ export class Hud {
       this.drivingCluster.classList.toggle('is-autopilot-frantic', mode === 'frantic');
     }
 
-    this.tachDeg = this.updateMainNeedle(
-      readout.rpm,
-      TACHOMETER_SCALE.max,
-      this.tachDeg,
-      this.tachNeedle,
-    );
-    this.speedDeg = this.updateMainNeedle(
-      Math.abs(readout.speedKmh),
-      SPEEDOMETER_SCALE.max,
-      this.speedDeg,
-      this.speedNeedle,
-    );
-
-    // The parking brake owns the gear cell: a lever in first with the brake on is a car
-    // that will not move, and the digit is where a driver looks before pulling away.
-    this.setText(this.gearEl, readout.handbrake ? 'P' : readout.gearLabel);
-    this.gearEl.classList.toggle('is-parked', readout.handbrake);
-    this.updateTyreDots(readout.tyres);
-
-    const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
-    this.fuelDeg = this.updateAuxNeedle(
-      fuelFraction,
-      this.fuelDeg,
-      this.fuelNeedle,
-    );
-    this.fuelEl.classList.toggle('is-alarm', fuelFraction < FUEL_RESERVE_FRACTION);
-
-    const temperature = readout.temperature;
-    this.setVisible(this.temperatureCluster, temperature !== null);
-    if (temperature !== null) {
-      this.temperatureDeg = this.updateAuxNeedle(
-        temperature.fraction,
-        this.temperatureDeg,
-        this.temperatureNeedle,
-      );
-      this.temperatureEl.classList.toggle('is-cold', temperature.zone === 'cold');
-      this.temperatureEl.classList.toggle('is-normal', temperature.zone === 'normal');
-      this.temperatureEl.classList.toggle('is-warm', temperature.zone === 'warm');
-      this.temperatureEl.classList.toggle('is-hot', temperature.zone === 'hot');
-      this.temperatureEl.classList.toggle('is-critical', temperature.zone === 'critical');
-    }
-
     // Faults own the display until the car is healthy; radio never trails them.
+    const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
+    const temperature = readout.temperature;
     const warnings: string[] = [];
     if (fuelFraction < FUEL_RESERVE_FRACTION) {
       warnings.push(readout.fuelLitres <= 0 ? 'NO FUEL' : 'FUEL LOW');
@@ -1116,17 +458,15 @@ export class Hud {
     const signature = warnings.join('   ');
     if (signature !== this.warningsSignature) this.warningsSignature = signature;
     this.engineOff = !readout.engineRunning;
-    this.checkEngineEl.classList.toggle('is-active', readout.checkEngine);
-    this.oilWarningEl.classList.toggle('is-active', readout.oilFraction < FLUID_ALARM_FRACTION);
     this.refreshSegmentDisplay();
-    this.handbrakeEl.classList.toggle('is-active', readout.handbrake);
-    this.turnLeftEl.classList.toggle('is-active', readout.blinkerLeft);
-    this.turnRightEl.classList.toggle('is-active', readout.blinkerRight);
-    this.dippedBeamEl.classList.toggle('is-active', readout.headlights === 'low');
-    this.mainBeamEl.classList.toggle('is-active', readout.headlights === 'high');
-    this.updateSteerStrip(readout.steering);
     this.updatePedalLever(readout.pedalLever);
-    this.updateInsets(readout);
+  }
+
+  /** The player's money, kopecks: on the panel while driving, by the pack on foot. */
+  setMoney(kopecks: number): void {
+    if (kopecks === this.moneyShown) return;
+    this.moneyShown = kopecks;
+    this.moneyEl.textContent = formatMoney(kopecks);
   }
 
   /** Player's dashboard size (Settings.dashboardSize), on top of the presentation's own. */
@@ -1135,21 +475,24 @@ export class Hud {
   }
 
   /**
-   * The G-force widget: shown with a reading while the player drives a car carrying
-   * ride-sensitive cargo (trip/ride.ts `carriesRideSensitive`), hidden on null.
+   * The G-force widget on the panel: the ride of the car the player drives, or null for
+   * a still face (the dot at the centre).
    */
   setRide(ride: RideReadout | null): void {
     if (ride === null) {
-      if (this.rideShown) {
-        this.rideShown = false;
-        this.rideEl.classList.add('is-hidden');
+      // A still face: the dot at the centre.
+      if (this.rideX !== 0 || this.rideY !== 0) {
+        this.rideX = 0;
+        this.rideY = 0;
+        this.rideDot.setAttribute('cx', '0');
+        this.rideDot.setAttribute('cy', '0');
       }
+      this.rideShown = false;
       return;
     }
     if (!this.rideShown) {
       this.rideShown = true;
-      this.rideEl.classList.remove('is-hidden');
-      // What happened before the widget was up is not news.
+      // What happened before the readings started is not news.
       this.rideHarshSeen = ride.harshMoments;
     }
     // The push is opposite the acceleration: braking throws the load forward (up the
@@ -1268,62 +611,6 @@ export class Hud {
   }
 
 
-  private updateMainNeedle(
-    value: number,
-    max: number,
-    previousDeg: number,
-    needle: SVGLineElement,
-  ): number {
-    const fraction = Math.min(Math.max(value / max, 0), 1);
-    const deg = START_ANGLE + fraction * SWEEP_ANGLE;
-    const rounded = Math.round(deg * 10) / 10;
-    if (rounded === previousDeg) return previousDeg;
-    const tip = polar(CX, CY, MAIN_NEEDLE_R, deg);
-    this.setAttr(needle, 'x2', tip.x.toFixed(2));
-    this.setAttr(needle, 'y2', tip.y.toFixed(2));
-    return rounded;
-  }
-
-  /**
-   * The steering-position strip: a track, its two end brackets, a centre notch and the
-   * marker the driver reads.
-   *
-   * `[---o---]` is the whole instrument. The brackets say where the ends of the travel
-   * are, the notch says straight ahead — which matters more than it looks, because the
-   * point of the thing is to tell a driver whose hands are on a keyboard whether the
-   * wheels are centred — and the marker carries the state.
-   */
-  private buildSteerStrip(): { svg: SVGSVGElement; thumb: SVGLineElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-steer-strip');
-    svg.setAttribute('viewBox', `0 0 ${STEER_STRIP_W} ${STEER_STRIP_H}`);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Steering position');
-
-    const rule = (cls: string, x1: number, y1: number, x2: number, y2: number): SVGLineElement => {
-      const line = svgEl('line');
-      line.setAttribute('class', cls);
-      line.setAttribute('x1', String(x1));
-      line.setAttribute('y1', String(y1));
-      line.setAttribute('x2', String(x2));
-      line.setAttribute('y2', String(y2));
-      svg.appendChild(line);
-      return line;
-    };
-
-    // The brackets, at the ends of the travel.
-    rule('hud-steer-bracket', 3, 1.5, 3, 8.5);
-    rule('hud-steer-bracket', STEER_STRIP_W - 3, 1.5, STEER_STRIP_W - 3, 8.5);
-    // The track between them, and the notch at its centre.
-    rule('hud-steer-track', STEER_STRIP_X0, STEER_STRIP_Y, STEER_STRIP_X1, STEER_STRIP_Y);
-    rule('hud-steer-centre', STEER_STRIP_CX, 2.5, STEER_STRIP_CX, 7.5);
-
-    // Placed by the first update; parked at centre so the first frame is never drawn
-    // with the marker off the end of the track.
-    const thumb = rule('hud-steer-thumb', STEER_STRIP_CX, 1, STEER_STRIP_CX, 9);
-    return { svg, thumb };
-  }
-
   /**
    * The pedal lever scale: seven cells, the four throttle notches over neutral over the
    * gentle and the full brake. A frame marks the notch the lever is on; the throttle
@@ -1383,41 +670,6 @@ export class Hud {
     this.setAttr(this.leverBrake, 'height', down.toFixed(1));
   }
 
-  /**
-   * Places the steering marker.
-   *
-   * POSITIVE IS LEFT, and in an SVG x grows to the right, so the sign is inverted here
-   * rather than at the source: the value the vehicle publishes is positive to the left
-   * because that is what the steering state means, and this is the one place that knows
-   * about the screen's axes.
-   */
-  private updateSteerStrip(fraction: number): void {
-    const f = Math.min(1, Math.max(-1, Number.isFinite(fraction) ? fraction : 0));
-    const x = STEER_STRIP_CX - f * STEER_STRIP_HALF_SPAN;
-    // A tenth of a unit is a tenth of a pixel width on screen, so rounding here is what
-    // keeps a held wheel from rewriting two attributes every frame.
-    const rounded = Math.round(x * 10) / 10;
-    if (rounded === this.steerStripX) return;
-    this.steerStripX = rounded;
-    const placed = String(rounded);
-    this.setAttr(this.steerThumb, 'x1', placed);
-    this.setAttr(this.steerThumb, 'x2', placed);
-  }
-
-  private updateAuxNeedle(
-    fractionValue: number,
-    previousDeg: number,
-    needle: SVGLineElement,
-  ): number {
-    const fraction = Math.min(Math.max(fractionValue, 0), 1);
-    const deg = AUX_START_ANGLE + fraction * AUX_SWEEP_ANGLE;
-    const rounded = Math.round(deg * 10) / 10;
-    if (rounded === previousDeg) return previousDeg;
-    const tip = polar(AUX_CX, AUX_CY, AUX_NEEDLE_R, deg);
-    this.setAttr(needle, 'x2', tip.x.toFixed(2));
-    this.setAttr(needle, 'y2', tip.y.toFixed(2));
-    return rounded;
-  }
 
   /**
    * The crosshair is the look's: it shows while the view is turned (mouse, stick, touch)
@@ -1472,18 +724,6 @@ export class Hud {
     this.invMassEl.classList.toggle('is-alarm', carriedMass > massLimit * MASS_ALARM_FRACTION);
   }
 
-  /**
-   * The purse in the top-right corner holding `kopecks` (ui/purse.ts), or null to hide
-   * it: main.ts shows it on foot near a money machine, and hides it while one holds it.
-   * Repainted only when the balance changes.
-   */
-  setPurse(kopecks: number | null): void {
-    this.setVisible(this.purseEl, kopecks !== null);
-    if (kopecks === null || kopecks === this.purseShown) return;
-    this.purseShown = kopecks;
-    const g = this.purseCanvas.getContext('2d');
-    if (g) drawPurse(g, PURSE_PX_W, PURSE_PX_H, kopecks);
-  }
 
   /**
    * One composited DOM circle, deliberately cheaper than transparent geometry in
@@ -1530,14 +770,15 @@ export class Hud {
 
 
   /**
-   * The route bead line at the top. `race`: the player and each rival as 0 (source
-   * post) .. 1 (finish). `delivery`: the player alone, 0 at the last post behind and 1
-   * at the nearest one ahead that will sign for the cargo, `remainingM` away; `place` is
-   * that post's place name (world/placenames.ts). Null hides it. A bead is moved only
-   * when it shifts half a pixel.
+   * The mini-map: the bead line under the panel. `race`: the player and each rival as 0
+   * (source post) .. 1 (finish). `delivery`: the player alone, 0 at the last post behind
+   * and 1 at the nearest one ahead that will sign for the cargo, `remainingM` away;
+   * `place` is that post's place name (world/placenames.ts). `idle`: the same line to the
+   * next post with no contract to take there, drawn grey and faint, there to be watched
+   * rather than followed. A bead is moved only when it shifts half a pixel.
    */
   setRouteProgress(
-    kind: 'race' | 'delivery' | null,
+    kind: 'race' | 'delivery' | 'idle',
     player: number,
     rivals: readonly number[],
     remainingM: number,
@@ -1546,12 +787,11 @@ export class Hud {
     if (this.disposed) return;
     if (kind !== this.raceKind) {
       this.raceKind = kind;
-      this.setVisible(this.raceEl, kind !== null);
       this.raceEl.classList.toggle('is-race', kind === 'race');
       this.raceEl.classList.toggle('is-delivery', kind === 'delivery');
+      this.raceEl.classList.toggle('is-idle', kind === 'idle');
       this.raceLabelKey = Number.NaN;
     }
-    if (kind === null) return;
     // Tenths of a kilometre out, tens of metres within one: the label is rebuilt only
     // when that reading or the place changes, not every tick.
     const near = remainingM < 1000;
@@ -1621,35 +861,6 @@ export class Hud {
     this.root.classList.remove('is-death-sequence');
   }
 
-  /**
-   * Paints the four tyre dots from the car's live wheel state.
-   *
-   * A car is not always four-wheeled and the wheels arrive in the model's own order,
-   * so the corner each dot shows is chosen by `isFront`/`sideSign` (negative is left,
-   * as everywhere else in the vehicle) rather than by index. A corner the car does not
-   * have is dimmed rather than hidden, so the grid never changes size.
-   */
-  private updateTyreDots(tyres: readonly WheelRideState[]): void {
-    for (let slot = 0; slot < 4; slot++) {
-      const wantFront = slot < 2;
-      const wantLeft = slot % 2 === 0;
-      let hottest: WheelRideState | null = null;
-      for (const tyre of tyres) {
-        if (tyre.isFront !== wantFront) continue;
-        if (tyre.sideSign < 0 !== wantLeft) continue;
-        // A six-wheeler has two corners on one side of one axle; the hotter of them is
-        // the one worth showing.
-        if (hottest === null || tyre.tyreTempC > hottest.tyreTempC) hottest = tyre;
-      }
-      const dot = this.tyreDots[slot]!;
-      const colour = hottest === null ? 'transparent' : tyreDotColour(hottest.tyreTempC);
-      if (this.tyreColours[slot] !== colour) {
-        this.tyreColours[slot] = colour;
-        dot.style.background = colour;
-      }
-      this.setVisible(dot, hottest !== null);
-    }
-  }
 
   private setText(node: HTMLElement, value: string): void {
     if (node.textContent !== value) node.textContent = value;

@@ -619,8 +619,6 @@ export interface Settings {
    * phone differ), so the same number means "a bit bigger" on both.
    */
   dashboardSize: number;
-  /** Whether the on-screen driving dashboard is drawn at all. Off by default. */
-  virtualDashboard: boolean;
   /** How far the desert is drawn; see `viewDistanceFor`. */
   viewDistance: ComputeLevel;
   /** How many ambient cars the stream holds; see `TRAFFIC_CAPS`. */
@@ -734,7 +732,6 @@ export const DEFAULT_SETTINGS: Settings = {
   abs: false,
   tractionControl: false,
   dashboardSize: 1,
-  virtualDashboard: false,
   // 16 km of desert and a 24-car stream; High is for a processor with room beyond them.
   viewDistance: 'medium',
   trafficDensity: 'medium',
@@ -1024,8 +1021,6 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
         DASHBOARD_SIZE_STEP
       );
     })(),
-    // Missing means an older save; it still gets the new default, off.
-    virtualDashboard: obj.virtualDashboard === true,
     // A save from before the split had one `cpuLoad` for both; it seeds each.
     viewDistance: computeLevel(obj.viewDistance) ?? computeLevel(obj.cpuLoad) ?? 'medium',
     trafficDensity: computeLevel(obj.trafficDensity) ?? computeLevel(obj.cpuLoad) ?? 'medium',

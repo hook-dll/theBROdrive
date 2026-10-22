@@ -836,7 +836,7 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
-  /** Puts 100 rubles in the purse. Dev only, absent in a production build. */
+  /** Adds 100 rubles to the player's money. Dev only, absent in a production build. */
   giveMoney?: () => void;
 }
 
@@ -1182,32 +1182,10 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      segmented('Virtual dashboard', [
-        {
-          label: 'On',
-          icon: 'drive',
-          hint: 'The speedometer and gauges are drawn on screen while you drive.',
-          active: () => settings.virtualDashboard,
-          pick: () => {
-            settings.virtualDashboard = true;
-            apply();
-          },
-        },
-        {
-          label: 'Off',
-          icon: 'fov',
-          hint: 'No dashboard on screen; the car’s own instruments still read from the seat.',
-          active: () => !settings.virtualDashboard,
-          pick: () => {
-            settings.virtualDashboard = false;
-            apply();
-          },
-        },
-      ]),
       sliderField(
-        'Virtual Dashboard Size',
+        'Dashboard Size',
         'gameplay',
-        'How big the virtual dashboard is drawn. 100% is the default size.',
+        'How big the on-screen panel is drawn. 100% is the default size.',
         DASHBOARD_SIZE_MIN,
         DASHBOARD_SIZE_MAX,
         DASHBOARD_SIZE_STEP,
@@ -2625,7 +2603,6 @@ export class MainMenu {
         abs: base.abs,
         tractionControl: base.tractionControl,
         dashboardSize: base.dashboardSize,
-        virtualDashboard: base.virtualDashboard,
         viewDistance: base.viewDistance,
         trafficDensity: base.trafficDensity,
       };
@@ -2663,7 +2640,6 @@ export class MainMenu {
           abs: settings.abs,
           tractionControl: settings.tractionControl,
           dashboardSize: settings.dashboardSize,
-          virtualDashboard: settings.virtualDashboard,
           viewDistance: settings.viewDistance,
           trafficDensity: settings.trafficDensity,
         });

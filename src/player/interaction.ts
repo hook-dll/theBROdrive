@@ -668,7 +668,6 @@ export class Interaction {
       get world() { return self.world; },
       get inventory() { return self.inventory; },
       get held() { return self.inventory.held; },
-      purse: () => (self.focusedFixture !== null ? self.world.state.player.money : null),
       debit: (kopecks: number) => self.focusedFixture !== null && debit(self.world, kopecks),
       credit: (kopecks: number) => credit(self.world, kopecks),
       give: (itemId: string) => self.inventory.remove(itemId),

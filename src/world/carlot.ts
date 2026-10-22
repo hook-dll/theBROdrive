@@ -21,7 +21,7 @@ import { emptyCabin } from '../vehicle/cabin';
  * stands on it is a pure function of the seed, the stop and its km band. The car itself
  * is a real car in world state from the moment its chunk enters the physics band
  * (`car_add`), carrying `lotPrice` until it is bought: its key box takes the price out of
- * the purse into `lotPaid` (`lot_pay`), and taking the key from its drawer is `car_buy`. Nobody sits
+ * the player's money into `lotPaid` (`lot_pay`), and taking the key from its drawer is `car_buy`. Nobody sits
  * in it before that. Car prices are flat (`carPrice`); what changes down the road is
  * which models stand on the lots: dearer ones further on, the foreign cars only past
  * `FOREIGN_FROM_KM`.

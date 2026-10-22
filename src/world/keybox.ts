@@ -4,10 +4,9 @@ import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
 import { formatMoney } from '../economy/economy';
 import type { CarState, GameWorld } from '../game/state';
-import { PURSE_SEAT_D, PURSE_SEAT_H, PURSE_SEAT_W } from '../render/purse';
 import { carModel } from '../vehicle/carmodels';
 import type { ChunkContext } from './chunks';
-import { rayBox, type FixtureContext, type FixtureField, type FixtureFocus, type PurseSeat, type WorldFixture } from './fixturefield';
+import { rayBox, type FixtureContext, type FixtureField, type FixtureFocus, type WorldFixture } from './fixturefield';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
 import { box, C } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
@@ -16,17 +15,16 @@ import { addStatic, yawRotation } from './props/scatter';
  * The key box beside a lot car (world/carlot.ts): how a car is bought, by hand.
  *
  * A painted steel box on a post, its face to the buyer, worked up close like the card
- * machines (player/machinefocus.ts): F frames it, and the box takes the purse into the
- * PURSE SLOT on its face (render/purse.ts). Then:
+ * machines (player/machinefocus.ts): F frames it. Then:
  *  - the LEVER: a click pulls it. It takes what is still owed of the car's price out of
- *    the purse at once (`lot_pay`, kept in `CarState.lotPaid`, so a reload never eats
+ *    the player's money at once (`lot_pay`, kept in `CarState.lotPaid`, so a reload never eats
  *    it). Short of it, it jams, rattles and springs back, and nothing is taken. Paid, it
  *    goes all the way down, a key on its tag drops inside and the drawer slides out.
  *  - the KEY DRAWER: a click takes the key: the car is bought (`car_buy`), its price
  *    board comes down (`MarketField.carSold`), the drawer slides shut again, empty, and
  *    the box lets go of the player.
  *
- * The price is painted on the plate over the slot. The key on its tag is only seen, never
+ * The price is painted on the plate on its face. The key on its tag is only seen, never
  * carried: taking it IS the purchase. Whether the key has dropped is the box's own
  * in-memory state; a rebuilt box has it back inside, and the paid lever simply drops it
  * again without taking anything.
@@ -41,10 +39,6 @@ const BODY_H = 0.34;
 const BODY_D = 0.16;
 const BODY_Y = 1.12;
 const FRONT = BODY_D / 2;
-
-/** The purse slot on the face, and how small the purse sits in it. */
-const PURSE_Y = 1.12;
-const PURSE_SCALE = 0.7;
 
 const LEVER_X = BODY_W / 2 + 0.015;
 const LEVER_Y = 1.17;
@@ -113,11 +107,6 @@ export function buildKeyBox(
   plate.scale.set(0.24, 0.075, 1);
   plate.position.set(0, BODY_Y + BODY_H / 2 - 0.05, FRONT + 0.002);
   root.add(plate);
-  // The purse slot: a steel escutcheon and its dark recess.
-  const slotW = PURSE_SEAT_W * PURSE_SCALE + 0.02;
-  const slotH = PURSE_SEAT_H * PURSE_SCALE + 0.02;
-  box(root, [slotW + 0.016, slotH + 0.016, 0.008], [0, PURSE_Y, FRONT + 0.004], C.metal);
-  box(root, [slotW, slotH, 0.006], [0, PURSE_Y, FRONT + 0.006], 0x111314);
   // The drawer's mouth, dark behind the drawer front.
   box(root, [0.22, 0.08, 0.004], [0, DRAWER_Y, FRONT + 0.001], 0x16191a);
 
@@ -191,7 +180,6 @@ class KeyBox implements WorldFixture {
   /** How far the drawer stands out, metres: the drawer aim follows it. */
   private drawerOut = 0;
   private readonly focusPose: FixtureFocus;
-  private readonly seat: PurseSeat;
 
   constructor(
     private readonly world: GameWorld,
@@ -220,9 +208,6 @@ class KeyBox implements WorldFixture {
     const [eyeX, eyeY, eyeZ] = abs(FOCUS_EYE);
     const [lookX, lookY, lookZ] = abs(FOCUS_LOOK);
     this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
-    // Seated in the recess, its face out of the box's face (+Z local, as the purse's own).
-    const [seatX, seatY, seatZ] = abs([0, PURSE_Y, FRONT + (PURSE_SEAT_D * PURSE_SCALE) / 2 - 0.002]);
-    this.seat = { x: seatX, y: seatY, z: seatZ, yaw, scale: PURSE_SCALE };
   }
 
   private car(): CarState | null {
@@ -235,10 +220,6 @@ class KeyBox implements WorldFixture {
 
   setFocused(focused: boolean): void {
     this.focused = focused;
-  }
-
-  purseSeat(): PurseSeat {
-    return this.seat;
   }
 
   aim(
@@ -298,7 +279,7 @@ class KeyBox implements WorldFixture {
           this.jam = JAM_S;
           return 'refused';
         }
-        // What is still owed comes out of the purse in one go, or nothing does.
+        // What is still owed comes out of the player's money in one go, or nothing does.
         const owed = car.lotPrice - (car.lotPaid ?? 0);
         if (owed > 0) {
           if (!ctx.debit(owed)) {

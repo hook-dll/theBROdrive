@@ -1,12 +1,12 @@
 /**
- * Cooling viewer: the radiator mesh and the temperature gauge's five zones.
+ * Cooling viewer: the radiator mesh and the panel display's temperature warnings.
  *
  * Both are things only an eye can check. The radiator has to read as a radiator in
- * the inventory strip and in a bonnet slot, and the gauge's zone colours have to be
- * readable at dashboard size against the road behind them — neither is something
+ * the inventory strip and in a bonnet slot, and the warnings have to be readable at
+ * dashboard size against the road behind them — neither is something
  * `tools/cooling.ts` can assert.
  *
- * Serve the dev server and open `/tools/coollab/`. Click to advance the gauge
+ * Serve the dev server and open `/tools/coollab/`. Click to advance the engine
  * through cold, normal, warm, hot and critical.
  */
 import * as THREE from 'three';
@@ -63,9 +63,6 @@ let index = 0;
 function paint(): void {
   const sample = SAMPLES[index];
   hud.setDriving({
-    speedKmh: 74,
-    rpm: 3100,
-    gearLabel: '3',
     fuelLitres: 42,
     tankCapacity: 65,
     temperature: {
@@ -85,19 +82,8 @@ function paint(): void {
     oilFraction: 0.8,
     engineRunning: sample.zone !== 'critical',
     engineDestroyed: false,
-    checkEngine: false,
-    handbrake: false,
-    blinkerLeft: false,
-    blinkerRight: false,
-    headlights: 'off',
-    grade: 0,
-    windRightMps: 0,
-    windForwardMps: 0,
-    steering: 0,
-    // This bench exercises the temperature gauge, so the rest of the dash is given the
-    // quietest truthful state: no tyre dots, and the player's own black faces.
-    tyres: [],
     autopilotMode: null,
+    pedalLever: null,
   });
   document.title = `coollab ${sample.zone}`;
 }

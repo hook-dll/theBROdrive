@@ -30,7 +30,7 @@ import {
   type CameraItem,
   type ContractCargoItem,
 } from './items/items';
-import { carriesRideSensitive, RideMeter } from './trip/ride';
+import { RideMeter } from './trip/ride';
 import { trackPassengerRide } from './contracts/kinds/teddyPassengers';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
@@ -40,7 +40,6 @@ import { loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
-import { PurseModel } from './render/purse';
 import { MarketField, marketProgramAnchor } from './world/market';
 import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
@@ -111,7 +110,7 @@ import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
-import { updateWeather, weather, weatherBeginS, windAt } from './world/weather';
+import { updateWeather, weather, weatherBeginS } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
@@ -204,8 +203,6 @@ const MIRROR_HAND_PITCH = 0.5;
 
 /** How often the record marker and player position are pushed into state. */
 const RECORD_INTERVAL = 2;
-/** On foot within this many metres of a money machine's purse slot, the purse shows on the HUD. */
-const PURSE_HUD_RADIUS_M = 10;
 /** Bubble gum is intentionally a cheap, readable rescue gag rather than a tool UI. */
 const GUM_CHEW_SECONDS = 3;
 const GUM_GROW_SECONDS = 5;
@@ -509,10 +506,6 @@ async function boot(): Promise<void> {
     mirrorProgramAnchor(),
     marketProgramAnchor(),
   );
-  // The one purse (render/purse.ts): hidden until a money machine takes it into its slot,
-  // and in the scene from boot, so its programs link with the rest.
-  const purse = new PurseModel();
-  renderer.scene.add(purse.root);
   // Far traffic draws as one instance per model; built now so its hidden anchor links the
   // shared far-car program behind the loading cover (render/farcars.ts).
   const farCars = new FarCarField(renderer.scene);
@@ -1002,7 +995,7 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The player starts with a little money in the purse.
+    // The player starts with a little money.
     world.apply({ t: 'money', kopecks: START_MONEY });
   }
 
@@ -1257,11 +1250,7 @@ async function boot(): Promise<void> {
     fixtures,
     origin,
     () => interaction.fixtureCtx,
-    (fixtureId) => {
-      interaction.setFocusedFixture(fixtureId);
-      // A money machine framed takes the purse into its slot; let go of, it gives it back.
-      purse.seat(fixtureId === null ? null : fixtures.get(fixtureId)?.purseSeat?.() ?? null);
-    },
+    (fixtureId) => interaction.setFocusedFixture(fixtureId),
   );
 
   const saveName = (state: typeof world.state): string => {
@@ -1542,8 +1531,6 @@ async function boot(): Promise<void> {
   const carAudioPose: CarPose = { x: 0, y: 0, z: 0, forwardX: 0, forwardZ: 1, airMps: 0, wet: 0 };
   /** How open the occupied kit car's cabin is to each ear; filled per frame in the cabin view. */
   const cabinEars: CabinOpenness = { left: 0, right: 0 };
-  /** The wind at the driven car, for the dash's wind gauge; written in place. */
-  const dashWind = { x: 0, z: 0 };
   const ambienceFrame: AmbienceFrame = {
     windMps: 0,
     rain: 0,
@@ -1697,7 +1684,12 @@ async function boot(): Promise<void> {
       const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
       hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS));
     } else {
-      hud.setRouteProgress(null, 0, NO_RIVALS, 0);
+      // No contract: the same line to the next post ahead, drawn idle.
+      const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, 0);
+      const targetS = postStop(world.seed, target).s;
+      const fromS = target > 0 ? Math.min(activeS, postStop(world.seed, target - 1).s) : 0;
+      const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
+      hud.setRouteProgress('idle', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS));
     }
     frameProfiler?.end('traffic');
 
@@ -2708,56 +2700,32 @@ async function boot(): Promise<void> {
     streamer.setLamps(night);
     frameProfiler?.end('lights');
 
-    if (driving && s.settings.virtualDashboard) {
+    if (driving) {
       const stats = driving.stats;
       const car = s.cars[drivingId!];
       const waterCap = bonnetWaterCapacity(car?.bonnet ?? []);
       const oilCap = oilCapacity(stats.engine);
-      // The dash's wind gauge reads the wind at the car itself, gusts included, in the
-      // car's frame: forward (sin h, cos h), right (-cos h, sin h).
-      const at = driving.root.position;
-      windAt(at.x + origin.x, at.z + origin.z, dashWind);
-      const heading = driving.heading;
-      const sinH = Math.sin(heading);
-      const cosH = Math.cos(heading);
-      const indicator = driving.indicator;
-      const blinkerLit = driving.indicatorLit;
-      // A kit car's cluster is in view from the seat; the chase shows none.
-      hud.setCabinInstruments(camera.mode === 'cabin' && driving.kit !== null);
       hud.setDriving({
-        speedKmh: driving.speedKmh,
-        rpm: driving.rpm,
-        gearLabel: driving.gearLabel,
         fuelLitres: car?.fuelLitres ?? 0,
         tankCapacity: stats.tankCapacity,
         temperature: driving.engineTemperature,
-        // No radiator fitted means no capacity, and the lamp treats that as dry —
+        // No radiator fitted means no capacity, and the display treats that as dry —
         // which it is: there is nowhere for water to be.
         waterFraction: waterCap > 0 ? (car?.waterLitres ?? 0) / waterCap : 0,
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,
-        checkEngine: driving.checkEngine,
-        handbrake: lastInput.handbrake,
-        blinkerLeft: blinkerLit && (indicator === 'left' || indicator === 'hazard'),
-        blinkerRight: blinkerLit && (indicator === 'right' || indicator === 'hazard'),
-        headlights: driving.headlights,
-        grade: driving.groundGrade,
-        windRightMps: -dashWind.x * cosH + dashWind.z * sinH,
-        windForwardMps: dashWind.x * sinH + dashWind.z * cosH,
-        steering: driving.steeringFraction,
-        tyres: driving.wheelRide,
-        // Null while the player steers, which is what keeps the faces black: the dash
-        // reports WHO is driving, not whether an autopilot exists.
+        // Null while the player steers, which keeps the panel's frame plain: it reports
+        // WHO is driving, not whether an autopilot exists.
         autopilotMode: autopilot.engaged ? autopilot.mode : null,
         pedalLever: autopilot.engaged ? null : input.pedalLever,
       });
     } else {
       hud.setDriving(null);
     }
-    // The G-force widget: up while he drives something that minds the ride (trip/ride.ts).
-    const rideCar = driving && s.player.seat === 'driver' ? s.cars[drivingId!] : undefined;
-    hud.setRide(rideCar && carriesRideSensitive(rideCar, inventory.all) ? ride : null);
+    hud.setMoney(s.player.money);
+    // The G-force widget: the ride of the car he drives from the driver's seat (trip/ride.ts).
+    hud.setRide(driving && s.player.seat === 'driver' ? ride : null);
     if (autopilotDebug !== null) {
       const laneGap = autopilot.laneBlockDistance;
       autopilotDebug.textContent = autopilot.engaged
@@ -2900,14 +2868,6 @@ async function boot(): Promise<void> {
       inventory.carriedMass,
       inventory.massLimit,
     );
-    // The purse: seated in the machine being worked, else on the HUD while the player is
-    // on foot near a money machine (POST, SHOP, a lot car's key box).
-    purse.update(s.player.money, origin.x, origin.z);
-    const purseNear = s.player.drivingCarId === null
-      && !machineFocus.working
-      && story === null
-      && fixtures.moneyMachineWithin(camera.eyePosition.x + origin.x, camera.eyePosition.z + origin.z, PURSE_HUD_RADIUS_M);
-    hud.setPurse(purseNear ? s.player.money : null);
     const gumBlowing = gumActive && gumTimer >= GUM_CHEW_SECONDS;
     hud.setBubbleGum(gumBlowing, (gumTimer - GUM_CHEW_SECONDS) / GUM_GROW_SECONDS);
 

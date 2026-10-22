@@ -174,7 +174,7 @@ export interface CarState {
   lotPrice?: number;
   /**
    * Kopecks already paid into this lot car's key box (world/keybox.ts), toward
-   * `lotPrice`: the whole price once its lever has taken it from the purse, or what a
+   * `lotPrice`: the whole price once its lever has taken it from the player's money, or what a
    * save from the coin days had fed in. Kept so a reload never eats it; `car_buy` clears
    * it with the price.
    */
@@ -213,8 +213,8 @@ export interface PlayerState {
   /** Shades currently on the player's face; absent from the carried pack while worn. */
   wornSunShades: SunShadesItem | null;
   /**
-   * The purse's balance, KOPECKS (economy/economy.ts). The purse is not an item: it is
-   * always carried, and money machines take it into their slot to debit or pay it.
+   * The player's balance, KOPECKS (economy/economy.ts). Not an item: money machines
+   * debit or pay it directly while they are worked.
    */
   money: number;
 }
@@ -439,7 +439,7 @@ export type WorldDelta =
   | { t: 'car_buy'; carId: string }
   /** Kopecks paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `kopecks`. */
   | { t: 'lot_pay'; carId: string; kopecks: number }
-  /** The purse's balance is now `kopecks` (economy/economy.ts `debit`, `credit`). */
+  /** The player's balance is now `kopecks` (economy/economy.ts `debit`, `credit`). */
   | { t: 'money'; kopecks: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */

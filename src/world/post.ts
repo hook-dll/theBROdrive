@@ -42,7 +42,7 @@ import { postId, postStop, type PostStop } from './poststops';
  * machine never runs dry.
  *
  * The TRAY takes cargo too, which its painted label says: clicked with cargo bound here
- * in hand, the machine draws it in, pays into the purse sitting in its slot and drops the
+ * in hand, the machine draws it in, pays into the player's money and drops the
  * signed sticker envelope into the tray. A haul is handed in the same way, with its
  * trailer or car on the lay-by and its papers in hand, in the pack or in a boot. A
  * registered parcel opens the rotary dial first (ui/dial.ts) and needs the PIN printed on
@@ -202,7 +202,7 @@ class PostMachine extends CardMachine {
         corner: `1/${count}`,
         headline: card.headline,
         lines: card.lines,
-        footer: card.ok ? 'the pay goes into the purse in the slot' : '',
+        footer: card.ok ? 'the pay goes into your money' : '',
       });
       return;
     }
@@ -364,7 +364,7 @@ class PostMachine extends CardMachine {
     this.saveStock({ consumedItemId: item.id, completedContractId: contractId, completedContractKind: item.contractKind });
     if (effect?.deltas) for (const delta of effect.deltas) this.world.apply(delta);
     ctx.give(item.id);
-    // Into the purse in the slot, before the envelope drops and the machine lets go.
+    // Paid first, before the envelope drops and the machine lets go.
     ctx.credit(pay);
     const envelope: StickerEnvelopeItem = {
       type: 'sticker_envelope',

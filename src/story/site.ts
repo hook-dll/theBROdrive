@@ -98,7 +98,7 @@ export function storySite(seed: number, road: Road, terrain: Terrain): StorySite
 /** The car every new drive starts in. */
 const START_CAR_MODEL_ID = 'kit_vaz1111';
 
-/** Kopecks in the purse at the start: four rubles fifty, a few litres of petrol and a can. */
+/** Kopecks the player has at the start: four rubles fifty, a few litres of petrol and a can. */
 export const START_MONEY = 4 * RUB + 50;
 
 /**

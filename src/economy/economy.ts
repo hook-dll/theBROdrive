@@ -3,9 +3,9 @@
  * contracts a car carries.
  *
  * Money is rubles and kopecks, and every amount in the game is an integer number of
- * KOPECKS: the balance, the prices, the pay. It is held in the purse (`PlayerState.money`),
- * which is not an item: it goes into a money machine's slot when the machine is worked
- * (render/purse.ts) and the machine debits or pays it there (`debit`, `credit`).
+ * KOPECKS: the balance, the prices, the pay. The player's balance is `PlayerState.money`,
+ * which is not an item: a money machine being worked debits or pays it directly
+ * (`debit`, `credit`).
  * Everything else in this file is a pure function of its arguments and the saved state,
  * so a card and the action behind it can never disagree about a price.
  *
@@ -35,40 +35,8 @@ export function kmIndex(km: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Money and the purse
+// Money
 // ---------------------------------------------------------------------------
-
-/**
- * The purse's six tubes, kopecks, in the order they stand in the case: 1, 5 and 10
- * kopecks, 1, 2 and 5 rubles.
- */
-export const PURSE_DENOMINATIONS: readonly number[] = [1, 5, 10, RUB, 2 * RUB, 5 * RUB];
-
-/**
- * Each `PURSE_DENOMINATIONS` coin's diameter, millimetres (the Russian coins of 1997):
- * the purse's tubes are sized to them, so the 5-ruble tube is the widest.
- */
-export const PURSE_COIN_MM: readonly number[] = [15.5, 18.5, 17.5, 20.5, 23, 25];
-
-/**
- * How many coins of each `PURSE_DENOMINATIONS` tube `kopecks` is, greedy from the
- * largest: the fewest coins that make the sum. The purse shows exactly this.
- */
-export function purseCoins(kopecks: number): number[] {
-  let rest = Math.max(0, Math.round(kopecks));
-  const counts = new Array<number>(PURSE_DENOMINATIONS.length).fill(0);
-  for (let i = PURSE_DENOMINATIONS.length - 1; i >= 0; i--) {
-    const coin = PURSE_DENOMINATIONS[i]!;
-    counts[i] = Math.floor(rest / coin);
-    rest -= counts[i]! * coin;
-  }
-  return counts;
-}
-
-/** A tube's coin as its pusher reads: `5коп`, `2р`. */
-export function denominationLabel(kopecks: number): string {
-  return kopecks >= RUB ? `${kopecks / RUB}р` : `${kopecks}коп`;
-}
 
 /**
  * An amount as it is painted everywhere: `3р 50коп`, with a zero part left out
@@ -83,7 +51,7 @@ export function formatMoney(kopecks: number): string {
 }
 
 /**
- * Takes `kopecks` out of the purse. False, and nothing taken, when it holds less: a
+ * Takes `kopecks` from the player's money. False, and nothing taken, when it is less: a
  * machine short of its price gives nothing.
  */
 export function debit(world: GameWorld, kopecks: number): boolean {
@@ -94,7 +62,7 @@ export function debit(world: GameWorld, kopecks: number): boolean {
   return true;
 }
 
-/** Puts `kopecks` into the purse. */
+/** Adds `kopecks` to the player's money. */
 export function credit(world: GameWorld, kopecks: number): void {
   const amount = Math.max(0, Math.round(kopecks));
   if (amount > 0) world.apply({ t: 'money', kopecks: world.state.player.money + amount });

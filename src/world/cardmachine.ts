@@ -3,9 +3,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
 import type { Item } from '../items/items';
-import { PURSE_SEAT_D, PURSE_SEAT_H, PURSE_SEAT_W } from '../render/purse';
 import type { ChunkContext } from './chunks';
-import { rayBox, type FixtureContext, type FixtureFocus, type PurseSeat, type WorldFixture } from './fixturefield';
+import { rayBox, type FixtureContext, type FixtureFocus, type WorldFixture } from './fixturefield';
 import { paintSign, SIGN_PLANE, signMaterial } from './market';
 import { box, C, cylinder } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
@@ -27,9 +26,8 @@ import { addStatic, yawRotation } from './props/scatter';
  *    machine gives goes to the hand.
  *  - the TRAY is the machine's one opening: what it gives lies in it, and what it takes
  *    (a post's cargo) is put into it.
- *  - the PURSE SLOT over the window: framed, the machine takes the purse into it
- *    (render/purse.ts, `purseSeat`), and what it sells is debited from it there; short,
- *    the button rattles and gives nothing.
+ *  - MONEY: what it sells is debited straight from the player's money; short, the
+ *    button rattles and gives nothing.
  *
  * The cards are painted on two canvases in turn, so a machine owns two sign-shaped
  * materials (the program `marketProgramAnchor` links at boot) and repaints them in place;
@@ -69,10 +67,6 @@ const BUTTON_Y = 0.98;
 /** A plate or showcase on the other side of the window's foot. */
 export const PANEL_X = 0.2;
 export const PANEL_Y = 0.98;
-
-/** The purse slot: a recess in the face between the card window and the board. */
-const PURSE_SLOT_Y = 1.71;
-const PURSE_SLOT_MARGIN = 0.015;
 
 /** The trough standing out of the front at the bottom, and the chute mouth above it. */
 const TRAY_W = 0.72;
@@ -184,15 +178,6 @@ export function buildCardMachine(
   board.position.set(0, BOARD_Y, FRONT - 0.006);
   board.rotation.y = Math.PI;
   root.add(board);
-
-  // The purse slot: a dark recess in a steel frame, the purse seated in it while worked.
-  const slotW = PURSE_SEAT_W + PURSE_SLOT_MARGIN * 2;
-  const slotH = PURSE_SEAT_H + PURSE_SLOT_MARGIN * 2;
-  box(root, [slotW, slotH, 0.012], [0, PURSE_SLOT_Y, FRONT - 0.006], 0x111314);
-  box(root, [slotW + 0.03, 0.015, 0.03], [0, PURSE_SLOT_Y + slotH / 2 + 0.0075, FRONT - 0.015], C.darkMetal);
-  box(root, [slotW + 0.03, 0.015, 0.03], [0, PURSE_SLOT_Y - slotH / 2 - 0.0075, FRONT - 0.015], C.darkMetal);
-  box(root, [0.015, slotH, 0.03], [slotW / 2 + 0.0075, PURSE_SLOT_Y, FRONT - 0.015], C.darkMetal);
-  box(root, [0.015, slotH, 0.03], [-slotW / 2 - 0.0075, PURSE_SLOT_Y, FRONT - 0.015], C.darkMetal);
 
   // The card window: a dark back, a frame standing proud of it, and the hinge across.
   box(root, [CARD_W + 0.02, CARD_H + 0.02, 0.01], [0, CARD_Y, FRONT - 0.005], 0x111314);
@@ -325,7 +310,6 @@ export abstract class CardMachine implements WorldFixture {
   private chuteIn = false;
   private refuseT = 0;
   private readonly focusPose: FixtureFocus;
-  private readonly seat: PurseSeat;
 
   constructor(readonly id: string, protected readonly parts: CardMachineParts) {
     const c = Math.cos(parts.yaw);
@@ -338,13 +322,6 @@ export abstract class CardMachine implements WorldFixture {
     const [eyeX, eyeY, eyeZ] = abs(FOCUS_EYE);
     const [lookX, lookY, lookZ] = abs(FOCUS_LOOK);
     this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
-    // Seated proud of the recess, its face out of the front (-Z local).
-    const [seatX, seatY, seatZ] = abs([0, PURSE_SLOT_Y, FRONT - PURSE_SEAT_D / 2 + 0.006]);
-    this.seat = { x: seatX, y: seatY, z: seatZ, yaw: parts.yaw + Math.PI, scale: 1 };
-  }
-
-  purseSeat(): PurseSeat {
-    return this.seat;
   }
 
   /** Cards the crank turns through now. */
@@ -381,7 +358,7 @@ export abstract class CardMachine implements WorldFixture {
     this.flips.push(this.selected);
   }
 
-  /** The button springs back with a rattle: it will not do it now (the purse is short). */
+  /** The button springs back with a rattle: it will not do it now (the money is short). */
   protected refuse(): FoleyEvent {
     this.refuseT = REFUSE_S;
     return 'refused';

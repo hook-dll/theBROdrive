@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- A SMALLER DRIVING PANEL, ALWAYS ON. The on-screen dashboard's dials and lamps are
+  gone (speedometer, tachometer, fuel and temperature, telltales, inclinometer, wind
+  gauge, tyre dots, gear cell, steering strip): the car's own instruments are in the
+  car. What is left is one low panel, shown while driving in the chase and the cabin
+  view alike: the G-force widget (now always there), the segment display with faults
+  and radio, the money as text, the pedal lever, and a mini-map across the foot — the
+  race or delivery bead line, or, with no contract, the line to the next post drawn
+  grey and faint. On foot the money sits above the pack's slots. The Virtual dashboard
+  setting is removed; Dashboard Size still scales the panel. The autopilot's mode now
+  colours the panel's frame instead of the dial faces.
+- THE COIN PURSE IS GONE. The 3D coin holder that the post, the shop and a lot car's
+  key box took into a slot on their face is removed, with its slot and the purse image
+  on the HUD. The money stays: a machine being worked debits or pays the player's
+  balance directly, and a short balance still rattles and gives nothing, as before.
 - THE PEDAL LEVER: THE KEYBOARD'S AND THE MOUSE BUTTONS' THROTTLE AND BRAKE HOLD A
   PEDAL. W and S (left and right mouse button while mouse driving) work a lever with
   notches (core/pedallever.ts): throttle 20/40/60/80 %, neutral, a gentle brake (30 %)
@@ -10,8 +24,8 @@
   Held past 0.25 s the throttle floors for as long as it is held and eases back to its
   notch after; the brake drops to full and stays, and at rest it is the automatic's
   reverse, as before — a tap never reverses. A brake takes the throttle away until the
-  throttle is pressed again. The lever is drawn as a seven-cell scale to the right of
-  the speedometer. Pads keep their triggers; the touch pedals keep the old ramps.
+  throttle is pressed again. The lever is drawn as a seven-cell scale on the driving
+  panel. Pads keep their triggers; the touch pedals keep the old ramps.
 - FRONT-DRIVERS UNDERSTEER, AND NO LONGER LOSE THE TAIL ON A LIGHT TURN. The tyres'
   load sensitivity (μ(Fz)) and peak slip angle were referenced at each wheel's OWN static
   load, which normalised the weight split away: every car was exactly neutral to the

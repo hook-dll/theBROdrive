@@ -22,8 +22,8 @@ const WHEEL_NOTCH = 1;
  *    camera eases back to the eyes; so does the machine itself once it has dropped
  *    something into its tray (`FixtureContext.stepBack`).
  *
- * A money machine (`WorldFixture.purseSeat`) takes the purse into its slot for as long as
- * it is framed (`onFramed`; main.ts seats render/purse.ts), and gives it back on leaving.
+ * A money machine debits or pays the player's money only while it is framed (`onFramed`
+ * tells player/interaction.ts which fixture is being worked).
  *
  * Nothing pauses: the world runs on while the player works the machine.
  */
@@ -94,8 +94,8 @@ export class MachineFocus {
     this.input.setCursorFree(true);
     if (document.pointerLockElement !== null) document.exitPointerLock();
     document.body.classList.add('is-machine-focus');
-    // Framed first, so the purse is in its slot when the machine is told; last, because
-    // what the machine gives on being framed may let go of it again at once.
+    // Framed first, so the machine can take money when it is told; last, because what
+    // the machine gives on being framed may let go of it again at once.
     this.onFramed(fixtureId);
     fixture.setFocused?.(true, this.context());
   }
