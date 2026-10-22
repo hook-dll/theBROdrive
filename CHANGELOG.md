@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 — 2026-10-22
+
+Kit cars built here from drawings (VAZ classics, Samaras, tens, Nivas, Oka, Moskvich, Volgas, UAZs, Nexia, Espero, Astra, Vectra) with working cabins and mirrors, roadside settlements with the ПОЧТА and МАГАЗИН card machines and money in rubles and kopecks, petrol by the litre, a small always-on driving panel, the pedal lever and mouse driving, one physics for every car, a rolling road with mesas back beside it, two cloud decks, Shadows / Grass / Resolution / Style settings, and the police and the dream layer removed.
 
 - A SMALLER DRIVING PANEL, ALWAYS ON. The on-screen dashboard's dials and lamps are
   gone (speedometer, tachometer, fuel and temperature, telltales, inclinometer, wind
