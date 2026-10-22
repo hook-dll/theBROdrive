@@ -89,6 +89,13 @@ export interface DrivingReadout {
    * for it.
    */
   autopilotMode: AutopilotMode | null;
+  /**
+   * The keyboard and mouse PEDAL LEVER (core/pedallever.ts) while it drives the pedals,
+   * null while a pad or touch does, or an autopilot drives: the notch the lever is on
+   * and the two pedals as they are now. Drawn as the vertical scale beside the
+   * speedometer, because the lever holds a pedal the keys no longer show by being down.
+   */
+  pedalLever: { readonly notch: number; readonly throttle: number; readonly brake: number } | null;
 }
 
 /**
@@ -203,6 +210,18 @@ const STEER_STRIP_X1 = STEER_STRIP_W - 9;
 const STEER_STRIP_Y = 5;
 const STEER_STRIP_CX = (STEER_STRIP_X0 + STEER_STRIP_X1) / 2;
 const STEER_STRIP_HALF_SPAN = (STEER_STRIP_X1 - STEER_STRIP_X0) / 2;
+/**
+ * THE PEDAL LEVER SCALE: seven sections stacked, the four throttle notches over neutral
+ * over the gentle and the full brake (core/pedallever.ts), each `LEVER_CELL` tall.
+ */
+const LEVER_W = 12;
+const LEVER_CELL = 15;
+const LEVER_THROTTLE_CELLS = 4;
+const LEVER_BRAKE_CELLS = 2;
+const LEVER_H = (LEVER_THROTTLE_CELLS + 1 + LEVER_BRAKE_CELLS) * LEVER_CELL;
+/** The top of the neutral cell and its foot: the throttle fills up, the brake down. */
+const LEVER_NEUTRAL_TOP = LEVER_THROTTLE_CELLS * LEVER_CELL;
+const LEVER_NEUTRAL_FOOT = LEVER_NEUTRAL_TOP + LEVER_CELL;
 /**
  * THE TWO INSET INSTRUMENTS — the inclinometer in the tachometer, the wind gauge in the
  * speedometer — sit in the wedge under each hub. The needles sweep 270° over the top
@@ -399,6 +418,11 @@ export class Hud {
   private readonly steerThumb: SVGLineElement;
   /** Last placed marker position, so a still wheel writes no attributes. */
   private steerStripX = -1;
+  /** The pedal lever scale (`DrivingReadout.pedalLever`): the svg, the notch frame, the fills. */
+  private readonly leverEl: SVGSVGElement;
+  private readonly leverNotch: SVGRectElement;
+  private readonly leverThrottle: SVGRectElement;
+  private readonly leverBrake: SVGRectElement;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
@@ -503,6 +527,11 @@ export class Hud {
     const steer = this.buildSteerStrip();
     this.steerStripEl = steer.svg;
     this.steerThumb = steer.thumb;
+    const lever = this.buildPedalLever();
+    this.leverEl = lever.svg;
+    this.leverNotch = lever.notch;
+    this.leverThrottle = lever.throttle;
+    this.leverBrake = lever.brake;
 
     this.gearEl = el('div', 'hud-gear');
     this.handbrakeEl = el('div', 'hud-handbrake');
@@ -555,7 +584,7 @@ export class Hud {
     telltalesRight.append(this.turnRightEl, this.mainBeamEl);
 
     const gaugeRow = el('div', 'hud-gauge-row');
-    gaugeRow.append(tach.svg, telltalesLeft, centreBlock, telltalesRight, speed.svg);
+    gaugeRow.append(tach.svg, telltalesLeft, centreBlock, telltalesRight, speed.svg, this.leverEl);
 
     const dashboard = el('div', 'hud-dashboard-shell');
     dashboard.append(gaugeRow);
@@ -1096,6 +1125,7 @@ export class Hud {
     this.dippedBeamEl.classList.toggle('is-active', readout.headlights === 'low');
     this.mainBeamEl.classList.toggle('is-active', readout.headlights === 'high');
     this.updateSteerStrip(readout.steering);
+    this.updatePedalLever(readout.pedalLever);
     this.updateInsets(readout);
   }
 
@@ -1292,6 +1322,65 @@ export class Hud {
     // with the marker off the end of the track.
     const thumb = rule('hud-steer-thumb', STEER_STRIP_CX, 1, STEER_STRIP_CX, 9);
     return { svg, thumb };
+  }
+
+  /**
+   * The pedal lever scale: seven cells, the four throttle notches over neutral over the
+   * gentle and the full brake. A frame marks the notch the lever is on; the throttle
+   * fills up from neutral and the brake down from it, as the pedals are now, and the
+   * throttle fill brightens past the top notch while the key kicks down.
+   */
+  private buildPedalLever(): { svg: SVGSVGElement; notch: SVGRectElement; throttle: SVGRectElement; brake: SVGRectElement } {
+    const svg = svgEl('svg');
+    svg.setAttribute('class', 'hud-pedal-lever');
+    svg.setAttribute('viewBox', `0 0 ${LEVER_W} ${LEVER_H}`);
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Pedal lever');
+    const rect = (cls: string, y: number, h: number): SVGRectElement => {
+      const r = svgEl('rect');
+      r.setAttribute('class', cls);
+      r.setAttribute('x', '2');
+      r.setAttribute('y', String(y));
+      r.setAttribute('width', String(LEVER_W - 4));
+      r.setAttribute('height', String(h));
+      svg.appendChild(r);
+      return r;
+    };
+    const throttle = rect('hud-lever-throttle', LEVER_NEUTRAL_TOP, 0);
+    const brake = rect('hud-lever-brake', LEVER_NEUTRAL_FOOT, 0);
+    for (let i = 1; i < LEVER_H / LEVER_CELL; i++) {
+      const line = svgEl('line');
+      const neutral = i === LEVER_THROTTLE_CELLS || i === LEVER_THROTTLE_CELLS + 1;
+      line.setAttribute('class', neutral ? 'hud-lever-tick is-neutral' : 'hud-lever-tick');
+      line.setAttribute('x1', '0');
+      line.setAttribute('x2', String(LEVER_W));
+      line.setAttribute('y1', String(i * LEVER_CELL));
+      line.setAttribute('y2', String(i * LEVER_CELL));
+      svg.appendChild(line);
+    }
+    const notch = rect('hud-lever-notch', LEVER_NEUTRAL_TOP, LEVER_CELL);
+    notch.setAttribute('x', '0.75');
+    notch.setAttribute('width', String(LEVER_W - 1.5));
+    return { svg, notch, throttle, brake };
+  }
+
+  private updatePedalLever(lever: DrivingReadout['pedalLever']): void {
+    this.leverEl.classList.toggle('is-hidden', lever === null);
+    if (lever === null) return;
+    // Notch n sits n cells above neutral; the brake notches below it.
+    this.setAttr(this.leverNotch, 'y', String(LEVER_NEUTRAL_TOP - lever.notch * LEVER_CELL));
+    // The throttle notches are 20 % apart, one cell each; past the top one's 80 % the
+    // fill is full and lit as a kickdown.
+    const up = Math.min(LEVER_NEUTRAL_TOP, (lever.throttle / 0.2) * LEVER_CELL);
+    this.setAttr(this.leverThrottle, 'y', (LEVER_NEUTRAL_TOP - up).toFixed(1));
+    this.setAttr(this.leverThrottle, 'height', up.toFixed(1));
+    this.leverEl.classList.toggle('is-kickdown', lever.throttle > 0.81);
+    // The gentle brake (30 %) fills its cell, the full brake both.
+    const down =
+      lever.brake <= 0.3
+        ? (lever.brake / 0.3) * LEVER_CELL
+        : LEVER_CELL + ((lever.brake - 0.3) / 0.7) * LEVER_CELL;
+    this.setAttr(this.leverBrake, 'height', down.toFixed(1));
   }
 
   /**

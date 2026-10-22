@@ -1,12 +1,14 @@
 /**
- * Pedal dose: does a key press deliver what the driver asked for?
+ * Pedal dose: does a touch pedal press deliver what the driver asked for?
  *
  *   bun tools/pedal-dose.ts
  *
- * A keyboard pedal is a switch, so the ONLY thing that turns it into a dose is the
+ * A touch pedal is a switch-like thumb, so the ONLY thing that turns it into a dose is the
  * shaping the input layer applies: a two-stage rise while the key is down (quick to a
  * knee, slow past it), and a faster fall when it comes up (`keyPedalStep`, `KEY_PEDAL_RAMPS`), throttle and brake
- * each at their own speeds. What that produces has to have two properties, and neither of
+ * each at their own speeds (the keyboard and the mouse buttons drive the pedal lever,
+ * core/pedallever.ts, instead). What that produces has to have two properties, and
+ * neither of
  * them can be judged by reading the constants:
  *
  *   MONOTONIC. A longer press must deliver more pedal than a shorter one, all the way

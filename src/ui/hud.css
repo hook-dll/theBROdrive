@@ -821,6 +821,47 @@ body.is-machine-focus .hud-crosshair {
   stroke-linecap: round;
 }
 
+/* THE PEDAL LEVER (core/pedallever.ts) beside the speedometer, in the steering strip's
+   inset: seven cells, throttle notches over neutral over the two brakes. The frame is
+   the notch the lever is on; the fills are the pedals as they are now. */
+.hud-pedal-lever {
+  display: block;
+  align-self: center;
+  width: 12px;
+  height: 105px;
+  box-sizing: content-box;
+  background: #11160d;
+  border: 2px inset rgba(176, 166, 140, 0.5);
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.82);
+}
+
+.hud-lever-tick {
+  stroke: rgba(232, 221, 196, 0.25);
+  stroke-width: 1;
+}
+
+.hud-lever-tick.is-neutral {
+  stroke: rgba(232, 221, 196, 0.62);
+}
+
+.hud-lever-throttle {
+  fill: color-mix(in srgb, var(--hud-telltale-green) 70%, transparent);
+}
+
+.hud-pedal-lever.is-kickdown .hud-lever-throttle {
+  fill: var(--hud-telltale-green);
+}
+
+.hud-lever-brake {
+  fill: color-mix(in srgb, var(--hud-red) 80%, transparent);
+}
+
+.hud-lever-notch {
+  fill: none;
+  stroke: var(--hud-fg);
+  stroke-width: 1.5;
+}
+
 /*
  * A fault message is already the only thing the display shows, and it scrolls when
  * it is longer than sixteen digits. Blinking it as well made the one line the player

@@ -8,6 +8,7 @@
 
 import type { TouchControls } from './touch';
 import { gamepads, PAD, type GamepadHub } from './gamepad';
+import { PedalLever } from './pedallever';
 import { INVENTORY_ITEM_LIMIT } from '../items/items';
 import { STEERING_WHEEL_HALF_LOCK_RAD } from '../vehicle/vehicletuning';
 
@@ -258,10 +259,12 @@ function resolveKeys(
 }
 
 /**
- * A keyboard pedal is a quick FOOT that goes down in TWO STAGES: quickly to a knee, then
+ * A TOUCH pedal is a quick FOOT that goes down in TWO STAGES: quickly to a knee, then
  * slowly the rest of the way, and lifts at one faster speed. Seconds for the travel.
+ * (The keyboard and the mouse buttons drive the pedal lever instead, core/pedallever.ts;
+ * these ramps were theirs and stay the thumb's.)
  *
- * A key is a switch, so how long it is held is the only dose control there is. With one
+ * A switch-like press is the only dose control there is. With one
  * constant rise the brake was floored in 0.15 s and the throttle in 0.25: a held key was
  * a full pedal before a driver could judge it, which locked the wheels of a car without
  * ABS and spun a rear-drive car on the power. Two stages give a tap a gentle pedal, a
@@ -377,8 +380,10 @@ export class InputReader {
   private mouseDriving = false;
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
-  /** The keyboard brake's knee, the driven car's threshold pedal; see `setBrakeKnee`. */
+  /** The touch brake's knee, the driven car's threshold pedal; see `setBrakeKnee`. */
   private brakeKnee: number = KEY_PEDAL_RAMPS.brake.knee;
+  /** Keyboard and mouse throttle and brake (core/pedallever.ts). */
+  private readonly lever = new PedalLever();
   /**
    * MOUSE DRIVING's steering wheel: the rim angle in radians, positive RIGHT like
    * `steer`, within ±`STEERING_WHEEL_HALF_LOCK_RAD`. Only the mouse and the steering
@@ -488,7 +493,7 @@ export class InputReader {
   }
 
   /**
-   * Where the keyboard brake's quick stage stops (`KEY_PEDAL_RAMPS`): the driven car's
+   * Where the touch brake's quick stage stops (`KEY_PEDAL_RAMPS`): the driven car's
    * threshold pedal (`Vehicle.thresholdBrakePedal`), kept off the ends so both stages
    * still exist. Without a car the ramp's own knee.
    */
@@ -506,7 +511,18 @@ export class InputReader {
    * engine revving, wheels standing still — which is exactly how it was reported.
    */
   setDriving(driving: boolean): void {
+    // A new seat starts in neutral: a lever left on a throttle notch must not drive off.
+    if (driving !== this.driving) this.lever.reset();
     this.driving = driving;
+  }
+
+  /**
+   * The keyboard and mouse pedal lever (core/pedallever.ts) while it is the device
+   * on either pedal, for the HUD's scale; null while a pad or the touch pedals hold
+   * both.
+   */
+  get pedalLever(): Readonly<PedalLever> | null {
+    return this.throttleDevice === 'keyboard' || this.brakeDevice === 'keyboard' ? this.lever : null;
   }
 
   /**
@@ -543,8 +559,9 @@ export class InputReader {
   };
 
   private onBlur = (): void => {
-    // Losing focus mid-corner must not leave the throttle pinned.
+    // Losing focus mid-corner must not leave the throttle pinned, held or on a notch.
     this.held.clear();
+    this.lever.reset();
   };
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -675,31 +692,42 @@ export class InputReader {
     for (let i = 0; i < this.padEdges.length; i++) {
       this.padEdges[i] = this.padHeld[i] === false && pad.buttons[i] === true;
     }
-    const keyThrottle = this.anyHeld(this.keys.throttle) ? 1 : 0;
-    const keyBrake = this.anyHeld(this.keys.brake) ? 1 : 0;
+    const keyThrottle = this.anyHeld(this.keys.throttle) || mouseThrottle;
+    const keyBrake = this.anyHeld(this.keys.brake) || mouseBrake;
     if (pad.rightTrigger > 0) this.throttleDevice = 'pad';
-    else if (keyThrottle > 0 || mouseThrottle) this.throttleDevice = 'keyboard';
+    else if (keyThrottle) this.throttleDevice = 'keyboard';
     else if (touchForward > 0) this.throttleDevice = 'touch';
     if (pad.leftTrigger > 0) this.brakeDevice = 'pad';
-    else if (keyBrake > 0 || mouseBrake) this.brakeDevice = 'keyboard';
+    else if (keyBrake) this.brakeDevice = 'keyboard';
     else if (touchBackward > 0) this.brakeDevice = 'touch';
 
-    // A trigger is a position, so it lands as one: no rise, no fall. A key is a switch,
-    // so it moves the pedal like a quick foot (`KEY_PEDAL_RAMPS`).
-    const wantThrottle = Math.max(keyThrottle, touchForward, mouseThrottle ? 1 : 0);
-    const wantBrake = Math.max(keyBrake, touchBackward, mouseBrake ? 1 : 0);
+    // Keys and mouse buttons drive the PEDAL LEVER (core/pedallever.ts): presses move
+    // it a notch, holds floor the throttle or drop to full brake. Another device taking
+    // a pedal puts it back in neutral, so no notch is waiting when the keys come back.
+    if (this.throttleDevice !== 'keyboard' && this.brakeDevice !== 'keyboard') this.lever.reset();
+    else this.lever.step(keyThrottle, keyBrake, dt);
+    // A trigger is a position, so it lands as one: no rise, no fall. A touch pedal is a
+    // switch-like thumb, so it moves the pedal like a quick foot (`KEY_PEDAL_RAMPS`).
     f.throttle =
       this.throttleDevice === 'pad'
         ? pad.rightTrigger
-        : keyPedalStep(f.throttle, wantThrottle, KEY_PEDAL_RAMPS.throttle, dt);
+        : this.throttleDevice === 'touch'
+          ? keyPedalStep(f.throttle, touchForward, KEY_PEDAL_RAMPS.throttle, dt)
+          : this.lever.throttle;
     f.brake =
       this.brakeDevice === 'pad'
         ? pad.leftTrigger
-        : keyPedalStep(f.brake, wantBrake, KEY_PEDAL_RAMPS.brake, dt, this.brakeKnee);
-    // Reverse is the HELD command, not the smoothed pedal: on the keyboard that is
-    // exactly the key's own state, so a release stops asking for reverse the same
-    // instant it did before, while the pedal tail decays.
-    f.reverse = this.brakeDevice === 'pad' ? pad.leftTrigger > 0 : wantBrake > 0;
+        : this.brakeDevice === 'touch'
+          ? keyPedalStep(f.brake, touchBackward, KEY_PEDAL_RAMPS.brake, dt, this.brakeKnee)
+          : this.lever.brake;
+    // Reverse is a HELD command: the trigger, the touch pedal, or the brake key held
+    // long (`PedalLever.reverse`), never a tap.
+    f.reverse =
+      this.brakeDevice === 'pad'
+        ? pad.leftTrigger > 0
+        : this.brakeDevice === 'touch'
+          ? touchBackward > 0
+          : this.lever.reverse;
 
     // The cabin editor hands the mouse back to the look and the keys to the eye.
     const editing = this.cabinEditing;
@@ -747,6 +775,7 @@ export class InputReader {
       f.throttle = 0;
       f.brake = 0;
       f.reverse = false;
+      this.lever.reset();
       // A mouse-held wheel is a position the editor has already frozen; zero would be
       // a command to centre it.
       if (f.steerMode !== 'direct') f.steer = 0;

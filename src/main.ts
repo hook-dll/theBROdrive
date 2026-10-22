@@ -2750,6 +2750,7 @@ async function boot(): Promise<void> {
         // Null while the player steers, which is what keeps the faces black: the dash
         // reports WHO is driving, not whether an autopilot exists.
         autopilotMode: autopilot.engaged ? autopilot.mode : null,
+        pedalLever: autopilot.engaged ? null : input.pedalLever,
       });
     } else {
       hud.setDriving(null);
