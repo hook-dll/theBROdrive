@@ -544,8 +544,10 @@ export class ScatterProvider implements ChunkProvider {
       }
       list.push(pl);
     }
+    // Rocks and cacti only: the ground cover's tufts are not among the tiles' props.
+    const coverForms = new Set(cover.map((pl) => pl.form));
     for (const [form, list] of byForm) {
-      const kind = { geometry: form.geometry, material: form.material, lod: form.lod };
+      const kind = { geometry: form.geometry, material: form.material, lod: form.lod, propShadows: !coverForms.has(form) };
       for (let i = 0; i < list.length; i++) {
         const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);

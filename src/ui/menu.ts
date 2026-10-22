@@ -838,6 +838,8 @@ export interface PauseHooks {
   jumpToLake?: (index: number) => void;
   /** Adds 100 rubles to the player's money. Dev only, absent in a production build. */
   giveMoney?: () => void;
+  /** Dev A/B: roadside props' sun shadows on or off; returns the new state. Dev only. */
+  toggleRoadsidePropShadows?: () => boolean;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -2828,6 +2830,12 @@ export class MainMenu {
         if (import.meta.env.DEV && hooks.giveMoney) {
           devButton('Get 100р', () => {
             hooks.giveMoney?.();
+            finish('resume');
+          });
+        }
+        if (import.meta.env.DEV && hooks.toggleRoadsidePropShadows) {
+          devButton('Roadside prop shadows', () => {
+            hooks.toggleRoadsidePropShadows?.();
             finish('resume');
           });
         }

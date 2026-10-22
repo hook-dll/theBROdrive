@@ -19,7 +19,7 @@ import { monumentsBetween, type Monument } from '../gradient';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { addStatic, yawRotation } from './scatter';
-import { matSignPost } from './poles';
+import { poleFitting, SIGN_POST } from './poles';
 import { ARTIFACT_EXTRA_SETBACK_M, artifactProgramAnchor, buildArtifact } from './artifacts';
 
 // Signs.
@@ -98,7 +98,7 @@ function buildDistanceSign(b: MonumentBuild): void {
   const postGeo = new THREE.BoxGeometry(0.09, postH, 0.09);
   b.disposables.push(postGeo);
   for (const sx of [-SIGN_WIDTH * 0.45, SIGN_WIDTH * 0.45]) {
-    const post = new THREE.Mesh(postGeo, matSignPost);
+    const post = poleFitting(postGeo, SIGN_POST);
     post.position.set(sx, postH * 0.5, 0);
     g.add(post);
   }
@@ -121,6 +121,7 @@ function buildDistanceSign(b: MonumentBuild): void {
  * own its program was linked as each sign came into view and released when it left.
  * The anchor's material has the same shape — a map, the same finish, no shadows — on a
  * one-pixel texture, so the program is linked once under the loading cover and kept.
+ * The posts are pole fittings, held by the pole anchor (`poleProgramAnchor`).
  */
 export function monumentProgramAnchor(): THREE.Object3D {
   const group = new THREE.Group();
@@ -133,8 +134,7 @@ export function monumentProgramAnchor(): THREE.Object3D {
     new THREE.PlaneGeometry(1, 1),
     new THREE.MeshStandardMaterial({ map: texture, roughness: 0.6, metalness: 0.1 }),
   );
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1, 0.09), matSignPost);
-  group.add(sign, post, artifactProgramAnchor());
+  group.add(sign, artifactProgramAnchor());
   return group;
 }
 

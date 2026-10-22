@@ -2805,7 +2805,10 @@ export class Vehicle implements Rebasable {
     // The pedal opposite an ENGAGED drive direction remains the service brake
     // until the car is nearly stopped. Neutral is different: drive may engage
     // during a slow rollback so engine torque, rather than the brakes, arrests it.
-    const automatic = this.world.state.settings.gearboxMode === 'automatic' || this.drivetrain.isPhysicallyAutomatic;
+    const automatic =
+      input.autoShift ||
+      this.world.state.settings.gearboxMode === 'automatic' ||
+      this.drivetrain.isPhysicallyAutomatic;
     const brakingForDirectionChange =
       automatic &&
       ((input.reverse && fwd > AUTO_DIRECTION_RELEASE_MPS) ||

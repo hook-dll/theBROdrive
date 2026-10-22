@@ -51,6 +51,12 @@ export interface InputFrame {
   handbrake: boolean;
   /** Requested shift this tick: -1 down, 0 none, +1 up. */
   shift: number;
+  /**
+   * The gearbox shifts itself this tick whatever `Settings.gearboxMode` says. Set by the
+   * autopilot, which never works the lever: in the manual mode it was left in neutral
+   * with its throttle down and the car did not move.
+   */
+  autoShift: boolean;
   /** Toggle intents, consumed once by the system that handles them. */
   toggleLights: boolean;
   toggleLeftIndicator: boolean;
@@ -127,6 +133,7 @@ export function emptyInput(): InputFrame {
     steer: 0,
     handbrake: false,
     shift: 0,
+    autoShift: false,
     toggleLights: false,
     toggleLeftIndicator: false,
     toggleRightIndicator: false,
@@ -458,6 +465,15 @@ export class InputReader {
   resyncPad(): void {
     const pad = this.pads.read();
     for (let i = 0; i < this.padHeld.length; i++) this.padHeld[i] = pad.buttons[i] === true;
+  }
+
+  /**
+   * Puts the parking brake latch down. Called when the autopilot takes the car: it works
+   * its own handbrake, and a latch left on would come back the moment it let go, pulling
+   * the rear wheels at whatever speed it had reached.
+   */
+  releaseHandbrake(): void {
+    this.keyboardHandbrake = false;
   }
 
   /** Attaches the touch overlay's state as a second input source. */
@@ -792,6 +808,7 @@ export class InputReader {
     f.shift =
       (this.anyPressed(this.keys.shiftUp) || this.padPressed(PAD.RB) ? 1 : 0) -
       (this.anyPressed(this.keys.shiftDown) || this.padPressed(PAD.LB) ? 1 : 0);
+    f.autoShift = false;
     f.toggleLights =
       this.anyPressed(this.keys.lights)
       || taps?.lights === true

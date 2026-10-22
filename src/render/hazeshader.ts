@@ -408,12 +408,6 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * toggling or tuning the lens never builds a program.
    */
   uniform float uPanini;
-  /**
-   * Size of tDiffuse in texels: the scene target, which the lens makes 1.25x the frame
-   * (equal to uResolution whenever the lens is off). FXAA and the ink measure their
-   * neighbours in these texels, the scene's own grid.
-   */
-  uniform vec2 uSceneResolution;
   uniform float uCameraNear;
   uniform float uCameraFar;
   uniform float uInkStrength;
@@ -534,7 +528,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * soft picture.
    */
   vec4 sceneSample(sampler2D tex, vec2 uv) {
-    vec2 samplePos = uv * uSceneResolution;
+    vec2 samplePos = uv * uResolution;
     vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
     vec2 f = samplePos - texPos1;
     vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
@@ -543,9 +537,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
     vec2 w3 = f * f * (-0.5 + 0.5 * f);
     vec2 w12 = w1 + w2;
     vec2 offset12 = w2 / w12;
-    vec2 texPos0 = (texPos1 - 1.0) / uSceneResolution;
-    vec2 texPos3 = (texPos1 + 2.0) / uSceneResolution;
-    vec2 texPos12 = (texPos1 + offset12) / uSceneResolution;
+    vec2 texPos0 = (texPos1 - 1.0) / uResolution;
+    vec2 texPos3 = (texPos1 + 2.0) / uResolution;
+    vec2 texPos12 = (texPos1 + offset12) / uResolution;
     vec4 result = vec4(0.0);
     result += texture2D(tex, vec2(texPos0.x, texPos0.y)) * w0.x * w0.y;
     result += texture2D(tex, vec2(texPos12.x, texPos0.y)) * w12.x * w0.y;
@@ -862,7 +856,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
    * sub-pixel wire, which MSAA saw. The ink is drawn after it, from the same picture.
    */
   vec4 fxaaSample(vec2 uv) {
-    vec2 px = 1.0 / uSceneResolution;
+    vec2 px = 1.0 / uResolution;
     float m = fxaaLuma(uv);
     float n = fxaaLuma(uv + vec2(0.0, px.y));
     float e = fxaaLuma(uv + vec2(px.x, 0.0));
@@ -1113,7 +1107,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
     // shader already samples excludes them by the property that actually distinguishes
     // them, and lets a canopy, a roof or a mast keep its outline against open sky.
     if (uInkStrength > 0.0 && airDistance < uCameraFar * 0.999) {
-      float ink = inkEdge(uv, 1.0 / uSceneResolution) * uInkStrength;
+      float ink = inkEdge(uv, 1.0 / uResolution) * uInkStrength;
       // The line is the surface's own colour driven down, not a black overlay:
       // black lines on sand read as dirt, dark-sand lines read as ink.
       color.rgb = mix(color.rgb, color.rgb * 0.34, ink);

@@ -144,6 +144,8 @@ export interface DevTools {
   jumpToLake(index: number): void;
   /** Adds 100 rubles to the player's money. */
   giveMoney(): void;
+  /** Dev A/B: roadside props cast and receive sun shadows, or not; returns the new state. */
+  toggleRoadsidePropShadows(): boolean;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
   updateLakeSeek(activeS: number): void;
 }
@@ -324,6 +326,14 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const amount = 100 * RUB;
     credit(ctx.world, amount);
     ctx.hud.setToast(`+${formatMoney(amount)}`);
+  };
+
+  /** Behind `PauseHooks.toggleRoadsidePropShadows`. */
+  const devToggleRoadsidePropShadows = (): boolean => {
+    const on = !ctx.streamer.propShadows;
+    ctx.streamer.setPropShadows(on);
+    ctx.hud.setToast(`roadside prop shadows: ${on ? 'as the desert (cast + receive)' : 'none (as shipped)'}`);
+    return on;
   };
 
   /**
@@ -779,6 +789,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     seatInNearestCar: devSeatInNearestCar,
     jumpToLake: devJumpToLake,
     giveMoney: devGiveMoney,
+    toggleRoadsidePropShadows: devToggleRoadsidePropShadows,
     updateLakeSeek,
   };
 }

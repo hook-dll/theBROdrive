@@ -32,7 +32,7 @@ import type { RoadDistance } from '../roaddistance';
 import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
-import { deformIcosahedron, matDeadStick } from './forms';
+import { deformIcosahedron, paintAsMaterial } from './forms';
 import { plainPoleMaterial, POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
 import { addStatic, leanRotation } from './scatter';
 
@@ -144,30 +144,31 @@ const STRIP_TIMBER = 0.8;
 const STRIP_OTHER = 0.3;
 
 // ---------------------------------------------------------------------------
-// Shared materials (never disposed; they live for the whole session)
+// Colours of what hangs on a pole, painted onto the pole's own material
 // ---------------------------------------------------------------------------
-
-// The monuments' signs and cairns borrow these; the pole line itself draws in the
-// catalogue's one vertex-coloured material (`poleMaterial`).
-export const matTimber = new THREE.MeshStandardMaterial({ color: 0x2f251c, roughness: 0.9, metalness: 0 });
-export const matChrome = new THREE.MeshStandardMaterial({
-  color: 0xd8d8d8,
-  roughness: 0.15,
-  metalness: 0.95,
-  emissive: 0x202020,
-  emissiveIntensity: 0.6,
-});
-export const matSignPost = new THREE.MeshStandardMaterial({ color: 0x5a5a5e, roughness: 0.7, metalness: 0.4 });
-export const matRust = new THREE.MeshStandardMaterial({ color: 0x6b4a32, roughness: 0.85, metalness: 0.25 });
 
 // Anomaly fittings. The tarp is sun-bleached canvas — grey with the warmth burnt out
 // of it — because a saturated cloth on a pole reads as a flag and therefore as
 // somebody being here now, which is the opposite of what a wrapped pole says. The
 // gear is the pale green-grey of painted line equipment, the one manufactured colour
 // the desert never produces by itself.
-const matTarp = new THREE.MeshStandardMaterial({ color: 0x9c9686, roughness: 1.0, metalness: 0 });
-const matGear = new THREE.MeshStandardMaterial({ color: 0x69706a, roughness: 0.62, metalness: 0.35 });
-const matRope = new THREE.MeshStandardMaterial({ color: 0x242424, roughness: 0.5, metalness: 0.4 });
+const TARP = 0x9c9686;
+const GEAR = 0x69706a;
+const ROPE = 0x242424;
+const NEST = 0x8a7a5c;
+/** The monuments' sign posts (props/monuments.ts). */
+export const SIGN_POST = 0x5a5a5e;
+
+/**
+ * One fitting on a pole: its geometry painted, on the pole's plain material (one program,
+ * no material of its own), casting and receiving as the pole it hangs on does.
+ */
+export function poleFitting(geometry: THREE.BufferGeometry, hex: number): THREE.Mesh {
+  const mesh = new THREE.Mesh(paintAsMaterial(geometry, hex), plainPoleMaterial());
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
 
 // ===========================================================================
 // The section schedule
@@ -564,11 +565,11 @@ function addAnomalyMeshes(poleGroup: THREE.Group, pose: PolePose): void {
   switch (pose.anomaly) {
     case 'wrapped': {
       const spread = Math.max(1, design.foot.r / TARP_AUTHORED_RADIUS);
-      const cloth = new THREE.Mesh(tarpWrap(), matTarp);
+      const cloth = poleFitting(tarpWrap(), TARP);
       cloth.position.x = design.foot.x;
       cloth.scale.set(spread, 1, spread);
       poleGroup.add(cloth);
-      const rope = new THREE.Mesh(tarpRope(), matRope);
+      const rope = poleFitting(tarpRope(), ROPE);
       rope.position.x = design.foot.x;
       rope.scale.set(spread, 1, spread);
       poleGroup.add(rope);
@@ -577,7 +578,7 @@ function addAnomalyMeshes(poleGroup: THREE.Group, pose: PolePose): void {
     case 'nest': {
       // A stripped pole has no arm to build on, so the nest goes on its top.
       const local: P3 = pose.fitted ? design.nest : [design.legs[0]!.x, design.height + 0.02, 0];
-      const nest = new THREE.Mesh(stickNest(), matDeadStick);
+      const nest = poleFitting(stickNest(), NEST);
       nest.position.set(local[0], local[1], local[2]);
       nest.rotation.y = hash01(pose.index, TAG_POLE_ANOMALY, 1) * Math.PI * 2;
       poleGroup.add(nest);
@@ -587,12 +588,12 @@ function addAnomalyMeshes(poleGroup: THREE.Group, pose: PolePose): void {
       // Which fitting is per POLE, not per event: a cluster where one pole carries a
       // transformer and the next a loudspeaker is a line somebody kept adding to.
       if (hash01(pose.index, TAG_POLE_ANOMALY, 2) < 0.5) {
-        const can = new THREE.Mesh(transformerCan(), matGear);
+        const can = poleFitting(transformerCan(), GEAR);
         // On the desert side (-X), where a can hangs clear of the carriageway.
         can.position.set(design.gear.x - design.gear.r - CAN_STANDOFF, POLE_GEAR_Y, 0);
         poleGroup.add(can);
       } else {
-        const horn = new THREE.Mesh(loudspeaker(), matGear);
+        const horn = poleFitting(loudspeaker(), GEAR);
         horn.position.set(design.gear.x + design.gear.r + 0.01, POLE_GEAR_Y + 0.7, 0);
         poleGroup.add(horn);
       }
@@ -837,11 +838,12 @@ export class PoleProvider implements ChunkProvider {
 /**
  * Compiles the pole programs at boot. A chunk's pole bodies are InstancedMeshes, a
  * different program from a plain Mesh, and linking it on first draw would hitch on
- * Windows. A pole with an anomaly is a plain Mesh, and what hangs on it (tarp and rope,
- * nest, transformer can or loudspeaker) is drawn on materials nothing else draws plain:
- * without these the first nest in view linked its program mid-drive (measured: 17 ms on
- * the Mac, seed `flick`, 160 s into a drive). The anchors are never drawn: their group
- * stays invisible. Each copies the shadow flags of the mesh it stands for.
+ * Windows. A pole with an anomaly is a plain Mesh, and so is what hangs on it (tarp and
+ * rope, nest, transformer can or loudspeaker, `poleFitting`), on the same plain material:
+ * the `plain` anchor holds that program (before, the fittings had materials of their
+ * own, and the first nest in view linked one mid-drive: 17 ms on the Mac, seed `flick`).
+ * The anchors are never drawn: their group stays invisible. Each copies the shadow flags
+ * of the mesh it stands for.
  */
 export function poleProgramAnchor(): THREE.Object3D {
   const group = new THREE.Group();
@@ -856,14 +858,6 @@ export function poleProgramAnchor(): THREE.Object3D {
   const plain = new THREE.Mesh(geometry, plainPoleMaterial());
   plain.castShadow = true;
   plain.receiveShadow = true;
-  group.add(
-    anchor,
-    plain,
-    new THREE.Mesh(tarpWrap(), matTarp),
-    new THREE.Mesh(tarpRope(), matRope),
-    new THREE.Mesh(stickNest(), matDeadStick),
-    new THREE.Mesh(transformerCan(), matGear),
-    new THREE.Mesh(loudspeaker(), matGear),
-  );
+  group.add(anchor, plain);
   return group;
 }

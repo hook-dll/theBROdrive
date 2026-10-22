@@ -2999,6 +2999,7 @@ export class Autopilot {
   /** Writes controls in-place using a geometric pure-pursuit waypoint. */
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
+    out.autoShift = true;
     if (this.laybyCourse) this.driveLayby(dt, vehicle, out, this.laybyCourse, originX, originZ);
     else this.driveControls(dt, vehicle, out, originX, originZ);
     this.modulateBrake(dt, vehicle, out);

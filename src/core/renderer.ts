@@ -53,14 +53,6 @@ const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
  * console knob (`Renderer.panini`) changes it. The lens is only on in cinema mode.
  */
 const DEFAULT_PANINI = 0.3;
-/**
- * Magnification the scene target carries while the cinema lens is on, per axis. The
- * lens magnifies the centre about 1.2x (Panini 0.3 at the letterboxed aspect) and the
- * target supplies that, so the Catmull-Rom tap only resamples, never upscales. Fixed
- * rather than fitted to the strength or the FOV: tuning the lens or widening the view
- * at speed never reallocates the target.
- */
-const PANINI_TARGET_SCALE = 1.25;
 
 export const CAMERA_FAR = 4000;
 /**
@@ -540,7 +532,6 @@ export class Renderer {
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
         uPanini: { value: 0 },
-        uSceneResolution: { value: new THREE.Vector2(1, 1) },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
@@ -1127,23 +1118,19 @@ export class Renderer {
   }
 
   /**
-   * Size the scene-pass target to the drawing buffer (CSS size × pixel ratio), times
-   * `PANINI_TARGET_SCALE` while the cinema lens is on, and hand the lens its uniforms.
-   * On the retro rung the lens still warps, but the target stays at the drawing size:
-   * its pixels are the look. Three's `setSize` is a no-op at an unchanged size, so
-   * tuning the strength reallocates nothing.
+   * Size the scene-pass target to the drawing buffer (CSS size × pixel ratio) and hand
+   * the lens its uniforms. The cinema lens samples this same target: a 1.25x target
+   * under it was 1.56x the scene's pixels, about 80% of the lens's cost (+1.35 ms in the
+   * cabin view on the M2 Pro), for a centre the lens magnifies past it; Catmull-Rom
+   * (render/hazeshader.ts `sceneSample`) upscales that centre instead. Three's `setSize`
+   * is a no-op at an unchanged size, so tuning the strength reallocates nothing.
    */
   private resizeHazeTarget(): void {
     this.renderer.getDrawingBufferSize(this._drawSize);
     const uniforms = this.hazeMaterial.uniforms;
-    const lens = this.cinemaLens ? this.paniniStrength : 0;
-    const scale = lens > 0 && this.quality !== 'retro' ? PANINI_TARGET_SCALE : 1;
-    const width = Math.round(this._drawSize.x * scale);
-    const height = Math.round(this._drawSize.y * scale);
-    this.hazeTarget.setSize(width, height);
-    uniforms.uSceneResolution.value.set(width, height);
+    this.hazeTarget.setSize(this._drawSize.x, this._drawSize.y);
     uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
-    uniforms.uPanini.value = lens;
+    uniforms.uPanini.value = this.cinemaLens ? this.paniniStrength : 0;
     setCleanFrameHeight(this._drawSize.y);
   }
 

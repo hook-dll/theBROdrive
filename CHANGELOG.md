@@ -1,5 +1,70 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- DEV: ROADSIDE PROP SHADOWS A/B (pause menu "Roadside prop shadows";
+  `InstanceBatches.setPropShadows`, `BatchKind.propShadows`, `ChunkStreamer.setPropShadows`).
+  The scatter's rocks and cacti along the road neither cast nor receive sun shadows
+  (only a contact disc under them), while the same forms in the desert tiles do both.
+  The switch gives the roadside ones the tiles' behaviour, or takes it away again, for
+  the session; ground cover is not touched. No program is built by it (95 before and
+  after: the tiles already linked both variants); on at km 30 it added 54 draws a frame,
+  all in the shadow passes.
+
+### Changed
+
+- THE CINEMA LENS DRAWS THE SCENE AT THE FRAME'S OWN SIZE (`core/renderer.ts`
+  `resizeHazeTarget`; `render/hazeshader.ts`, `uSceneResolution` gone). Under the Panini
+  lens the scene target was 1.25x per axis, 1.56x the pixels, about 80% of the lens's
+  cost; Catmull-Rom (`sceneSample`) now upscales the magnified centre from the 1x
+  target instead. Measured on the M2 Pro (frame drawn six times over, wall clock,
+  2126x1080): the lens added 0.76 ms in the chase view and 1.46 ms in the cabin view
+  before, 0.10 and 0.40 ms after. The centre of the frame is a little softer.
+- ONE MATERIAL FOR THE SOLID PROPS, THE POLE FITTINGS ON THE POLE'S (`world/props/forms.ts`
+  `matProp`, `paintAsMaterial`; `world/props/poles.ts` `poleFitting`;
+  `world/props/monuments.ts`). Saguaro, boulders and slab, dead stick, fallen trunk and
+  both trees draw in one vertex-coloured material instead of four (cactus, rock, dead
+  wood, plant), each form's colour painted into its vertices the way `material.color`
+  decoded it, the saguaro's flat shading moved from `flatShading` into its normals. The
+  tarp, rope, nest, transformer can, loudspeaker and the monuments' sign posts are
+  painted onto the pole's own plain material instead of four materials of their own, and
+  now cast and receive sun shadows as the pole does (they did neither); their metal
+  sheen is gone. The unused `matTimber`, `matChrome` and `matRust` are deleted. The barrel
+  and the scrub keep their own material: their Clean-style cull size is in its program.
+  Programs at boot 95 → 92, none built over a minute of driving. The prop gallery shows
+  the forms as the game draws them (it had tinted them with the palette's gravel).
+- LESS SCRIPT PER TICK IN THE CHASE VIEW (`player/interaction.ts` `seatedKitPart`,
+  `rayMeetsKitDoor`). Seated in a kit car, the aim ray was cast against every triangle of
+  the car every tick, although from the chase only a side door answers. It is now first
+  tried against the boxes of the door parts' meshes in their own frames, the box three
+  tests before a mesh's triangles: a ray that misses them all cannot pick a door, and
+  the walk is skipped. Same answers (20 000 random rays round the car: 1324 door hits,
+  none lost, 79% skipped); 0.374 → 0.002 ms a tick from the chase eye, 29 → 1.1 ms of
+  script a second on autopilot. On foot and from the cabin view nothing changes.
+- FEWER PROGRAM RE-RESOLVES A FRAME (`world/deserttiles.ts`, `renderOrder` 0.5). The
+  desert tiles' props receive shadows, the scatter's batch pages of the same forms and
+  materials do not, and three sorts opaque draws by material, then distance: the two
+  interleaved, and each change made three resolve the material's program again and
+  upload all its uniforms. The tiles' props now draw as their own group, between the
+  ground and the contact shadows: the picture is the same, the main pass's re-resolves
+  went 16.4 → 10 a frame (the rest is one switch each way per two-variant material)
+  and `setProgram` 38.7 → 27.7 ms a second on autopilot; no new programs (95 before
+  and after).
+
+### Fixed
+
+- THE AUTOPILOT DRIVES OFF FROM NEUTRAL AND OFF THE HANDBRAKE (`core/input.ts`
+  `InputFrame.autoShift`, `releaseHandbrake`; `vehicle/autopilot.ts` `drive`;
+  `vehicle/vehicle.ts`). With the gearbox on Manual the autopilot never worked the lever:
+  engaged in N it held its throttle down and the car stood still, and in a gear it never
+  shifted. Its frame now asks the gearbox to shift itself, whatever the setting, so it
+  pulls away in first and changes up as on Automatic. Engaging it also puts the
+  handbrake latch down: the autopilot works its own handbrake, and a latch left on came
+  back the moment it was switched off, pulling the rear wheels at speed (measured: on at
+  78 km/h before, off after).
+
 ## 0.23.0 — 2026-10-22
 
 Kit cars built here from drawings (VAZ classics, Samaras, tens, Nivas, Oka, Moskvich, Volgas, UAZs, Nexia, Espero, Astra, Vectra) with working cabins and mirrors, roadside settlements with the ПОЧТА and МАГАЗИН card machines and money in rubles and kopecks, petrol by the litre, a small always-on driving panel, the pedal lever and mouse driving, one physics for every car, a rolling road with mesas back beside it, two cloud decks, Shadows / Grass / Resolution / Style settings, and the police and the dream layer removed.

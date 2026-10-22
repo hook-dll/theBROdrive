@@ -47,6 +47,11 @@ export interface BatchKind {
   readonly receiveShadow?: boolean;
   readonly renderOrder?: number;
   readonly lod?: BatchLod;
+  /**
+   * A roadside prop: casts and receives as `InstanceBatches.propShadows` says, not by
+   * `castShadow`/`receiveShadow` (dev A/B against the desert tiles' props, which do both).
+   */
+  readonly propShadows?: boolean;
 }
 
 /**
@@ -139,6 +144,28 @@ export class InstanceBatches {
   private readonly pageOf = new Map<THREE.InstancedMesh, Page>();
   /** The pages of LOD kinds, the only ones `syncLod` walks. */
   private readonly lodPages: Page[] = [];
+  /** Whether `propShadows` kinds cast and receive; see `setPropShadows`. */
+  private propShadowsOn = false;
+
+  get propShadows(): boolean {
+    return this.propShadowsOn;
+  }
+
+  /**
+   * Dev A/B: roadside props cast and receive sun shadows as the desert tiles' do, or
+   * neither (as shipped). Their materials already have both variants and depth programs
+   * linked through the tiles, so no program is built mid-drive.
+   */
+  setPropShadows(on: boolean): void {
+    this.propShadowsOn = on;
+    for (const family of this.families.values()) {
+      if (!family.kind.propShadows) continue;
+      for (const page of family.pages) {
+        page.mesh.castShadow = on;
+        page.mesh.receiveShadow = on;
+      }
+    }
+  }
 
   constructor(private readonly origin: BatchOrigin) {}
 
@@ -246,8 +273,8 @@ export class InstanceBatches {
     if (kind.geometry.boundingSphere === null) kind.geometry.computeBoundingSphere();
     const mesh = new THREE.InstancedMesh(kind.geometry, kind.material, BATCH_PAGE_SLOTS);
     mesh.count = 0;
-    mesh.castShadow = kind.castShadow ?? false;
-    mesh.receiveShadow = kind.receiveShadow ?? false;
+    mesh.castShadow = kind.propShadows ? this.propShadowsOn : (kind.castShadow ?? false);
+    mesh.receiveShadow = kind.propShadows ? this.propShadowsOn : (kind.receiveShadow ?? false);
     mesh.renderOrder = kind.renderOrder ?? 0;
     // Set by hand so three's culling never reads the zero matrices of unused slots.
     const sphere = new THREE.Sphere();

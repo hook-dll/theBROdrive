@@ -637,6 +637,10 @@ export class Interaction {
   };
   /** Side doors per rig, found once; a rebuilt car has a new rig and new nodes. */
   private readonly kitDoorCache = new WeakMap<KitRig, readonly KitDoor[]>();
+  /** Per rig, the meshes under its `door_*` parts, found once: the chase view's prefilter. */
+  private readonly kitDoorMeshCache = new WeakMap<KitRig, readonly THREE.Mesh[]>();
+  private readonly kitRay = new THREE.Ray();
+  private readonly kitInverse = new THREE.Matrix4();
   private readonly kitEye = new THREE.Vector3();
   private readonly kitAhead = new THREE.Vector3();
   private readonly kitCentre = new THREE.Vector3();
@@ -1797,10 +1801,64 @@ export class Interaction {
     const t = vehicle.chassis.translation(this.tScratch);
     const half = vehicle.modelMeasure.halfExtents;
     const reach = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ) + Math.hypot(half[0], half[1], half[2]);
+    // From the chase only a door answers, and only when the ray meets it: a ray that
+    // misses every door's box as it stands now cannot pick one, so the walk over the
+    // whole car's triangles is skipped. Every tick of a drive in the chase view paid it.
+    if (!cabinView && vehicle.kit && !this.rayMeetsKitDoor(vehicle, vehicle.kit, eyeX, eyeY, eyeZ, dirX, dirY, dirZ)) {
+      const aim = this.kitAimed;
+      aim.part = null;
+      aim.distance = Infinity;
+      aim.seat = null;
+      aim.place = -1;
+      aim.throughGlass = false;
+      return null;
+    }
     if (!this.aimKit(vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, reach, true)) return null;
     const part = this.kitAimed.part;
     if (part && !cabinView && !part.control.id.startsWith('door_')) return null;
     return part;
+  }
+
+  /**
+   * Whether the eye ray meets the bounding box of any `door_*` part's mesh, each box in
+   * its own mesh's frame and pose of the last drawn frame (the matrices `aimKit` casts
+   * against). Three tests the same box before a mesh's triangles, so a ray that misses
+   * every one cannot pick a door. Conservative: past-`reach` hits still count.
+   */
+  private rayMeetsKitDoor(
+    vehicle: Vehicle,
+    rig: KitRig,
+    eyeX: number,
+    eyeY: number,
+    eyeZ: number,
+    dirX: number,
+    dirY: number,
+    dirZ: number,
+  ): boolean {
+    let meshes = this.kitDoorMeshCache.get(rig);
+    if (!meshes) {
+      const found: THREE.Mesh[] = [];
+      vehicle.root.traverse((node) => {
+        const id = (node.userData.kitControl as KitControl | undefined)?.id;
+        if (!id?.startsWith('door_')) return;
+        node.traverse((child) => {
+          const mesh = child as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+          found.push(mesh);
+        });
+      });
+      meshes = found;
+      this.kitDoorMeshCache.set(rig, meshes);
+    }
+    const ray = this.kitRay;
+    for (const mesh of meshes) {
+      ray.origin.set(eyeX, eyeY, eyeZ);
+      ray.direction.set(dirX, dirY, dirZ);
+      ray.applyMatrix4(this.kitInverse.copy(mesh.matrixWorld).invert());
+      if (ray.intersectsBox(mesh.geometry.boundingBox!)) return true;
+    }
+    return false;
   }
 
   /**

@@ -590,6 +590,12 @@ export class DesertTileStreamer {
       const instances = new THREE.InstancedMesh(form.geometry, form.material, placements.length);
       instances.castShadow = true;
       instances.receiveShadow = true;
+      // Their own place in the opaque list. The scatter's batch pages draw the same forms
+      // in the same materials without receiving shadows, and three sorts opaque draws by
+      // material then distance: interleaved, every change between the two re-resolved the
+      // material's program and uploaded all its uniforms again (16 times a frame on the
+      // road at km 30). Before the contact shadows (1), which lie over what is drawn first.
+      instances.renderOrder = 0.5;
       for (let i = 0; i < placements.length; i++) {
         const prop = placements[i]!;
         writeInstanceTransform(prop, 1);

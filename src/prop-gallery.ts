@@ -149,17 +149,16 @@ export function bootPropGallery(): void {
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; ground.receiveShadow = true; scene.add(ground);
   const entries: GalleryEntry[] = [];
   const rockPads: THREE.MeshStandardMaterial[] = [];
-  const sharedMaterials = new Set<THREE.MeshStandardMaterial>();
-  // `tinted` entries take the palette slider's gravel colour, as the scatter does in the
-  // game. Poles do not: they carry their own paint in vertex colour, which a material
-  // colour would multiply.
-  const addEntry = (name: string, root: THREE.Group, x: number, z: number, pad: { radius: number; rock: boolean }, tinted: boolean, view: { back: number; eye: number }): void => {
+  // The forms and poles stand as the game draws them: the forms share one material with
+  // their colours in their vertices, the poles carry their own vertex paint, and the game
+  // neither tints nor recolours either.
+  const addEntry = (name: string, root: THREE.Group, x: number, z: number, pad: { radius: number; rock: boolean }, view: { back: number; eye: number }): void => {
     const index = entries.length;
     const padMaterial = new THREE.MeshStandardMaterial({ color: pad.rock ? 0x815f42 : 0xc38b50, roughness: 1 });
     const disc = new THREE.Mesh(new THREE.CircleGeometry(pad.radius, 32), padMaterial); disc.rotation.x = -Math.PI / 2; disc.position.set(x, 0, z); disc.receiveShadow = true; scene.add(disc);
     if (pad.rock) rockPads.push(padMaterial);
     root.position.set(x, root.position.y, z);
-    root.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; const material = object.material; if (tinted && material instanceof THREE.MeshStandardMaterial) { applyComicShading(material, { contourStrength: 0, stippleStrength: 0, reliefShadeStrength: 0 }); sharedMaterials.add(material); } } });
+    root.traverse((object) => { if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; } });
     scene.add(root);
     const bounds = new THREE.Box3().setFromObject(root); const label = makeLabel(index, name); label.position.set(x, Math.max(2.6, bounds.max.y + 1.1), z); scene.add(label);
     entries.push({ name, root, x, z, ...view });
@@ -169,7 +168,7 @@ export function bootPropGallery(): void {
     const z = formsTop + (Math.floor(i / GRID_COLUMNS) + 0.5) * CELL_Z;
     const specimen = new THREE.Group(); const mesh = new THREE.Mesh(form.geometry, form.material); const scale = (form.minScale + form.maxScale) * 0.5;
     mesh.scale.setScalar(scale); mesh.position.y = -form.sink * form.baseRadius * scale; specimen.add(mesh);
-    addEntry(form.id, specimen, x, z, { radius: 8.5, rock: desertPropForms(SurfaceType.Rock).includes(form) }, true, { back: 10, eye: EYE_HEIGHT });
+    addEntry(form.id, specimen, x, z, { radius: 8.5, rock: desertPropForms(SurfaceType.Rock).includes(form) }, { back: 10, eye: EYE_HEIGHT });
   });
   // Every design stands as the world builds it at the start of its section: upright,
   // fully fitted, unworn. A worn pole differs only in lean and in whether it still
@@ -179,7 +178,7 @@ export function bootPropGallery(): void {
     const x = ((id % POLE_COLUMNS) - (POLE_COLUMNS - 1) / 2) * POLE_CELL_X;
     const z = polesTop + (Math.floor(id / POLE_COLUMNS) + 0.5) * POLE_CELL_Z;
     const pole = createPoleDisplay(design, { era: design.era, dilapidation: 0, wireChance: 1 }, 0xdecade, id);
-    addEntry(design.name, pole, x, z, { radius: 3.2, rock: false }, false, { back: design.height * 1.05 + 2, eye: design.height * 0.55 });
+    addEntry(design.name, pole, x, z, { radius: 3.2, rock: false }, { back: design.height * 1.05 + 2, eye: design.height * 0.55 });
   }
 
   let yaw = 0; let pitch = -0.5; const keys = new Set<string>();
@@ -195,8 +194,6 @@ export function bootPropGallery(): void {
   const setPalette = (): void => {
     const distance = Number(paletteInput.value); const palette = desertPaletteAt(distance);
     groundMaterial.color.setHex(palette.sand); for (const material of rockPads) material.color.setHex(palette.rock);
-    for (const material of sharedMaterials) material.color.setHex(palette.gravel);
-    for (const form of desertPropForms(SurfaceType.Rock)) form.material.color.setHex(palette.rock);
     readout.textContent = `${(distance / 1000).toLocaleString('ru-RU', { maximumFractionDigits: 0 })} км · песок #${palette.sand.toString(16).padStart(6, '0').toUpperCase()}`;
   };
   paletteInput.addEventListener('input', setPalette); setPalette();

@@ -1721,6 +1721,7 @@ async function boot(): Promise<void> {
         if (!autopilot.engaged) {
           autopilot.setMode('sleeper');
           autopilot.setEngaged(true);
+          input.releaseHandbrake();
         } else if (autopilot.mode === 'sleeper') {
           autopilot.setMode('hurried');
         } else if (autopilot.mode === 'hurried') {
@@ -2094,6 +2095,7 @@ async function boot(): Promise<void> {
           if (!autopilot.engaged) {
             autopilot.setMode('sleeper');
             autopilot.setEngaged(true);
+            input.releaseHandbrake();
           } else if (autopilot.mode === 'sleeper') {
             autopilot.setMode('hurried');
           } else if (autopilot.mode === 'hurried') {
@@ -3136,6 +3138,7 @@ async function boot(): Promise<void> {
     seatInNearestCar: devTools?.seatInNearestCar,
     jumpToLake: devTools?.jumpToLake,
     giveMoney: devTools?.giveMoney,
+    toggleRoadsidePropShadows: devTools?.toggleRoadsidePropShadows,
   };
 
   /**

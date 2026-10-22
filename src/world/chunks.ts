@@ -180,6 +180,15 @@ export class ChunkStreamer {
     this.scene.add(this.batches.root);
   }
 
+  /** Dev A/B: roadside props cast and receive sun shadows (`InstanceBatches.setPropShadows`). */
+  get propShadows(): boolean {
+    return this.batches.propShadows;
+  }
+
+  setPropShadows(on: boolean): void {
+    this.batches.setPropShadows(on);
+  }
+
   register(provider: ChunkProvider): void {
     this.providers.push(provider);
     for (const chunk of this.built.values()) {

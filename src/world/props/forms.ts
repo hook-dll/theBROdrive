@@ -30,7 +30,8 @@ import {
 // Shared materials (never disposed; they live for the whole session)
 // ---------------------------------------------------------------------------
 
-// Desert palette. Two deliberate departures from the obvious choice:
+// Desert palette, painted into the vertices of one material (`matProp`). Two deliberate
+// departures from the obvious choice:
 //
 //  - Boulders are sandstone, not the grey-brown of `SURFACES[Rock]`. Sharing the
 //    ground's albedo made every scattered rock read as a chip of the surface it
@@ -39,44 +40,62 @@ import {
 //    than sand (0xbf9f6b), so a boulder reads against both.
 //  - The saguaro is the one green thing here, and it is far paler than a leaf: the
 //    pale sage green of a real Carnegiea gigantea, read off a photograph rather than
-//    guessed at. It is flat shaded because the flutes below are what a saguaro IS at
-//    any distance, and flat shading is what makes them read as ribs catching the low
-//    sun down one side instead of as a smooth tube. The barrel form gets its own dry
-//    khaki, because at 0.8-1.7 scale it is a low round blob, and in green it reads as
-//    a lawn shrub that wandered into the desert.
-const matCactus = applyGroundFade(new THREE.MeshStandardMaterial({
-  // Set against the RUNNING GAME, not a swatch: the desert sun here is bright enough
-  // that a colour picked off a photograph comes out neon — brighter than the sand the
-  // plant stands on, which the eye reads as signage rather than as a plant. The sample
-  // is cut by a tenth for that reason: still unmistakably sage, and now under the
-  // ground's own albedo instead of on top of it.
-  color: 0x7d9a63,
-  roughness: 0.95,
-  metalness: 0,
-  flatShading: true,
-}));
+//    guessed at. It is flat shaded (`facet`) because the flutes are what a saguaro IS
+//    at any distance, and flat shading is what makes them read as ribs catching the
+//    low sun down one side instead of as a smooth tube. The barrel form gets its own
+//    dry khaki, because at 0.8-1.7 scale it is a low round blob, and in green it reads
+//    as a lawn shrub that wandered into the desert.
+//
+// Set against the RUNNING GAME, not a swatch: the desert sun here is bright enough that
+// a colour picked off a photograph comes out neon. The saguaro's sample is cut by a
+// tenth for that reason: still unmistakably sage, under the ground's own albedo.
+const CACTUS = 0x7d9a63;
+const DEAD_WOOD = 0x8a7a5c;
+const ROCK = 0x815f42;
+
+/**
+ * Every solid prop that is not culled with the ground cover: cactus, rock, dead wood
+ * and the two trees, each form's colours in its vertices. One material instead of one
+ * per colour: one program family, one set of uniforms, one material switch.
+ */
+const matProp = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
+
 // The barrel cactus and the scrub, about 0.7 m: the scatter's other small forms, culled
-// with the ground cover in the Clean style.
+// with the ground cover in the Clean style (their cull size is baked into this program).
 const matScrub = applyCleanCull(
   applyGroundFade(new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 })),
   0.7,
 );
-export const matDeadStick = applyGroundFade(new THREE.MeshStandardMaterial({ color: 0x8a7a5c, roughness: 1.0, metalness: 0 }));
-export const matRock = applyGroundFade(new THREE.MeshStandardMaterial({
-  color: 0x815f42,
-  roughness: 0.98,
-  metalness: 0,
-}));
 
 /**
- * The two trees carry their bark and their canopy in VERTEX COLOURS on one material,
- * so a tree is one instanced draw call instead of two. Everything else in this file
- * is a single flat colour and does not need it.
+ * Paints a part one colour as `material.color = hex` would: the hex decoded from sRGB,
+ * so a form moved from its own coloured material onto `matProp` keeps its shade. (`paint`
+ * is the trees' convention, a display hex taken as linear.)
  */
-const matPlant = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
+export function paintAsMaterial(geometry: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const colour = new THREE.Color(hex);
+  const count = geometry.getAttribute('position').count;
+  const colours = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colours[i * 3] = colour.r;
+    colours[i * 3 + 1] = colour.g;
+    colours[i * 3 + 2] = colour.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colours, 3));
+  return geometry;
+}
+
+/** Flat shading in the geometry: every face its own normal, as `flatShading` drew it. */
+function facet(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+  flat.computeVertexNormals();
+  return flat;
+}
+
+const cactus = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => paintAsMaterial(facet(geometry), CACTUS);
 
 /**
- * The ground cover's own plant material: `matPlant` plus a fade by distance from the
+ * The ground cover's own plant material: `matProp`'s look plus a fade by distance from the
  * camera, gone before `DESERT_TILE_FADE_FULL`. Past that the tiles smooth their wheel-
  * scale relief away while a prop keeps the height of the full relief, so a half-metre
  * tuft hovered a metre over the drawn ground and read as a swarm of dots in the sky.
@@ -508,8 +527,8 @@ let _trunkForm: PropForm | null = null;
 function trunkForm(): PropForm {
   _trunkForm ??= {
     id: 'trunk',
-    geometry: buildFallenTrunk(),
-    material: matDeadStick,
+    geometry: paintAsMaterial(buildFallenTrunk(), DEAD_WOOD),
+    material: matProp,
     baseRadius: 0.42,
     height: 0.5,
     collider: 'box',
@@ -527,19 +546,19 @@ let _sandForms: PropForm[] | null = null;
 export function sandForms(): PropForm[] {
   if (!_sandForms) {
     _sandForms = [
-      { id: 'saguaro', geometry: buildSaguaro(), material: matCactus, baseRadius: 0.4, height: 6.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1, vary: { stretch: 0.18, spread: 0.1, lean: 0.07 } },
+      { id: 'saguaro', geometry: cactus(buildSaguaro()), material: matProp, baseRadius: 0.4, height: 6.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1, vary: { stretch: 0.18, spread: 0.1, lean: 0.07 } },
       { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7, weight: 1 },
-      { id: 'deadstick', geometry: buildDeadStick(), material: matDeadStick, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5, weight: 1 },
+      { id: 'deadstick', geometry: paintAsMaterial(buildDeadStick(), DEAD_WOOD), material: matProp, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5, weight: 1 },
       trunkForm(),
       scrubForm(),
       // A LANDMARK IS NOT A PROP, and the weight is what says so: a fifth of an
       // ordinary member, so a driver can cross minutes of desert without meeting one.
       // `baseRadius` is the trunk at its foot AFTER `standTo`, because the capsule
       // collider's radius is derived from it.
-      { id: 'dragontree', geometry: buildDragonTree(), material: matPlant, baseRadius: 0.82, height: 6.3, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.85, maxScale: 1.2, weight: 0.18, vary: { stretch: 0.16, spread: 0.18, lean: 0.1 } },
+      { id: 'dragontree', geometry: buildDragonTree(), material: matProp, baseRadius: 0.82, height: 6.3, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.85, maxScale: 1.2, weight: 0.18, vary: { stretch: 0.16, spread: 0.18, lean: 0.1 } },
       // Rarer still, and the capsule is what makes nine metres of trunk a wall rather
       // than scenery.
-      { id: 'baobab', geometry: buildBaobab(), material: matPlant, baseRadius: 2.04, height: 9.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.8, maxScale: 1.15, weight: 0.1, vary: { stretch: 0.12, spread: 0.2, lean: 0.06 } },
+      { id: 'baobab', geometry: buildBaobab(), material: matProp, baseRadius: 2.04, height: 9.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.8, maxScale: 1.15, weight: 0.1, vary: { stretch: 0.12, spread: 0.2, lean: 0.06 } },
     ];
   }
   return _sandForms;
@@ -549,10 +568,10 @@ let _rockForms: PropForm[] | null = null;
 export function rockForms(): PropForm[] {
   if (!_rockForms) {
     _rockForms = [
-      { id: 'boulder', geometry: deformIcosahedron(0x00b1, 1.0), material: matRock, baseRadius: 1, height: 2, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
-      { id: 'boulderlow', geometry: deformIcosahedron(0x00b2, 0.55), material: matRock, baseRadius: 1, height: 1.1, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
-      { id: 'bouldertall', geometry: deformIcosahedron(0x00b3, 1.5), material: matRock, baseRadius: 1, height: 3, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
-      { id: 'slab', geometry: deformIcosahedron(0x00b4, 0.26), material: matRock, baseRadius: 1, height: 0.52, collider: 'hull', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9, weight: 1 },
+      { id: 'boulder', geometry: paintAsMaterial(deformIcosahedron(0x00b1, 1.0), ROCK), material: matProp, baseRadius: 1, height: 2, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'boulderlow', geometry: paintAsMaterial(deformIcosahedron(0x00b2, 0.55), ROCK), material: matProp, baseRadius: 1, height: 1.1, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'bouldertall', geometry: paintAsMaterial(deformIcosahedron(0x00b3, 1.5), ROCK), material: matProp, baseRadius: 1, height: 3, collider: 'hull', sink: 0.28, rotate3d: true, minScale: 0.4, maxScale: 1.6, weight: 1 },
+      { id: 'slab', geometry: paintAsMaterial(deformIcosahedron(0x00b4, 0.26), ROCK), material: matProp, baseRadius: 1, height: 0.52, collider: 'hull', sink: 0.3, rotate3d: true, minScale: 0.5, maxScale: 1.9, weight: 1 },
     ];
   }
   return _rockForms;
@@ -823,11 +842,11 @@ function pieceTable(): Record<string, readonly PropPiece[]> {
       // PURPOSE, for the reason given above the interface: a tonne of anything stops a
       // car dead, and these pieces exist so the car WALKS THROUGH the fallen plant.
       saguaro: [
-        { geometry: ribbedColumn(0.3, 0.375, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 1.05, 0], capsule: [1.05, 0.33], mass: 60 },
-        { geometry: ribbedColumn(0.29, 0.3, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 3.15, 0], capsule: [1.05, 0.3], mass: 45 },
-        { geometry: ribbedColumn(0.27, 0.29, 2.1, 18, 9, 0.08), material: matCactus, offset: [0, 5.25, 0], capsule: [1.05, 0.28], mass: 34 },
-        { geometry: armPiece(1), material: matCactus, offset: [1.05, 4.55, 0], capsule: [1.05, 0.14], mass: 16 },
-        { geometry: armPiece(-1), material: matCactus, offset: [-1.05, 5.15, 0], capsule: [1.05, 0.14], mass: 16 },
+        { geometry: cactus(ribbedColumn(0.3, 0.375, 2.1, 18, 9, 0.08)), material: matProp, offset: [0, 1.05, 0], capsule: [1.05, 0.33], mass: 60 },
+        { geometry: cactus(ribbedColumn(0.29, 0.3, 2.1, 18, 9, 0.08)), material: matProp, offset: [0, 3.15, 0], capsule: [1.05, 0.3], mass: 45 },
+        { geometry: cactus(ribbedColumn(0.27, 0.29, 2.1, 18, 9, 0.08)), material: matProp, offset: [0, 5.25, 0], capsule: [1.05, 0.28], mass: 34 },
+        { geometry: cactus(armPiece(1)), material: matProp, offset: [1.05, 4.55, 0], capsule: [1.05, 0.14], mass: 16 },
+        { geometry: cactus(armPiece(-1)), material: matProp, offset: [-1.05, 5.15, 0], capsule: [1.05, 0.14], mass: 16 },
       ],
       barrel: [
         { geometry: lump(0.19), material: matScrub, offset: [0.1, 0.12, 0.05], capsule: [0.06, 0.16], mass: 4 },
