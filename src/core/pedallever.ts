@@ -12,8 +12,10 @@
  *  - A PRESS of the throttle key moves the lever one notch up, and from neutral or the
  *    brake straight to notch 1. The pedal travels to the new notch gently
  *    (`NOTCH_RATE_PER_S`), starting the moment the key goes down. Held past
- *    `LONG_PRESS_S` it floors the pedal for as long as it is held (kickdown), and let go
- *    it eases back to its notch.
+ *    `LONG_PRESS_S` it drives the pedal to the floor for as long as it is held
+ *    (kickdown), and the lever's notch follows the pedal up as it passes each one: let
+ *    go, the lever stays on the notch the pedal had reached, so a short hold sets a
+ *    higher notch and a long one the top (the pedal easing back from the floor to it).
  *  - A PRESS of the brake key on a throttle notch moves the lever one notch down: that
  *    is lifting off, not braking. In neutral, or held past `BRAKE_HOLD_S` from any notch,
  *    it is the BRAKE (−1): the throttle goes to 0 and stays there, and the brake pedal
@@ -33,7 +35,7 @@ export const THROTTLE_NOTCHES = [0.2, 0.4, 0.6, 0.8] as const;
 export const LEVER_MIN = -1;
 export const LEVER_MAX = THROTTLE_NOTCHES.length;
 /** Seconds the throttle key must be held to stop being a press and kick down. */
-export const LONG_PRESS_S = 0.25;
+export const LONG_PRESS_S = 0.11;
 /** Seconds the brake key must be held on a throttle notch to stop lifting and brake. */
 export const BRAKE_HOLD_S = 0.11;
 /** Pedal travel per second between notches: one throttle notch in 0.2 s. */
@@ -114,6 +116,12 @@ export class PedalLever {
         ? KICKDOWN_RATE_PER_S
         : NOTCH_RATE_PER_S;
     this.throttle = approach(this.throttle, throttleWant, throttleRate * dt);
+    // A kickdown carries the lever up with the pedal: the notch it has reached is the
+    // one the lever stays on when the key comes up.
+    if (kickdown) {
+      const reached = Math.floor(this.throttle / THROTTLE_NOTCHES[0] + 1e-6);
+      this.notch = Math.max(this.notch, Math.min(LEVER_MAX, reached));
+    }
     const brakeRate = brakeWant > this.brake ? knee / BRAKE_KNEE_S : RELEASE_RATE_PER_S;
     this.brake = approach(this.brake, brakeWant, brakeRate * dt);
   }
