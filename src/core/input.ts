@@ -380,7 +380,7 @@ export class InputReader {
   private mouseDriving = false;
   /** Analog positions read against the assist's cap; see `setAnalogSteeringAssist`. */
   private analogSteerAssist = true;
-  /** The touch brake's knee, the driven car's threshold pedal; see `setBrakeKnee`. */
+  /** The brake's knee, the driven car's threshold pedal; see `setBrakeKnee`. */
   private brakeKnee: number = KEY_PEDAL_RAMPS.brake.knee;
   /** Keyboard and mouse throttle and brake (core/pedallever.ts). */
   private readonly lever = new PedalLever();
@@ -493,9 +493,9 @@ export class InputReader {
   }
 
   /**
-   * Where the touch brake's quick stage stops (`KEY_PEDAL_RAMPS`): the driven car's
-   * threshold pedal (`Vehicle.thresholdBrakePedal`), kept off the ends so both stages
-   * still exist. Without a car the ramp's own knee.
+   * The driven car's threshold pedal (`Vehicle.thresholdBrakePedal`): where the touch
+   * brake's quick stage stops (`KEY_PEDAL_RAMPS`) and how far the pedal lever's brake goes
+   * down, kept off the ends. Without a car the ramp's own knee.
    */
   setBrakeKnee(pedal: number | null): void {
     const knee = pedal ?? KEY_PEDAL_RAMPS.brake.knee;
@@ -705,7 +705,7 @@ export class InputReader {
     // it a notch, holds floor the throttle or drop to full brake. Another device taking
     // a pedal puts it back in neutral, so no notch is waiting when the keys come back.
     if (this.throttleDevice !== 'keyboard' && this.brakeDevice !== 'keyboard') this.lever.reset();
-    else this.lever.step(keyThrottle, keyBrake, dt);
+    else this.lever.step(keyThrottle, keyBrake, dt, this.brakeKnee);
     // A trigger is a position, so it lands as one: no rise, no fall. A touch pedal is a
     // switch-like thumb, so it moves the pedal like a quick foot (`KEY_PEDAL_RAMPS`).
     f.throttle =

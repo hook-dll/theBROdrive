@@ -42,7 +42,13 @@ export interface DrivingReadout {
    * and the two pedals as they are now. Drawn as the vertical scale beside the
    * speedometer, because the lever holds a pedal the keys no longer show by being down.
    */
-  pedalLever: { readonly notch: number; readonly throttle: number; readonly brake: number } | null;
+  pedalLever: {
+    readonly notch: number;
+    readonly throttle: number;
+    readonly brake: number;
+    /** The brake pedal's ceiling, the car's threshold pedal: a full brake cell. */
+    readonly knee: number;
+  } | null;
 }
 
 /**
@@ -63,13 +69,13 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const LCD_DIGITS = 16;
 
 /**
- * THE PEDAL LEVER SCALE: seven sections stacked, the four throttle notches over neutral
- * over the gentle and the full brake (core/pedallever.ts), each `LEVER_CELL` tall.
+ * THE PEDAL LEVER SCALE: six sections stacked, the four throttle notches over neutral
+ * over the brake (core/pedallever.ts), each `LEVER_CELL` tall.
  */
 const LEVER_W = 12;
 const LEVER_CELL = 9;
 const LEVER_THROTTLE_CELLS = 4;
-const LEVER_BRAKE_CELLS = 2;
+const LEVER_BRAKE_CELLS = 1;
 const LEVER_H = (LEVER_THROTTLE_CELLS + 1 + LEVER_BRAKE_CELLS) * LEVER_CELL;
 /** The top of the neutral cell and its foot: the throttle fills up, the brake down. */
 const LEVER_NEUTRAL_TOP = LEVER_THROTTLE_CELLS * LEVER_CELL;
@@ -612,10 +618,10 @@ export class Hud {
 
 
   /**
-   * The pedal lever scale: seven cells, the four throttle notches over neutral over the
-   * gentle and the full brake. A frame marks the notch the lever is on; the throttle
-   * fills up from neutral and the brake down from it, as the pedals are now, and the
-   * throttle fill brightens past the top notch while the key kicks down.
+   * The pedal lever scale: six cells, the four throttle notches over neutral over the
+   * brake. A frame marks the notch the lever is on; the throttle fills up from neutral
+   * and the brake down from it, as the pedals are now, and the throttle fill brightens
+   * past the top notch while the key kicks down.
    */
   private buildPedalLever(): { svg: SVGSVGElement; notch: SVGRectElement; throttle: SVGRectElement; brake: SVGRectElement } {
     const svg = svgEl('svg');
@@ -654,7 +660,7 @@ export class Hud {
   private updatePedalLever(lever: DrivingReadout['pedalLever']): void {
     this.leverEl.classList.toggle('is-hidden', lever === null);
     if (lever === null) return;
-    // Notch n sits n cells above neutral; the brake notches below it.
+    // Notch n sits n cells above neutral; the brake below it.
     this.setAttr(this.leverNotch, 'y', String(LEVER_NEUTRAL_TOP - lever.notch * LEVER_CELL));
     // The throttle notches are 20 % apart, one cell each; past the top one's 80 % the
     // fill is full and lit as a kickdown.
@@ -662,11 +668,8 @@ export class Hud {
     this.setAttr(this.leverThrottle, 'y', (LEVER_NEUTRAL_TOP - up).toFixed(1));
     this.setAttr(this.leverThrottle, 'height', up.toFixed(1));
     this.leverEl.classList.toggle('is-kickdown', lever.throttle > 0.81);
-    // The gentle brake (30 %) fills its cell, the full brake both.
-    const down =
-      lever.brake <= 0.3
-        ? (lever.brake / 0.3) * LEVER_CELL
-        : LEVER_CELL + ((lever.brake - 0.3) / 0.7) * LEVER_CELL;
+    // The brake at the car's threshold pedal fills its cell.
+    const down = Math.min(1, lever.knee > 0 ? lever.brake / lever.knee : 0) * LEVER_CELL;
     this.setAttr(this.leverBrake, 'height', down.toFixed(1));
   }
 

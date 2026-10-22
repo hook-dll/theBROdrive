@@ -16,15 +16,16 @@
   key box took into a slot on their face is removed, with its slot and the purse image
   on the HUD. The money stays: a machine being worked debits or pays the player's
   balance directly, and a short balance still rattles and gives nothing, as before.
-- THE PEDAL LEVER: THE KEYBOARD'S AND THE MOUSE BUTTONS' THROTTLE AND BRAKE HOLD A
-  PEDAL. W and S (left and right mouse button while mouse driving) work a lever with
-  notches (core/pedallever.ts): throttle 20/40/60/80 %, neutral, a gentle brake (30 %)
-  and the full brake. A press under 0.25 s moves it one notch, the pedal easing there,
-  and it stays; throttle from any brake notch goes straight to the first throttle notch.
-  Held past 0.25 s the throttle floors for as long as it is held and eases back to its
-  notch after; the brake drops to full and stays, and at rest it is the automatic's
-  reverse, as before — a tap never reverses. A brake takes the throttle away until the
-  throttle is pressed again. The lever is drawn as a seven-cell scale on the driving
+- THE PEDAL LEVER: THE KEYBOARD'S AND THE MOUSE BUTTONS' THROTTLE HOLDS A PEDAL. W and
+  S (left and right mouse button while mouse driving) work a lever with notches
+  (core/pedallever.ts): throttle 20/40/60/80 %, neutral, and the brake. A W press under
+  0.25 s moves it one notch up, the pedal easing there, and it stays; held longer the
+  throttle floors for as long as it is held and eases back to its notch after. An S
+  press on a throttle notch steps it down (lifting off); in neutral, or held past 0.25 s,
+  S is the brake for as long as it is held — down to the car's threshold pedal in 0.1 s,
+  as the keyboard brake always went — and let go the lever is in neutral with no
+  throttle until W is pressed again. Held at rest it is the automatic's reverse, as
+  before; a tap never reverses. The lever is drawn as a six-cell scale on the driving
   panel. Pads keep their triggers; the touch pedals keep the old ramps.
 - FRONT-DRIVERS UNDERSTEER, AND NO LONGER LOSE THE TAIL ON A LIGHT TURN. The tyres'
   load sensitivity (μ(Fz)) and peak slip angle were referenced at each wheel's OWN static

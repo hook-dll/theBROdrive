@@ -414,7 +414,7 @@ body.is-machine-focus .hud-crosshair {
   display: block;
   align-self: center;
   width: 12px;
-  height: 63px;
+  height: 54px;
   box-sizing: content-box;
   background: #11160d;
   border: 2px inset rgba(176, 166, 140, 0.5);
