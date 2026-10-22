@@ -343,30 +343,43 @@ body.is-machine-focus .hud-crosshair {
   gap: 8px;
 }
 
+/* The display's column: the segment display, the mini-map's line under it at its
+   width, the mini-map's words under that. */
 .hud-panel-centre {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 5px;
+  gap: 4px;
 }
 
+/* The money's slot left of the display, as wide as the G-force widget and the lever
+   together on its right, so the display sits at the panel's centre. */
 .hud-money-slot {
   display: flex;
+  flex: none;
+  width: 86px;
   justify-content: flex-end;
 }
 
-/* The money: a plain line of text, on the panel under the display while driving and
-   above the pack's slots on foot. */
+/* The money: rubles over kopecks on the panel, on one line above the pack's slots on
+   foot. */
 .hud-money {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   color: var(--hud-fg);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .hud-inventory .hud-money {
+  flex-direction: row;
+  gap: 0.35em;
+  font-size: 13px;
   background: var(--hud-panel);
   padding: 3px 10px;
 }
@@ -617,16 +630,17 @@ body.is-machine-focus .hud-crosshair {
 
 
 
-/* THE MINI-MAP: the bead line across the panel's foot, from the post behind to the one
-   ahead. Race: the player a filled bead, each rival a hollow one, a chequered flag at
-   the finish. Delivery: the player alone, the receiving post as an amber pin, the
-   distance beside it. Idle (no contract): the same line to the next post, grey and
-   faint, there to be watched rather than followed. Beads move by transform. */
+/* THE MINI-MAP: the bead line under the segment display and as long as it, its words a
+   line further down, from the post behind to the one ahead. Race: the player a filled
+   bead, each rival a hollow one, a chequered flag at the finish. Delivery: the player
+   alone, the receiving post as an amber pin. Idle (no contract): the same line to the
+   next post, grey and faint, there to be watched rather than followed. Beads move by
+   transform. */
 .hud-race {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 0 4px 0 6px;
+  gap: 2px;
 }
 .hud-race.is-idle {
   opacity: 0.45;
@@ -635,7 +649,7 @@ body.is-machine-focus .hud-crosshair {
 .hud-race-track {
   position: relative;
   flex: none;
-  width: 236px;
+  width: 242px;
   height: 14px;
 }
 .hud-race-line {
@@ -693,7 +707,7 @@ body.is-machine-focus .hud-crosshair {
   z-index: 1;
 }
 .hud-race-label {
-  min-width: 92px;
+  text-align: center;
   color: var(--hud-fg);
   font-size: 11px;
   font-weight: 700;

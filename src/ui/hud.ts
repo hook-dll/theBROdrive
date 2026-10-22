@@ -121,8 +121,8 @@ const MASS_ALARM_FRACTION = 0.9;
 const TOAST_DURATION_MS = 3200;
 const TOAST_LEAVE_MS = 300;
 const MAX_TOASTS = 4;
-/** Length of the mini-map's bead line, px; matches `.hud-race-track` width in hud.css. */
-const RACE_LINE_PX = 236;
+/** Length of the mini-map's bead line, px: the segment display's width less the end marks' overhang (hud.css `.hud-race-track`). */
+const RACE_LINE_PX = 242;
 /**
  * The crosshair fades this long after the view was last turned: long enough to read
  * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
@@ -286,21 +286,23 @@ export class Hud {
     this.moneySlot = el('div', 'hud-money-slot');
 
     // THE MINI-MAP: the route bead line, from the post behind to the one ahead (or a
-    // race's start to its finish), under the panel's row.
+    // race's start to its finish), under the display and as long as it, its words a
+    // line further down.
     this.raceEl = el('div', 'hud-race is-idle');
     this.raceTrackEl = el('div', 'hud-race-track');
     this.raceTrackEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-start'), el('div', 'hud-race-finish'));
     this.raceLabelEl = el('div', 'hud-race-label');
     this.raceEl.append(this.raceTrackEl, this.raceLabelEl);
 
-    // THE PANEL: the G-force widget, the display with the money under it, the pedal
-    // lever; the mini-map across the foot. The car's own instruments are in the car.
+    // THE PANEL, the segment display at its centre with the mini-map under it; the money
+    // to its left, the G-force widget and the pedal lever to its right. The car's own
+    // instruments are in the car.
     const centre = el('div', 'hud-panel-centre');
-    centre.append(this.lcdEl, this.moneySlot);
+    centre.append(this.lcdEl, this.raceEl);
     const row = el('div', 'hud-panel-row');
-    row.append(this.rideEl, centre, this.leverEl);
+    row.append(this.moneySlot, centre, this.rideEl, this.leverEl);
     const dashboard = el('div', 'hud-dashboard-shell');
-    dashboard.append(row, this.raceEl);
+    dashboard.append(row);
     this.drivingCluster.append(dashboard);
 
     this.invMassEl = el('div', 'hud-inv-mass');
@@ -468,11 +470,20 @@ export class Hud {
     this.updatePedalLever(readout.pedalLever);
   }
 
-  /** The player's money, kopecks: on the panel while driving, by the pack on foot. */
+  /**
+   * The player's money, kopecks: rubles over kopecks on the panel while driving, on one
+   * line by the pack on foot.
+   */
   setMoney(kopecks: number): void {
     if (kopecks === this.moneyShown) return;
     this.moneyShown = kopecks;
-    this.moneyEl.textContent = formatMoney(kopecks);
+    // Rubles and kopecks as separate parts, so the panel can stack them.
+    const parts = formatMoney(kopecks).split(' ').map((text) => {
+      const part = el('span', 'hud-money-part');
+      part.textContent = text;
+      return part;
+    });
+    this.moneyEl.replaceChildren(...parts);
   }
 
   /** Player's dashboard size (Settings.dashboardSize), on top of the presentation's own. */

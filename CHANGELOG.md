@@ -6,10 +6,12 @@
   gone (speedometer, tachometer, fuel and temperature, telltales, inclinometer, wind
   gauge, tyre dots, gear cell, steering strip): the car's own instruments are in the
   car. What is left is one low panel, shown while driving in the chase and the cabin
-  view alike: the G-force widget (now always there), the segment display with faults
-  and radio, the money as text, the pedal lever, and a mini-map across the foot — the
-  race or delivery bead line, or, with no contract, the line to the next post drawn
-  grey and faint. On foot the money sits above the pack's slots. The Virtual dashboard
+  view alike, built round the segment display (faults and radio) at its centre: under
+  it the mini-map at the display's width — the race or delivery bead line, or, with no
+  contract, the line to the next post drawn grey and faint — and its words a line
+  lower; the money to its left, rubles over kopecks; the G-force widget (now always
+  there) and the pedal lever to its right. On foot the money sits above the pack's
+  slots. The Virtual dashboard
   setting is removed; Dashboard Size still scales the panel. The autopilot's mode now
   colours the panel's frame instead of the dial faces.
 - THE COIN PURSE IS GONE. The 3D coin holder that the post, the shop and a lot car's
@@ -21,7 +23,7 @@
   (core/pedallever.ts): throttle 20/40/60/80 %, neutral, and the brake. A W press under
   0.25 s moves it one notch up, the pedal easing there, and it stays; held longer the
   throttle floors for as long as it is held and eases back to its notch after. An S
-  press on a throttle notch steps it down (lifting off); in neutral, or held past 0.25 s,
+  press on a throttle notch steps it down (lifting off); in neutral, or held past 0.11 s,
   S is the brake for as long as it is held — down to the car's threshold pedal in 0.1 s,
   as the keyboard brake always went — and let go the lever is in neutral with no
   throttle until W is pressed again. Held at rest it is the automatic's reverse, as

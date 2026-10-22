@@ -15,7 +15,7 @@
  *    `LONG_PRESS_S` it floors the pedal for as long as it is held (kickdown), and let go
  *    it eases back to its notch.
  *  - A PRESS of the brake key on a throttle notch moves the lever one notch down: that
- *    is lifting off, not braking. In neutral, or held past `LONG_PRESS_S` from any notch,
+ *    is lifting off, not braking. In neutral, or held past `BRAKE_HOLD_S` from any notch,
  *    it is the BRAKE (−1): the throttle goes to 0 and stays there, and the brake pedal
  *    goes down to the car's threshold pedal — the hardest stop that still rolls the
  *    wheels (`Vehicle.thresholdBrakePedal`, `setBrakeKnee`) — in `BRAKE_KNEE_S`, as the
@@ -32,8 +32,10 @@ export const THROTTLE_NOTCHES = [0.2, 0.4, 0.6, 0.8] as const;
 /** The brake notch, and the top throttle notch. */
 export const LEVER_MIN = -1;
 export const LEVER_MAX = THROTTLE_NOTCHES.length;
-/** Seconds a key must be held to stop being a press and become a hold. */
+/** Seconds the throttle key must be held to stop being a press and kick down. */
 export const LONG_PRESS_S = 0.25;
+/** Seconds the brake key must be held on a throttle notch to stop lifting and brake. */
+export const BRAKE_HOLD_S = 0.11;
 /** Pedal travel per second between notches: one throttle notch in 0.2 s. */
 export const NOTCH_RATE_PER_S = 1;
 /** Throttle travel per second while kicking down, and back to the notch after. */
@@ -80,7 +82,7 @@ export class PedalLever {
       } else {
         this.brakeHeldS += dt;
       }
-      if (this.brakeHeldS >= LONG_PRESS_S) this.braking = true;
+      if (this.brakeHeldS >= BRAKE_HOLD_S) this.braking = true;
     } else {
       this.brakeHeldS = -1;
       this.braking = false;
@@ -99,7 +101,7 @@ export class PedalLever {
       this.throttleHeldS = -1;
     }
     const kickdown = this.throttleHeldS >= LONG_PRESS_S;
-    this.reverse = this.braking && this.brakeHeldS >= LONG_PRESS_S;
+    this.reverse = this.braking && this.brakeHeldS >= BRAKE_HOLD_S;
 
     const throttleWant = kickdown ? 1 : this.notch > 0 ? THROTTLE_NOTCHES[this.notch - 1]! : 0;
     const brakeWant = this.braking ? knee : 0;
