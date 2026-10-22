@@ -1109,6 +1109,12 @@ export class Vehicle implements Rebasable {
   // on the wheel. The road wheels hang off it with no play, so it is also the rim's.
   private steerAngle = 0;
   /**
+   * The load the tyres' load sensitivity and peak angle are referenced at, N: the car's
+   * mean corner load (weight over the wheel count). One tyre all round, so the nose of
+   * a nose-heavy car runs its tyres further up their load curve than its tail does.
+   */
+  private tyreReferenceLoadN = 1;
+  /**
    * KEYBOARD STEERING (`SteerMode` 'keys', vehicletuning.ts): the steering wheel's angle,
    * radians at the rim and positive to the left like the rack.
    */
@@ -1706,6 +1712,12 @@ export class Vehicle implements Rebasable {
     const airSq = speedMps * speedMps;
     const frontKept = frontLoadN > 0 ? 1 - (this.liftFrontCoeff * airSq) / frontLoadN : 1;
     const rearKept = rearLoadN > 0 ? 1 - (this.liftRearCoeff * airSq) / rearLoadN : 1;
+    // The heavier axle's tyres are the further over their reference load
+    // (`tyreReferenceLoadN`), so its coefficient is the one the car corners on.
+    const axles = this.axleGeometry;
+    const frontCorner = frontLoadN / Math.max(1, axles.frontCount);
+    const rearCorner = rearLoadN / Math.max(1, axles.rearCount);
+    const axleMu = Math.min(this.tyreLoadFactor(frontCorner), this.tyreLoadFactor(rearCorner));
     return (
       GRAVITY *
       SURFACES[surfaceType].mu *
@@ -1714,7 +1726,20 @@ export class Vehicle implements Rebasable {
       this.tyreCarGrip(this.statsValue.mass) *
       this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip *
+      axleMu *
       clamp(Math.min(frontKept, rearKept), 0, 1)
+    );
+  }
+
+  /**
+   * μ(Fz), the tyre's load sensitivity (`LOAD_SENSITIVITY`): exactly 1 at this car's
+   * mean corner load (`tyreReferenceLoadN`), less on a tyre pressed harder.
+   */
+  private tyreLoadFactor(loadN: number): number {
+    return clamp(
+      1 - LOAD_SENSITIVITY * (loadN / this.tyreReferenceLoadN - 1),
+      LOAD_SENSITIVITY_MIN,
+      LOAD_SENSITIVITY_MAX,
     );
   }
 
@@ -2004,6 +2029,7 @@ export class Vehicle implements Rebasable {
     this.buildVisuals(previousKit);
 
     const weightN = stats.mass * GRAVITY;
+    this.tyreReferenceLoadN = weightN / Math.max(1, axles.frontCount + axles.rearCount);
     // Each axle's roll geometry: the preset's, or the model's own where its linkage is
     // not the preset family's (see `CarModelDef.rollCentre` and `antiRoll`).
     const rollCentre = this.model.rollCentre ?? {
@@ -3032,11 +3058,7 @@ export class Vehicle implements Rebasable {
     let rearCapacityN = 0;
     for (const w of this.wheels) {
       if (!w.grounded || w.loadN <= 0) continue;
-      const loadFactor = clamp(
-        1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
-        LOAD_SENSITIVITY_MIN,
-        LOAD_SENSITIVITY_MAX,
-      );
+      const loadFactor = this.tyreLoadFactor(w.loadN);
       // The tyre's longitudinal peak on this ground and in this weather
       // (`longitudinalPeakShare`), not its capacity: on a paved surface the brush peaks
       // a little under it, by how much the rubber's sliding friction has fallen.
@@ -3165,20 +3187,17 @@ export class Vehicle implements Rebasable {
       // FRICTION in vehicletuning.ts). What is handed on is the curve and the slip
       // measured in units of its peak; the wheel substeps read the force once they know
       // how much of the patch the slip ratio has taken and how fast it slides.
-      // μ(Fz). Exactly 1 at this wheel's static share of the car's weight, so the
-      // calibrated straight-line figures stand and only TRANSFER changes anything.
-      const loadFactor = clamp(
-        1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
-        LOAD_SENSITIVITY_MIN,
-        LOAD_SENSITIVITY_MAX,
-      );
+      // μ(Fz) against the car's mean corner load (`tyreReferenceLoadN`): the same tyre
+      // all round, so a nose-heavy car's front tyres sit further up their load curve
+      // than its rear ones, before any transfer.
+      const loadFactor = this.tyreLoadFactor(w.loadN);
 
       // The brush tyre's peak moves with load (`brushPeakTan`). The loose placeholder's
       // fade starts at that peak, held a degree short of its full angle.
       const staticPeakDeg = w.isFront ? this.tyre.peakFrontDeg : this.tyre.peakRearDeg;
       const fullDeg = w.isFront ? this.tyre.fullFrontDeg : this.tyre.fullRearDeg;
       const plateau = w.isFront ? this.tyre.plateauFront : this.tyre.plateauRear;
-      const peakTan = brushPeakTan(staticPeakDeg, w.loadN / w.staticLoadN, loadFactor);
+      const peakTan = brushPeakTan(staticPeakDeg, w.loadN / this.tyreReferenceLoadN, loadFactor);
       const fadePeakDeg = Math.min((Math.atan(peakTan) * 180) / Math.PI, fullDeg - 1);
 
       w.tyre.frictionSlip = surface.mu * weatherGrip(surfaceType) * gripBudgetFactor * loadFactor;
@@ -4397,11 +4416,7 @@ export class Vehicle implements Rebasable {
       // the same coefficient the side force is sized from (see `SurfaceProps.mu`),
       // warmed or cooled by this tyre's own temperature. The dig and the low range are
       // laid over it per substep, because they answer to propulsion.
-      w.longitudinalLoadFactor = clamp(
-        1 - LOAD_SENSITIVITY * (w.loadN / w.staticLoadN - 1),
-        LOAD_SENSITIVITY_MIN,
-        LOAD_SENSITIVITY_MAX,
-      );
+      w.longitudinalLoadFactor = this.tyreLoadFactor(w.loadN);
       w.longitudinalMu =
         surface.mu * weatherGrip(surfaceType) * tyreGrip * w.tyreGrip * w.longitudinalLoadFactor;
       // COMBINED SLIP (vehicletuning.ts): the slip ratio in units of this surface's own
@@ -5261,6 +5276,7 @@ export class Vehicle implements Rebasable {
     if (!this.tyres) return;
     const stats = this.statsValue;
     const weightN = stats.mass * GRAVITY;
+    this.tyreReferenceLoadN = weightN / Math.max(1, this.axleGeometry.frontCount + this.axleGeometry.rearCount);
     const suspension = this.model.suspension;
     const axles = this.axleGeometry;
 

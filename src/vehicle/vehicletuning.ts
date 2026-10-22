@@ -682,7 +682,7 @@ export function slidingRatio(floor: number, slideSpeedMps: number): number {
  * slowly than load (`BRUSH_STIFFNESS_LOAD_EXPONENT`), so a tyre pressed harder reaches
  * its peak LATER and a light one sooner — the outside front of a car loaded into a
  * bend needs more lock than it did in a straight line, and a light inside tyre lets
- * go at small angles. At the car's static load z = 1 at the `TyreCurve`'s peak angle.
+ * go at small angles. At the car's mean corner load z = 1 at the `TyreCurve`'s peak angle.
  */
 export function brushShape(z: number, r: number): number {
   if (z >= 1) return r;
@@ -706,13 +706,13 @@ export const BRUSH_STIFFNESS_LOAD_EXPONENT = 0.7;
 
 /**
  * The brush tyre's peak, as the TANGENT of the angle it peaks at for this load:
- * `loadRatio` is Fz over the static load and `muRatio` the load-sensitivity factor
+ * `loadRatio` is Fz over the car's mean corner load and `muRatio` the load-sensitivity factor
  * already in the capacity. Its side slip `z` is `tan α` over this, so z = 1 where the
  * whole patch slides.
  */
 export function brushPeakTan(staticPeakDeg: number, loadRatio: number, muRatio: number): number {
   const ratio = Math.max(0.05, loadRatio);
-  // Cα / (μ Fz) at static load, from the static peak: z reaches 1 there.
+  // Cα / (μ Fz) at the reference load, from the reference peak: z reaches 1 there.
   const stiffness = 3 / Math.tan((staticPeakDeg * Math.PI) / 180);
   const scale = (stiffness * ratio ** BRUSH_STIFFNESS_LOAD_EXPONENT) / (ratio * Math.max(0.05, muRatio));
   return 3 / scale;
@@ -1169,10 +1169,15 @@ export const LONGITUDINAL_RELAXATION_FLOOR_MPS = 3;
  * costing any: the balance of the car could only be authored (see
  * REAR_AXLE_SIDE_GRIP) and never emerged from what the car was doing.
  *
- * μ scales as 1 - k·(Fz/Fz_static - 1), so it is EXACTLY 1 at the static load and
- * the calibrated straight-line figures are untouched. 0.18 is a mild period value:
- * an outer tyre carrying 1.6x its static load keeps 89% of its μ, so a hard corner
- * loses a few per cent of total grip and the loaded end gives up first.
+ * μ scales as 1 - k·(Fz/Fz_ref - 1), Fz_ref the car's MEAN corner load (weight over the
+ * wheel count): one tyre all round. It was each wheel's own static load, which made every
+ * car exactly neutral whatever its weight split — a 62% nose-heavy front-driver ran its
+ * front and rear tyres at the same share of their peak to the limit, and any yaw
+ * overshoot or lift took the tail (tools: a 0.35 s key at 80 km/h spun the VAZ-2111,
+ * 2108 and Vectra). Against the mean, the heavy end runs further up its load curve —
+ * here and in the peak angle (`brushPeakTan`) — and the front-drivers understeer
+ * ~1.3–2.2°/g, the front axle reaching its peak at ~0.72 g with the rear short of it.
+ * An outer tyre carrying 1.6x the reference keeps 86% of its μ.
  */
 export const LOAD_SENSITIVITY = 0.24;
 /** Floor on the load-sensitivity factor, so an airborne-then-slammed wheel stays sane. */

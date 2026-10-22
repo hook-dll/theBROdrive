@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- FRONT-DRIVERS UNDERSTEER, AND NO LONGER LOSE THE TAIL ON A LIGHT TURN. The tyres'
+  load sensitivity (μ(Fz)) and peak slip angle were referenced at each wheel's OWN static
+  load, which normalised the weight split away: every car was exactly neutral to the
+  limit, and a 0.35 s key at 80 km/h spun the VAZ-2111, 2108 and Vectra, lifted or not.
+  They are now referenced at the car's mean corner load (`tyreReferenceLoadN`), one tyre
+  all round. Ramp steer at 80 km/h: the front-drivers understeer ~1.3–2.2°/g, the front
+  axle reaching its peak at 0.71–0.74 g with the rear short of it; the same key now
+  ploughs the nose. The VAZ-2101 (51% front) is unchanged, neutral at ~0.9 g. Skidpad
+  (tools/reality.ts): VAZ-2108 0.72 → 0.68 g (Car and Driver's Samara: 0.71), the
+  classics unchanged; turning circles and braking within 1%; autopilot lap checks pass.
 - KEYBOARD STEERING: A TAP IS A SMALL CORRECTION AND A HOLD IS A QUICK TURN, AT ANY
   SPEED. A held key's rim now gathers speed like a hand, 120°/s at the press up to
   720°/s 0.3 s in, all of it falling as 45 km/h over the speed above 45; let go, it
