@@ -20,10 +20,10 @@
   balance directly, and a short balance still rattles and gives nothing, as before.
 - THE PEDAL LEVER: THE KEYBOARD'S AND THE MOUSE BUTTONS' THROTTLE HOLDS A PEDAL. W and
   S (left and right mouse button while mouse driving) work a lever with notches
-  (core/pedallever.ts): throttle 20/40/60/80 %, neutral, and the brake. A W press under
-  0.11 s moves it one notch up, the pedal easing there, and it stays; held longer the
-  throttle heads for the floor for as long as it is held, the lever's notch following
-  the pedal up, and let go the lever stays on the notch the pedal reached. An S
+  (core/pedallever.ts): throttle 20/40/60/80 %, neutral, and the brake. Taps set a
+  cruise: a W tap under 0.11 s moves the lever one notch up, the pedal easing there, and
+  it stays. A hold is the plain pedal: held longer, the throttle heads for the floor for
+  as long as it is held, and let go it is off and the lever in neutral. An S
   press on a throttle notch steps it down (lifting off); in neutral, or held past 0.11 s,
   S is the brake for as long as it is held — down to the car's threshold pedal in 0.1 s,
   as the keyboard brake always went — and let go the lever is in neutral with no
