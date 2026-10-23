@@ -51,7 +51,7 @@ import {
   withRemeasure,
 } from '../game/settings';
 import { RADIO_RECOMMENDATIONS } from '../audio/radio';
-import { prefersMobilePresentation, renderPixelRatio } from '../core/renderer';
+import { prefersMobilePresentation, sceneFrameSize, type CanvasPixels } from '../core/renderer';
 import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
 import { CAR_MODELS, modelEngine, modelGearbox, type CarModelDef } from '../vehicle/carmodels';
@@ -107,6 +107,7 @@ const RESOLUTION_NOTES: Record<RenderHeight, string> = {
   720: 'Light on the chip; soft on a big screen.',
   1080: 'Full HD: sharp on most screens.',
   1440: 'The sharpest, and the heaviest on the chip.',
+  screen: 'Exactly this screen\'s pixels, one for one: never stretched and never shrunk.',
 };
 
 /**
@@ -770,7 +771,7 @@ export interface PauseHooks {
    * quotes a resolution the game is not rendering is the same drift this control exists
    * to end.
    */
-  viewport: () => { readonly cssWidth: number; readonly cssHeight: number };
+  viewport: () => CanvasPixels;
   /**
    * Forget the recorded rung verdict and measure the machine again on the next launch.
    *
@@ -789,6 +790,12 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
+  /**
+   * The heat shimmer and mirage in the finishing pass (core/renderer.ts `heatHaze`), for
+   * an A/B by eye. Dev only; it only shows between mid-morning and late afternoon, on
+   * Medium and up, where the ground is hot (render/heathaze.ts).
+   */
+  heatHaze?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -859,7 +866,7 @@ interface SettingsHost {
   /** Pushes the working copy whole: through world.apply in a drive, to storage on the title. */
   readonly apply: () => void;
   /** The canvas CSS size the Resolution rows quote pixels for; see `PauseHooks.viewport`. */
-  readonly viewport: () => { readonly cssWidth: number; readonly cssHeight: number };
+  readonly viewport: () => CanvasPixels;
   /** Hands the detail level back to the launch measurement; see `PauseHooks.remeasureGraphics`. */
   readonly remeasureGraphics: () => void;
   /**
@@ -1363,11 +1370,10 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
     // bars and leaves the window alone, and a row that names a resolution the game is
     // not rendering is the drift this control exists to end.
     const viewport = host.viewport();
-    const pixelsAt = (ratio: number): string => {
-      const width = Math.floor(viewport.cssWidth * ratio);
-      const height = Math.floor(viewport.cssHeight * ratio);
-      return `${width}x${height}, ${((width * height) / 1_000_000).toFixed(2)} Mpx`;
-    };
+    const pixelsOf = ({ width, height }: { readonly width: number; readonly height: number }): string =>
+      `${width}x${height}, ${((width * height) / 1_000_000).toFixed(2)} Mpx`;
+    const pixelsAt = (ratio: number): string =>
+      pixelsOf({ width: Math.floor(viewport.cssWidth * ratio), height: Math.floor(viewport.cssHeight * ratio) });
 
     // WHO PICKED IT rides in the preset row's own head, next to the thing it
     // describes, with the one action on it — shaped like the key-bindings field,
@@ -1440,20 +1446,23 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           changed();
         },
       })))] : [segmented('Resolution', RENDER_HEIGHTS.map((height) => ({
-        label: `${height}p`,
+        label: height === 'screen' ? 'Screen' : `${height}p`,
         icon: 'pixels',
         hint: () => {
-          const ratio = renderPixelRatio(height, viewport.cssHeight);
+          const frame = sceneFrameSize(height, viewport);
           // How the frame meets this screen, from its own device lines: the same choice
           // is an upscale on a 4K panel and a supersample on a 1080p one.
-          const stretch = (viewport.cssHeight * window.devicePixelRatio)
-            / Math.floor(viewport.cssHeight * ratio);
-          return `${pixelsAt(ratio)}. ${RESOLUTION_NOTES[height]} `
-            + (stretch > 1.01
-              ? `On this screen it is scaled up ${stretch.toFixed(1)}x.`
-              : stretch < 0.99
-                ? 'Drawn bigger than this screen and shrunk down, which smooths every edge.'
-                : 'This screen\'s own pixels.');
+          const stretch = viewport.deviceHeight / frame.height;
+          return `${pixelsOf(frame)}. ${RESOLUTION_NOTES[height]} `
+            + (height === 'screen' && stretch > 1.01
+              ? `Held at twice the window's size: on this screen it is scaled up ${stretch.toFixed(1)}x.`
+              : height === 'screen'
+                ? ''
+                : stretch > 1.01
+                  ? `On this screen it is scaled up ${stretch.toFixed(1)}x.`
+                  : stretch < 0.99
+                    ? `Drawn ${(1 / stretch).toFixed(2)}x bigger than this screen and averaged down to it, which smooths every edge.`
+                    : 'This screen\'s own pixels.');
         },
         active: () => settings.renderHeight === height,
         pick: () => {
@@ -2460,7 +2469,12 @@ export class MainMenu {
       settingsScreen = openSettings(sheet, {
         settings,
         apply,
-        viewport: () => ({ cssWidth: window.innerWidth, cssHeight: window.innerHeight }),
+        viewport: () => ({
+          cssWidth: window.innerWidth,
+          cssHeight: window.innerHeight,
+          deviceWidth: Math.round(window.innerWidth * window.devicePixelRatio),
+          deviceHeight: Math.round(window.innerHeight * window.devicePixelRatio),
+        }),
         // The launch the player is about to start is the one that measures.
         remeasureGraphics: () => {
           Object.assign(settings, withRemeasure(settings, mobilePresentation));
@@ -2814,6 +2828,17 @@ export class MainMenu {
           const index = devTools.length;
           devButton(label(), () => {
             overlay.setEnabled(!overlay.enabled);
+            const btn = devTools[index];
+            if (btn) btn.textContent = label();
+          });
+        }
+        // Same shape: a switch whose label is its state.
+        if (import.meta.env.DEV && hooks.heatHaze) {
+          const haze = hooks.heatHaze;
+          const label = (): string => `Heat haze: ${haze.enabled ? 'on' : 'off'}`;
+          const index = devTools.length;
+          devButton(label(), () => {
+            haze.setEnabled(!haze.enabled);
             const btn = devTools[index];
             if (btn) btn.textContent = label();
           });

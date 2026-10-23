@@ -17,13 +17,14 @@
  */
 
 import { retroActive } from '../../render/retro';
+import { sceneFrameHeight } from '../../render/cleanstyle';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { hash01 } from '../../core/rng';
 import { SurfaceType } from '../../core/surfaces';
 import { varietyEventOfKindAt } from '../director';
-import { DwellingBuilder, type P3 } from '../dwellings/builder';
+import type { P3 } from '../dwellings/builder';
 import { poleConditionAt, poleEraSegments, type PoleCondition, type PoleEra } from '../gradient';
 import { ROAD_LENGTH, type Road } from '../road';
 import type { Terrain } from '../terrain';
@@ -33,7 +34,7 @@ import { laybyKeepsClear } from '../layby';
 import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 
 import { deformIcosahedron, paintAsMaterial } from './forms';
-import { plainPoleMaterial, POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
+import { makePoleMaterial, plainPoleMaterial, POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
 import { addStatic, leanRotation } from './scatter';
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,9 @@ const _unitScale = new THREE.Vector3(1, 1, 1);
 const _axis = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
+const _wireTangent = new THREE.Vector3();
+const _wireNormal = new THREE.Vector3();
+const _wireBinormal = new THREE.Vector3();
 
 // Poles run along the RIGHT-hand side of the road facing away from the house, as
 // specified. `Road.offsetPoint` treats positive lateral as LEFT of travel (see its
@@ -135,6 +139,31 @@ const WIRE_SAG_CLEARANCE = 0.55;
 /** Straight pieces per span, and sides per wire: enough to read as a hanging curve. */
 const WIRE_SEGMENTS = 12;
 const WIRE_SIDES = 3;
+/**
+ * THE NARROWEST A WIRE IS EVER DRAWN, in pixels of the scene target.
+ *
+ * A wire is 9 to 22 mm in radius (poledesigns.ts `WireStyle`). At the default 85°
+ * field of view a scene pixel is 1.27 mm wide per metre of depth at 1440 lines and
+ * 2.5 mm at 720, so a 1 cm wire drops under a pixel from about 12 m out at 1440p and
+ * 6 m at 720p. Under a pixel, the rasteriser only lights the pixels whose centres the
+ * sliver happens to cross, and a span beyond 30 to 50 m read as a broken dotted line
+ * that crawled as the car moved; FXAA cannot restore pixels that were never drawn.
+ *
+ * So the shader (`wireMaterial`) never lets a wire's projected width fall under this,
+ * and fades it by the ratio of its true radius to the radius drawn: the "ink" per
+ * metre of wire (width x opacity) is what the true wire would cover, so a far span is
+ * a continuous faint line rather than dots, and from about 12 m in at 1440p nothing
+ * changes at all. One pixel is the least a sloping strip can be and still put a
+ * sample in every column (or row) it crosses; wider would only smear it.
+ */
+const WIRE_MIN_WIDTH_PX = 1;
+/**
+ * The narrowest the WIRE_SIDES-gon cross-section looks from any side, in units of its
+ * circumradius (the radius the tube is built at): an odd polygon seen vertex-on
+ * spans r(1 + cos(PI/n)), 1.5 r for the triangle; an even one 2r cos(PI/n). The clamp
+ * is sized on this, not on 2r, so a wire seen across a vertex is still a full pixel.
+ */
+const WIRE_NARROWEST_WIDTH = WIRE_SIDES % 2 === 1 ? 1 + Math.cos(Math.PI / WIRE_SIDES) : 2 * Math.cos(Math.PI / WIRE_SIDES);
 /**
  * How much of a worn section has lost its arms and insulators, per unit of
  * dilapidation. Timber is stripped for its hardware and its arms rot; steel and
@@ -701,6 +730,173 @@ function retroWireMaterial(): THREE.LineBasicMaterial {
   return (_retroWireMaterial ??= new THREE.LineBasicMaterial({ vertexColors: true, fog: true }));
 }
 
+/** Per-vertex attribute: the wire's true radius, metres (`WireBuilder`, `wireMaterial`). */
+const WIRE_RADIUS_ATTRIBUTE = 'wireRadius';
+
+const WIRE_VERTEX_PARS = /* glsl */ `#include <common>
+attribute float ${WIRE_RADIUS_ATTRIBUTE};
+uniform float sceneFrameHeight;
+varying float vWireCoverage;`;
+
+// The vertex's own normal IS its radial direction (a tube ring's smooth normal, unit
+// length, caps included: they share the rings' vertices), so the centreline is the
+// vertex less its normal times the true radius, and the wire is redrawn about it at
+// the clamped radius. Sized at the CENTRE's view depth, so a ring stays round, and by
+// view depth rather than distance because a rectilinear projection draws a small
+// object at a given depth the same size anywhere on screen. projectionMatrix[1][1] is
+// 1 / tan(fov / 2): one pixel at depth z is 2z / (that x frame height) metres. Object
+// space is taken for view space, which holds because a chunk is never scaled. Before
+// the renderer has sized its target (height 0) the wire is drawn true.
+const WIRE_VERTEX_WIDEN = /* glsl */ `#include <begin_vertex>
+{
+	vec3 wireCentre = position - normal * ${WIRE_RADIUS_ATTRIBUTE};
+	float wireDepth = max( -( modelViewMatrix * vec4( wireCentre, 1.0 ) ).z, 0.0 );
+	float wirePixel = sceneFrameHeight > 0.0
+		? 2.0 * wireDepth / ( projectionMatrix[ 1 ][ 1 ] * sceneFrameHeight )
+		: 0.0;
+	float wireDrawn = max( ${WIRE_RADIUS_ATTRIBUTE}, wirePixel * ${(WIRE_MIN_WIDTH_PX / WIRE_NARROWEST_WIDTH).toFixed(4)} );
+	transformed = wireCentre + normal * wireDrawn;
+	vWireCoverage = ${WIRE_RADIUS_ATTRIBUTE} / max( wireDrawn, 1e-6 );
+}`;
+
+const WIRE_FRAGMENT_PARS = /* glsl */ `#include <common>
+varying float vWireCoverage;`;
+
+const WIRE_FRAGMENT_COVERAGE = /* glsl */ `#include <color_fragment>
+	diffuseColor.a *= vWireCoverage;`;
+
+let _wireMaterial: THREE.MeshStandardMaterial | null = null;
+/**
+ * The wires' material: the pole material (vertex colour, comic light unbanded), its
+ * own object so the plain pole meshes keep their program, plus the pixel clamp of
+ * `WIRE_MIN_WIDTH_PX`: a wire under a pixel is drawn a pixel wide and that much fainter.
+ *
+ * THE FADE IS ALPHA BLENDING, so the material is transparent. The alternatives were
+ * worse. Alpha to coverage needs a multisampled target and the scene target is not
+ * (core/renderer.ts, "NOT MULTISAMPLED"). A dithered discard is a pattern that crawls
+ * as the wire moves across the pixel grid, the very thing being fixed and the thing
+ * the Clean style exists to remove. Mixing the colour toward the fog instead is right
+ * only against the horizon sky, and a wire seen from the chase camera crosses sand too,
+ * where it would draw a pale line. Up close the coverage is exactly 1 and the wire
+ * looks as it did; it is only drawn in the transparent pass instead of the opaque one.
+ *
+ * DEPTH WRITE STAYS ON. A chunk's wires are one mesh, sorted on that mesh's centre
+ * against the other transparent things, which are all either far behind a wire (the
+ * mirage tableaux, water) or right at the eye (car glass, spray, dust) and sort the
+ * right way round. What depth buys is the post pass (render/hazeshader.ts), which
+ * reads the scene's depth: without it a near wire against hot ground would take the
+ * ground's depth and boil with it, and against the sky the ink gate would see the far
+ * plane and leave it unoutlined. The price is that the
+ * faint pixels of a far wire hide anything transparent drawn after them behind it:
+ * one pixel wide, at a few per cent opacity.
+ *
+ * Casts no shadow, like the wire mesh it draws (a 1 cm wire's shadow was never drawn).
+ */
+function wireMaterial(): THREE.MeshStandardMaterial {
+  if (_wireMaterial) return _wireMaterial;
+  const material = makePoleMaterial();
+  material.name = 'pole-wire';
+  material.transparent = true;
+  const previousCompile = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previousCompile.call(material, shader, renderer);
+    shader.uniforms.sceneFrameHeight = sceneFrameHeight;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', WIRE_VERTEX_PARS)
+      .replace('#include <begin_vertex>', WIRE_VERTEX_WIDEN);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', WIRE_FRAGMENT_PARS)
+      .replace('#include <color_fragment>', WIRE_FRAGMENT_COVERAGE);
+  };
+  const previousKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:pole-wire-v1`;
+  _wireMaterial = material;
+  return material;
+}
+
+/**
+ * Every wire of a chunk as one INDEXED geometry: position, normal, colour and the true
+ * radius `wireMaterial` widens about. It replaces `DwellingBuilder.tube`, which emits
+ * every triangle's three corners apart and carries no extra stream. Same rings, same
+ * parallel-transported frame, same smooth normals, so the same picture; the two end
+ * caps are drawn on the end rings' own vertices, so they widen with the tube.
+ *
+ * Memory per wire (13 rings of 3): 39 vertices x 40 bytes (12 position, 12 normal,
+ * 12 colour, 4 radius) and 222 16-bit indices, about 2.0 KB, where the builder's
+ * 222 separate vertices x 36 bytes were 8.0 KB. The radius attribute adds 156 bytes a
+ * wire; the chunk's wire geometry ends up about four times smaller than before.
+ */
+class WireBuilder {
+  private readonly positions: number[] = [];
+  private readonly normals: number[] = [];
+  private readonly colours: number[] = [];
+  private readonly radii: number[] = [];
+  private readonly indices: number[] = [];
+
+  tube(path: readonly P3[], radius: number, hex: number): void {
+    const count = path.length;
+    if (count < 2) return;
+    const last = count - 1;
+    const base = this.positions.length / 3;
+    _wireColour.set(hex);
+    wireTangent(path, 0, _wireTangent);
+    if (Math.abs(_wireTangent.y) < 0.9) _wireNormal.set(0, 1, 0);
+    else _wireNormal.set(1, 0, 0);
+    for (let i = 0; i < count; i++) {
+      wireTangent(path, i, _wireTangent);
+      _wireNormal.addScaledVector(_wireTangent, -_wireNormal.dot(_wireTangent)).normalize();
+      _wireBinormal.crossVectors(_wireTangent, _wireNormal);
+      const p = path[i]!;
+      for (let k = 0; k < WIRE_SIDES; k++) {
+        const a = (k / WIRE_SIDES) * Math.PI * 2;
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        const nx = c * _wireNormal.x + s * _wireBinormal.x;
+        const ny = c * _wireNormal.y + s * _wireBinormal.y;
+        const nz = c * _wireNormal.z + s * _wireBinormal.z;
+        this.positions.push(p[0] + nx * radius, p[1] + ny * radius, p[2] + nz * radius);
+        this.normals.push(nx, ny, nz);
+        this.colours.push(_wireColour.r, _wireColour.g, _wireColour.b);
+        this.radii.push(radius);
+      }
+    }
+    // The ring runs counter-clockwise about the tangent, so (k, k+1 on this ring, k+1
+    // on the next) faces outward.
+    for (let i = 0; i < last; i++) {
+      const ring = base + i * WIRE_SIDES;
+      const next = ring + WIRE_SIDES;
+      for (let k = 0; k < WIRE_SIDES; k++) {
+        const l = (k + 1) % WIRE_SIDES;
+        this.indices.push(ring + k, ring + l, next + l, ring + k, next + l, next + k);
+      }
+    }
+    // Caps: the first faces back along the path, the last forward.
+    const end = base + last * WIRE_SIDES;
+    for (let k = 1; k + 1 < WIRE_SIDES; k++) {
+      this.indices.push(base, base + k + 1, base + k);
+      this.indices.push(end, end + k, end + k + 1);
+    }
+  }
+
+  geometry(): THREE.BufferGeometry {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(this.colours, 3));
+    geometry.setAttribute(WIRE_RADIUS_ATTRIBUTE, new THREE.Float32BufferAttribute(this.radii, 1));
+    // 16-bit indices until a chunk passes 65535 vertices (about 1700 wires), 32 after.
+    geometry.setIndex(this.indices);
+    return geometry;
+  }
+}
+
+/** Central-difference tangent of `path` at point `i`, one-sided at the ends. */
+function wireTangent(path: readonly P3[], i: number, out: THREE.Vector3): THREE.Vector3 {
+  const a = path[Math.max(0, i - 1)]!;
+  const b = path[Math.min(path.length - 1, i + 1)]!;
+  return out.set(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize();
+}
+
 export class PoleProvider implements ChunkProvider {
   readonly id = 'poles';
 
@@ -765,7 +961,7 @@ export class PoleProvider implements ChunkProvider {
     // the same pure function rather than read from a neighbour's content — otherwise
     // spans would flicker as chunks load around the boundary. Every wire of the chunk
     // goes into ONE geometry: a telegraph line is eight wires a span.
-    const wires = new DwellingBuilder({ grime: 0 });
+    const wires = new WireBuilder();
     // The retro rung draws each wire as a one-pixel line instead of a tube: a tube a
     // centimetre across is a fraction of a pixel at 360 lines from a few metres out, and
     // rasterised it breaks into a dotted trail (render/retro.ts). A line is always one
@@ -807,7 +1003,7 @@ export class PoleProvider implements ChunkProvider {
             lineColours.push(_wireColour.r, _wireColour.g, _wireColour.b, _wireColour.r, _wireColour.g, _wireColour.b);
           }
         } else {
-          wires.tube(path, wire.radius, WIRE_SIDES, wire.hex);
+          wires.tube(path, wire.radius, wire.hex);
         }
         wireCount++;
       });
@@ -820,7 +1016,8 @@ export class PoleProvider implements ChunkProvider {
       group.add(new THREE.LineSegments(wireGeometry, retroWireMaterial()));
     } else if (wireCount > 0) {
       wireGeometry = wires.geometry();
-      group.add(new THREE.Mesh(wireGeometry, plainPoleMaterial()));
+      // Shadow flags left off, as `poleProgramAnchor`'s wire stand-in copies them.
+      group.add(new THREE.Mesh(wireGeometry, wireMaterial()));
     }
 
     return {
@@ -842,6 +1039,9 @@ export class PoleProvider implements ChunkProvider {
  * rope, nest, transformer can or loudspeaker, `poleFitting`), on the same plain material:
  * the `plain` anchor holds that program (before, the fittings had materials of their
  * own, and the first nest in view linked one mid-drive: 17 ms on the Mac, seed `flick`).
+ * The wires are a plain Mesh too, on `wireMaterial` (transparent, its own patch: a
+ * program of its own), and exist only once a chunk with a span streams in, so the
+ * `wire` anchor is a real wire from `WireBuilder`, attribute for attribute.
  * The anchors are never drawn: their group stays invisible. Each copies the shadow flags
  * of the mesh it stands for.
  */
@@ -858,6 +1058,9 @@ export function poleProgramAnchor(): THREE.Object3D {
   const plain = new THREE.Mesh(geometry, plainPoleMaterial());
   plain.castShadow = true;
   plain.receiveShadow = true;
-  group.add(anchor, plain);
+  const wires = new WireBuilder();
+  wires.tube([[0, 0, 0], [0, 0, 0.01]], 0.001, 0xffffff);
+  const wire = new THREE.Mesh(wires.geometry(), wireMaterial());
+  group.add(anchor, plain, wire);
   return group;
 }

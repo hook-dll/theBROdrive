@@ -532,7 +532,6 @@ async function boot(): Promise<void> {
   const heatHaze = new HeatHaze(terrain, road);
   // Rain, flying dust and blown sand: three instanced draws, each off in fair weather.
   const weatherParticles = new WeatherParticles(renderer.scene, world.seed);
-  const drawSize = new THREE.Vector2();
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
   // dissolves as the player reaches the shore.
   const lakeWater = new LakeWater(
@@ -720,12 +719,14 @@ async function boot(): Promise<void> {
         const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
         const framesPerSecond =
           s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
-        const frame = renderer.drawingBufferSize;
+        const frame = renderer.frameSize;
+        const shown = renderer.presentedSize;
+        const chosen = s.graphicsQuality === 'retro' ? `${s.retroLines}p` : s.renderHeight === 'screen' ? 'screen' : `${s.renderHeight}p`;
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
-          `resolution ${frame.width}x${frame.height} `
-            + `(${s.graphicsQuality === 'retro' ? s.retroLines : s.renderHeight}p), `
+          `resolution ${frame.width}x${frame.height} (${chosen}), `
             + `${((frame.width * frame.height) / 1_000_000).toFixed(2)} Mpx, `
+            + `${shown.shrunk ? `shrunk onto ${shown.width}x${shown.height}, ` : ''}`
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
@@ -2668,14 +2669,14 @@ async function boot(): Promise<void> {
         seed: world.seed,
       }),
     );
-    renderer.renderer.getDrawingBufferSize(drawSize);
+    const frameLines = renderer.frameHeight;
     weatherParticles.update(
       frameDt,
       renderer.camera,
       origin.x,
       origin.z,
       terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS),
-      drawSize.y,
+      frameLines,
       renderer.fog,
       sky.dayFactor,
       sky.horizonColor,
@@ -3041,6 +3042,16 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
+    heatHaze: import.meta.env.DEV
+      ? {
+          get enabled() {
+            return renderer.heatHaze;
+          },
+          setEnabled: (on: boolean) => {
+            renderer.heatHaze = on;
+          },
+        }
+      : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

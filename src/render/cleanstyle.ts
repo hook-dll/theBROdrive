@@ -55,8 +55,17 @@ const CLEAN_CULL_FULL_PX = 8;
  */
 export const cleanCull = { x: 0, y: CLEAN_CULL_GONE_PX };
 
+/**
+ * `uniform float sceneFrameHeight`: the height in device pixels of the target the scene
+ * is drawn into, 0 until the renderer first sizes it. Unlike `cleanCull.x` it holds in
+ * both styles, for patches that need a pixel's size whatever the style: the pole
+ * line's wires never fall below a pixel wide (world/props/poles.ts `wireMaterial`).
+ * A uniform OBJECT handed to every program by reference, so the one write in
+ * `setCleanFrameHeight` reaches all of them, as the header says of the vectors.
+ */
+export const sceneFrameHeight: THREE.IUniform<number> = { value: 0 };
+
 let cleanOn = false;
-let frameHeightPx = 0;
 
 /** Switches every Clean uniform on or off. Uniform writes only; see the header. */
 export function setCleanStyle(on: boolean): void {
@@ -64,12 +73,12 @@ export function setCleanStyle(on: boolean): void {
   const value = on ? 1 : 0;
   cleanStyle.x = value;
   cleanStyle.z = value;
-  cleanCull.x = on ? frameHeightPx * 0.5 : 0;
+  cleanCull.x = on ? sceneFrameHeight.value * 0.5 : 0;
 }
 
-/** The presented frame's height in device pixels, which the cull's pixel sizes are counted in. */
+/** The scene frame's height in device pixels, which every pixel size here is counted in. */
 export function setCleanFrameHeight(heightPx: number): void {
-  frameHeightPx = heightPx;
+  sceneFrameHeight.value = heightPx;
   cleanCull.x = cleanOn ? heightPx * 0.5 : 0;
 }
 

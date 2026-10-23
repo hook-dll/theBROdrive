@@ -413,6 +413,7 @@ export const HAZE_FRAGMENT = /* glsl */ `
   uniform float uInkStrength;
   uniform float uInkThreshold;
   uniform float uFxaa;
+  uniform float uEncodeOutput;
   uniform vec3 uViewTint;
   uniform float uViewTintStrength;
   uniform float uBinoculars;
@@ -576,9 +577,14 @@ export const HAZE_FRAGMENT = /* glsl */ `
    *
    * \`linearToOutputTexel\` is Three's output encode: sRGB for this pass, drawn to the
    * canvas; the identity where tools/haze-probe.ts draws the same source into a target.
+   * \`uEncodeOutput\` puts the sRGB encode back where the renderer draws this pass into
+   * its own frame target to shrink it to the screen (render/presentshader.ts): Three
+   * treats every render target as linear, and the grade, the ink and the grain after
+   * this must see the same encoded picture whichever way the frame leaves.
    */
   vec3 toDisplay(vec3 radiance) {
-    return linearToOutputTexel(vec4(displayCurve(radiance), 1.0)).rgb;
+    vec4 shown = linearToOutputTexel(vec4(displayCurve(radiance), 1.0));
+    return uEncodeOutput > 0.5 ? sRGBTransferOETF(shown).rgb : shown.rgb;
   }
 
   /**

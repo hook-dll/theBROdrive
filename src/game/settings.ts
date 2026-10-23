@@ -65,11 +65,13 @@ export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
 export interface GraphicsTier {
   /**
    * Default `Settings.renderHeight` on a desktop presentation: the lines a preset puts
-   * the frame at. Width follows the canvas aspect (core/renderer.ts `pixelRatioFor`).
+   * the frame at. Width follows the canvas aspect (core/renderer.ts `sceneFrameSize`).
+   * Always a number of lines, never `screen`: a preset is a cost, and the screen's own
+   * pixels are a different cost on every display.
    */
-  readonly renderHeight: RenderHeight;
+  readonly renderHeight: FixedRenderHeight;
   /** The same under phone presentation, where a DPR of 3 invites millions. */
-  readonly mobileRenderHeight: RenderHeight;
+  readonly mobileRenderHeight: FixedRenderHeight;
   /** Sun shadow map. The one per-frame pass a weak machine cannot afford at any size. */
   readonly shadows: boolean;
   /**
@@ -425,14 +427,27 @@ export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {
  * `EXT_disjoint_timer_query_webgl2` (Safari, most Android WebViews) could never do, so
  * the automatic mode was a different control on different browsers.
  */
-export const RENDER_HEIGHTS = [540, 720, 1080, 1440] as const;
+export const FIXED_RENDER_HEIGHTS = [540, 720, 1080, 1440] as const;
+export type FixedRenderHeight = (typeof FIXED_RENDER_HEIGHTS)[number];
+/**
+ * The row the player picks from: the four heights, then `screen` — exactly the canvas's
+ * own device pixels, one frame pixel to one display pixel.
+ *
+ * WHY A FIFTH CHOICE THAT IS NOT A NUMBER. None of the four heights is a screen's own
+ * lines unless the canvas happens to be exactly that tall, and a browser window almost
+ * never is: a maximised window on a 1080-line monitor has about 990 lines under its tabs
+ * and address bar, so 1080p there is drawn 1.09x and shrunk, 1440p 1.45x. `screen` is
+ * the one choice that is never resampled at all, and it is still a base the player can
+ * see — the row quotes its pixels. It is never a preset's height (see `GraphicsTier`).
+ */
+export const RENDER_HEIGHTS = [...FIXED_RENDER_HEIGHTS, 'screen'] as const;
 export type RenderHeight = (typeof RENDER_HEIGHTS)[number];
 
 /** The height a rung's preset puts the frame at, for this presentation. */
 export function renderHeightDefault(
   quality: GraphicsQuality,
   mobilePresentation: boolean,
-): RenderHeight {
+): FixedRenderHeight {
   const tier = GRAPHICS_TIERS[quality];
   return mobilePresentation ? tier.mobileRenderHeight : tier.renderHeight;
 }

@@ -4,6 +4,18 @@
 
 ### Added
 
+- RESOLUTION "SCREEN" (`game/settings.ts` `RENDER_HEIGHTS`, `FIXED_RENDER_HEIGHTS`;
+  `core/renderer.ts` `sceneFrameSize`). A fifth choice in the Resolution row: exactly the
+  device pixels the canvas covers, one frame pixel to one screen pixel, read from a
+  `device-pixel-content-box` observer (rounded `clientWidth x DPR` where the browser has
+  none), bounded at 2x the CSS size like the other heights. Never a preset's height. A
+  maximised window on a 1080-line monitor is about 1920x990, so none of the fixed heights
+  landed on it: 1080p there is 2095x1080, 1440p 2793x1440 (the "4.02 Mpx"). Measured on
+  the M2 Pro in that window, chase view, GPU median: Screen 5.3-5.7 ms, 1080p 6.4, 1440p
+  10.0.
+- DEV: HEAT HAZE A/B (pause menu "Heat haze"; `Renderer.heatHaze`). Turns the shimmer
+  and the mirage off for the session, as on the cheapest tier. They only exist from
+  mid-morning to late afternoon on hot ground (at 13:00, shimmer 0.87 to 0).
 - DEV: ROADSIDE PROP SHADOWS A/B (pause menu "Roadside prop shadows";
   `InstanceBatches.setPropShadows`, `BatchKind.propShadows`, `ChunkStreamer.setPropShadows`).
   The scatter's rocks and cacti along the road neither cast nor receive sun shadows
@@ -15,6 +27,28 @@
 
 ### Changed
 
+- A FRAME TALLER THAN THE SCREEN IS SHRUNK BY THE GAME, NOT THE BROWSER
+  (`core/renderer.ts` `resize`, `frameTarget`, `presentMaterial`;
+  `render/presentshader.ts`; `render/hazeshader.ts` `uEncodeOutput`). The canvas used to
+  be the frame, so 1440p in a 990-line window was scaled by the compositor with one
+  bilinear tap per screen pixel, which at 1.45x weights some texels fully and their
+  neighbours hardly at all: much of the supersample was thrown away. The canvas now stays
+  at the screen's device pixels; the finishing pass draws into an 8-bit frame target and
+  a present pass area-averages it onto the canvas in linear light (at most 3x3
+  `texelFetch`). Both finishing variants and the present pass compile at boot. GPU cost
+  on the M2 Pro at 2793x1440 onto 1920x990: 9.65 ms against 9.34-9.62 for the old path,
+  whose compositor scale was outside the timer. `Renderer.drawingBufferSize` is now
+  `frameSize` (plus `frameHeight`, `presentedSize`); the frame report says when the frame
+  is shrunk.
+- POLE-LINE WIRES NEVER DRAW THINNER THAN A PIXEL (`world/props/poles.ts`
+  `wireMaterial`, `WireBuilder`; `render/cleanstyle.ts` `sceneFrameHeight`). A 1 cm wire
+  is under a pixel from about 12 m at 1440 lines, and beyond 30-50 m it rasterised as a
+  broken, crawling dotted line that FXAA cannot rebuild. The vertex shader now widens
+  each wire about its axis to at least one scene pixel and fades it by true radius over
+  drawn radius, so a far span is a continuous faint line; up close nothing changes. The
+  wires are one indexed geometry per chunk with a per-vertex true radius (about 2 KB a
+  wire, from 8), transparent with depth writes on, and their program has a boot anchor
+  in `poleProgramAnchor`.
 - THE CINEMA LENS DRAWS THE SCENE AT THE FRAME'S OWN SIZE (`core/renderer.ts`
   `resizeHazeTarget`; `render/hazeshader.ts`, `uSceneResolution` gone). Under the Panini
   lens the scene target was 1.25x per axis, 1.56x the pixels, about 80% of the lens's

@@ -1117,17 +1117,19 @@ export function poleMaterial(): THREE.MeshStandardMaterial {
 
 let plainMaterial: THREE.MeshStandardMaterial | null = null;
 /**
- * `poleMaterial` for the plain meshes: an anomaly's pole and a chunk's wires. Three keeps
- * one current program per material object, and one material drawn by the instanced pole
- * bodies and by plain meshes in the same pass looked its program up again at every
- * switch, six times a frame. The same material twice, so each keeps its program.
+ * `poleMaterial` for the plain meshes: an anomaly's pole and what hangs on it. Three
+ * keeps one current program per material object, and one material drawn by the
+ * instanced pole bodies and by plain meshes in the same pass looked its program up
+ * again at every switch, six times a frame. The same material twice, so each keeps
+ * its program. (The chunk's wires have their own, `wireMaterial` in poles.ts.)
  */
 export function plainPoleMaterial(): THREE.MeshStandardMaterial {
   plainMaterial ??= makePoleMaterial();
   return plainMaterial;
 }
 
-function makePoleMaterial(): THREE.MeshStandardMaterial {
+/** A fresh pole material: the one the poles share, and the base of the wires' own. */
+export function makePoleMaterial(): THREE.MeshStandardMaterial {
   return applyComicShading(
     new THREE.MeshStandardMaterial({ name: 'pole-body', vertexColors: true, roughness: 0.8, metalness: 0 }),
     { contourStrength: 0, stippleStrength: 0, lightingStrength: 0 },

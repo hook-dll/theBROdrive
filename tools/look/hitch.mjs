@@ -91,7 +91,7 @@ try {
         kmh: Math.round(Math.hypot(b.autopilot.controlledVehicle?.chassis.linvel().x ?? 0, b.autopilot.controlledVehicle?.chassis.linvel().z ?? 0) * 3.6),
         weather: b.weather.now.kind,
         hour: b.state().timeOfDay / 60,
-        lines: b.renderer.drawingBufferSize.height,
+        lines: b.renderer.frameHeight,
         sunShadow: b.sky.sunLight.shadow.autoUpdate && b.sky.sunLight.shadow.intensity > 0,
         lampShadow: lamp !== null && lamp.shadow.autoUpdate,
         spikes: window.__broSpikes.slice(),

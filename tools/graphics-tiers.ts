@@ -26,6 +26,7 @@ import {
   GRAPHICS_TIERS,
   presentationFpsFor,
   qualityPresetOf,
+  FIXED_RENDER_HEIGHTS,
   RENDER_HEIGHTS,
   renderHeightDefault,
   sanitizeSettings,
@@ -38,7 +39,7 @@ import {
 } from '../src/game/settings';
 import { FIXED_DT } from '../src/core/physics';
 import { MAX_STEPS_PER_FRAME } from '../src/core/loop';
-import { renderPixelRatio } from '../src/core/renderer';
+import { sceneFrameSize } from '../src/core/renderer';
 import { installAssetShim } from './assetshim';
 
 installAssetShim();
@@ -248,40 +249,50 @@ function checkRates(): void {
 
 // --- 2. the frame is the height the player chose ---------------------------------
 //
-// Three things must hold, and each of them is a way the control could quietly stop
+// Four things must hold, and each of them is a way the control could quietly stop
 // being one:
 //
 //  - IT IS EXACT. A height drawn on a canvas tall enough for it is that many lines, on
-//    every display at every device-pixel-ratio: three floors `cssHeight x ratio`, so a
-//    ratio one ulp short draws 1079 lines and the menu says 1080.
+//    every display at every device-pixel-ratio: the size is floored from `cssHeight x
+//    ratio`, so a ratio one ulp short draws 1079 lines and the menu says 1080.
 //  - IT IS BOUNDED. Past a ratio of 2 more lines are not sharpness, so a short canvas
 //    draws twice its CSS height, and the menu quotes that rather than the label.
 //  - THE ROW MOVES. A taller choice never draws fewer lines than a shorter one.
-console.log('\ndisplay                       height   ratio   drawn');
+//  - `screen` IS THE SCREEN: the canvas's own device pixels wherever the DPR is 2 or
+//    less, and the bound above it.
+console.log('\ndisplay                       height     drawn');
+const canvasOf = (cssWidth: number, cssHeight: number, dpr: number) => ({
+  cssWidth,
+  cssHeight,
+  deviceWidth: Math.round(cssWidth * dpr),
+  deviceHeight: Math.round(cssHeight * dpr),
+});
 for (const display of DISPLAYS) {
   const [cssWidth, cssHeight] = display.css;
+  const canvas = canvasOf(cssWidth, cssHeight, display.dpr);
   let previousLines = 0;
   for (const height of RENDER_HEIGHTS) {
-    const ratio = renderPixelRatio(height, cssHeight);
-    const lines = Math.floor(cssHeight * ratio);
+    const frame = sceneFrameSize(height, canvas);
     console.log(
-      `${display.name.padEnd(29)} ${`${height}p`.padStart(6)} ${ratio.toFixed(2).padStart(7)} `
-        + `${`${Math.floor(cssWidth * ratio)}x${lines}`.padStart(11)}`,
+      `${display.name.padEnd(29)} ${(height === 'screen' ? 'screen' : `${height}p`).padStart(6)} `
+        + `${`${frame.width}x${frame.height}`.padStart(11)}`,
     );
-    const expected = Math.min(height, Math.floor(cssHeight * 2));
-    if (lines !== expected) {
-      failures.push(`${display.name} at ${height}p draws ${lines} lines, not ${expected}`);
+    const expected = height === 'screen'
+      ? (display.dpr <= 2 ? canvas.deviceHeight : Math.floor(cssHeight * 2))
+      : Math.min(height, Math.floor(cssHeight * 2));
+    if (frame.height !== expected) {
+      failures.push(`${display.name} at ${height} draws ${frame.height} lines, not ${expected}`);
     }
-    if (lines < previousLines) {
+    if (height !== 'screen' && frame.height < previousLines) {
       failures.push(`${display.name} at ${height}p draws fewer lines than the choice below it`);
     }
-    previousLines = lines;
+    if (height !== 'screen') previousLines = frame.height;
   }
 }
 // Every height a canvas could be, not just the listed displays: the ulp is per height.
 for (let cssHeight = 300; cssHeight <= 2400; cssHeight++) {
-  for (const height of RENDER_HEIGHTS) {
-    const lines = Math.floor(cssHeight * renderPixelRatio(height, cssHeight));
+  for (const height of FIXED_RENDER_HEIGHTS) {
+    const lines = sceneFrameSize(height, canvasOf(cssHeight, cssHeight, 1)).height;
     if (lines !== Math.min(height, Math.floor(cssHeight * 2))) {
       failures.push(`a ${cssHeight}-pixel canvas at ${height}p draws ${lines} lines`);
     }

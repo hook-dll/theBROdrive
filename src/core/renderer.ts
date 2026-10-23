@@ -16,6 +16,7 @@ import {
   type HeatHazeFrame,
   type HeatMirageParameters,
 } from '../render/hazeshader';
+import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import {
   DEFAULT_FIELD_OF_VIEW,
   DEFAULT_INK_STRENGTH,
@@ -91,22 +92,45 @@ export function farPlaneForViewDistance(metres: number): number {
 const MAX_DEPTH_RATIO = 160000;
 
 /**
- * Ceiling on the drawing-buffer ratio, whatever the chosen height asks of the canvas:
- * past 2 it is not sharpness. It bites only on a canvas shorter than half the chosen
- * height — 1440p in a 600-pixel window — and the menu quotes the clamped result.
+ * Ceiling on the scene frame's size against the canvas's CSS size, whatever the chosen
+ * height asks of it: past 2 it is not sharpness. It bites only on a canvas shorter than
+ * half the chosen height — 1440p in a 600-pixel window, or `screen` on a phone whose DPR
+ * is 3 — and the menu quotes the clamped result.
  */
 const MAX_PIXEL_RATIO = 2;
 
+/** The canvas in CSS pixels and in the device pixels it covers on the display. */
+export interface CanvasPixels {
+  readonly cssWidth: number;
+  readonly cssHeight: number;
+  readonly deviceWidth: number;
+  readonly deviceHeight: number;
+}
+
 /**
- * The drawing-buffer ratio that draws `renderHeight` lines on a canvas `cssHeight` CSS
- * pixels tall; the width follows at the same ratio, so the aspect is the canvas's own.
+ * The scene frame a chosen height draws on this canvas: `renderHeight` lines, the width
+ * at the canvas's own aspect; or for `screen` exactly the device pixels the canvas
+ * covers.
  *
  * Exported because the menu quotes the frame this produces: one function, so the row
  * cannot name a resolution the renderer is not drawing. Half a line of headroom because
- * three floors `cssHeight x ratio`, and `H / h x h` can land one ulp under `H`.
+ * the size is `floor(cssHeight x ratio)`, and `H / h x h` can land one ulp under `H`.
  */
-export function renderPixelRatio(renderHeight: number, cssHeight: number): number {
-  return Math.min(MAX_PIXEL_RATIO, (renderHeight + 0.5) / Math.max(1, cssHeight));
+export function sceneFrameSize(
+  renderHeight: RenderHeight,
+  canvas: CanvasPixels,
+): { readonly width: number; readonly height: number } {
+  const cssWidth = Math.max(1, canvas.cssWidth);
+  const cssHeight = Math.max(1, canvas.cssHeight);
+  if (renderHeight === 'screen' && canvas.deviceHeight <= cssHeight * MAX_PIXEL_RATIO) {
+    return { width: Math.max(1, canvas.deviceWidth), height: Math.max(1, canvas.deviceHeight) };
+  }
+  const lines = renderHeight === 'screen' ? Number.POSITIVE_INFINITY : renderHeight;
+  const ratio = Math.min(MAX_PIXEL_RATIO, (lines + 0.5) / cssHeight);
+  return {
+    width: Math.max(1, Math.floor(cssWidth * ratio)),
+    height: Math.max(1, Math.floor(cssHeight * ratio)),
+  };
 }
 
 /**
@@ -335,8 +359,31 @@ export class Renderer {
   private readonly hazeCamera: THREE.OrthographicCamera;
   private readonly hazeMaterial: THREE.ShaderMaterial;
   private readonly hazeGeometry: THREE.BufferGeometry;
-  /** Reused scratch vector for the drawing-buffer size. */
-  private readonly _drawSize = new THREE.Vector2();
+  /**
+   * The finished frame at the scene's size, drawn only while the frame has more lines
+   * than the screen (`shrinking`): the finishing pass writes here instead of the canvas,
+   * and the present pass shrinks it onto the canvas (render/presentshader.ts). Eight-bit,
+   * display-encoded, no depth: exactly what the canvas would have held. 1x1 otherwise,
+   * which Three never allocates while nothing draws into it.
+   */
+  private readonly frameTarget: THREE.WebGLRenderTarget;
+  private readonly presentScene = new THREE.Scene();
+  private readonly presentMaterial: THREE.ShaderMaterial;
+  /** The scene frame, texels: what the scene and the finishing pass are drawn at. */
+  private readonly sceneSize = new THREE.Vector2(1, 1);
+  /** Whether the frame is taller than the canvas's device pixels and is shrunk onto it. */
+  private shrinking = false;
+  /**
+   * The device pixels the canvas covers, from a `device-pixel-content-box` observer,
+   * which is exact where `clientWidth x devicePixelRatio` is not at a fractional ratio;
+   * 0 until it reports, or where the browser has no such box (Safari), and then the
+   * product is rounded instead.
+   */
+  private observedDeviceWidth = 0;
+  private observedDeviceHeight = 0;
+  private readonly canvasObserver: ResizeObserver | null;
+  /** Dev switch for the heat shimmer and mirage (pause menu); see `setHeatHaze`. */
+  private heatHazeOn = true;
   /** Reused scratch for the camera's forward vector (horizon tracking). */
   private readonly _forward = new THREE.Vector3();
   /** Whether the cinema lens is on: cinema mode, set through `setCinema`. */
@@ -436,7 +483,6 @@ export class Renderer {
       this.timerQueryExt = null;
     }
     this.applyRetroCanvas();
-    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.shadowMap.enabled =
       shadowModeFor(shadowMode, quality, this.mobilePresentation) !== 'off';
     // PCFSoft's wider kernel costs extra texture taps for a blur that reads as
@@ -537,6 +583,7 @@ export class Renderer {
         uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
         uInkThreshold: { value: INK_THRESHOLD },
         uFxaa: { value: fxaa && quality !== 'retro' ? 1 : 0 },
+        uEncodeOutput: { value: 0 },
         uViewTint: { value: new THREE.Color(1, 1, 1) },
         uViewTintStrength: { value: 0 },
         uBinoculars: { value: 0 },
@@ -568,6 +615,30 @@ export class Renderer {
     hazeMesh.frustumCulled = false; // clip-space triangle spans far outside the frustum
     this.hazeScene.add(hazeMesh);
 
+    // The frame target and the present pass: see `frameTarget` and render/presentshader.ts.
+    // Nearest and unmipped because the present pass reads it texel by texel.
+    this.frameTarget = new THREE.WebGLRenderTarget(1, 1, {
+      depthBuffer: false,
+      type: THREE.UnsignedByteType,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      generateMipmaps: false,
+    });
+    this.presentMaterial = new THREE.ShaderMaterial({
+      vertexShader: PRESENT_VERTEX,
+      fragmentShader: PRESENT_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tFrame: { value: this.frameTarget.texture },
+        uFrameSize: { value: new THREE.Vector2(1, 1) },
+        uScale: { value: new THREE.Vector2(1, 1) },
+      },
+    });
+    const presentMesh = new THREE.Mesh(this.hazeGeometry, this.presentMaterial);
+    presentMesh.frustumCulled = false;
+    this.presentScene.add(presentMesh);
+
     // Retuned with the vehicle lamps (render/vehiclelights.ts `LAMP_EXPOSURE`): 150 was
     // authored against the old linear-encoded frame.
     this.torchLight = new THREE.SpotLight(0xffedbd, 52, 65, 0.32, 0.58, 1.7);
@@ -577,15 +648,27 @@ export class Renderer {
     this.scene.add(this.torchLight, this.torchTarget);
 
 
+    // The window's resize event still drives it (a DPR change on a move between screens
+    // arrives there everywhere); the observer adds the exact device-pixel size and the
+    // layout changes no window event reports.
+    this.canvasObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.observeCanvas);
+    try {
+      this.canvasObserver?.observe(this.renderer.domElement, { box: 'device-pixel-content-box' });
+    } catch {
+      this.canvasObserver?.observe(this.renderer.domElement);
+    }
     this.resize();
     window.addEventListener('resize', this.resize);
   }
 
   dispose(): void {
     window.removeEventListener('resize', this.resize);
+    this.canvasObserver?.disconnect();
     this.disposeGpuQueries();
     this.hazeTarget.dispose();
+    this.frameTarget.dispose();
     this.hazeMaterial.dispose();
+    this.presentMaterial.dispose();
     this.hazeGeometry.dispose();
     this.scene.remove(this.torchLight, this.torchTarget);
     this.torchLight.dispose();
@@ -619,8 +702,12 @@ export class Renderer {
   }
 
   /**
-   * Waits until both program variants used by the live two-pass frame are ready, and
-   * the plain shadow depth variants (`depthVariantSamples`) with them.
+   * Waits until every program variant the live frame draws is ready — the scene pass,
+   * the finishing pass both to the canvas and into the frame target (a render target is
+   * a different program key: linear output), and the present pass — and the plain
+   * shadow depth variants (`depthVariantSamples`) with them. Both finishing variants
+   * always, because the player can move the frame past the screen's height from the
+   * pause menu at any time.
    */
   async waitForFrameShaders(): Promise<void> {
     const sceneReady = this.compileForScenePass(this.scene);
@@ -629,10 +716,13 @@ export class Renderer {
       : Promise.resolve();
     const previousTarget = this.renderer.getRenderTarget();
     try {
+      this.renderer.setRenderTarget(this.frameTarget);
+      const framedReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
       this.renderer.setRenderTarget(null);
       const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
+      const presentReady = this.renderer.compileAsync(this.presentScene, this.hazeCamera);
       const shadeReady = this.cloudShadowPass?.compile();
-      await Promise.all([sceneReady, depthReady, postReady, shadeReady]);
+      await Promise.all([sceneReady, depthReady, framedReady, postReady, presentReady, shadeReady]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }
@@ -823,17 +913,20 @@ export class Renderer {
   }
 
   /**
-   * The drawing-buffer ratio for the current rung and canvas: the player's frame height,
-   * or on the retro rung its own whole-pixel line count.
+   * The scene frame for the current rung and canvas: the player's frame height, or on
+   * the retro rung its own whole-pixel line count.
    */
-  private pixelRatio(): number {
-    const cssHeight = this.renderer.domElement.clientHeight;
+  private frameSizeFor(canvas: CanvasPixels): { readonly width: number; readonly height: number } {
     // The retro rung's pixels are its look, so the frame height never moves them (see
     // render/retro.ts).
     if (this.quality === 'retro') {
-      return retroPixelRatio(cssHeight, window.devicePixelRatio, this.retroLines);
+      const ratio = retroPixelRatio(canvas.cssHeight, window.devicePixelRatio, this.retroLines);
+      return {
+        width: Math.max(1, Math.floor(canvas.cssWidth * ratio)),
+        height: Math.max(1, Math.floor(canvas.cssHeight * ratio)),
+      };
     }
-    return renderPixelRatio(this.renderHeight, cssHeight);
+    return sceneFrameSize(this.renderHeight, canvas);
   }
 
   /**
@@ -844,15 +937,43 @@ export class Renderer {
     this.renderer.domElement.style.imageRendering = this.quality === 'retro' ? 'pixelated' : '';
   }
 
+  private observeCanvas = (entries: ResizeObserverEntry[]): void => {
+    const box = entries[entries.length - 1]?.devicePixelContentBoxSize?.[0];
+    this.observedDeviceWidth = box ? box.inlineSize : 0;
+    this.observedDeviceHeight = box ? box.blockSize : 0;
+    this.resize();
+  };
+
+  /**
+   * Sizes the scene frame and the canvas.
+   *
+   * Up to the screen's own height the canvas IS the frame, as it always was: equal, or
+   * smaller and scaled up by the compositor, which is free and as good as any upscale
+   * this pass could afford at the screen's size. Past it, the canvas stays at the
+   * screen's device pixels and the frame is shrunk onto it by `presentMaterial`, an
+   * area average, instead of by the compositor's single bilinear tap (see
+   * render/presentshader.ts for why that tap wasted most of a supersample). The retro
+   * rung never shrinks: its frame is always coarser than the screen.
+   *
+   * The canvas is only re-sized when its size changes: assigning a canvas's width
+   * clears it even to the same value, and the observer reports after the frame is drawn.
+   */
   private resize = (): void => {
-    const canvas = this.renderer.domElement;
-    const width = Math.max(1, canvas.clientWidth);
-    const height = Math.max(1, canvas.clientHeight);
-    this.renderer.setPixelRatio(this.pixelRatio());
-    this.renderer.setSize(width, height, false);
+    const canvas = this.viewport();
+    const frame = this.frameSizeFor(canvas);
+    this.sceneSize.set(frame.width, frame.height);
+    this.shrinking = this.quality !== 'retro' && frame.height > canvas.deviceHeight;
+    const width = this.shrinking ? canvas.deviceWidth : frame.width;
+    const height = this.shrinking ? canvas.deviceHeight : frame.height;
+    const element = this.renderer.domElement;
+    if (element.width !== width || element.height !== height) {
+      // Drawing-buffer pixels given directly at a ratio of 1: the frame and the screen are
+      // both sized in device pixels here, and the CSS size is the layout's own.
+      this.renderer.setDrawingBufferSize(width, height, 1);
+    }
     this.resizeHazeTarget();
 
-    this.camera.aspect = width / height;
+    this.camera.aspect = canvas.cssWidth / canvas.cssHeight;
     this.camera.updateProjectionMatrix();
   };
 
@@ -994,13 +1115,23 @@ export class Renderer {
     // the ink and the grain on the displayed picture. Acceptable keeps the pass and
     // drops the WARP (see `setHeatHaze`), which is where the cost was.
     //
+    // A frame taller than the screen takes a third: pass 2 into `frameTarget`, then the
+    // present pass shrinks it onto the canvas (see `resize`).
+    //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
     // cutscene's ground does not read it.
     if (scene === this.scene) this.cloudShadowPass?.draw();
     this.renderer.setRenderTarget(this.hazeTarget);
     this.renderer.render(scene, camera);
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.hazeScene, this.hazeCamera);
+    if (this.shrinking) {
+      this.renderer.setRenderTarget(this.frameTarget);
+      this.renderer.render(this.hazeScene, this.hazeCamera);
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.presentScene, this.hazeCamera);
+    } else {
+      this.renderer.setRenderTarget(null);
+      this.renderer.render(this.hazeScene, this.hazeCamera);
+    }
   }
 
   /**
@@ -1070,11 +1201,24 @@ export class Renderer {
    * on a uniform every fragment agrees on.
    */
   setHeatHaze(frame: HeatHazeFrame): void {
-    const enabled = this.quality !== 'acceptable' && this.quality !== 'retro';
+    const enabled = this.heatHazeOn && this.quality !== 'acceptable' && this.quality !== 'retro';
     this.hazeMaterial.uniforms.uStrength.value = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
     this.hazeMaterial.uniforms.uMirage.value = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
     this.hazeEyeHeight = frame.eyeAboveM;
     this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
+  }
+
+  /**
+   * The heat shimmer and the mirage, for a developer's A/B from the pause menu: off
+   * is exactly the cheapest tier's pass, the field skipped on a uniform. Not a
+   * setting, and not persisted.
+   */
+  get heatHaze(): boolean {
+    return this.heatHazeOn;
+  }
+
+  set heatHaze(on: boolean) {
+    this.heatHazeOn = on;
   }
 
   /**
@@ -1118,34 +1262,57 @@ export class Renderer {
   }
 
   /**
-   * Size the scene-pass target to the drawing buffer (CSS size × pixel ratio) and hand
-   * the lens its uniforms. The cinema lens samples this same target: a 1.25x target
-   * under it was 1.56x the scene's pixels, about 80% of the lens's cost (+1.35 ms in the
-   * cabin view on the M2 Pro), for a centre the lens magnifies past it; Catmull-Rom
-   * (render/hazeshader.ts `sceneSample`) upscales that centre instead. Three's `setSize`
-   * is a no-op at an unchanged size, so tuning the strength reallocates nothing.
+   * Size the scene-pass target to the scene frame (`sceneSize`), the frame target with
+   * it while the frame is shrunk onto the screen, and hand the lens its uniforms. The
+   * cinema lens samples this same target: a 1.25x target under it was 1.56x the
+   * scene's pixels, about 80% of the lens's cost (+1.35 ms in the cabin view on the M2
+   * Pro), for a centre the lens magnifies past it; Catmull-Rom (render/hazeshader.ts
+   * `sceneSample`) upscales that centre instead. Three's `setSize` is a no-op at an
+   * unchanged size, so tuning the strength reallocates nothing.
    */
   private resizeHazeTarget(): void {
-    this.renderer.getDrawingBufferSize(this._drawSize);
+    const { x: width, y: height } = this.sceneSize;
     const uniforms = this.hazeMaterial.uniforms;
-    this.hazeTarget.setSize(this._drawSize.x, this._drawSize.y);
-    uniforms.uResolution.value.set(this._drawSize.x, this._drawSize.y);
+    this.hazeTarget.setSize(width, height);
+    uniforms.uResolution.value.set(width, height);
     uniforms.uPanini.value = this.cinemaLens ? this.paniniStrength : 0;
-    setCleanFrameHeight(this._drawSize.y);
+    uniforms.uEncodeOutput.value = this.shrinking ? 1 : 0;
+    // Back to 1x1 when not shrinking: `setSize` disposes the frame-sized texture, and
+    // Three allocates the small one only if something draws into it.
+    this.frameTarget.setSize(this.shrinking ? width : 1, this.shrinking ? height : 1);
+    const canvas = this.renderer.domElement;
+    (this.presentMaterial.uniforms.uFrameSize.value as THREE.Vector2).set(width, height);
+    (this.presentMaterial.uniforms.uScale.value as THREE.Vector2).set(
+      width / Math.max(1, canvas.width),
+      height / Math.max(1, canvas.height),
+    );
+    setCleanFrameHeight(height);
   }
 
   // --- Resolution and GPU timing ---
 
   /** Pixels the scene is actually shaded at, both passes. */
   get renderedPixels(): number {
-    this.renderer.getDrawingBufferSize(this._drawSize);
-    return this._drawSize.x * this._drawSize.y;
+    return this.sceneSize.x * this.sceneSize.y;
   }
 
-  /** The drawing buffer, device pixels: the frame the scene is shaded at. */
-  get drawingBufferSize(): { readonly width: number; readonly height: number } {
-    this.renderer.getDrawingBufferSize(this._drawSize);
-    return { width: this._drawSize.x, height: this._drawSize.y };
+  /** The scene frame, pixels: what the scene and the finishing pass are shaded at. */
+  get frameSize(): { readonly width: number; readonly height: number } {
+    return { width: this.sceneSize.x, height: this.sceneSize.y };
+  }
+
+  /** The scene frame's height, lines; per-frame readers take this, which allocates nothing. */
+  get frameHeight(): number {
+    return this.sceneSize.y;
+  }
+
+  /**
+   * The canvas's drawing buffer: the frame itself, or the screen's own device pixels
+   * while a taller frame is shrunk onto them.
+   */
+  get presentedSize(): { readonly width: number; readonly height: number; readonly shrunk: boolean } {
+    const canvas = this.renderer.domElement;
+    return { width: canvas.width, height: canvas.height, shrunk: this.shrinking };
   }
 
   /** Whether this context can time the GPU. Without it `gpuFrameMs` stays null. */
@@ -1277,17 +1444,15 @@ export class Renderer {
   }
 
   /**
-   * Installs the drawing-buffer ratio for the current rung, height and canvas, and
-   * forgets the GPU average: it was measured at a pixel count that no longer applies.
-   * `setPixelRatio` re-sizes the buffer around the current CSS size, so the canvas
-   * layout never moves.
+   * Installs the frame for the current rung, height and canvas, and forgets the GPU
+   * average: it was measured at a pixel count that no longer applies. Only the drawing
+   * buffer and the targets move; the canvas layout never does.
    */
   private applyResolution(): void {
     this.disposeGpuQueries();
     this.gpuAverageMs = null;
     this.gpuSamples = 0;
-    this.renderer.setPixelRatio(this.pixelRatio());
-    this.resizeHazeTarget();
+    this.resize();
   }
 
   /**
@@ -1325,18 +1490,24 @@ export class Renderer {
   }
 
   /**
-   * The CSS viewport the resolution policy is resolved against, for the menu.
+   * The canvas the resolution policy is resolved against, for the menu and `resize`:
+   * its CSS size and the device pixels it covers.
    *
    * The menu cannot read `window.innerWidth`: cinema mode shortens the CANVAS, not the
    * window, so the two disagree by 180 pixels exactly while it is on — and a readout
    * that claims a resolution the game is not rendering is the drift this whole control
    * exists to remove.
    */
-  viewport(): { readonly cssWidth: number; readonly cssHeight: number } {
+  viewport(): CanvasPixels {
     const canvas = this.renderer.domElement;
+    const cssWidth = Math.max(1, canvas.clientWidth);
+    const cssHeight = Math.max(1, canvas.clientHeight);
+    const dpr = window.devicePixelRatio || 1;
     return {
-      cssWidth: Math.max(1, canvas.clientWidth),
-      cssHeight: Math.max(1, canvas.clientHeight),
+      cssWidth,
+      cssHeight,
+      deviceWidth: this.observedDeviceWidth || Math.max(1, Math.round(cssWidth * dpr)),
+      deviceHeight: this.observedDeviceHeight || Math.max(1, Math.round(cssHeight * dpr)),
     };
   }
 
