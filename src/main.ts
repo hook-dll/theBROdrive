@@ -1318,8 +1318,8 @@ async function boot(): Promise<void> {
   camera.setShake(world.state.settings.cameraShake);
   camera.setStyle(world.state.settings.cameraStyle);
   camera.setYaw(initialYaw);
-  /** Driver's-seat eye per car model, and its O/J editor; see vehicle/cabincamera.ts. */
-  const cabinCamera = new CabinCamera(input, camera, (text) => hud.setToast(text));
+  /** The cabin view's eye per car model and seat; see vehicle/cabincamera.ts. */
+  const cabinCamera = new CabinCamera();
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
@@ -1501,7 +1501,7 @@ async function boot(): Promise<void> {
         beginDeathSequence,
       })
     : null;
-  /** Held devices are edge-toggled by E and reset when their item leaves the hand. */
+  /** Held devices are edge-toggled by F (with nothing aimed) and reset when their item leaves the hand. */
   let binocularsActive = false;
   /** Sticker-in-hand hint: how long it has been showing, and whether it was last frame. */
   let stickerHintClock = 0;
@@ -1510,7 +1510,7 @@ async function boot(): Promise<void> {
   let cameraActive = false;
   /** A shutter press is fulfilled from the completed rendered frame, not a fixed step. */
   let pendingPhotoCamera: CameraItem | null = null;
-  /** 0..1 while an E-key watch action accelerates four in-game hours; 1 is idle. */
+  /** 0..1 while an F-key watch action accelerates four in-game hours; 1 is idle. */
   let watchFastForwardProgress = 1;
   /** Any fixed-step origin rebase keeps the following rendered frame ineligible. */
   let rebasedThisFrame = false;
@@ -1703,7 +1703,6 @@ async function boot(): Promise<void> {
     }
     frameProfiler?.end('traffic');
 
-    cabinCamera.step(dt, f, controlled ? (s.cars[drivingId!]?.modelId ?? null) : null);
     if (driving && !controlled) {
       player.setEnabled(false);
       if (f.cycleCamera) camera.cycleDriving();
@@ -1877,53 +1876,6 @@ async function boot(): Promise<void> {
       else if (f.cycleItem !== 0) inventory.cycle(f.cycleItem);
     }
 
-    // E owns held-item toggles/equipping, unless the aim is on a kit car's working part
-    // (a door, a lid, a fitting): then E works that part (`Interaction.claimsUseHeld`).
-    // F remains the physical world action, including vehicle entry.
-    const useHeld = f.useHeld && !interaction.claimsUseHeld;
-    const heldAfterSelection = inventory.held;
-    if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
-    if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
-    if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
-    if (driving === null && !dying && !medicineActive && useHeld && heldAfterSelection !== null) {
-      if (heldAfterSelection.type === 'medicine') {
-        // Health and inventory change in one turn before the autosave microtask.
-        // The removed item's viewmodel remains owned by the timed animation below.
-        vitals.restoreFully();
-        inventory.remove(heldAfterSelection.id);
-        medicineActive = true;
-        medicineTimer = 0;
-        medicineCapReleased = false;
-        hud.setToast('medicine taken');
-      } else if (heldAfterSelection.type === 'binoculars') {
-        binocularsActive = !binocularsActive;
-      } else if (heldAfterSelection.type === 'torchlight') {
-        torchlightActive = !torchlightActive;
-      } else if (heldAfterSelection.type === 'camera') {
-        if (!cameraActive) {
-          cameraActive = true;
-        } else if (heldAfterSelection.framesRemaining > 0) {
-          pendingPhotoCamera = heldAfterSelection;
-        } else {
-          hud.setToast('camera roll is spent');
-        }
-      } else if (
-        heldAfterSelection.type === 'pocket_watch' &&
-        watchFastForwardProgress >= 1
-      ) {
-        watchFastForwardProgress = 0;
-        hud.setToast('watch shaken — winding four hours forward');
-      }
-    }
-    if (!medicineActive && useHeld && heldAfterSelection?.type === 'sun_shades') {
-      const previous = s.player.wornSunShades;
-      const next = inventory.remove(heldAfterSelection.id);
-      if (next?.type === 'sun_shades') {
-        if (previous !== null) inventory.add(previous);
-        world.apply({ t: 'wearable', shades: next });
-        hud.setToast(`${next.tint} sun shades on — G to remove`);
-      }
-    }
     if (f.removeWearable && s.player.wornSunShades !== null) {
       const worn = s.player.wornSunShades;
       world.apply({ t: 'wearable', shades: null });
@@ -2036,6 +1988,54 @@ async function boot(): Promise<void> {
       activeS,
       camera.mode === 'cabin',
     );
+    // F with nothing aimed is the held item's (`InteractionResult.useHeld`): this tick's
+    // aim, so a press that picked something up or opened a door never also toggles it.
+    const useHeld = interacted.useHeld;
+    const heldAfterSelection = inventory.held;
+    if (driving !== null || heldAfterSelection?.type !== 'binoculars') binocularsActive = false;
+    if (driving !== null || heldAfterSelection?.type !== 'torchlight') torchlightActive = false;
+    if (driving !== null || heldAfterSelection?.type !== 'camera') cameraActive = false;
+    if (driving === null && !dying && !medicineActive && useHeld && heldAfterSelection !== null) {
+      if (heldAfterSelection.type === 'medicine') {
+        // Health and inventory change in one turn before the autosave microtask.
+        // The removed item's viewmodel remains owned by the timed animation below.
+        vitals.restoreFully();
+        inventory.remove(heldAfterSelection.id);
+        medicineActive = true;
+        medicineTimer = 0;
+        medicineCapReleased = false;
+        hud.setToast('medicine taken');
+      } else if (heldAfterSelection.type === 'binoculars') {
+        binocularsActive = !binocularsActive;
+      } else if (heldAfterSelection.type === 'torchlight') {
+        torchlightActive = !torchlightActive;
+      } else if (heldAfterSelection.type === 'camera') {
+        if (!cameraActive) {
+          cameraActive = true;
+        } else if (heldAfterSelection.framesRemaining > 0) {
+          pendingPhotoCamera = heldAfterSelection;
+        } else {
+          hud.setToast('camera roll is spent');
+        }
+      } else if (
+        heldAfterSelection.type === 'pocket_watch' &&
+        watchFastForwardProgress >= 1
+      ) {
+        watchFastForwardProgress = 0;
+        hud.setToast('watch shaken — winding four hours forward');
+      } else if (heldAfterSelection.type === 'sun_shades') {
+        const previous = s.player.wornSunShades;
+        const next = inventory.remove(heldAfterSelection.id);
+        if (next?.type === 'sun_shades') {
+          if (previous !== null) inventory.add(previous);
+          world.apply({ t: 'wearable', shades: next });
+          hud.setToast(`${next.tint} sun shades on — G to remove`);
+        }
+      }
+    }
+    // Getting in from foot sits down facing the windscreen, in the cabin view; C still
+    // goes back to the chase.
+    if (interacted.boarded) camera.setMode('cabin');
     // Working a machine up close nothing is written on the screen: the machine is the text.
     prompt = machineFocus.working ? null : interacted.prompt;
     actionable = !machineFocus.working && interacted.actionable;
@@ -2414,7 +2414,7 @@ async function boot(): Promise<void> {
     }
 
     Object.assign(cameraInput, lastInput);
-    // E held on the inside mirror: the mouse turns the mirror, the head stays still. A
+    // F held on the inside mirror: the mouse turns the mirror, the head stays still. A
     // mirror turned by θ swings the view in it by 2θ, so half the look delta moves the
     // image with the hand.
     const aimingKit = interaction.aimingKit;
@@ -2853,7 +2853,6 @@ async function boot(): Promise<void> {
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt, actionable);
-    hud.setCabinEditor(cabinCamera.hud);
     trunkView.update(
       boot,
       boot ? (vehicles.get(boot.id) ?? null) : null,

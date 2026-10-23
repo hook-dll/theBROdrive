@@ -524,14 +524,15 @@ export class CameraRig {
     this.binoculars = active;
   }
 
-  /** While true the cabin view does not turn back to the road (main.ts: E held on the mirror). */
+  /** While true the cabin view does not turn back to the road (main.ts: F held on the mirror). */
   setCabinLookHeld(held: boolean): void {
     this.cabinLookHeld = held;
   }
 
   setMode(mode: CameraMode): void {
-    // Foot is derived from `onFoot`; retaining the driving selection is what makes
-    // a chase view and its zoom still be there after re-entering a car.
+    // Foot is derived from `onFoot`. The driving selection is kept across a walk, the
+    // chase's zoom with it; main.ts selects the cabin as the player gets in from foot, and
+    // the entry snap (`snapDriving`) then faces it down the car.
     if (mode !== 'foot') this._mode = mode;
   }
 

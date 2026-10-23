@@ -968,8 +968,8 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
 
   /**
    * Label of the first other action bound to `code`, or null. Two actions may
-   * deliberately share a key only when both declare it as a default; F uses
-   * that context-sensitive exception for world manipulation and vehicle entry.
+   * deliberately share a key only when both declare it as a default: Space (handbrake,
+   * jump), C (camera, crouch) and Shift (mouse look, sprint) are each a car's and a foot's.
    */
   const holderOf = (code: string, exceptActionId: string): string | null => {
     const except = BINDABLE_ACTIONS.find((action) => action.id === exceptActionId);
@@ -3042,19 +3042,19 @@ export class MainMenu {
           readonly detail: string;
           readonly request: DevSpawnItemRequest;
         }[] = [
-          { label: 'medicine bottle', detail: 'E use · full recovery', request: { type: 'medicine' } },
-          { label: 'binoculars', detail: 'E toggle · 10x', request: { type: 'binoculars' } },
-          { label: 'torchlight', detail: 'E toggle beam', request: { type: 'torchlight' } },
+          { label: 'medicine bottle', detail: 'F use · full recovery', request: { type: 'medicine' } },
+          { label: 'binoculars', detail: 'F toggle · 10x', request: { type: 'binoculars' } },
+          { label: 'torchlight', detail: 'F toggle beam', request: { type: 'torchlight' } },
           {
             label: 'professional camera',
-            detail: `E viewfinder · ${CAMERA_FRAME_LIMIT} frames`,
+            detail: `F viewfinder · ${CAMERA_FRAME_LIMIT} frames`,
             request: { type: 'camera' },
           },
           { label: 'football', detail: 'walk or sprint into it', request: { type: 'football' } },
-          { label: 'pocket watch', detail: 'E wind +4 h', request: { type: 'pocket_watch' } },
-          { label: 'green sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
-          { label: 'yellow sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
-          { label: 'red sun shades', detail: 'E equip · G remove', request: { type: 'sun_shades', tint: 'red' } },
+          { label: 'pocket watch', detail: 'F wind +4 h', request: { type: 'pocket_watch' } },
+          { label: 'green sun shades', detail: 'F equip · G remove', request: { type: 'sun_shades', tint: 'green' } },
+          { label: 'yellow sun shades', detail: 'F equip · G remove', request: { type: 'sun_shades', tint: 'yellow' } },
+          { label: 'red sun shades', detail: 'F equip · G remove', request: { type: 'sun_shades', tint: 'red' } },
         ];
         for (const spec of equipment) {
           const row = button('menu-body', '');

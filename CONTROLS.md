@@ -19,25 +19,66 @@ the player stays down and rises by himself once he has walked out from under it.
 crouch ends on getting into a car and on a rescue. In a car `C` is still the camera; the
 two actions share the key by default and can be split in Settings → Controls.
 
-## Cars: doors with E, getting in and out with F
+## One interaction key: F
+
+`F` (the bindable "Interact", the pad's X, the touch overlay's F) is every interaction
+there is; `E` is bound to nothing. One press means one thing, decided by the aim
+(`Interaction.fixedUpdate`, `src/player/interaction.ts`).
+
+**On foot** the press belongs to the aim when the aim shows something: a named world
+target (the tow bar between two cars, a machine, a barrel, a key box, a loose part or
+item, a trailer, a compartment's cell), a prompt, a lit crosshair, or a kit car's body
+within reach (3.5 m), even where nothing on it answers. Then, first match wins:
+
+1. a sticker envelope in hand aimed at a car: F (or a click) sticks it;
+2. the world target's action (pick up, open, take, stow, hitch, press), unless an
+   unnamed kit part shares the ray and nothing is prompted;
+3. the kit seat got into through an open side door, when F can do something there (sit,
+   take what lies on it, lay the load on it): the seat looked at, or, looking through the
+   open doorway within 2.6 m at anything in the cabin that is not a seat (the dash, the
+   far door, the far window), the seat that doorway serves. This wins over an open door in
+   the same ray, the near one's edge or the far one across the cabin;
+4. the kit car's part in the aim (a side door, the bonnet, the boot lid, the fuel flap): a
+   shut door opens, from its panel or its window; an open one shuts only when no seat is
+   got into past it;
+5. boarding the parked plane;
+6. getting in otherwise (a car's body); a seat that refuses, or a kit car's bare body
+   beside a door, knocks.
+
+An aim that shows nothing gives the press to the held item
+(`InteractionResult.useHeld`, `src/main.ts`): binoculars and the torch toggle, the camera
+raises its viewfinder and then takes a photo, the medicine is taken, the pocket watch winds
+four hours on, sun shades go on. A held item is never used from a seat.
+
+**Seated**, first match wins: the kit car's part in the aim (a door, a switch, a stalk,
+the hazard button, the radio knob, a mirror), another seat in the aim (cabin view only),
+out of the car.
+
+Held down, F works a barrel's tap and turns the inside or a door mirror with the mouse.
+A sticker being tried on is mirrored with the middle mouse button (the pad's B, the touch
+strip's MIRROR); the wheel turns it, Shift+wheel sizes it, the right button resets it.
+
+## Cars: doors, getting in and out
 
 The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`,
 `aimKit` and the `kit*` methods beside it). Picking is against the car's render mesh with
 the car lab's rule: clear glass is looked through unless the pane itself moves.
 
 **A kit car names nothing.** No prompt for its doors, lids, flap or seats, on foot or
-seated: the round crosshair lights on whatever E or F works there (`InteractionResult
+seated: the round crosshair lights on whatever F works there (`InteractionResult
 .actionable`), and, while driving, shows only then. A refusal is the thing not happening
-(a door that stays shut answers F with a knock). Only the bonnet and boot cells keep their
-line (`[F] take 1.5 inline-four — oil full — 4.0 L`), and a seat the player cannot take
-with his load says why.
+(a door that stays shut when the player tries to get out). Only the bonnet and boot cells
+keep their line (`[F] take 1.5 inline-four — oil full — 4.0 L`), and a seat the player
+cannot take with his load says why.
 
-- **On foot, E works only the panels**: the side doors, the bonnet, the boot lid or
-  tailgate and the fuel flap. Windows, vents and everything in the cabin are not reached
-  from outside, even through an open door. A sticker envelope in hand keeps E (it mirrors
-  the sticker); any other held item gives E up while a panel is in the crosshair. A
-  door, the bonnet and the boot each sound their latch as they open and their slam as
-  they land shut; getting in and out is silent.
+- **On foot, F works only the panels**: the side doors, the bonnet, the boot lid or
+  tailgate and the fuel flap. A side door's window is that door: the hand stops at the
+  shut glass. Nothing is worked through glass on foot, so a panel seen through a window
+  (the far door) does not answer. Windows, vents and everything in the cabin are not
+  reached from outside, even through an open door. A sticker envelope in hand makes the
+  car a surface to stick on, not a set of panels. A door, the bonnet and the boot each
+  sound their latch as they open and their slam as they land shut; getting in and out is
+  silent.
 - **The bonnet and boot grids follow their lids.** Opening the bonnet shows its grid in the
   bay, where the parts stand: the engine's big cell in the middle, the radiator in front,
   the turbine and the air filter beside it, each cell outlined round its top and lit pink
@@ -49,11 +90,14 @@ with his load says why.
   pour and the line shows the pour. Shut, the flap shows nothing and takes nothing. Oil
   and water still pour into the engine and radiator cells in the open bonnet. The tank is
   the car's own; it is not a part.
-- **F gets in by looking at a seat through an open side door** (front or rear, on the
-  player's side; the rear bench through a front door on a two-door car). The first opaque
-  thing the eye ray meets must be the seat, not seen through glass, and the ray must
-  cross the open door's outline. The player sits in that seat. The cabin carry limits
-  still apply. The seats themselves are not worked: no sliding, reclining or headrests.
+- **F gets in through an open side door** (front or rear, on the player's side; the rear
+  bench through a front door on a two-door car), the ray crossing the open door's outline
+  within reach. Looking at a seat (the first opaque thing met, not seen through glass)
+  sits in that seat; looking through the doorway at anything else in the cabin sits in
+  the seat that door serves (front left the driver's, front right the passenger's, rear
+  the bench's side). To shut an open door from outside, aim at it from where the ray
+  does not pass through its opening. The cabin carry limits still apply. The seats
+  themselves are not worked: no sliding, reclining or headrests.
 - **Only the driver's seat drives.** From any other seat the car holds where it stands:
   pedals, steering, gears, lights, indicators and the autopilot do nothing ("only the
   driver can do that"). The cabin view is from that seat (the passenger's is the
@@ -66,14 +110,16 @@ with his load says why.
   runs the wipers slow, fast and off.
 - **F gets out through the open door on the seat's side** (a rear seat's rear door, or
   the front door on a car without rear doors) below 5 km/h, beside that door,
-  ground-checked.
+  ground-checked, when the aim is on no part and no other seat. A door opened from the
+  seat is still in the aim: look off it (at the road) before F again, or F shuts it.
+- **Getting in from foot switches to the cabin view**, facing down the car; `C` goes
+  back to the chase. Moving between seats keeps the view as it was.
 - **The cabin view hides the on-screen cluster**: the car's own instruments read speed,
   revs, fuel, temperature, oil pressure, charge and vacuum, and its warning lamps light.
   The interior and both door mirrors show what is behind, from the seat's eye.
 
 Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
-left. The touch overlay's E button is on-foot only, so from the seat parts are worked
-with the keyboard or the pad's B.
+left.
 
 ## Gamepad (Xbox-style, W3C "standard" mapping)
 
@@ -89,8 +135,8 @@ own layout would otherwise drive the car with its triggers as its steering.
 | RT | throttle, 0..1 (analog) | — |
 | LT | brake / reverse, 0..1 (analog) | — |
 | A | handbrake (toggle) | jump |
-| B | use held item (`E`) | use held item (`E`) |
-| X | enter/exit car, pick up/mount (`F`) | same |
+| B | — | mirror the sticker being tried on |
+| X | everything `F` does | same |
 | Y | camera: chase ↔ cabin (`C`) | crouch / stand up (`C`) |
 | RB / LB | shift up / down (manual or override) | — |
 | D-pad ↑ | recentre camera (`V`) | recentre camera |
@@ -186,33 +232,13 @@ is its horizon; the mouse turns the head against the car (to look at a door, say
 3 s after the mouse stops the head turns back to the road by itself. There is no zoom,
 no occlusion pull-in, and the speed sway does not reach it.
 
-The eye is per car model, chassis-local metres (+X the car's left, +Y up, +Z
-forward), first match wins (`src/vehicle/cabincamera.ts`):
-
-1. this browser's override (`localStorage` `bro.cabinCameras`), written only when J
-   could not write the config file;
-2. `config/cabin-cameras.json`, `{ "<modelId>": [x, y, z] }`;
-3. the kit seat: `CarModelMeasure.cabinEye`, an anchor at the driver's cushion plus a
-   seated eye height (`KIT_DRIVER_EYE_NODE`, `src/carkit/interior.ts`) carried through
-   the body fit. A body without a kit cabin uses its bonnet mount.
-
-**Editor (driving).** `O` opens it (switching to the cabin view) and steps the axis:
-X → Y → Z → closed. While it is open the pedal and steering keys move the eye and
-drive nothing (throttle, brake and steering read zero; the handbrake still toggles):
-
-| Axis | A / ← | D / → | W / ↑ | S / ↓ |
-|---|---|---|---|---|
-| X | car's left | car's right | — | — |
-| Y | — | — | up | down |
-| Z | — | — | forward | back |
-
-0.15 m/s, Shift ×4. The HUD shows the axis and the eye to the millimetre. Mouse look
-stays live. `C` away from the cabin view closes the editor.
-
-**Save (`J`, cabin view, editor open or not).** On the dev server the game POSTs
-`/__dev/cabin-camera` and `vite.config.ts` rewrites `config/cabin-cameras.json` (one
-line per car, keys sorted); the page does not reload on that file. In any other build, or
-if the POST fails, the eye goes to `localStorage` and the toast says so.
+The eye is per car model and seat, chassis-local metres (+X the car's left, +Y up, +Z
+forward; `src/vehicle/cabincamera.ts`). The driver's is the kit seat:
+`CarModelMeasure.cabinEye`, an anchor at the driver's cushion plus a seated eye height
+(`KIT_DRIVER_EYE_NODE`, `src/carkit/interior.ts`) carried through the body fit; a body
+without a kit cabin uses its bonnet mount. The front passenger's is the driver's mirrored
+across the car; the rear seats' come from the bench (`CarModelMeasure.rearEye`, the
+right one mirrored).
 
 ## Camera style
 

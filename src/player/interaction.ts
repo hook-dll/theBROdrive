@@ -93,7 +93,7 @@ const EXIT_SPEED_LIMIT_KMH = 5;
  * pillar's edge) and still count as aimed through the opening.
  */
 const KIT_OPENING_SLACK = 0.08;
-/** How long E holds a momentary fitting (the horn) down, seconds. */
+/** How long F holds a momentary fitting (the horn) down, seconds. */
 const KIT_PRESS_SECONDS = 0.3;
 /**
  * Heaviest single thing a player can take into the cabin, kg: what fits on a lap or
@@ -174,12 +174,19 @@ export interface InteractionResult {
   continuous: FoleyContinuous;
   /** World-attached storage grid while the player is looking into an opened compartment. */
   boot: TrunkViewState | null;
-  /** True on the F edge that asks to board the parked plane. */
+  /** True on the F press that asks to board the parked plane. */
   board: boolean;
+  /** True on the F press that seated the player from foot (`tryEnter`): main.ts turns the view to the cabin. */
+  boarded: boolean;
   /**
-   * The crosshair is on something a car's E or F works that no prompt names: a door,
-   * lid, flap or fitting, a seat F sits in, an open flap a held can pours into. The HUD
-   * lights the crosshair for it, and shows it at all while driving only then.
+   * The F press that nothing aimed at took: the held item's (binoculars, torch, camera,
+   * watch, shades, medicine), which main.ts works. Never seated.
+   */
+  useHeld: boolean;
+  /**
+   * The crosshair is on something F works that no prompt names: a car's door, lid, flap
+   * or fitting, a seat F sits in, an open flap a held can pours into. The HUD lights the
+   * crosshair for it, and shows it at all while driving only then.
    */
   actionable: boolean;
 }
@@ -393,7 +400,11 @@ interface Resolved {
   kitHit: boolean;
   /** The side door the player stands at (see `kitEntryDoor`), or null. */
   kitDoor: KitDoor | null;
-  /** F gets in, to this seat: the eye looks at it through an open side door's opening. */
+  /**
+   * F gets in, to this seat: the eye looks at it through an open side door's opening, or
+   * looks through that opening at anything in the cabin that is not a seat (the dash, the
+   * far door), when it is the seat the door serves.
+   */
   kitSeat: PlayerSeat | null;
   /**
    * The cabin place (vehicle/cabin.ts index) whose thing the eye looks at through that
@@ -446,6 +457,8 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
 
 /** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
 const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
+/** A side door, which a seat is got into through. */
+const KIT_SIDE_DOOR = /^door_[fr][lr]$/;
 /**
  * Cabin parts also worked on foot, when the eye ray reaches them through an open side
  * door (`kitOpenDoorDistance`): the van's engine cover behind the front seats, which is
@@ -561,7 +574,6 @@ export function operateTrunkCell(
 export class Interaction {
   private player: Player | null = null;
   private prevInteract = false;
-  private prevMount = false;
   private prevDrop = false;
   private conditionEmitTimer = 0;
   /**
@@ -617,7 +629,6 @@ export class Interaction {
    * mirrored by the player, kept while the same envelope stays in hand.
    */
   private stickerStyle: { envelopeId: string; rollOffset: number; scale: number; mirror: boolean } | null = null;
-  private prevUseHeld = false;
   private readonly stickerPoint = new THREE.Vector3();
   private readonly stickerNormal = new THREE.Vector3();
   private readonly stickerNormalMatrix = new THREE.Matrix3();
@@ -645,12 +656,12 @@ export class Interaction {
   private readonly kitAhead = new THREE.Vector3();
   private readonly kitCentre = new THREE.Vector3();
   private readonly kitBox = new THREE.Box3();
-  /** A momentary fitting (the horn) held down by E, released after `KIT_PRESS_SECONDS`. */
+  /** How far along the eye ray the door `kitOpening` last returned is entered through. */
+  private kitOpeningDistance = Infinity;
+  /** A momentary fitting (the horn) held down by F, released after `KIT_PRESS_SECONDS`. */
   private kitPress: { rig: KitRig; control: KitControl; left: number } | null = null;
-  /** The hand-aimed part (the inside mirror) E is held on: the mouse turns it, not the head. */
+  /** The hand-aimed part (the inside mirror) F is held on: the mouse turns it, not the head. */
   private kitAim: { vehicle: Vehicle; rig: KitRig; control: KitControl } | null = null;
-  /** Last tick's aim named a kit part, so E belongs to it; see `claimsUseHeld`. */
-  private kitClaimsE = false;
   /** A seated press main.ts answers; see `takeCabinPress`. */
   private cabinPress: 'hazard' | 'radio' | null = null;
   /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
@@ -760,15 +771,6 @@ export class Interaction {
   }
 
   /**
-   * The last tick's aim named a kit car's working part, so E works that part and not
-   * the held item (binoculars, torch, shades). Read by the composition root before it
-   * hands E to the held item; a sticker in hand keeps E (it mirrors the sticker).
-   */
-  get claimsUseHeld(): boolean {
-    return this.kitClaimsE || this.kitAim !== null;
-  }
-
-  /**
    * The hazard button or the radio knob worked from the seat since the last call, once:
    * main.ts cycles the hazards with the autopilot and steps the car's radio.
    */
@@ -801,21 +803,16 @@ export class Interaction {
     /** The drawing camera is the cabin view (not the chase). */
     cabinView: boolean,
   ): InteractionResult {
-    const interactPressed = input.interact && !this.prevInteract;
-    const mountPressed = input.mount && !this.prevMount;
+    const pressed = input.interact && !this.prevInteract;
     const dropPressed = input.dropItem && !this.prevDrop;
     const primaryPressed = input.usePrimary && !this.prevPrimary;
     const secondaryPressed = input.useSecondary && !this.prevSecondary;
     this.prevInteract = input.interact;
-    this.prevMount = input.mount;
     this.prevDrop = input.dropItem;
     this.sound = null;
     this.continuous = null;
     this.prevPrimary = input.usePrimary;
     this.prevSecondary = input.useSecondary;
-    const useHeldPressed = input.useHeld && !this.prevUseHeld;
-    this.prevUseHeld = input.useHeld;
-    this.kitClaimsE = false;
     this.listenForShut(dt);
     if (this.kitPress) {
       this.kitPress.left -= dt;
@@ -824,8 +821,8 @@ export class Interaction {
         this.kitPress = null;
       }
     }
-    // Let go of E (or out of the seat), the mirror stays where the hand left it.
-    if (this.kitAim && (!input.useHeldDown || !this.world.state.player.drivingCarId)) {
+    // Let go of F (or out of the seat), the mirror stays where the hand left it.
+    if (this.kitAim && (!input.interactDown || !this.world.state.player.drivingCarId)) {
       this.kitAim.vehicle.storeMirrorAim();
       this.kitAim = null;
     }
@@ -835,7 +832,7 @@ export class Interaction {
       // at the car, and a driver cannot reach into it.
       this.openStorage = null;
       // A kit car is worked from the seat too: the ray runs from whichever camera is
-      // drawing, so the occupant looks at a door or a fitting and E works it; from the
+      // drawing, so the occupant looks at a door or a fitting and F works it; from the
       // chase view only the side doors answer. Nothing is said: the crosshair
       // appears on it (`actionable`), and a refused exit is the door that stays shut.
       const active = this.getVehicle();
@@ -846,20 +843,28 @@ export class Interaction {
       let seat: PlayerSeat | null = null;
       if (active && rig) {
         aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
-        if (aimed) {
-          this.kitClaimsE = true;
-          if (useHeldPressed) this.workKitPart(active.vehicle, rig, aimed.control);
-        }
         const other = this.kitAimed.seat;
         if (cabinView && other !== null && other !== this.world.state.player.seat) {
           seat = other;
         }
       }
-      if (interactPressed) {
-        if (seat) this.world.apply({ t: 'enter_car', carId: this.world.state.player.drivingCarId, seat });
+      // ONE F, SEATED, first match wins: the part in the aim, another seat in the aim, out
+      // of the car. The held item is never used from a seat.
+      if (pressed) {
+        if (aimed && active && rig) this.workKitPart(active.vehicle, rig, aimed.control);
+        else if (seat) this.world.apply({ t: 'enter_car', carId: this.world.state.player.drivingCarId, seat });
         else this.tryExit(roadS);
       }
-      return { prompt: null, sound: this.sound, continuous: null, boot: null, board: false, actionable: aimed !== null || seat !== null };
+      return {
+        prompt: null,
+        sound: this.sound,
+        continuous: null,
+        boot: null,
+        board: false,
+        boarded: false,
+        useHeld: false,
+        actionable: aimed !== null || seat !== null,
+      };
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -882,9 +887,9 @@ export class Interaction {
         envelope,
         resolved,
         input,
-        mountPressed || primaryPressed,
+        pressed || primaryPressed,
         secondaryPressed,
-        useHeldPressed,
+        input.stickerMirror,
         dropPressed,
         eyeX,
         eyeY,
@@ -906,23 +911,19 @@ export class Interaction {
     const prompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
       ? STICKER_HINT
       : this.promptFor(resolved);
-    // A kit car's part in the aim takes E, unnamed: the crosshair lights on it. A sticker
-    // in hand keeps E for mirroring, and the car is a surface to it, not a set of doors.
+    // A kit car's part in the aim is unnamed: the crosshair lights on it. A sticker in hand
+    // makes the car a surface, not a set of doors.
     const kitRig = resolved.vehicle?.kit ?? null;
     const kitPart = envelope === null && kitRig ? resolved.kitPart : null;
-    if (kitPart && resolved.vehicle && kitRig) {
-      this.kitClaimsE = true;
-      if (useHeldPressed) this.workKitPart(resolved.vehicle, kitRig, kitPart.control);
-    }
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const aimedAt = resolved.target;
     // F held on a world fixture (a barrel's tap, a wheel being turned); a machine worked
     // up close takes it only once it is framed.
-    if (aimedAt.kind === 'world-fixture' && input.mountDown) {
+    if (aimedAt.kind === 'world-fixture' && input.interactDown) {
       const fixture = this.worldFixtures.get(aimedAt.id);
       const framed = !fixture?.focus || this.focusedFixture === aimedAt.id;
-      const held = framed ? fixture?.hold?.(this.fixtureContext, dt, mountPressed) ?? null : null;
+      const held = framed ? fixture?.hold?.(this.fixtureContext, dt, pressed) ?? null : null;
       if (held) {
         if (held.sound) this.sound = held.sound;
         if (held.continuous) this.continuous = held.continuous;
@@ -933,16 +934,43 @@ export class Interaction {
       if (this.inventory.held?.id === this.spentSponge) this.drop(eyeX, eyeY, eyeZ, dirX * 0.25, -1, dirZ * 0.25);
       this.spentSponge = null;
     }
-    const worldActionPressed = mountPressed && !stickerBlocksCar
-      && (this.towActionValue !== null || this.mountHasPriority(resolved.target));
-    if (worldActionPressed) {
-      const actionResolved = resolved;
-      this.mount(actionResolved);
+
+    // A refused seat says why (the prompt), so it does not also light the crosshair.
+    const actionable = kitPart !== null
+      || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
+      || (aimedAt.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
+    // ONE F, ON FOOT. It belongs to the aim when the aim shows it something: a named world
+    // target (the tow bar, a fixture, a loose thing, a trailer, a compartment), a prompt,
+    // a lit crosshair, or a kit car's body within reach (`kitHit`: the car is what the
+    // hand is at, even where nothing on it answers). Then, first match wins:
+    //  1. the world action, unless an unnamed kit part shares the ray and nothing is
+    //     prompted (an open bonnet's empty cell in front of its lid: F shuts the lid);
+    //  2. the seat the eye gets in at through an open side door (`kitSeat`: the seat
+    //     looked at, or the one that doorway serves), when F can do something there (sit,
+    //     take what lies on it, lay the load on it); this wins over an open door in the
+    //     same ray, the near one's edge or the far one across the cabin;
+    //  3. the kit car's part (a shut door is opened, from its panel or its window; an open
+    //     one shut when no seat is got into past it; a lid, the flap);
+    //  4. boarding the plane;
+    //  5. getting in otherwise (a car's body; a refused seat, or a kit car's bare body
+    //     beside a door, knocks).
+    // An aim that shows nothing leaves F to the held item (`useHeld`, main.ts). A sticker
+    // in hand is a step ahead of all of this (`updateStickerMode`).
+    const worldAction = !stickerBlocksCar && (this.towActionValue !== null || this.mountHasPriority(aimedAt));
+    const aimTakesF = worldAction || prompt !== null || actionable || resolved.kitHit;
+    let board = false;
+    let boarded = false;
+    if (pressed && aimTakesF) {
+      const seatAction = resolved.kitSeat !== null && !stickerBlocksCar ? this.cabinAction(resolved) : null;
+      const seatWorks = seatAction !== null
+        && seatAction.kind !== 'refuse'
+        && (seatAction.kind !== 'sit' || this.cabinRefusal() === null);
+      if (worldAction && (prompt !== null || kitPart === null)) this.mount(resolved);
+      else if (seatWorks) boarded = this.tryEnter(resolved);
+      else if (kitPart && resolved.vehicle && kitRig) this.workKitPart(resolved.vehicle, kitRig, kitPart.control);
+      else if (aimedAt.kind === 'aircraft') board = true;
+      else if (!stickerBlocksCar) boarded = this.tryEnter(resolved);
     }
-    if (interactPressed && !worldActionPressed && !stickerBlocksCar) this.tryEnter(resolved);
-    // F is also world manipulation, but `mountHasPriority` yields the plane to this
-    // edge, so an F aimed at the aircraft never reaches `mount`.
-    const board = interactPressed && !worldActionPressed && !stickerBlocksCar && resolved.target.kind === 'aircraft';
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
     if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
@@ -970,11 +998,7 @@ export class Interaction {
         };
       }
     }
-    // A refused seat says why (the prompt), so it does not also light the crosshair.
-    const actionable = kitPart !== null
-      || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
-      || (resolved.target.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
-    return { prompt, sound: this.sound, continuous: this.continuous, boot, board, actionable };
+    return { prompt, sound: this.sound, continuous: this.continuous, boot, board, boarded, useHeld: pressed && !aimTakesF, actionable };
   }
 
   /** A target that belongs to a car and is not an open storage grid. */
@@ -988,9 +1012,10 @@ export class Interaction {
    * glass, the sticker is shown there live, see-through, exactly as it will be —
    * a decal clipped to the panels that can carry it, on top of every sticker
    * already there — and follows the crosshair. The wheel turns it, Shift+wheel sizes
-   * it, E mirrors it, right click puts it back upright at catalogue size, F or click
-   * sticks it. Returns null when the crosshair is not on a car, so the rest of the
-   * world stays usable with the envelope in hand.
+   * it, the middle button (the pad's B, the touch strip's MIRROR) mirrors it, right click
+   * puts it back upright at catalogue size, F or click sticks it. Returns null when the
+   * crosshair is not on a car, so the rest of the world stays usable with the envelope in
+   * hand.
    */
   private updateStickerMode(
     held: StickerEnvelopeItem,
@@ -1069,16 +1094,18 @@ export class Interaction {
       this.onStickerPreview(null, null, false);
       this.onStickerPlaced(carId, sticker);
       this.sound = 'mount';
-      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false, actionable: false };
+      return { prompt: 'stuck on', sound: this.sound, continuous: null, boot: null, board: false, boarded: false, useHeld: false, actionable: false };
     }
     this.onStickerPreview(carId, sticker, true);
     const size = Math.round(style.scale * 100);
     return {
-      prompt: `[F/click] stick · wheel turn · Shift+wheel size ${size}% · [E] mirror${style.mirror ? ' ✓' : ''} · right click reset`,
+      prompt: `[F/click] stick · wheel turn · Shift+wheel size ${size}% · [middle click] mirror${style.mirror ? ' ✓' : ''} · right click reset`,
       sound: null,
       continuous: null,
       boot: null,
       board: false,
+      boarded: false,
+      useHeld: false,
       actionable: false,
     };
   }
@@ -1572,6 +1599,28 @@ export class Interaction {
         kitHit = false;
       }
     }
+    // Getting in through the doorway itself: the ray crosses an open side door's opening on
+    // the player's side within reach and meets no seat or thing beyond it, only the cabin
+    // (the dash, the tunnel, the far door, the far window): the seat that door serves. A
+    // shut door met before the opening, a cabin part in the aim (`KIT_DOOR_REACH_PART`)
+    // and anything of the world nearer than the car keep the press.
+    if (kitSeat === null && rig && vehicle && !forSale && vehicleDist <= VEHICLE_RANGE) {
+      const t = target as Target;
+      const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body';
+      const part = kitPart?.control.id ?? null;
+      const door = own && (part === null || KIT_SIDE_DOOR.test(part))
+        ? this.kitOpening(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz)
+        : null;
+      if (
+        door
+        && this.kitOpeningDistance <= RAY_RANGE
+        // The door in the aim stands open (its edge in the opening) or lies past the
+        // opening (the far door, across the cabin).
+        && (part === null || rig.get(part) > 0.5 || this.kitAimed.distance > this.kitOpeningDistance)
+      ) {
+        kitSeat = door.front ? (door.left ? 'driver' : 'passenger') : door.left ? 'rear-left' : 'rear-right';
+      }
+    }
 
     return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, kitPlace };
   }
@@ -1725,6 +1774,15 @@ export class Interaction {
       const picked = KitRig.controlOf(hit.object);
       const pane = picked !== null && KIT_PANE_PART.test(picked.control.id);
       if ((!picked || pane) && isGlassHit(hit)) {
+        // On foot a side door's window is that door: the hand meets it there, and F opens
+        // the door rather than reaching through the shut glass at whatever is behind it.
+        const door = !seated && pane && picked ? KitRig.controlOf(picked.node.parent) : null;
+        if (door && KIT_SIDE_DOOR.test(door.control.id)) {
+          found = true;
+          aim.distance = hit.distance;
+          aim.part = door;
+          break;
+        }
         aim.throughGlass = true;
         continue;
       }
@@ -1754,8 +1812,11 @@ export class Interaction {
         && (frontSeat || !KIT_SIDE_MIRROR.test(picked.control.id))
         && (seated
           ? !KIT_LID_PART.test(picked.control.id)
-          : KIT_SHELL_PART.test(picked.control.id)
-            || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorDistance(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity))
+          // On foot nothing is worked through glass: a panel seen through a window is the
+          // far side of the car.
+          : !aim.throughGlass
+            && (KIT_SHELL_PART.test(picked.control.id)
+              || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorDistance(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity)))
       ) {
         aim.part = picked;
       }
@@ -1882,7 +1943,7 @@ export class Interaction {
   /** `node` as a side door, if it is one with meshes to outline it. */
   private kitDoorOf(node: THREE.Object3D): KitDoor | null {
     const id = (node.userData.kitControl as KitControl | undefined)?.id;
-    if (!id || !/^door_[fr][lr]$/.test(id) || !node.parent) return null;
+    if (!id || !KIT_SIDE_DOOR.test(id) || !node.parent) return null;
     const box = new THREE.Box3();
     for (const child of node.children) {
       const mesh = child as THREE.Mesh;
@@ -1918,7 +1979,7 @@ export class Interaction {
     return nearest;
   }
 
-  /** `openDoorDistance` through a kit car's side doors. */
+  /** How far along the eye ray it enters the car through a kit car's open side door; see `kitOpening`. */
   private kitOpenDoorDistance(
     rig: KitRig,
     vehicle: Vehicle,
@@ -1929,32 +1990,38 @@ export class Interaction {
     dy: number,
     dz: number,
   ): number {
-    return this.openDoorDistance(rig, this.kitDoors(rig, vehicle), eyeX, eyeY, eyeZ, dx, dy, dz);
+    return this.kitOpening(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) ? this.kitOpeningDistance : Infinity;
   }
 
   /**
-   * How far along the eye ray it enters the car through one of `doors` standing open on
-   * the player's side (0 with the eye already in the opening), or Infinity when it does
-   * not. Any of them, front or rear: the rear bench of a two-door car is reached through
-   * a front door, a front seat across the car through the near one.
+   * The side door standing open on the player's side whose opening the eye ray enters the
+   * car through first, or null; how far along the ray in `kitOpeningDistance` (0 with the
+   * eye already in the opening). Any of them, front or rear: the rear bench of a two-door
+   * car is reached through a front door, a front seat across the car through the near one.
    */
-  private openDoorDistance(
+  private kitOpening(
     rig: KitRig,
-    doors: readonly KitDoor[],
+    vehicle: Vehicle,
     eyeX: number,
     eyeY: number,
     eyeZ: number,
     dx: number,
     dy: number,
     dz: number,
-  ): number {
+  ): KitDoor | null {
+    const doors = this.kitDoors(rig, vehicle);
+    this.kitOpeningDistance = Infinity;
     const frame = doors[0]?.node.parent;
-    if (!frame) return Infinity;
+    if (!frame) return null;
     const left = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ)).x > 0;
-    let nearest = Infinity;
+    let nearest: KitDoor | null = null;
     for (const door of doors) {
       if (door.left !== left || rig.get(door.id) <= 0.5) continue;
-      nearest = Math.min(nearest, this.throughOpening(door, eyeX, eyeY, eyeZ, dx, dy, dz));
+      const distance = this.throughOpening(door, eyeX, eyeY, eyeZ, dx, dy, dz);
+      if (distance < this.kitOpeningDistance) {
+        this.kitOpeningDistance = distance;
+        nearest = door;
+      }
     }
     return nearest;
   }
@@ -2718,57 +2785,59 @@ export class Interaction {
     return aimed ? car : null;
   }
 
-  private tryEnter(resolved: Resolved): void {
-    if (!resolved.vehicle || !resolved.carId) return;
+  /** F at a car on foot: gets in, or takes or lays a thing on a kit car's seat. True once seated. */
+  private tryEnter(resolved: Resolved): boolean {
+    if (!resolved.vehicle || !resolved.carId) return false;
     // A car on a lot is not the player's until he takes its key from the key box beside
     // it (world/keybox.ts): F at the car itself only refuses.
     if (this.lotCarAimed(resolved)) {
       this.sound = 'refused';
-      return;
+      return false;
     }
     const target = resolved.target;
     if (resolved.vehicle.kit) {
       // A kit car: a seat looked at through an open side door is the whole rule (see
       // `resolve`); the eye may look past Rapier's reach into the cabin, so a `none`
       // target counts, while a loose thing in front of the car keeps F for itself.
-      if (target.kind !== 'none' && target.kind !== 'car-body' && target.kind !== 'car-entry') return;
+      if (target.kind !== 'none' && target.kind !== 'car-body' && target.kind !== 'car-entry') return false;
       if (!resolved.kitSeat) {
         if (resolved.kitDoor && resolved.kitHit) this.sound = 'refused';
-        return;
+        return false;
       }
       const action = this.cabinAction(resolved);
       if (action.kind === 'refuse') {
         this.sound = 'refused';
-        return;
+        return false;
       }
       if (action.kind === 'take') {
         const item = this.world.state.cars[resolved.carId]?.cabin[action.place];
         if (!item || !this.inventory.add(item)) {
           this.sound = 'refused';
-          return;
+          return false;
         }
         this.world.apply({ t: 'car_cabin', carId: resolved.carId, place: action.place, item: null });
         this.sound = 'pickup';
-        return;
+        return false;
       }
       if (action.kind === 'lay') {
         this.inventory.remove(action.item.id);
         this.world.apply({ t: 'car_cabin', carId: resolved.carId, place: action.place, item: action.item });
         this.sound = 'drop';
-        return;
+        return false;
       }
     } else if (
       (target.kind !== 'car-body' && target.kind !== 'car-entry') ||
       target.carId !== resolved.carId ||
       resolved.vehicleDist >= VEHICLE_RANGE
-    ) return;
+    ) return false;
     if (this.cabinRefusal() !== null || this.world.state.cars[resolved.carId]?.lotPrice !== undefined) {
       this.sound = 'refused';
-      return;
+      return false;
     }
     this.world.apply({ t: 'enter_car', carId: resolved.carId, seat: resolved.kitSeat ?? 'driver' });
     this.player?.setEnabled(false);
     // Getting in is silent: the door was heard opening, and is heard shutting if he shuts it.
+    return true;
   }
 
   /**
@@ -2839,7 +2908,7 @@ export class Interaction {
     }
     const exit = this.computeExitPosition(carId, active.vehicle, door);
     this.world.apply({ t: 'exit_car' });
-    // Silent, as getting in is: the door he leaves by was opened and is shut with E.
+    // Silent, as getting in is: the door he leaves by was opened and is shut with F.
     if (this.player) {
       this.player.setEnabled(true);
       if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);

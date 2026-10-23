@@ -23,6 +23,7 @@ import type { Item } from '../items/items';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
+import { TRAFFIC_WHEEL_SUBSTEPS } from '../vehicle/vehicletuning';
 import type { WorldOrigin } from './origin';
 import {
   laybyDriveLateral,
@@ -3124,6 +3125,8 @@ export class RoadTraffic {
       this.scene,
       this.origin,
     );
+    // The AI's cars run the wheel loop at 240 Hz, the player's at 480 (vehicletuning.ts).
+    vehicle.setWheelSubsteps(TRAFFIC_WHEEL_SUBSTEPS);
     const autopilot = new Autopilot(
       request.direction === 1 ? this.road : this.reverseRoad,
       this.physics,

@@ -3,10 +3,10 @@
  *
  * Can the driver see his door mirrors? For every kit car, from the eye the in-game cabin
  * camera uses (the `kit_driver_eye` node, interior.ts `driverEyeAt`: render/carmodel.ts
- * reads it as `cabinEye`, vehicle/cabincamera.ts makes it the driver's view unless
- * config/cabin-cameras.json overrides it — that file is empty), rays go to a grid of points
- * on each door mirror's glass (its live face, `userData.kitMirror` `left`/`right`). A
- * point counts as seen if the line reaches it past every opaque triangle of the built car:
+ * reads it as `cabinEye`, vehicle/cabincamera.ts makes it the driver's view), rays go to
+ * a grid of points on each door mirror's glass (its live face, `userData.kitMirror`
+ * `left`/`right`). A point counts as seen if the line reaches it past every opaque
+ * triangle of the built car:
  * A pillar and its trim, the sail, the dash, the door's frame and card, the visors (stowed,
  * as built). Window glass is no obstacle; a line that reaches the mirror through no glass
  * at all is noted.

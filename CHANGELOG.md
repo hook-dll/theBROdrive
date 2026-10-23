@@ -29,6 +29,50 @@
 
 ### Changed
 
+- THE PLAYER'S CARS RUN THE WHEEL LOOP AT 480 HZ (`vehicle/vehicletuning.ts`
+  `WHEEL_SUBSTEPS` 8, `TRAFFIC_WHEEL_SUBSTEPS` 4; `Vehicle.setWheelSubsteps`;
+  `world/traffic.ts`). Wheels, carcasses and the driveline take eight substeps per 60 Hz
+  step instead of four. The physics suite moved by a tenth here and there (VAZ-2101 US
+  gradient 1.58 to 1.57, UAZ-469 DLC 85.0 to 82.5, every 0-100 and stop within 0.1-0.3).
+  The traffic stays at 240 Hz: doubling it for every AI car took the simulation tick on
+  the high-traffic road from about 2.5 ms to 3.5-4.0 ms.
+- F IS THE ONE INTERACTION KEY; E IS FREE (`core/input.ts` `InputFrame.interact`,
+  `interactDown`, `stickerMirror`; `player/interaction.ts` `fixedUpdate`,
+  `InteractionResult.useHeld`; `main.ts`; `core/touch.ts`). The bindable "Use held item"
+  (E) and "Pick up / mount" (F) are merged into "Interact" (F, the pad's X); a saved
+  override for either old id is dropped on load, and E and the pad's B are bound to
+  nothing in play. One press means one thing. On foot it belongs to the aim when the aim
+  shows something (a named world target, a prompt, a lit crosshair or a kit car's body
+  within reach, so binoculars in hand never toggle at a parked car), first match
+  wins: a sticker stuck on, the world target's action, a kit seat got into through an
+  open side door (the seat looked at, or the one the doorway serves when the eye looks
+  through it at the dash or the far door: an open door in the ray, near or far, no longer
+  wins over getting in), a kit car's door, lid or flap, boarding the plane, getting in
+  otherwise; an aim that shows nothing gives it to the held item
+  (binoculars, torch, camera, medicine, pocket watch, sun shades), on the same tick, so a
+  press that picked something up never also toggles the torch. Seated: the part in the
+  aim (a door, the hazard button, the radio knob, a stalk), then another seat in the aim,
+  then out of the car; a held item is not used from a seat. Held, F still works a
+  barrel's tap and turns the mirrors. A sticker being tried on is mirrored with the
+  middle button, the pad's B or the touch strip's new MIRROR; the touch overlay's E
+  button is gone. Prompts, the dev item list and CONTROLS.md say F.
+- ON FOOT A SIDE DOOR'S WINDOW IS THAT DOOR (`player/interaction.ts` `aimKit`): the aim
+  stopped at no glass, so a ray through the near shut window picked the FAR door across
+  the cabin, and F (E before) worked it, while the near door aimed at its window did
+  nothing. Now the near window is the near door, and nothing is worked through glass on
+  foot. Checked on the VAZ-1111 start car: F at the near window opens the door, F again
+  through the doorway seats the player in the cabin view, F at the open door's edge shuts
+  it, and the far door no longer answers through the glass.
+- GETTING IN FROM FOOT SITS IN THE CABIN VIEW (`main.ts`, `InteractionResult.boarded`,
+  `CameraRig.setMode`). F at a seat or a car's body now switches to the cabin view,
+  facing down the car; `C` still goes back to the chase. Moving between seats, loads and
+  dev jumps into a seat keep the view as it was.
+- THE CABIN CAMERA EDITOR IS GONE (`vehicle/cabincamera.ts`; `config/cabin-cameras.json`,
+  the `bro.cabinCameras` browser store and `vite.config.ts`'s `/__dev/cabin-camera` writer
+  removed). O and J are bound to nothing. The driver's eye is the kit seat's again
+  (`CarModelMeasure.cabinEye`, else the bonnet mount): the VAZ-1111's had been moved by
+  accident and saved to the config file. A stored override in a browser is no longer
+  read.
 - HEAT HAZE IS GONE (`render/hazeshader.ts`, `core/renderer.ts` `setEyeAboveGround`;
   `render/heathaze.ts`, `tools/haze-probe.ts` and the dev "Heat haze" A/B removed). The
   finishing pass no longer displaces the picture by a moving refraction field, draws the

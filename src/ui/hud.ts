@@ -186,8 +186,6 @@ export class Hud {
   /** When the view was last turned, ms (`noteLook`); the crosshair fades after it. */
   private lastLookMs = -Infinity;
   private readonly promptEl: HTMLElement;
-  /** The cabin-camera editor's axis and eye readout; see vehicle/cabincamera.ts. */
-  private readonly cabinEditorEl: HTMLElement;
   private readonly drivingCluster: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
@@ -266,7 +264,6 @@ export class Hud {
     this.crosshairEl = el('div', 'hud-crosshair');
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
-    this.cabinEditorEl = el('div', 'hud-cabin-editor is-hidden');
 
     this.drivingCluster = el('div', 'hud-driving is-hidden');
 
@@ -318,7 +315,6 @@ export class Hud {
     this.tops = [
       this.crosshairEl,
       this.promptEl,
-      this.cabinEditorEl,
       this.drivingCluster,
       this.inventoryEl,
       this.toastEl,
@@ -703,12 +699,6 @@ export class Hud {
   /** Called every rendered frame: whether the view was turned since the last one. */
   noteLook(turned: boolean): void {
     if (turned) this.lastLookMs = performance.now();
-  }
-
-  /** The cabin-camera editor's line, or null to hide it. */
-  setCabinEditor(text: string | null): void {
-    this.setVisible(this.cabinEditorEl, text !== null);
-    if (text !== null) this.setText(this.cabinEditorEl, text);
   }
 
   setInventory(items: readonly Item[], selected: number, carriedMass: number, massLimit: number): void {

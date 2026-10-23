@@ -1127,6 +1127,8 @@ export class Vehicle implements Rebasable {
    * what turns the driver aids on (ABS, traction control): see `setPlayerDriven`.
    */
   private playerDriven = false;
+  /** Wheel-loop substeps per fixed step: `WHEEL_SUBSTEPS`, or the traffic's own count. */
+  private wheelSubsteps = WHEEL_SUBSTEPS;
   /** The driver aids' pedal scales, 1 when idle (`Settings.abs`, `Settings.tractionControl`). */
   private absScale = 1;
   private tcsScale = 1;
@@ -4407,7 +4409,7 @@ export class Vehicle implements Rebasable {
     }
 
     // THE SUBSTEPS: the driveline, then every wheel against the contact read above.
-    const substeps = WHEEL_SUBSTEPS;
+    const substeps = this.wheelSubsteps;
     const h = dt / substeps;
     const share = 1 / substeps;
     const frontShare = 1 - this.model.rearDriveBias;
@@ -5224,6 +5226,14 @@ export class Vehicle implements Rebasable {
    */
   setPlayerDriven(playerDriven: boolean): void {
     this.playerDriven = playerDriven;
+  }
+
+  /**
+   * Wheel-loop substeps per fixed step (vehicletuning.ts `WHEEL_SUBSTEPS`). The traffic
+   * sets its cars to `TRAFFIC_WHEEL_SUBSTEPS` once, at spawn.
+   */
+  setWheelSubsteps(substeps: number): void {
+    this.wheelSubsteps = Math.max(1, Math.round(substeps));
   }
 
   /**

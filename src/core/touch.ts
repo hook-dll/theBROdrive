@@ -14,7 +14,6 @@ const LOOK_RADIANS_PER_PIXEL = 0.0035;
 const ZOOM_SPEED = 1.2;
 
 type TouchButton =
-  | 'useHeld'
   | 'interact'
   | 'camera'
   | 'recenter'
@@ -39,8 +38,6 @@ export interface TouchState {
   readonly steeringActive: boolean;
   /** One-shot taps, cleared by `consumeTaps`. */
   interact: boolean;
-  mount: boolean;
-  useHeld: boolean;
   camera: boolean;
   recenter: boolean;
   drop: boolean;
@@ -49,10 +46,11 @@ export interface TouchState {
   lights: boolean;
   autopilot: boolean;
   handbrake: boolean;
-  /** Sticker try-on taps: notches turned, size steps, back to upright. */
+  /** Sticker try-on taps: notches turned, size steps, back to upright, mirrored. */
   stickerTurn: number;
   stickerSize: number;
   stickerReset: boolean;
+  stickerMirror: boolean;
 }
 
 interface TouchHooks {
@@ -77,24 +75,23 @@ interface ButtonSpec {
 }
 
 const BUTTONS: readonly ButtonSpec[] = [
-  { id: 'useHeld', key: 'E', label: 'Use held item', mode: 'foot', side: 'left', position: 'top' },
-  { id: 'interact', key: 'F', label: 'Enter / exit vehicle', mode: 'foot', side: 'left', position: 'lower-left' },
+  { id: 'interact', key: 'F', label: 'Interact: use, pick up, open, get in', mode: 'foot', side: 'left', position: 'lower-left' },
   { id: 'drop', key: 'Q', label: 'Drop item', mode: 'foot', side: 'left', position: 'lower-right' },
   { id: 'removeWearable', key: 'G', label: 'Remove worn item', mode: 'foot', side: 'left', position: 'bottom' },
   { id: 'crouch', key: 'C', label: 'Crouch / stand up', mode: 'foot', side: 'right', position: 'top' },
   { id: 'camera', key: 'C', label: 'Toggle hood / chase camera', mode: 'drive', side: 'left', position: 'top' },
   { id: 'recenter', key: 'V', label: 'Recenter view', mode: 'drive', side: 'left', position: 'lower-left' },
   { id: 'lights', key: 'L', label: 'Cycle headlights', mode: 'drive', side: 'left', position: 'lower-right' },
-  { id: 'interact', key: 'F', label: 'Exit vehicle', mode: 'drive', side: 'right', position: 'top' },
+  { id: 'interact', key: 'F', label: 'Interact: work what is aimed at, or get out', mode: 'drive', side: 'right', position: 'top' },
   { id: 'autopilot', key: 'P', label: 'Cycle autopilot', mode: 'drive', side: 'right', position: 'lower-left' },
   { id: 'handbrake', key: 'SPACE', label: 'Toggle handbrake', mode: 'drive', side: 'right', position: 'lower-right' },
   { id: 'cinema', key: '-', label: 'Toggle cinema viewport', mode: 'drive', side: 'right', position: 'bottom' },
 ];
 
 /**
- * The sticker try-on strip, shown only while a sticker is previewed on a car. Sticking
- * and mirroring are the F and E face buttons, as on the keyboard; these are what the
- * desktop does with the wheel, Shift+wheel and the right button.
+ * The sticker try-on strip, shown only while a sticker is previewed on a car. Sticking is
+ * the F face button, as on the keyboard; these are what the desktop does with the wheel,
+ * Shift+wheel, the middle and the right button.
  */
 const STICKER_BUTTONS: readonly {
   readonly label: string;
@@ -106,6 +103,7 @@ const STICKER_BUTTONS: readonly {
   { label: '−', aria: 'Smaller sticker', tap: (s) => { s.stickerSize -= 1; } },
   { label: '+', aria: 'Larger sticker', tap: (s) => { s.stickerSize += 1; } },
   { label: 'RESET', aria: 'Sticker upright, catalogue size', tap: (s) => { s.stickerReset = true; } },
+  { label: 'MIRROR', aria: 'Mirror sticker', tap: (s) => { s.stickerMirror = true; } },
 ];
 
 export class TouchControls {
@@ -155,8 +153,6 @@ export class TouchControls {
     steer: 0,
     steeringActive: false,
     interact: false,
-    mount: false,
-    useHeld: false,
     camera: false,
     recenter: false,
     drop: false,
@@ -168,6 +164,7 @@ export class TouchControls {
     stickerTurn: 0,
     stickerSize: 0,
     stickerReset: false,
+    stickerMirror: false,
   };
 
   constructor(root: HTMLElement, canvas: HTMLCanvasElement, hooks: TouchHooks) {
@@ -253,8 +250,6 @@ export class TouchControls {
   /** Reads and clears the one-shot face-button taps. */
   consumeTaps(): {
     interact: boolean;
-    mount: boolean;
-    useHeld: boolean;
     camera: boolean;
     recenter: boolean;
     drop: boolean;
@@ -266,11 +261,10 @@ export class TouchControls {
     stickerTurn: number;
     stickerSize: number;
     stickerReset: boolean;
+    stickerMirror: boolean;
   } {
     const taps = {
       interact: this.state.interact,
-      mount: this.state.mount,
-      useHeld: this.state.useHeld,
       camera: this.state.camera,
       recenter: this.state.recenter,
       drop: this.state.drop,
@@ -282,10 +276,9 @@ export class TouchControls {
       stickerTurn: this.state.stickerTurn,
       stickerSize: this.state.stickerSize,
       stickerReset: this.state.stickerReset,
+      stickerMirror: this.state.stickerMirror,
     };
     this.state.interact = false;
-    this.state.mount = false;
-    this.state.useHeld = false;
     this.state.camera = false;
     this.state.recenter = false;
     this.state.drop = false;
@@ -297,6 +290,7 @@ export class TouchControls {
     this.state.stickerTurn = 0;
     this.state.stickerSize = 0;
     this.state.stickerReset = false;
+    this.state.stickerMirror = false;
     return taps;
   }
 
@@ -757,9 +751,6 @@ export class TouchControls {
       return;
     }
     this.state[id] = true;
-    // Keyboard F owns both physical interaction paths. Mirroring both preserves its
-    // context-sensitive enter/exit versus pick-up/mount behavior on touch.
-    if (id === 'interact') this.state.mount = true;
   }
 
   private updateHint(): void {

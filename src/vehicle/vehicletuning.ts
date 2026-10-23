@@ -1052,7 +1052,7 @@ export const SLIP_REFERENCE_MPS = 1.5;
 export const LOCK_SLIP_RATIO = -0.5;
 /**
  * Substeps of the wheel, carcass and driveline loop per 60 Hz fixed step
- * (`Vehicle.updateWheelDynamics`): 4, so the loop runs at 240 Hz. The chassis is
+ * (`Vehicle.updateWheelDynamics`): 8, so the loop runs at 480 Hz. The chassis is
  * Rapier's and is held through them; it receives each tyre's force averaged over the
  * substeps, as one impulse.
  *
@@ -1076,12 +1076,18 @@ export const LOCK_SLIP_RATIO = -0.5;
  * side of its force curve, where a real one either recovers or locks. Measured on the
  * VAZ-2108's 100-0 stop: one front wheel held at 37-60% slip for 1.5 s, the other at
  * 10%, and the car turned 12 degrees. At 240 Hz the mode has 9-13 substeps a period,
- * and doubling to 480 Hz moves no suite figure by more than 0.3%, a stop's yaw and the
- * distance of a stop that turns aside excepted: those are decided by which front wheel
- * tips over its peak first. The wheel itself stays implicit: a millisecond is not a
- * step anyone can afford.
+ * and at 480 Hz 18-26: the owner's choice for the cars the player owns, for a closer
+ * follow of that mode. The wheel against its slip stiffness below about 20 km/h (1 ms
+ * and less) is still shorter than a substep, so it stays implicit.
+ *
+ * Traffic keeps 240 Hz (`TRAFFIC_WHEEL_SUBSTEPS`). The physics suite moves by at most
+ * 0.1-0.2 of a figure between the two, and on the high-traffic road the doubled loop for
+ * every traffic car raised the simulation tick from about 2.5 ms to 3.5-4.0 ms, which a
+ * 144 FPS frame (6.9 ms) cannot carry.
  */
-export const WHEEL_SUBSTEPS = 4;
+export const WHEEL_SUBSTEPS = 8;
+/** Wheel-loop substeps for the AI traffic's cars; see `WHEEL_SUBSTEPS`. */
+export const TRAFFIC_WHEEL_SUBSTEPS = 4;
 /**
  * THE SLIP THE LONGITUDINAL CURVE PEAKS AT IS A SURFACE PROPERTY, and it now lives in
  * `SurfaceProps.optimalSlip` rather than here. It used to be this one constant (0.12, a

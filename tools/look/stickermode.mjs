@@ -2,7 +2,7 @@
  * tools/look/stickermode.mjs
  *
  * The sticker editing mode, driven the way a player drives it: out of the car on F,
- * an envelope in hand, the crosshair on the car, real wheel / Shift+wheel / E / F
+ * an envelope in hand, the crosshair on the car, real wheel / Shift+wheel / middle click / F
  * input. Frames: the hint (cars glowing and winking), the live preview, turned,
  * sized and mirrored, placed; a second sticker overlapping the first (it must go on
  * top); one on a side window. Prints the HUD prompt at each step.
@@ -118,7 +118,12 @@ try {
   await wheel(2);
   await shot('turned');
   await wheel(-3, true);
-  await page.keyboard.press('KeyE');
+  // The middle button mirrors; on a canvas without the pointer a click only takes it.
+  if (!(await page.evaluate(() => document.pointerLockElement !== null))) {
+    await page.mouse.click(W / 2, H / 2, { button: 'middle' });
+    await sleep(200);
+  }
+  await page.mouse.click(W / 2, H / 2, { button: 'middle' });
   await sleep(200);
   await shot('bigger-mirrored');
   await page.keyboard.press('KeyF');

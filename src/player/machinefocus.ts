@@ -201,7 +201,7 @@ export class MachineFocus {
       this.downPending = false;
       this.grabbing = fixture.grab?.(this.origin.x, this.origin.z, o.x, o.y, o.z, d.x, d.y, d.z) ?? false;
       // Not a part that takes the hand: the click is F on whatever is under the cursor.
-      if (!this.grabbing) f.mount = true;
+      if (!this.grabbing) f.interact = true;
       else this.gripAngle = this.screenAngle(fixture);
     }
     if (this.grabbing) {
@@ -218,7 +218,7 @@ export class MachineFocus {
         this.grabbing = false;
       }
     } else {
-      f.mountDown ||= this.mouseHeld;
+      f.interactDown ||= this.mouseHeld;
     }
     this.upPending = false;
     if (Math.abs(this.wheel) >= WHEEL_NOTCH) {

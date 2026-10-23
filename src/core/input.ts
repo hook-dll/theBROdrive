@@ -66,20 +66,17 @@ export interface InputFrame {
   radioCycle: boolean;
   /** Re-centre the view (behind the car when driving, level horizon on foot): tap, consumed by CameraRig. */
   recenterCamera: boolean;
-  /** O: step the cabin-camera editor X → Y → Z → off; tap, consumed by the cabin camera. */
-  cabinEdit: boolean;
-  /** J: save the cabin camera's eye for this car model; tap, consumed by the cabin camera. */
-  cabinSave: boolean;
-  /** Enter/exit the car (entry needs an open or removed door): tap, consumed once by interaction. */
+  /**
+   * F, the one interaction key: tap, consumed once by interaction (player/interaction.ts,
+   * `fixedUpdate`), which gives it to what is aimed at or, with nothing aimed, to the held
+   * item (`InteractionResult.useHeld`).
+   */
   interact: boolean;
-  /** Pick up a loose part/item, or fit/remove a part at the aimed slot: tap, consumed once by interaction. */
-  mount: boolean;
-  /** The same key while it is held down: a world fixture held on (a barrel's tap) works while it is. */
-  mountDown: boolean;
-  /** Toggle or equip the held handheld item: tap, consumed by the item owner. */
-  useHeld: boolean;
-  /** The same key while it is held down: a hand-aimed kit part (the inside mirror) turns while it is. */
-  useHeldDown: boolean;
+  /**
+   * The same key while it is held down: a world fixture held on (a barrel's tap) works,
+   * and a hand-aimed kit part (the inside mirror) turns, while it is.
+   */
+  interactDown: boolean;
   /** Drop the held item in front of the player: tap, consumed once by interaction. */
   dropItem: boolean;
   /** Remove the currently worn item: tap, consumed by the wearable owner. */
@@ -112,6 +109,8 @@ export interface InputFrame {
   stickerTurn: number;
   stickerSize: number;
   stickerReset: boolean;
+  /** Mirror the sticker being tried on: the middle button, the pad's B or the touch strip; tap. */
+  stickerMirror: boolean;
   /** M: switch mouse driving on or off; tap, consumed once by the settings owner. */
   toggleMouseDriving: boolean;
   /** Cycles autopilot: sleeper -> hurried -> frantic -> off; edge-triggered. */
@@ -140,13 +139,8 @@ export function emptyInput(): InputFrame {
     cycleCamera: false,
     radioCycle: false,
     recenterCamera: false,
-    cabinEdit: false,
-    cabinSave: false,
     interact: false,
-    mount: false,
-    mountDown: false,
-    useHeld: false,
-    useHeldDown: false,
+    interactDown: false,
     dropItem: false,
     removeWearable: false,
     usePrimary: false,
@@ -165,6 +159,7 @@ export function emptyInput(): InputFrame {
     stickerTurn: 0,
     stickerSize: 0,
     stickerReset: false,
+    stickerMirror: false,
     toggleMouseDriving: false,
     // A synthetic frame is a computed command until a device says otherwise.
     steerMode: 'direct',
@@ -201,28 +196,23 @@ export const BINDABLE_ACTIONS: readonly {
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
   { id: 'mouseDriving', label: 'Mouse driving on / off', defaultKeys: ['KeyM'] },
   // While mouse driving, held: the mouse turns the view and the wheel stays put. Shares
-  // Shift with sprint by default (see `holderOf` in ui/menu.ts): sprint walks on foot,
-  // and its in-car uses (the cabin editor's ×4, Shift+wheel sticker sizing) only gain a
-  // wheel that holds still meanwhile.
+  // Shift with sprint by default (see `holderOf` in ui/menu.ts): sprint walks on foot and
+  // does nothing in a car.
   { id: 'mouseLook', label: 'Mouse driving: look around (hold)', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
   { id: 'camera', label: 'Switch camera: chase / cabin', defaultKeys: ['KeyC'] },
   { id: 'recenterCamera', label: 'Recenter camera', defaultKeys: ['KeyV'] },
-  // The cabin-camera editor: O steps the axis being moved (X, Y, Z, off) and WASD/arrows
-  // move the eye instead of driving; J saves the eye for this model.
-  { id: 'cabinEdit', label: 'Cabin camera editor: X / Y / Z / off', defaultKeys: ['KeyO'] },
-  { id: 'cabinSave', label: 'Save cabin camera position', defaultKeys: ['KeyJ'] },
   // The radio is a car fitting, so it sits on the driving hand's side of the board.
   { id: 'radio', label: 'Radio: station 1 / station 2 / off', defaultKeys: ['KeyR'] },
   { id: 'autopilot', label: 'Autopilot: sleeper / hurried / frantic / off', defaultKeys: ['KeyP'] },
-  { id: 'useHeld', label: 'Use held item', defaultKeys: ['KeyE'] },
-  { id: 'interact', label: 'Enter / exit vehicle', defaultKeys: ['KeyF'] },
-  { id: 'mount', label: 'Pick up / mount', defaultKeys: ['KeyF'] },
+  // One key for everything the hand does: what is aimed at first, else the held item
+  // (player/interaction.ts, `fixedUpdate`).
+  { id: 'interact', label: 'Interact: use, pick up, open, get in / out', defaultKeys: ['KeyF'] },
   { id: 'drop', label: 'Drop item', defaultKeys: ['KeyQ'] },
   { id: 'removeWearable', label: 'Remove worn item', defaultKeys: ['KeyG'] },
   { id: 'jump', label: 'Jump', defaultKeys: ['Space'] },
   { id: 'sprint', label: 'Sprint', defaultKeys: ['ShiftLeft', 'ShiftRight'] },
-  // C is the camera key in a car and free on foot, so the two share it the way F and
-  // Space are shared (see `holderOf` in ui/menu.ts).
+  // C is the camera key in a car and free on foot, so the two share it the way Space is
+  // shared (see `holderOf` in ui/menu.ts).
   { id: 'crouch', label: 'Crouch / stand up', defaultKeys: ['KeyC'] },
   // X and Z are the gearbox; item cycling moves to the bracket keys, which nothing
   // else uses and which stay reachable from the movement hand.
@@ -376,8 +366,6 @@ export class InputReader {
   private keyboardHandbrake = false;
   /** Whether the player is in a driver's seat; set by the game, like mouse driving. */
   private driving = false;
-  /** The cabin-camera editor is open; see `setCabinEditing`. */
-  private cabinEditing = false;
   /**
    * Raw horizontal mouse travel in CSS pixels since the last sample, kept apart from
    * `yawDelta` because steering must not inherit the look sensitivity.
@@ -541,15 +529,6 @@ export class InputReader {
     return this.throttleDevice === 'keyboard' || this.brakeDevice === 'keyboard' ? this.lever : null;
   }
 
-  /**
-   * While the cabin-camera editor is open the pedal and steering keys move the eye
-   * (through `moveX`/`moveZ`) instead of the car: throttle, brake and steer read zero
-   * from every device. The GAME owns this, like `setDriving`.
-   */
-  setCabinEditing(editing: boolean): void {
-    this.cabinEditing = editing;
-  }
-
   dispose(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
@@ -589,7 +568,11 @@ export class InputReader {
     // Middle button: the browser's autoscroll would otherwise fire on press.
     if (e.button === 1) e.preventDefault();
     if (e.button === 0) this.held.add('Mouse0');
-    if (e.button === 1) this.held.add('Mouse1');
+    if (e.button === 1) {
+      this.held.add('Mouse1');
+      // An edge too: the middle click mirrors a sticker being tried on.
+      this.pressed.add('Mouse1');
+    }
     if (e.button === 2) this.held.add('Mouse2');
   };
 
@@ -745,15 +728,13 @@ export class InputReader {
           ? touchBackward > 0
           : this.lever.reverse;
 
-    // The cabin editor hands the mouse back to the look and the keys to the eye.
-    const editing = this.cabinEditing;
     // While mouse driving, the middle button or the look key (Shift) gives the mouse to
     // the view; the wheel holds the angle it had.
-    const mouseLook = editing || this.held.has('Mouse1') || this.anyHeld(this.keys.mouseLook);
+    const mouseLook = this.held.has('Mouse1') || this.anyHeld(this.keys.mouseLook);
     const steerWithMouse = mouseDriving && !mouseLook;
     const mouseSteerPx = steerWithMouse ? this.rawDX : 0;
-    const rightHeld = !editing && this.anyHeld(this.keys.right);
-    const leftHeld = !editing && this.anyHeld(this.keys.left);
+    const rightHeld = this.anyHeld(this.keys.right);
+    const leftHeld = this.anyHeld(this.keys.left);
     const keySteer = (rightHeld ? 1 : 0) - (leftHeld ? 1 : 0);
     if (pad.steer !== 0) this.steerDevice = 'pad';
     else if (keySteer !== 0 || mouseSteerPx !== 0) this.steerDevice = 'keyboard';
@@ -786,15 +767,6 @@ export class InputReader {
       f.steer = keySteer !== 0 || !touch?.steeringActive ? keySteer : touch.steer;
       f.steerMode = 'keys';
       f.steerBothHeld = rightHeld && leftHeld;
-    }
-    if (editing) {
-      f.throttle = 0;
-      f.brake = 0;
-      f.reverse = false;
-      this.lever.reset();
-      // A mouse-held wheel is a position the editor has already frozen; zero would be
-      // a command to centre it.
-      if (f.steerMode !== 'direct') f.steer = 0;
     }
 
     const taps = this.touch?.consumeTaps();
@@ -830,18 +802,11 @@ export class InputReader {
       this.anyPressed(this.keys.recenterCamera)
       || taps?.recenter === true
       || this.padPressed(PAD.DUp);
-    f.cabinEdit = this.anyPressed(this.keys.cabinEdit);
-    f.cabinSave = this.anyPressed(this.keys.cabinSave);
     f.radioCycle =
       this.anyPressed(this.keys.radio) || (this.driving && this.padPressed(PAD.DDown));
-    // X is the pad's F: it enters and leaves a car, picks things up and opens what is
-    // aimed at, exactly as the key does.
+    // X is the pad's F: it does whatever F does, exactly as the key does.
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true || this.padPressed(PAD.X);
-    f.mount = this.anyPressed(this.keys.mount) || taps?.mount === true || this.padPressed(PAD.X);
-    f.mountDown = this.anyHeld(this.keys.mount) || pad.buttons[PAD.X] === true;
-    f.useHeld =
-      this.anyPressed(this.keys.useHeld) || taps?.useHeld === true || this.padPressed(PAD.B);
-    f.useHeldDown = this.anyHeld(this.keys.useHeld) || pad.buttons[PAD.B] === true;
+    f.interactDown = this.anyHeld(this.keys.interact) || pad.buttons[PAD.X] === true;
     f.dropItem =
       this.anyPressed(this.keys.drop)
       || taps?.drop === true
@@ -910,6 +875,9 @@ export class InputReader {
     f.stickerTurn = taps?.stickerTurn ?? 0;
     f.stickerSize = taps?.stickerSize ?? 0;
     f.stickerReset = taps?.stickerReset === true;
+    // The middle button is a mouse driving's look hold, but mouse driving is a car's and
+    // a sticker is tried on on foot; B is the pad's, free in play since F does all.
+    f.stickerMirror = this.pressed.has('Mouse1') || taps?.stickerMirror === true || (!this.driving && this.padPressed(PAD.B));
     this.yawDelta = 0;
     this.pitchDelta = 0;
     this.rawDX = 0;
