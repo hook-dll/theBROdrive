@@ -3052,6 +3052,16 @@ async function boot(): Promise<void> {
           },
         }
       : undefined,
+    ink: import.meta.env.DEV
+      ? {
+          get enabled() {
+            return renderer.ink;
+          },
+          setEnabled: (on: boolean) => {
+            renderer.ink = on;
+          },
+        }
+      : undefined,
     viewport: () => renderer.viewport(),
     /**
      * Throw away the recorded verdict and measure this machine again.

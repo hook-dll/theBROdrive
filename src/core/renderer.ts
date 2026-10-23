@@ -595,7 +595,7 @@ export class Renderer {
         uPanini: { value: 0 },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
-        uInkStrength: { value: Math.min(1, Math.max(0, inkStrength)) },
+        uInkStrength: { value: (this.inkStrength = Math.min(1, Math.max(0, inkStrength))) },
         uInkThreshold: { value: INK_THRESHOLD },
         uFxaa: { value: fxaa && quality !== 'retro' ? 1 : 0 },
         uEncodeOutput: { value: 0 },
@@ -1569,8 +1569,26 @@ export class Renderer {
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */
   setInkStrength(strength: number): void {
-    this.hazeMaterial.uniforms.uInkStrength.value = Math.min(1, Math.max(0, strength));
+    this.inkStrength = Math.min(1, Math.max(0, strength));
+    this.hazeMaterial.uniforms.uInkStrength.value = this.inkOn ? this.inkStrength : 0;
   }
+
+  /**
+   * The drawn outlines, for an A/B by eye from the pause menu: off is strength 0, which
+   * the pass branches past on a uniform. The strength is kept for when they return.
+   * Not a setting, and not persisted.
+   */
+  get ink(): boolean {
+    return this.inkOn;
+  }
+
+  set ink(on: boolean) {
+    this.inkOn = on;
+    this.setInkStrength(this.inkStrength);
+  }
+
+  private inkOn = true;
+  private inkStrength = DEFAULT_INK_STRENGTH;
 
   /**
    * Sets the draw distance in place, from the pause menu, with no reload.

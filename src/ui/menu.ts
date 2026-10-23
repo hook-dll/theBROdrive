@@ -796,6 +796,8 @@ export interface PauseHooks {
    * Medium and up, where the ground is hot (render/heathaze.ts).
    */
   heatHaze?: { readonly enabled: boolean; setEnabled(on: boolean): void };
+  /** The drawn outlines in the finishing pass (core/renderer.ts `ink`), for an A/B by eye. Dev only. */
+  ink?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
    * Record a fully fuelled car into the world.
    *
@@ -2839,6 +2841,16 @@ export class MainMenu {
           const index = devTools.length;
           devButton(label(), () => {
             haze.setEnabled(!haze.enabled);
+            const btn = devTools[index];
+            if (btn) btn.textContent = label();
+          });
+        }
+        if (import.meta.env.DEV && hooks.ink) {
+          const ink = hooks.ink;
+          const label = (): string => `Ink: ${ink.enabled ? 'on' : 'off'}`;
+          const index = devTools.length;
+          devButton(label(), () => {
+            ink.setEnabled(!ink.enabled);
             const btn = devTools[index];
             if (btn) btn.textContent = label();
           });
