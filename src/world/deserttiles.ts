@@ -50,19 +50,42 @@ import { DESERT_PHYSICS_TILES, DESERT_VISUAL_TILES } from './ranges';
  * live set.
  *
  * Invariants:
- *  - neighbouring tiles sample the same absolute edge coordinates, so render and
- *    heightfield seams are bit-identical;
+ *  - neighbouring tiles of one generation mode sample the same absolute edge
+ *    coordinates, so render and heightfield seams are bit-identical (during a mode
+ *    switch both modes stand side by side for a while; each is valid where it stands);
  *  - every rendered/physical coordinate is relative to WorldOrigin before it reaches f32;
- *  - the current tile is always physical, even after a teleport; ordinary prefetch work
- *    is capped at one tile operation per rendered frame;
+ *  - the current tile is always solid, even after a teleport (`ensureGroundUnderPlayer`);
+ *    every other tile operation is one scheduler job: an attach, a few collider stages,
+ *    or one step of a replacement;
+ *  - a tile's colliders are staged disabled and switched on together, so a tile is
+ *    either solid with every prop collider and breakable, or not solid at all;
+ *  - outside `prime`, a live tile is never removed from inside the window to be rebuilt:
+ *    a tile of the other generation mode stays drawn and solid until its replacement is
+ *    complete;
  *  - all close terrain is one uniform fine lattice. There is no coarse driveable ring;
  *    the camera-centred vista owns everything beyond the fine visual square.
  */
 
 export { DESERT_TILE_CELLS, DESERT_TILE_SIZE } from './deserttiledata';
 
-/** Past this player-to-road distance no live tile can intersect the corridor. */
+/**
+ * Past this player-to-road distance no live tile can intersect the corridor, so tiles
+ * may skip the road queries ("far" generation mode). Far mode is valid anywhere past it,
+ * which is why it is where far mode is LEFT.
+ */
 const ROAD_QUERY_CUTOFF = 900;
+/**
+ * Far mode is ENTERED only this much further out. Every switch regenerates the whole
+ * window in the other mode, so a drive along the cutoff must not switch at each wobble
+ * across it. Near mode is valid everywhere; the band costs only worker time.
+ */
+const ROAD_QUERY_HYSTERESIS = 200;
+/**
+ * Rank added to a replacement's score when choosing the worker's next tile: a live tile
+ * of the other mode is valid ground meanwhile, a missing tile is a hole, so every
+ * missing tile (prefetch included) is generated first.
+ */
+const REPLACEMENT_RANK = 1000;
 const PROP_TAG = 0x44535254;
 const MAX_TILE_PROPS = 5;
 const TILE_PROP_ID_BASE = 1_000_000;
@@ -164,7 +187,18 @@ interface DesertTile {
   readonly props: readonly DesertPropPlacement[];
   readonly registered: number[];
   readonly farFromRoad: boolean;
-  bodies: RAPIER.RigidBody[];
+  /** Every body this tile's colliders hang off, staged or solid. */
+  readonly bodies: RAPIER.RigidBody[];
+  /** Every collider staged so far; disabled until the tile turns solid. */
+  readonly colliders: RAPIER.Collider[];
+  /** Prop `i`'s collider, or null where it has none; registered as breakable when solid. */
+  readonly propColliders: (RAPIER.Collider | null)[];
+  /**
+   * Collider staging cursor: 0 nothing built, 1 the ground heightfield, `1 + i` the
+   * ground and props `[0, i)`. Every stage is built at `1 + props.length`.
+   */
+  physicsStage: number;
+  /** Solid: every staged collider enabled and every breakable registered. */
   hasPhysics: boolean;
 }
 
@@ -224,7 +258,13 @@ export type DesertTileWorkerFactory = () => Worker | null;
 export class DesertTileStreamer {
   private readonly tiles = new Map<string, DesertTile>();
   private readonly wanted = new Map<string, TileWork>();
+  /** Finished tile data awaiting attachment or a replacement; always in the current mode. */
   private readonly readyData = new Map<string, ReadyTileData>();
+  /**
+   * Tiles being assembled off-scene to take the place of a live tile of the other
+   * generation mode, keyed like `tiles` (see `advanceReplacement`).
+   */
+  private readonly replacements = new Map<string, DesertTile>();
   private worker: Worker | null = null;
   private workerReady = false;
   private activeRequest: ActiveTileRequest | null = null;
@@ -267,17 +307,18 @@ export class DesertTileStreamer {
 
 
   /**
-   * Establishes solid ground before the loading cover leaves. Nine tiles are the only
-   * synchronous batch in normal play; every later non-current tile is worker-built.
+   * Establishes solid ground before the loading cover leaves: the whole physical square,
+   * `(2 * DESERT_PHYSICS_TILES + 1)²` tiles, generated here on the main thread. The
+   * bootstrap batch; in play only `ensureGroundUnderPlayer` builds synchronously.
    */
   prime(x: number, z: number, roadLateral: number): void {
     if (this.disposed) return;
-    const nextFarFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
+    const nextFarFromRoad = this.farModeAt(roadLateral);
     const centreTx = Math.floor(x / DESERT_TILE_SIZE);
     const centreTz = Math.floor(z / DESERT_TILE_SIZE);
     if (nextFarFromRoad !== this.farFromRoad) {
       this.farFromRoad = nextFarFromRoad;
-      this.invalidateGenerationMode(centreTx, centreTz);
+      this.invalidateGenerationMode();
     }
     for (let dz = -DESERT_PHYSICS_TILES; dz <= DESERT_PHYSICS_TILES; dz++) {
       for (let dx = -DESERT_PHYSICS_TILES; dx <= DESERT_PHYSICS_TILES; dx++) {
@@ -290,34 +331,21 @@ export class DesertTileStreamer {
   }
 
   /**
-   * Keeps the physical square (`DESERT_PHYSICS_TILES`) complete immediately, while visual data
-   * and non-current physics are attached only from staged worker results.
+   * Keeps the tile under the player solid immediately; everything else arrives from
+   * the worker and is attached, made solid or replaced one scheduler job at a time.
    */
   update(x: number, z: number, roadLateral: number, frameId: number): void {
     if (this.disposed) return;
-    const nextFarFromRoad = Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF;
+    const nextFarFromRoad = this.farModeAt(roadLateral);
     const modeChanged = nextFarFromRoad !== this.farFromRoad;
-    this.farFromRoad = nextFarFromRoad;
     const centreTx = Math.floor(x / DESERT_TILE_SIZE);
     const centreTz = Math.floor(z / DESERT_TILE_SIZE);
-    const currentKey = tileKey(centreTx, centreTz);
-    if (modeChanged) this.invalidateGenerationMode(centreTx, centreTz);
-
-    // A teleport can beat the worker. This is the only post-prime synchronous terrain
-    // generation path, and it exists solely to keep solid ground under the player.
-    const current = this.tiles.get(currentKey);
-    if (!current) {
-      const staged = this.readyData.get(currentKey);
-      if (staged && staged.farFromRoad === this.desiredModeForTile(centreTx, centreTz)) {
-        this.readyData.delete(currentKey);
-        this.promote(this.attach(centreTx, centreTz, staged.data, staged.farFromRoad));
-      } else {
-        if (staged) this.discardStaged(currentKey, staged);
-        this.buildSynchronously(centreTx, centreTz, true);
-      }
-    } else if (!current.hasPhysics) {
-      this.promote(current);
+    if (modeChanged) {
+      this.farFromRoad = nextFarFromRoad;
+      this.invalidateGenerationMode();
     }
+
+    this.ensureGroundUnderPlayer(centreTx, centreTz);
 
     for (const [key, tile] of this.tiles) {
       const dx = Math.abs(tile.tx - centreTx);
@@ -325,8 +353,19 @@ export class DesertTileStreamer {
       if (dx > DESERT_VISUAL_TILES || dz > DESERT_VISUAL_TILES) {
         this.teardown(tile);
         this.tiles.delete(key);
-      } else if (tile.hasPhysics && (dx > DESERT_PHYSICS_TILES || dz > DESERT_PHYSICS_TILES)) {
+      } else if (tile.physicsStage > 0 && (dx > DESERT_PHYSICS_TILES || dz > DESERT_PHYSICS_TILES)) {
         this.demote(tile);
+      }
+    }
+    for (const [key, next] of this.replacements) {
+      if (!this.tiles.has(key)) {
+        // The tile it was to replace has left the window.
+        this.discardReplacement(key, next);
+      } else if (
+        next.physicsStage > 0 &&
+        (Math.abs(next.tx - centreTx) > DESERT_PHYSICS_TILES || Math.abs(next.tz - centreTz) > DESERT_PHYSICS_TILES)
+      ) {
+        this.demote(next);
       }
     }
 
@@ -355,12 +394,40 @@ export class DesertTileStreamer {
     this.syncPendingState();
   }
 
-  /** Re-express visual groups after PhysicsWorld has shifted every rigid body. */
+  /**
+   * Solid ground under the player, now: the one synchronous path in `update`.
+   *
+   * Reached only when ordinary streaming is behind the player — after a teleport, or
+   * with the worker starved. In ordinary movement the tile under the player entered the
+   * physical square two tiles earlier and has long been solid, so this does nothing. A
+   * live tile of the other generation mode is valid ground and is kept as it is.
+   */
+  private ensureGroundUnderPlayer(tx: number, tz: number): void {
+    const key = tileKey(tx, tz);
+    const current = this.tiles.get(key);
+    if (current) {
+      this.makeSolidNow(current);
+      return;
+    }
+    const staged = this.readyData.get(key);
+    if (staged) {
+      this.readyData.delete(key);
+      this.makeSolidNow(this.attach(tx, tz, staged.data, staged.farFromRoad));
+      return;
+    }
+    this.buildSynchronously(tx, tz, true);
+  }
+
+  /**
+   * Re-express visual groups after PhysicsWorld has shifted every rigid body. Staged
+   * colliders moved with the rest; a replacement still off-scene is placed when it goes
+   * live (`goLive`).
+   */
   rebase(): void {
     for (const tile of this.tiles.values()) {
       tile.group.position.x = tile.centreX - this.origin.x;
       tile.group.position.z = tile.centreZ - this.origin.z;
-      // Frozen at attach (see `freezeStaticSubtree`): the root recomposes, the rest follows.
+      // Frozen at creation (see `freezeStaticSubtree`): the root recomposes, the rest follows.
       tile.group.updateMatrix();
     }
   }
@@ -377,6 +444,8 @@ export class DesertTileStreamer {
     this.readyData.clear();
     for (const tile of this.tiles.values()) this.teardown(tile);
     this.tiles.clear();
+    for (const tile of this.replacements.values()) this.teardown(tile);
+    this.replacements.clear();
     this.scheduler.setPending('desert', false);
   }
 
@@ -422,20 +491,23 @@ export class DesertTileStreamer {
     return this.tiles.get(tileKey(Math.floor(x / DESERT_TILE_SIZE), Math.floor(z / DESERT_TILE_SIZE)))?.hasPhysics ?? false;
   }
 
+  /** Generates and attaches a tile on the main thread: `prime` and `ensureGroundUnderPlayer` only. */
   private buildSynchronously(tx: number, tz: number, withPhysics: boolean): void {
     const key = tileKey(tx, tz);
     const existing = this.tiles.get(key);
     if (existing) {
-      if (existing.farFromRoad !== this.desiredModeForTile(tx, tz)) {
-        this.teardown(existing);
-        this.tiles.delete(key);
-      } else {
-        if (withPhysics && !existing.hasPhysics) this.promote(existing);
+      if (existing.farFromRoad === this.farFromRoad) {
+        if (withPhysics) this.makeSolidNow(existing);
         return;
       }
+      this.teardown(existing);
+      this.tiles.delete(key);
     }
+    const pending = this.replacements.get(key);
+    if (pending) this.discardReplacement(key, pending);
+    const staged = this.readyData.get(key);
+    if (staged) this.discardStaged(key, staged);
 
-    const farFromRoad = this.desiredModeForTile(tx, tz);
     const data = generateDesertTileData(
       {
         seed: this.seed,
@@ -446,19 +518,25 @@ export class DesertTileStreamer {
       },
       tx,
       tz,
-      farFromRoad,
+      this.farFromRoad,
       this.recycled.pop(),
     );
-    const tile = this.attach(tx, tz, data, farFromRoad);
-    if (withPhysics) this.promote(tile);
+    const tile = this.attach(tx, tz, data, this.farFromRoad);
+    if (withPhysics) this.makeSolidNow(tile);
   }
 
-  /** Creates scene/physics-ready objects over worker-owned typed arrays without copying them. */
+  /** Puts a new tile in the scene and in `tiles`, not yet solid. */
   private attach(tx: number, tz: number, data: DesertTileData, farFromRoad: boolean): DesertTile {
-    const key = tileKey(tx, tz);
-    const existing = this.tiles.get(key);
-    if (existing) return existing;
+    const tile = this.createTile(tx, tz, data, farFromRoad);
+    this.goLive(tile);
+    return tile;
+  }
 
+  /**
+   * Builds a tile's scene objects over worker-owned typed arrays without copying them,
+   * out of the scene: `goLive` puts it there.
+   */
+  private createTile(tx: number, tz: number, data: DesertTileData, farFromRoad: boolean): DesertTile {
     const centreX = (tx + 0.5) * DESERT_TILE_SIZE;
     const centreZ = (tz + 0.5) * DESERT_TILE_SIZE;
     const geometry = new THREE.BufferGeometry();
@@ -470,7 +548,6 @@ export class DesertTileStreamer {
     geometry.setDrawRange(0, data.indexCount);
 
     const group = new THREE.Group();
-    group.position.set(centreX - this.origin.x, 0, centreZ - this.origin.z);
     const mesh = new THREE.Mesh(geometry, DESERT_TILE_MATERIAL);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
@@ -484,12 +561,11 @@ export class DesertTileStreamer {
       group,
     );
     freezeStaticSubtree(group);
-    this.scene.add(group);
 
-    const tile: DesertTile = {
+    return {
       tx,
       tz,
-      key,
+      key: tileKey(tx, tz),
       centreX,
       centreZ,
       group,
@@ -501,10 +577,20 @@ export class DesertTileStreamer {
       registered: [],
       farFromRoad,
       bodies: [],
+      colliders: [],
+      propColliders: props.map(() => null),
+      physicsStage: 0,
       hasPhysics: false,
     };
-    this.tiles.set(key, tile);
-    return tile;
+  }
+
+  /** Places a created tile in the current origin and makes it the live tile at its key. */
+  private goLive(tile: DesertTile): void {
+    if (this.tiles.has(tile.key)) throw new Error(`desert tile ${tile.key} is already live`);
+    tile.group.position.set(tile.centreX - this.origin.x, 0, tile.centreZ - this.origin.z);
+    tile.group.updateMatrix();
+    this.scene.add(tile.group);
+    this.tiles.set(tile.key, tile);
   }
 
 
@@ -663,28 +749,40 @@ export class DesertTileStreamer {
     }
   }
 
-  private desiredModeForTile(_tx: number, _tz: number): boolean {
-    return this.farFromRoad;
+  /** Far mode for a player `roadLateral` from the road, with hysteresis (see ROAD_QUERY_HYSTERESIS). */
+  private farModeAt(roadLateral: number): boolean {
+    return Math.abs(roadLateral) >= ROAD_QUERY_CUTOFF + (this.farFromRoad ? 0 : ROAD_QUERY_HYSTERESIS);
   }
 
-  private invalidateGenerationMode(centreTx: number, centreTz: number): void {
-    const desired = this.desiredModeForTile(centreTx, centreTz);
-    if (this.activeRequest && this.activeRequest.farFromRoad !== desired) {
+  /**
+   * The generation mode just changed. Work in flight or staged for the old mode is
+   * dropped. LIVE tiles of the old mode are kept, drawn and solid, until their
+   * replacements are complete (`advanceReplacement`): the old mode was the right one
+   * where and when they were built, and tearing them down here left holes in the window
+   * — and, under the player, a synchronous rebuild — at every crossing.
+   */
+  private invalidateGenerationMode(): void {
+    if (this.activeRequest && this.activeRequest.farFromRoad !== this.farFromRoad) {
       // The worker cannot cancel a transferred request. Dropping its identity makes
       // the eventual response harmless; the replacement receives a new request id.
       this.activeRequest = null;
     }
     for (const [key, staged] of this.readyData) {
-      if (staged.farFromRoad !== desired) this.discardStaged(key, staged);
+      if (staged.farFromRoad !== this.farFromRoad) this.discardStaged(key, staged);
     }
-    for (const [key, tile] of this.tiles) {
-      if (tile.farFromRoad === desired) continue;
-      const dx = Math.abs(tile.tx - centreTx);
-      const dz = Math.abs(tile.tz - centreTz);
-      if (dx > DESERT_VISUAL_TILES || dz > DESERT_VISUAL_TILES) continue;
-      this.teardown(tile);
-      this.tiles.delete(key);
+    for (const [key, next] of this.replacements) {
+      if (next.farFromRoad !== this.farFromRoad) this.discardReplacement(key, next);
     }
+  }
+
+  /**
+   * Whether finished data for `key` in mode `farFromRoad` still has a use: the tile is
+   * wanted, in the current mode, and has no live tile of that mode nor a replacement
+   * already being assembled.
+   */
+  private wantsData(key: string, farFromRoad: boolean): boolean {
+    if (farFromRoad !== this.farFromRoad || !this.wanted.has(key) || this.replacements.has(key)) return false;
+    return this.tiles.get(key)?.farFromRoad !== farFromRoad;
   }
 
   private createWorker(): Worker | null {
@@ -732,13 +830,10 @@ export class DesertTileStreamer {
     const key = tileKey(response.tx, response.tz);
     if (!active || active.id !== response.requestId || active.key !== key) return;
     this.activeRequest = null;
-    const desired = this.desiredModeForTile(response.tx, response.tz);
-    if (
-      active.farFromRoad === desired &&
-      this.wanted.has(key) &&
-      !this.tiles.has(key)
-    ) {
+    if (this.wantsData(key, active.farFromRoad)) {
       this.readyData.set(key, { data: response.data, farFromRoad: active.farFromRoad });
+    } else {
+      this.reclaim(response.data);
     }
     this.pumpWorker();
     this.syncPendingState();
@@ -825,22 +920,26 @@ export class DesertTileStreamer {
 
   private dropUnwantedData(): void {
     for (const [key, staged] of this.readyData) {
-      const work = this.wanted.get(key);
-      if (
-        !work ||
-        this.tiles.has(key) ||
-        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
-      ) {
-        this.discardStaged(key, staged);
-      }
+      if (!this.wantsData(key, staged.farFromRoad)) this.discardStaged(key, staged);
     }
   }
 
+  /**
+   * The best-scored wanted tile that needs data: one with no tile at all, or — after
+   * every missing one (REPLACEMENT_RANK) — one whose live tile is in the other mode.
+   */
   private nextUnpreparedWork(): TileWork | null {
     let next: TileWork | null = null;
+    let nextRank = Number.POSITIVE_INFINITY;
     for (const work of this.wanted.values()) {
-      if (this.tiles.has(work.key) || this.readyData.has(work.key)) continue;
-      if (!next || work.score < next.score) next = work;
+      if (this.readyData.has(work.key) || this.replacements.has(work.key)) continue;
+      const tile = this.tiles.get(work.key);
+      if (tile && (tile.farFromRoad === this.farFromRoad || !work.visual)) continue;
+      const rank = work.score + (tile ? REPLACEMENT_RANK : 0);
+      if (rank < nextRank) {
+        next = work;
+        nextRank = rank;
+      }
     }
     return next;
   }
@@ -852,7 +951,7 @@ export class DesertTileStreamer {
     if (!next) return;
 
     const requestId = ++this.nextRequestId;
-    const farFromRoad = this.desiredModeForTile(next.tx, next.tz);
+    const farFromRoad = this.farFromRoad;
     this.activeRequest = { id: requestId, key: next.key, farFromRoad };
     const request: DesertTileWorkerRequest = {
       type: 'tile',
@@ -874,6 +973,10 @@ export class DesertTileStreamer {
    * Worker failure leaves generation available rather than stranding the wanted ring.
    * The data build remains frame-budgeted; attachment and promotion take their usual
    * separate scheduler-gated path below.
+   *
+   * KNOWN OVERRUN: this generates a whole tile in one job, far past a job slice, because
+   * `generateDesertTileData` is not resumable. It runs only once the worker has failed,
+   * and the scheduler's DEV report names it (`desert-generate-degraded`).
    */
   private pumpDegraded(frameId: number): void {
     if (this.worker || this.degradedBuildFrame === frameId) return;
@@ -881,7 +984,7 @@ export class DesertTileStreamer {
     if (!work) return;
     if (
       this.scheduler.tryRun(frameId, 'desert-generate-degraded', () => {
-        const farFromRoad = this.desiredModeForTile(work.tx, work.tz);
+        const farFromRoad = this.farFromRoad;
         const data = generateDesertTileData(
           {
             seed: this.seed,
@@ -895,12 +998,10 @@ export class DesertTileStreamer {
           farFromRoad,
           this.recycled.pop(),
         );
-        if (
-          this.wanted.has(work.key) &&
-          !this.tiles.has(work.key) &&
-          farFromRoad === this.desiredModeForTile(work.tx, work.tz)
-        ) {
+        if (this.wantsData(work.key, farFromRoad)) {
           this.readyData.set(work.key, { data, farFromRoad });
+        } else {
+          this.reclaim(data);
         }
       })
     ) {
@@ -908,110 +1009,158 @@ export class DesertTileStreamer {
     }
   }
 
+  /**
+   * At most one tile job per call, most urgent kind first:
+   *  1. collider stages for a live tile the physical square needs solid;
+   *  2. attaching staged data where the window has no tile at all (a hole);
+   *  3. a step of replacing a live tile of the other generation mode.
+   */
   private applyOneStagedUnit(frameId: number): void {
     let promote: DesertTile | null = null;
+    let promoteScore = Number.POSITIVE_INFINITY;
     for (const work of this.wanted.values()) {
       if (!work.physics) continue;
       const tile = this.tiles.get(work.key);
-      if (!tile || tile.hasPhysics) continue;
-      if (tile.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
-        this.teardown(tile);
-        this.tiles.delete(work.key);
-        continue;
-      }
-      if (!promote || work.score < this.wanted.get(promote.key)!.score) promote = tile;
+      if (!tile || tile.hasPhysics || work.score >= promoteScore) continue;
+      promote = tile;
+      promoteScore = work.score;
     }
     if (promote) {
       const tile = promote;
-      this.scheduler.tryRun(frameId, 'desert-promote', () => {
-        this.promote(tile);
+      this.scheduler.tryRun(frameId, 'desert-promote', (deadline) => {
+        if (this.advancePhysics(tile, deadline)) this.finishPhysics(tile);
       });
       return;
     }
 
     let attach: TileWork | null = null;
     for (const work of this.wanted.values()) {
-      const staged = this.readyData.get(work.key);
-      if (!work.visual || this.tiles.has(work.key) || !staged) continue;
-      if (staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
-        this.discardStaged(work.key, staged);
-        continue;
-      }
+      if (!work.visual || this.tiles.has(work.key) || !this.readyData.has(work.key)) continue;
       if (!attach || work.score < attach.score) attach = work;
     }
-    if (!attach) return;
-    const work = attach;
-    this.scheduler.tryRun(frameId, 'desert-attach', () => {
-      const staged = this.readyData.get(work.key);
-      if (
-        !staged ||
-        !work.visual ||
-        this.tiles.has(work.key) ||
-        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
-      ) {
-        if (staged && staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)) {
-          this.discardStaged(work.key, staged);
-          if (this.worker) this.pumpWorker();
-        }
-        return;
-      }
-      this.readyData.delete(work.key);
-      this.attach(work.tx, work.tz, staged.data, staged.farFromRoad);
+    if (attach) {
+      const work = attach;
+      this.scheduler.tryRun(frameId, 'desert-attach', () => {
+        const staged = this.readyData.get(work.key);
+        if (!staged || this.tiles.has(work.key)) return;
+        this.readyData.delete(work.key);
+        this.attach(work.tx, work.tz, staged.data, staged.farFromRoad);
+      });
+      return;
+    }
+
+    let replace: TileWork | null = null;
+    for (const work of this.wanted.values()) {
+      const tile = this.tiles.get(work.key);
+      if (!work.visual || !tile || tile.farFromRoad === this.farFromRoad) continue;
+      if (!this.replacements.has(work.key) && !this.readyData.has(work.key)) continue;
+      if (!replace || work.score < replace.score) replace = work;
+    }
+    if (!replace) return;
+    const work = replace;
+    this.scheduler.tryRun(frameId, 'desert-replace', (deadline) => {
+      this.advanceReplacement(work, deadline);
     });
+  }
+
+  /**
+   * One job of replacing a live tile built in the other generation mode.
+   *
+   * The old tile stays drawn and solid throughout. Its replacement is created off-scene
+   * from the staged data, its colliders are staged disabled if the square needs it
+   * solid, and the two change places inside the job that finishes it: old torn down
+   * first (its breakables forgotten), new placed, switched on and registered. No frame
+   * is rendered or simulated between, so the ground never has a hole.
+   */
+  private advanceReplacement(work: TileWork, deadline: number): void {
+    const old = this.tiles.get(work.key);
+    if (!old) return;
+    let next = this.replacements.get(work.key);
+    if (!next) {
+      const staged = this.readyData.get(work.key);
+      if (!staged) return;
+      this.readyData.delete(work.key);
+      next = this.createTile(work.tx, work.tz, staged.data, staged.farFromRoad);
+      this.replacements.set(work.key, next);
+      if (performance.now() >= deadline) return;
+    }
+    if (work.physics && !this.advancePhysics(next, deadline)) return;
+
+    this.replacements.delete(work.key);
+    this.teardown(old);
+    this.tiles.delete(work.key);
+    this.goLive(next);
+    if (work.physics) this.finishPhysics(next);
   }
 
   private syncPendingState(): void {
     let pending = this.activeRequest !== null;
     for (const work of this.wanted.values()) {
+      if (pending) break;
       const tile = this.tiles.get(work.key);
-      if (
-        tile &&
-        tile.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
-      ) {
-        pending = true;
-        break;
-      }
-      if (work.physics && tile && !tile.hasPhysics) {
-        pending = true;
-        break;
-      }
-      const staged = this.readyData.get(work.key);
-      if (
-        staged &&
-        staged.farFromRoad !== this.desiredModeForTile(work.tx, work.tz)
-      ) {
-        pending = true;
-        break;
-      }
-      if (work.visual && !tile && staged) {
-        pending = true;
-        break;
-      }
-      if (!tile && !staged) {
-        pending = true;
-        break;
+      if (!tile) {
+        // A hole is owed an attach; prefetch-only data is done once it is staged.
+        pending = work.visual || !this.readyData.has(work.key);
+      } else {
+        pending = tile.farFromRoad !== this.farFromRoad || (work.physics && !tile.hasPhysics);
       }
     }
     this.scheduler.setPending('desert', pending);
   }
 
-  private promote(tile: DesertTile): void {
-    if (tile.hasPhysics) return;
-    const terrainCollider = this.physics.addHeightfield(
-      DESERT_TILE_CELLS,
-      DESERT_TILE_CELLS,
-      tile.heights,
-      { x: DESERT_TILE_SIZE, y: 1, z: DESERT_TILE_SIZE },
-      { x: tile.centreX - this.origin.x, y: 0, z: tile.centreZ - this.origin.z },
-      TERRAIN_COLLIDER_SURFACE,
-    );
-    const terrainBody = terrainCollider.parent();
-    if (terrainBody) tile.bodies.push(terrainBody);
+  /**
+   * Builds one collider stage: the ground heightfield first, then one prop per stage.
+   * Colliders are created disabled; nothing is solid until `finishPhysics`.
+   */
+  private buildPhysicsStage(tile: DesertTile): void {
+    if (tile.physicsStage === 0) {
+      const ground = this.physics.addHeightfield(
+        DESERT_TILE_CELLS,
+        DESERT_TILE_CELLS,
+        tile.heights,
+        { x: DESERT_TILE_SIZE, y: 1, z: DESERT_TILE_SIZE },
+        { x: tile.centreX - this.origin.x, y: 0, z: tile.centreZ - this.origin.z },
+        TERRAIN_COLLIDER_SURFACE,
+      );
+      ground.setEnabled(false);
+      tile.colliders.push(ground);
+      const body = ground.parent();
+      if (body) tile.bodies.push(body);
+    } else {
+      const i = tile.physicsStage - 1;
+      const prop = tile.props[i]!;
+      if (!(propPieces(prop.form.id) && this.breakables?.isBroken(prop.id))) {
+        const collider = this.addPropCollider(tile, prop);
+        if (collider) {
+          collider.setEnabled(false);
+          tile.colliders.push(collider);
+          tile.propColliders[i] = collider;
+        }
+      }
+    }
+    tile.physicsStage++;
+  }
 
-    for (const prop of tile.props) {
+  /**
+   * Builds collider stages until `deadline`, at least one while any remain. True once
+   * every stage is built (the tile is ready for `finishPhysics`).
+   */
+  private advancePhysics(tile: DesertTile, deadline: number): boolean {
+    const stages = 1 + tile.props.length;
+    while (tile.physicsStage < stages) {
+      this.buildPhysicsStage(tile);
+      if (performance.now() >= deadline) break;
+    }
+    return tile.physicsStage >= stages;
+  }
+
+  /** The tile turns solid: every staged collider switches on and its breakables register. */
+  private finishPhysics(tile: DesertTile): void {
+    for (const collider of tile.colliders) collider.setEnabled(true);
+    for (let i = 0; i < tile.props.length; i++) {
+      const prop = tile.props[i]!;
+      const collider = tile.propColliders[i];
       const pieces = propPieces(prop.form.id);
-      if (pieces && this.breakables?.isBroken(prop.id)) continue;
-      const collider = this.addPropCollider(tile, prop);
       if (!collider || !pieces || !this.breakables || !prop.mesh) continue;
       tile.registered.push(prop.id);
       this.breakables.register({
@@ -1033,6 +1182,13 @@ export class DesertTileStreamer {
       });
     }
     tile.hasPhysics = true;
+  }
+
+  /** Every remaining stage and the switch-on, now: ground the player stands on. */
+  private makeSolidNow(tile: DesertTile): void {
+    if (tile.hasPhysics) return;
+    this.advancePhysics(tile, Number.POSITIVE_INFINITY);
+    this.finishPhysics(tile);
   }
 
   private addPropCollider(
@@ -1096,6 +1252,7 @@ export class DesertTileStreamer {
     return collider;
   }
 
+  /** Back to not solid: breakables forgotten, every staged or live collider removed. */
   private demote(tile: DesertTile): void {
     if (tile.registered.length > 0) {
       this.breakables?.forget(tile.registered);
@@ -1103,18 +1260,27 @@ export class DesertTileStreamer {
     }
     for (const body of tile.bodies) this.physics.removeBody(body);
     tile.bodies.length = 0;
+    tile.colliders.length = 0;
+    tile.propColliders.fill(null);
+    tile.physicsStage = 0;
     tile.hasPhysics = false;
   }
 
+  /** Frees a tile, live or an off-scene replacement; callers drop it from its map. */
   private teardown(tile: DesertTile): void {
-    if (tile.hasPhysics) this.demote(tile);
+    if (tile.physicsStage > 0) this.demote(tile);
     this.scene.remove(tile.group);
     tile.geometry.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
-    // Every caller drops the tile from `tiles` around this call, and the geometry
-    // above is gone, so nothing can read these buffers again: they are free to be
-    // written over by the next tile the worker builds.
+    // Every caller drops the tile from `tiles` or `replacements` around this call, and
+    // the geometry above is gone, so nothing can read these buffers again: they are
+    // free to be written over by the next tile the worker builds.
     this.reclaim(tile.data);
+  }
+
+  private discardReplacement(key: string, next: DesertTile): void {
+    this.replacements.delete(key);
+    this.teardown(next);
   }
 
   /**

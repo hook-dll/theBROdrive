@@ -34,17 +34,21 @@ export const ROAD_VISUAL_CHUNKS = 6;
  *
  * Not the chunks that do: while the player is on the road every chunk is built with
  * its colliders from the start, the whole visual window, so steady travel never has
- * to turn a finished visual-only chunk into a physical one. That conversion is a full
- * synchronous rebuild — no provider can add just its colliders — and it cost 35-50 ms
- * of main thread twice per 200 m chunk (one chunk gaining physics ahead, one losing it
- * behind): measured in a browser trace as every stutter of a 60 fps drive. This band
- * is now only the floor that is repaired on the spot when it is ever found without
- * physics — after a return from the open desert, or a teleport.
+ * to turn a finished visual-only chunk into a physical one. That conversion rebuilds
+ * every provider of the chunk — no provider can add just its colliders — and done
+ * synchronously it cost 35-50 ms of main thread twice per 200 m chunk (one chunk
+ * gaining physics ahead, one losing it behind): measured in a browser trace as every
+ * stutter of a 60 fps drive. This band is now only the floor that is PROMOTED when it
+ * is found without physics — after a return from the open desert, or a teleport: the
+ * chunk's contributions are rebuilt physical one scheduler job at a time, each old one
+ * drawn until its replacement is ready (`ChunkPromotion` in world/chunks.ts), nearest
+ * chunk first. Only `ChunkStreamer.prime` settles a chunk synchronously, for the one
+ * the player is put on.
  *
  * Four, not two: ambient traffic lives inside `ROAD_PHYSICS_REACH_M`, and 400 m of it
  * either side was too short a stretch of road to look down. On the road this costs
  * nothing (every chunk out to ROAD_VISUAL_CHUNKS is physical already); the price is a
- * larger synchronous repair after a teleport or a return from the desert.
+ * longer promotion queue after a teleport or a return from the desert.
  */
 export const ROAD_PHYSICS_CHUNKS = 4;
 /**

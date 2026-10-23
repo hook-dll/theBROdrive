@@ -1,6 +1,8 @@
 ---
 description: Every material variant that can first appear mid-drive must be compiled behind the loading cover or before its object is attached. A program linked on first draw is a 300-800 ms main-thread freeze on Windows (ANGLE/D3D11).
-alwaysApply: true
+condition: 'Material\b|InstancedMesh|instanceColor|setColorAt|onBeforeCompile|customProgramCacheKey|castShadow|receiveShadow|DoubleSide|alphaTest|vertexColors|\w+Light\(|\.environment\b'
+scope: 'tool:edit(**/src/**/*.ts), tool:write(**/src/**/*.ts)'
+interruptMode: never
 ---
 
 # Shader variants: compile before the first draw

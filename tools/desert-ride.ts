@@ -121,7 +121,8 @@ const capturePhysics = {
         colliderCorners.push(vertices[v * 3]!, vertices[v * 3 + 1]!, vertices[v * 3 + 2]!);
       }
     }
-    return { parent: () => null };
+    // The provider builds its slab colliders disabled for the streamer to switch on.
+    return { parent: () => null, setEnabled: () => {} };
   },
 };
 

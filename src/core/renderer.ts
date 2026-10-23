@@ -5,17 +5,7 @@ import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import { retroActive, retroPixelRatio } from '../render/retro';
 import { setCleanFrameHeight, setCleanStyle } from '../render/cleanstyle';
-import {
-  advanceHazePhase,
-  createHeatMirageUniforms,
-  DEFAULT_EYE_HEIGHT_M,
-  DEFAULT_HEAT_MIRAGE,
-  HAZE_FRAGMENT,
-  HAZE_VERTEX,
-  writeHeatMirageUniforms,
-  type HeatHazeFrame,
-  type HeatMirageParameters,
-} from '../render/hazeshader';
+import { DEFAULT_EYE_HEIGHT_M, HAZE_FRAGMENT, HAZE_VERTEX } from '../render/hazeshader';
 import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import {
   DEFAULT_FIELD_OF_VIEW,
@@ -47,8 +37,6 @@ import type { ShadeTint } from '../items/items';
  */
 /** Albedo of a haboob wall, authored against the starting sand. */
 const WALL_DUST = new SandColor(new THREE.Color(0.72, 0.42, 0.2));
-/** The distant sand veil over the horizon, likewise. */
-const SAND_VEIL = new SandColor(new THREE.Color(0.78, 0.69, 0.56));
 /**
  * The cinema lens's Panini strength d (render/hazeshader.ts `paniniSource`) until the
  * console knob (`Renderer.panini`) changes it. The lens is only on in cinema mode.
@@ -363,7 +351,7 @@ export class Renderer {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly fog: THREE.FogExp2;
-  // --- Heat-haze post pass ---
+  // --- Finishing post pass ---
   /** Scene-pass target sampled by the fullscreen haze/ink pass on every tier. */
   private readonly hazeTarget: THREE.WebGLRenderTarget;
   /** Tiny scene holding the fullscreen triangle. */
@@ -384,6 +372,8 @@ export class Renderer {
   private readonly presentMaterial: THREE.ShaderMaterial;
   /** The scene frame, texels: what the scene and the finishing pass are drawn at. */
   private readonly sceneSize = new THREE.Vector2(1, 1);
+  /** The device pixels the canvas covers, as `resize` last resolved them (`presentedSize`). */
+  private readonly displaySize = new THREE.Vector2(1, 1);
   /** Whether the frame is taller than the canvas's device pixels and is shrunk onto it. */
   private shrinking = false;
   /** Frame lines per screen line; 0 on the retro rung. Decides FXAA (`applyFxaa`). */
@@ -397,28 +387,12 @@ export class Renderer {
   private observedDeviceWidth = 0;
   private observedDeviceHeight = 0;
   private readonly canvasObserver: ResizeObserver | null;
-  /** Dev switch for the heat shimmer and mirage (pause menu); see `setHeatHaze`. */
-  private heatHazeOn = true;
-  /** Reused scratch for the camera's forward vector (horizon tracking). */
+  /** Reused scratch for the camera's forward vector (torch aim). */
   private readonly _forward = new THREE.Vector3();
   /** Whether the cinema lens is on: cinema mode, set through `setCinema`. */
   private cinemaLens = false;
   /** The cinema lens's Panini strength; see `panini`. */
   private paniniStrength = DEFAULT_PANINI;
-  /**
-   * Camera height above the grazed-ground line, metres, for the hot-layer
-   * integration. Defaulted to a standing eye so the very first frame is sensible
-   * before the loop supplies one.
-   */
-  private hazeEyeHeight = DEFAULT_EYE_HEIGHT_M;
-  private hazeMinimumEyeHeight = DEFAULT_HEAT_MIRAGE.minimumEyeHeightM;
-  /** Live handle on the pass's physical constants; see createHeatMirageUniforms. */
-  private readonly heatUniforms = createHeatMirageUniforms();
-  /** Rise rates of the two strata octaves, strata per second. */
-  private hazeBroadRiseHz = DEFAULT_HEAT_MIRAGE.broadRiseHz;
-  private hazeFineRiseHz = DEFAULT_HEAT_MIRAGE.fineRiseHz;
-  /** Wall clock of the previous frame, seconds; negative until the first one. */
-  private hazeClockS = -1;
   /** `Settings.fxaa`, kept so a rung change can apply it (never on the retro rung). */
   private fxaa: boolean;
   /** `Settings.shadows`, kept so a rung change can apply it (phones may still force off). */
@@ -548,9 +522,8 @@ export class Renderer {
     this.scene.fog = this.fog;
 
     // Every tier renders into this colour-and-depth target, then uses the fullscreen
-    // pass for the display transform, authored colour, ink and
-    // FXAA. Acceptable suppresses only the haze warp; standard and blessing sample the
-    // depth so nearby geometry never inherits a horizon-shaped screen mask.
+    // pass for the display transform, authored colour, ink and FXAA; the pass reads the
+    // depth for the weather and the ink gate.
     //
     // LINEAR HDR (`sceneTargetType`): the scene's radiance, unclipped, so the sun's disc,
     // a lamp lens and glinting paint keep their excess for the tone curve to roll off.
@@ -582,14 +555,7 @@ export class Renderer {
         tDiffuse: { value: this.hazeTarget.texture },
         tDepth: { value: this.hazeTarget.depthTexture },
         uResolution: { value: new THREE.Vector2(1, 1) },
-        uStrength: { value: 0 },
-        uMirage: { value: 0 },
-        uHazePhase: { value: new THREE.Vector2() },
-        ...this.heatUniforms,
-        uDaylight: { value: 0 },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
-        uGroundSlope: { value: 0 },
-        uHorizon: { value: 0.5 },
         uCameraRotation: { value: new THREE.Matrix3() },
         uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
         uPanini: { value: 0 },
@@ -615,8 +581,6 @@ export class Renderer {
         uContrast: { value: DISPLAY_CONTRAST },
         uVeil: { value: 0 },
         uDustAlbedo: { value: WALL_DUST.value },
-        uSandVeil: { value: SAND_VEIL.value },
-        uAirThick: { value: 0 },
         uFogDensity: { value: 0 },
       },
     });
@@ -977,6 +941,7 @@ export class Renderer {
     const canvas = this.viewport();
     const frame = this.frameSizeFor(canvas);
     this.sceneSize.set(frame.width, frame.height);
+    this.displaySize.set(canvas.deviceWidth, canvas.deviceHeight);
     this.shrinking = this.quality !== 'retro' && frame.height > canvas.deviceHeight;
     this.supersample = this.quality === 'retro' ? 0 : frame.height / canvas.deviceHeight;
     this.applyFxaa();
@@ -1096,23 +1061,6 @@ export class Renderer {
    */
   private drawFrame(scene: THREE.Scene = this.scene, camera: THREE.PerspectiveCamera = this.camera): void {
     this.renderer.info.reset();
-    // Real time, not game time: the strata climb at a flicker rate the eye knows,
-    // which a time-scaled or paused game clock would slow or freeze. The phases are
-    // integrated here in doubles and wrapped (see advanceHazePhase), so no uniform
-    // grows with uptime and the float32 the shader holds never loses the pattern.
-    const nowS = performance.now() * 0.001;
-    const dt = this.hazeClockS < 0 ? 0 : Math.min(0.1, Math.max(0, nowS - this.hazeClockS));
-    this.hazeClockS = nowS;
-    const phase = this.hazeMaterial.uniforms.uHazePhase.value as THREE.Vector2;
-    phase.set(
-      advanceHazePhase(phase.x, dt, this.hazeBroadRiseHz),
-      advanceHazePhase(phase.y, dt, this.hazeFineRiseHz),
-    );
-    this.hazeMaterial.uniforms.uHorizon.value = this.horizonScreenY(camera);
-    this.hazeMaterial.uniforms.uEyeAbove.value = Math.max(
-      this.hazeMinimumEyeHeight,
-      this.hazeEyeHeight,
-    );
     camera.updateWorldMatrix(true, false);
     (this.hazeMaterial.uniforms.uCameraRotation.value as THREE.Matrix3).setFromMatrix4(
       camera.matrixWorld,
@@ -1126,11 +1074,10 @@ export class Renderer {
     //
     // Pass 1 renders into `hazeTarget`. Three writes the WORKING colour space (linear)
     // into a render target and applies no tone mapping there, so the target holds the
-    // scene's linear radiance. Pass 2 does the haze, the dust and the veils on that
+    // scene's linear radiance. Pass 2 does the weather's dust and veil on that
     // radiance, then maps it to the display exactly once — the renderer's tone operator
     // and the sRGB encode (`toDisplay` in render/hazeshader.ts) — and draws the grade,
-    // the ink and the grain on the displayed picture. Acceptable keeps the pass and
-    // drops the WARP (see `setHeatHaze`), which is where the cost was.
+    // the ink and the grain on the displayed picture.
     //
     // A frame taller than the screen takes a third: pass 2 into `frameTarget`, then the
     // present pass shrinks it onto the canvas (see `resize`).
@@ -1153,7 +1100,7 @@ export class Renderer {
 
   /**
    * Draws one frame of an ALTERNATE scene and camera through the same two-pass
-   * frame — same post pass, same daylight, ink and heat uniforms.
+   * frame — same post pass, same ink and weather uniforms.
    *
    * This exists for the ending cutscene: main.js has stopped its own loop by then, the
    * world's scene is left attached to `this.scene` and simply never drawn again, and
@@ -1173,69 +1120,12 @@ export class Renderer {
   }
 
   /**
-   * Screen-space `uv.y` of the true horizon (0 = bottom of frame, 1 = top). Used by
-   * the INK pass only — the shimmer works in world rays and needs no such row.
-   *
-   * A horizontal sight-line lands at NDC y = -tan(pitch) / tan(fovY / 2): look up
-   * and the horizon slides down the frame, look down and it climbs. Reading it off
-   * the camera's own forward vector rather than tracking pitch separately keeps it
-   * correct through the camera rig's roll and spring, and clamping a little way
-   * outside the frame keeps the falloff sensible when the horizon is off-screen.
+   * The eye's height over the ground under the camera, metres: what the dust wall
+   * (render/hazeshader.ts `dustWall`) measures its crest and foot from. main.ts sets it
+   * every frame; until then it is a standing player's.
    */
-  private horizonScreenY(camera: THREE.PerspectiveCamera = this.camera): number {
-    camera.getWorldDirection(this._forward);
-    const horizontal = Math.hypot(this._forward.x, this._forward.z);
-    const pitch = Math.atan2(this._forward.y, horizontal);
-    const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2;
-    const ndc = -Math.tan(pitch) / Math.tan(halfFov);
-    return Math.min(1.6, Math.max(-0.6, 0.5 + 0.5 * ndc));
-  }
-
-  /** Updates every physical parameter in the production heat-mirage shader. */
-  setHeatMirageParameters(parameters: HeatMirageParameters): void {
-    writeHeatMirageUniforms(this.heatUniforms, parameters);
-    this.hazeBroadRiseHz = parameters.broadRiseHz;
-    this.hazeFineRiseHz = parameters.fineRiseHz;
-    this.hazeMinimumEyeHeight = parameters.minimumEyeHeightM;
-  }
-
-  /**
-   * How much of the day's light the colour finish should assume, 0..1: the sand
-   * veil. Deliberately separate from the heat: the two used to be
-   * one number, so the mirage lab's heat slider re-graded the whole picture.
-   */
-  setDaylight(dayFactor: number): void {
-    this.hazeMaterial.uniforms.uDaylight.value = Math.min(1, Math.max(0, dayFactor));
-  }
-
-  /**
-   * This frame's heat: shimmer and mirage strength, and the grazed-ground line the
-   * shader integrates the hot layer against (render/heathaze.ts).
-   *
-   * Both strengths are always zero on the cheapest tier. The procedural field is the
-   * expensive half of this pass; Acceptable pays the copy and outlines, which define
-   * the drawn look, and skips the heat: at zero strength the shader branches past it
-   * on a uniform every fragment agrees on.
-   */
-  setHeatHaze(frame: HeatHazeFrame): void {
-    const enabled = this.heatHazeOn && this.quality !== 'acceptable' && this.quality !== 'retro';
-    this.hazeMaterial.uniforms.uStrength.value = enabled ? Math.min(1, Math.max(0, frame.shimmer)) : 0;
-    this.hazeMaterial.uniforms.uMirage.value = enabled ? Math.min(1, Math.max(0, frame.mirage)) : 0;
-    this.hazeEyeHeight = frame.eyeAboveM;
-    this.hazeMaterial.uniforms.uGroundSlope.value = frame.groundSlope;
-  }
-
-  /**
-   * The heat shimmer and the mirage, for a developer's A/B from the pause menu: off
-   * is exactly the cheapest tier's pass, the field skipped on a uniform. Not a
-   * setting, and not persisted.
-   */
-  get heatHaze(): boolean {
-    return this.heatHazeOn;
-  }
-
-  set heatHaze(on: boolean) {
-    this.heatHazeOn = on;
+  setEyeAboveGround(metres: number): void {
+    this.hazeMaterial.uniforms.uEyeAbove.value = metres;
   }
 
   /**
@@ -1254,7 +1144,6 @@ export class Renderer {
     air: THREE.Color;
     saturation: number;
     veil: number;
-    airThick: number;
     /** The dust storm's own fog density (sky.dustFogDensity). */
     weatherFog: number;
     /** Inside the storm: the dust's density per metre from the camera (sky.dustSightFogDensity). */
@@ -1274,7 +1163,6 @@ export class Renderer {
     (u.uWallAir.value as THREE.Color).copy(frame.air);
     u.uGradeSat.value = frame.saturation;
     u.uVeil.value = frame.veil;
-    u.uAirThick.value = frame.airThick;
     u.uFogDensity.value = frame.weatherFog;
   }
 
@@ -1324,12 +1212,38 @@ export class Renderer {
   }
 
   /**
-   * The canvas's drawing buffer: the frame itself, or the screen's own device pixels
-   * while a taller frame is shrunk onto them.
+   * How the frame reaches the display, all three sizes in device pixels:
+   *
+   *  - `width`/`height`: the canvas's drawing buffer — the frame itself, or the screen's
+   *    own device pixels while a taller frame is shrunk onto them (`shrunk`).
+   *  - `displayWidth`/`displayHeight`: the device pixels the canvas covers on the panel,
+   *    as `resize` last resolved them.
+   *  - `fit`: `native` when the frame is those pixels one for one; `stretched` when it is
+   *    deliberately smaller (the rung's `screenLines` ceiling, or a multiple below 1) and
+   *    the compositor scales it up, bilinear; `shrunk` when it is larger and the present
+   *    pass averages it down; `pixelated` on the retro rung, scaled up nearest-neighbour.
+   *    No other fit exists: a frame at the screen's lines is always its exact pixels
+   *    (`sceneFrameSize`), so `stretched` is never an accident of rounding.
    */
-  get presentedSize(): { readonly width: number; readonly height: number; readonly shrunk: boolean } {
+  get presentedSize(): {
+    readonly width: number;
+    readonly height: number;
+    readonly shrunk: boolean;
+    readonly displayWidth: number;
+    readonly displayHeight: number;
+    readonly fit: 'native' | 'stretched' | 'shrunk' | 'pixelated';
+  } {
     const canvas = this.renderer.domElement;
-    return { width: canvas.width, height: canvas.height, shrunk: this.shrinking };
+    const displayWidth = this.displaySize.x;
+    const displayHeight = this.displaySize.y;
+    const fit = this.quality === 'retro'
+      ? 'pixelated'
+      : this.shrinking
+        ? 'shrunk'
+        : this.sceneSize.x === displayWidth && this.sceneSize.y === displayHeight
+          ? 'native'
+          : 'stretched';
+    return { width: canvas.width, height: canvas.height, shrunk: this.shrinking, displayWidth, displayHeight, fit };
   }
 
   /** Whether this context can time the GPU. Without it `gpuFrameMs` stays null. */

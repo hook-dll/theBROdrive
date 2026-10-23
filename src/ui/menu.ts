@@ -790,12 +790,6 @@ export interface PauseHooks {
   frameReport?: () => string;
   /** The live performance graph across the top of the screen (ui/perfoverlay.ts). Dev only. */
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
-  /**
-   * The heat shimmer and mirage in the finishing pass (core/renderer.ts `heatHaze`), for
-   * an A/B by eye. Dev only; it only shows between mid-morning and late afternoon, on
-   * Medium and up, where the ground is hot (render/heathaze.ts).
-   */
-  heatHaze?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /** The drawn outlines in the finishing pass (core/renderer.ts `ink`), for an A/B by eye. Dev only. */
   ink?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
@@ -2835,16 +2829,6 @@ export class MainMenu {
           });
         }
         // Same shape: a switch whose label is its state.
-        if (import.meta.env.DEV && hooks.heatHaze) {
-          const haze = hooks.heatHaze;
-          const label = (): string => `Heat haze: ${haze.enabled ? 'on' : 'off'}`;
-          const index = devTools.length;
-          devButton(label(), () => {
-            haze.setEnabled(!haze.enabled);
-            const btn = devTools[index];
-            if (btn) btn.textContent = label();
-          });
-        }
         if (import.meta.env.DEV && hooks.ink) {
           const ink = hooks.ink;
           const label = (): string => `Ink: ${ink.enabled ? 'on' : 'off'}`;

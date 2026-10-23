@@ -350,6 +350,12 @@ export function shadowModeFor(
  * It is the largest lever there is: half the frames is half the render work and half the
  * presenting, while the simulation keeps its fixed rate so the car handles identically.
  * The floor is that simulation — no cap can go below it.
+ *
+ * A CEILING, NEVER A TARGET. The loop (core/loop.ts `presentsNow`) meets a cap the panel
+ * divides whole by counting callbacks, so 144 on a 144 Hz panel or 60 on 120 Hz is locked
+ * to the refresh with no periodic doubled frame; a cap at or above the refresh presents
+ * every refresh; and a machine that cannot draw at the cap presents what it can, never in
+ * catch-up bursts. What it is actually scheduling is `GameLoop.presentation`.
  */
 export function presentationFpsFor(frameRateLimit: number | null): number | null {
   return frameRateLimit;

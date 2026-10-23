@@ -67,3 +67,6 @@ pnpm-debug.log*
 tools/sound/.cache/
 __pycache__/
 tools/look/.cache/
+
+# omp harness: pi-team run state and blueprints (per-machine, several MB).
+/.omp/team/

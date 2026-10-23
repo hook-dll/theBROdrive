@@ -26,8 +26,6 @@ import {
   type MirageKind,
 } from './render/mirage-tableau';
 import { MirageSchedule } from './render/mirage-schedule';
-import { HeatHaze } from './render/heathaze';
-import { DEFAULT_HEAT_MIRAGE, type HeatMirageParameters } from './render/hazeshader';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { desertPaletteAt } from './world/gradient';
@@ -47,12 +45,10 @@ const GROUND_COLUMNS = 48;
 const CALENDAR = newWorldState(SEED).calendarEpoch;
 
 type MirageSelection =
-  | { readonly system: 'heat'; readonly label: string }
   | { readonly system: 'distant'; readonly family: DistantMirageFamily; readonly label: string }
   | { readonly system: 'tableau'; readonly kind: MirageKind; readonly label: string };
 
 const SELECTIONS: readonly MirageSelection[] = [
-  { system: 'heat', label: 'Жаркое марево · рефракция' },
   ...DISTANT_MIRAGE_FAMILIES.map((family) => ({
     system: 'distant' as const,
     family,
@@ -71,8 +67,6 @@ interface LabState {
   quality: GraphicsQuality;
   fxaa: boolean;
   ink: number;
-  heatStrength: number;
-  heat: HeatMirageParameters;
   opacity: number;
   distance: number;
   lateral: number;
@@ -82,36 +76,6 @@ interface LabState {
   length: number;
   density: number;
 }
-
-interface RangeSpec {
-  readonly key: keyof HeatMirageParameters;
-  readonly label: string;
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly unit: string;
-}
-
-const HEAT_RANGES: readonly RangeSpec[] = [
-  { key: 'scaleHeightM', label: 'Высота горячего слоя', min: 0.5, max: 12, step: 0.1, unit: 'м' },
-  { key: 'referencePathM', label: 'Путь полного эффекта', min: 40, max: 1_000, step: 5, unit: 'м' },
-  { key: 'nearClearM', label: 'Чистая ближняя зона', min: 0, max: 180, step: 1, unit: 'м' },
-  { key: 'nearFullM', label: 'Полный эффект объектов', min: 20, max: 420, step: 1, unit: 'м' },
-  { key: 'groundClearM', label: 'Чистая зона земли', min: 0, max: 250, step: 1, unit: 'м' },
-  { key: 'groundFullM', label: 'Полный эффект земли', min: 20, max: 600, step: 1, unit: 'м' },
-  { key: 'angleMrad', label: 'Амплитуда преломления', min: 0, max: 8, step: 0.05, unit: 'мрад' },
-  { key: 'lateralShare', label: 'Доля бокового сдвига', min: 0, max: 1, step: 0.01, unit: '' },
-  { key: 'broadCellMrad', label: 'Высота крупных слоёв', min: 1, max: 30, step: 0.1, unit: 'мрад' },
-  { key: 'fineCellMrad', label: 'Высота мелких слоёв', min: 0.5, max: 15, step: 0.1, unit: 'мрад' },
-  { key: 'striation', label: 'Вытяжение слоёв', min: 1, max: 12, step: 0.1, unit: '×' },
-  { key: 'broadRiseHz', label: 'Подъём крупных слоёв', min: -4, max: 6, step: 0.05, unit: 'Гц' },
-  { key: 'fineRiseHz', label: 'Подъём мелких слоёв', min: -8, max: 12, step: 0.05, unit: 'Гц' },
-  { key: 'fineOnsetM', label: 'Мелкие слои с', min: 0, max: 1_500, step: 10, unit: 'м' },
-  { key: 'fineFullM', label: 'Мелкие слои полностью', min: 50, max: 3_000, step: 10, unit: 'м' },
-  { key: 'mirageCriticalMrad', label: 'Критический угол миража', min: 0, max: 20, step: 0.1, unit: 'мрад' },
-  { key: 'mirageBlend', label: 'Сила отражения', min: 0, max: 1, step: 0.01, unit: '' },
-  { key: 'minimumEyeHeightM', label: 'Минимальная высота глаза', min: 0, max: 5, step: 0.05, unit: 'м' },
-];
 
 function makeLandscape(road: Road, terrain: Terrain): THREE.Mesh {
   const positions = new Float32Array(GROUND_ROWS * GROUND_COLUMNS * 6 * 3);
@@ -239,10 +203,6 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <label><span>FXAA</span><input data-control="fxaa" type="checkbox"><output></output></label>
       <label><span>Контур</span><input data-control="ink" type="range" min="0" max="1" step="0.01"><output></output></label>
     </fieldset>
-    <fieldset><legend>Жаркое марево · все параметры</legend>
-      <label><span>Сила</span><input data-control="heatStrength" type="range" min="0" max="1" step="0.01"><output></output></label>
-      ${HEAT_RANGES.map((spec) => `<label><span>${spec.label}</span><input data-heat="${spec.key}" type="range" min="${spec.min}" max="${spec.max}" step="${spec.step}"><output data-unit="${spec.unit}"></output></label>`).join('')}
-    </fieldset>
     <fieldset class="presentation"><legend>Визуальный мираж</legend>
       <label><span>Непрозрачность</span><input data-control="opacity" type="range" min="0" max="1" step="0.01"><output></output></label>
       <label><span>Дистанция</span><input data-control="distance" type="range" min="180" max="1300" step="5"><output data-unit="м"></output></label>
@@ -254,9 +214,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       <label data-system="tableau"><span>Плотность табло</span><input data-control="density" type="range" min="0.05" max="1" step="0.05"><output></output></label>
     </fieldset>
     <div class="buttons"><button data-action="reset">Сбросить параметры</button><button data-action="game">Вернуться в игру</button></div>
-    <div class="footer" data-drive-status>0 км/ч · камера: погоня</div>
-    <div class="footer" data-heat-readout></div>
-    <div class="footer">Heat haze остаётся доступным поверх каждого визуального миража для совместной настройки.</div>`;
+    <div class="footer" data-drive-status>0 км/ч · камера: погоня</div>`;
   document.body.appendChild(root);
 
   const sync = (): void => {
@@ -268,15 +226,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
       const output = input.parentElement?.querySelector('output');
       if (output) output.textContent = `${typeof value === 'number' ? Number(value.toFixed(2)) : ''}${output.dataset.unit ?? ''}`;
     });
-    root.querySelectorAll<HTMLInputElement>('[data-heat]').forEach((input) => {
-      const key = input.dataset.heat as keyof HeatMirageParameters;
-      input.value = String(state.heat[key]);
-      const output = input.parentElement?.querySelector('output');
-      if (output) output.textContent = `${Number(state.heat[key].toFixed(2))}${output.dataset.unit ?? ''}`;
-    });
     const system = SELECTIONS[state.selection]?.system;
-    const panel = root.querySelector<HTMLElement>('.presentation');
-    if (panel) panel.hidden = system === 'heat';
     // A tableau lines both verges and a distant silhouette stands alone off to one
     // side, so the two systems do not share a placement control.
     root.querySelectorAll<HTMLElement>('[data-system]').forEach((row) => {
@@ -287,10 +237,7 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
   root.addEventListener('input', (event) => {
     const input = event.target;
     if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement)) return;
-    if (input.dataset.heat) {
-      const key = input.dataset.heat as keyof HeatMirageParameters;
-      state.heat = { ...state.heat, [key]: Number(input.value) };
-    } else if (input.dataset.control) {
+    if (input.dataset.control) {
       const key = input.dataset.control as keyof LabState;
       const value = input instanceof HTMLInputElement && input.type === 'checkbox'
         ? input.checked
@@ -308,8 +255,6 @@ function createInterface(state: LabState, apply: () => void): HTMLElement {
     });
   });
   root.querySelector('[data-action="reset"]')?.addEventListener('click', () => {
-    state.heat = { ...DEFAULT_HEAT_MIRAGE };
-    state.heatStrength = 1;
     state.opacity = 0.82;
     state.distance = 560;
     state.lateral = 95;
@@ -343,8 +288,6 @@ export async function bootMirageLab(): Promise<void> {
     quality: 'standard',
     fxaa: true,
     ink: DEFAULT_INK_STRENGTH,
-    heatStrength: 1,
-    heat: { ...DEFAULT_HEAT_MIRAGE },
     opacity: 0.82,
     distance: 560,
     lateral: 95,
@@ -375,7 +318,6 @@ export async function bootMirageLab(): Promise<void> {
   const schedule = new MirageSchedule(SEED, road.length);
   const distant = new DistantMirage(renderer.scene, road, terrain, SEED, origin, schedule);
   const tableau = new MirageTableau(renderer.scene, road, terrain, SEED, origin, schedule);
-  const heatHaze = new HeatHaze(terrain, road);
   const landscape = makeLandscape(road, terrain);
   const roadMesh = makeRoad(road);
   landscape.position.set(-origin.x, 0, -origin.z);
@@ -416,7 +358,6 @@ export async function bootMirageLab(): Promise<void> {
     starField.setQuality(state.quality, prefersMobilePresentation());
     renderer.setFxaa(state.fxaa);
     renderer.setInkStrength(state.ink);
-    renderer.setHeatMirageParameters(state.heat);
     const selection = SELECTIONS[state.selection] ?? SELECTIONS[0]!;
     if (selection.system === 'distant') {
       tableau.hide();
@@ -428,7 +369,7 @@ export async function bootMirageLab(): Promise<void> {
         state.scale,
         state.variation,
       );
-    } else if (selection.system === 'tableau') {
+    } else {
       distant.hide();
       tableau.showPreview(
         selection.kind,
@@ -440,14 +381,10 @@ export async function bootMirageLab(): Promise<void> {
         state.variation,
         state.density,
       );
-    } else {
-      distant.hide();
-      tableau.hide();
     }
   };
   const interfaceRoot = createInterface(state, apply);
   const driveStatus = interfaceRoot.querySelector<HTMLElement>('[data-drive-status]');
-  const heatReadout = interfaceRoot.querySelector<HTMLElement>('[data-heat-readout]');
   apply();
 
   const target: CameraTarget = {
@@ -539,31 +476,8 @@ export async function bootMirageLab(): Promise<void> {
     vehicle.setHeadlightEnvironmentFactor(sky.artificialLightFactor);
     distant.setPreviewDayFactor(sky.dayFactor);
     tableau.setPreviewDayFactor(sky.dayFactor, projection.lateral);
-    // Daylight and heat are separate inputs on purpose: the strength slider scales
-    // the heat the game would have at this hour and nothing else, so the colour
-    // finish here is the game's at any slider position.
-    renderer.setDaylight(sky.dayFactor);
-    const heat = heatHaze.update(frameDt, {
-      camera: renderer.camera,
-      originX: origin.x,
-      originZ: origin.z,
-      hintS: activeS,
-      sunHeight: sky.sunDirection.y,
-      timeOfDay: daySeconds,
-      dayLength: DAY_LENGTH,
-      seed: SEED,
-    });
-    renderer.setHeatHaze({
-      shimmer: heat.shimmer * state.heatStrength,
-      mirage: heat.mirage * state.heatStrength,
-      eyeAboveM: heat.eyeAboveM,
-      groundSlope: heat.groundSlope,
-    });
-    if (heatReadout) {
-      heatReadout.textContent =
-        `марево ${heat.shimmer.toFixed(2)} · мираж ${heat.mirage.toFixed(2)} · ` +
-        `глаз ${heat.eyeAboveM.toFixed(1)} м · уклон ${(heat.groundSlope * 100).toFixed(1)}%`;
-    }
+    // The finishing pass's eye height feeds only the dust wall, which the lab never
+    // raises, so the post pass needs nothing from the world here.
     if (driveStatus) {
       const cameraLabel = camera.mode === 'cabin' ? 'салон' : 'погоня';
       driveStatus.textContent = `${Math.round(vehicle.speedKmh)} км/ч · камера: ${cameraLabel}`;

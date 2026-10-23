@@ -211,9 +211,9 @@ const BLOCK = 16;
  * the same answer from any caller, and a repeat is impossible except in the one case
  * of a raw first slot matching its predecessor, which the second block absorbs.
  *
- * A heat wave is allowed to fall at night: every consumer of `heat` gates it by the
- * sun's own heating (render/heathaze.ts), so a night "heat wave" is a warm, still
- * night and nothing else, which is honest.
+ * A heat wave is allowed to fall at night. Its consumers are the air-temperature offset
+ * below and the insect ambience (audio/ambience.ts), which gates it by daylight, so a
+ * night "heat wave" is a warm, still night with no daytime insects, which is honest.
  */
 export function weatherKindOfSlot(seed: number, slot: number): WeatherKind {
   const first = (Math.floor(slot / BLOCK) - 1) * BLOCK;

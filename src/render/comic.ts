@@ -73,7 +73,8 @@ export interface ComicOptions {
  *    the shader (lines vanish once they would sit closer than a couple of pixels)
  *    leaves strata you read rather than a hatch you squint at.
  *  - Stipple at 0.36 with a 0.13-0.25 cell radius drew 25 cm pebbles. Dots want to
- *    be barely-there: small, sparse, and gone by 60 m.
+ *    be barely-there: small and sparse. `stippleRange` is only the outer bound; each
+ *    dot is normally gone earlier, once its projected width nears a pixel (the shader).
  *  - Full banding (mix 1.0) flattened shadowed sand into grey plates. 0.55 keeps
  *    the hard terminator while the sun's falloff still lives inside each band.
  */
@@ -91,7 +92,30 @@ export const DEFAULT_COMIC: ComicOptions = {
 };
 
 /** One program for every comic material, so they all share a compile. */
-const COMIC_PROGRAM_KEY = 'comic-ground-v5';
+const COMIC_PROGRAM_KEY = 'comic-ground-v6';
+/** Stipple dot radius, in cells: `MIN` plus up to `SPAN` by a per-cell hash. */
+const STIPPLE_RADIUS_MIN = 0.05;
+const STIPPLE_RADIUS_SPAN = 0.055;
+/**
+ * A dot's narrowest projected width, pixels, at which it is gone and at which it is
+ * drawn in full. Below a pixel a dot is sampled, not drawn: it blinks in and out as the
+ * frame slides over it, and the old code's widened sub-pixel blobs were that crawl.
+ */
+const STIPPLE_GONE_PX = 1.0;
+const STIPPLE_FULL_PX = 2.0;
+/** Lattice stretch (cells per pixel) past which even the widest dot is gone. */
+const STIPPLE_MAX_STRETCH = (2 * (STIPPLE_RADIUS_MIN + STIPPLE_RADIUS_SPAN)) / STIPPLE_GONE_PX;
+/** Share of lattice cells that hold a dot on plain comic ground. */
+export const COMIC_STIPPLE_KEEP = '0.22';
+/**
+ * The comic ground's stipple call, as it appears in the patched fragment shader with
+ * `keepBelow` as its cell share (a GLSL expression). The desert tiles swap the share for
+ * their own per-vertex pebble density by replacing `comicStippleCall(COMIC_STIPPLE_KEEP)` with
+ * their call (world/terrainmesh.ts `applyDesertGround`); one builder keeps the two in step.
+ */
+export function comicStippleCall(keepBelow: string): string {
+  return `comicStipple( stippleUv, stippleDx, stippleDy, stippleStretch, ${keepBelow} )`;
+}
 const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v1';
 const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
 const DIRECT_CALL =
@@ -166,20 +190,44 @@ float comicHash( vec2 p ) {
 }
 
 /**
- * Ink dots on a jittered lattice. The dot radius is compared against the pixel
- * footprint of a cell, so a dot that would land inside one pixel is faded out
- * instead of flickering — the usual death of procedural stipple.
+ * Largest singular value of the screen-to-lattice Jacobian whose columns are dx and
+ * dy: the most lattice units one pixel step covers in any screen direction, so a
+ * feature 2r across is at least 2r / stretch pixels wide on screen.
  */
-float comicStipple( vec2 world, float footprint ) {
+float comicStretch( vec2 dx, vec2 dy ) {
+  float xx = dot( dx, dx );
+  float xy = dot( dx, dy );
+  float yy = dot( dy, dy );
+  float halfDiff = 0.5 * ( xx - yy );
+  return max( sqrt( 0.5 * ( xx + yy ) + sqrt( halfDiff * halfDiff + xy * xy ) ), 1e-6 );
+}
+
+/**
+ * Ink dots on a jittered lattice, in at most keepBelow of the cells. dx and dy are the
+ * lattice coordinate's screen derivatives and stretch is comicStretch of them, all
+ * taken by the caller in uniform control flow. Each dot fades by its OWN narrowest
+ * projected width before it drops under a pixel, so the small dots go first and the
+ * field thins out instead of every dot turning into a crawling sub-pixel speck. The
+ * edge is antialiased in screen space along the dot's radius, so a dot squashed by a
+ * grazing view keeps a pixel-wide edge on its short axis too. All of it is a function
+ * of the world position and its projection: nothing is tied to the pixel grid.
+ */
+float comicStipple( vec2 world, vec2 dx, vec2 dy, float stretch, float keepBelow ) {
   vec2 cell = floor( world );
   vec2 local = fract( world ) - 0.5;
-  float keep = comicHash( cell );
-  if ( keep > 0.22 ) return 0.0;
+  if ( comicHash( cell ) > keepBelow ) return 0.0;
+  float radius = ${STIPPLE_RADIUS_MIN.toFixed(3)} + comicHash( cell + 3.1 ) * ${STIPPLE_RADIUS_SPAN.toFixed(3)};
+  float visible = smoothstep( ${STIPPLE_GONE_PX.toFixed(2)}, ${STIPPLE_FULL_PX.toFixed(2)}, 2.0 * radius / stretch );
+  if ( visible <= 0.0 ) return 0.0;
   vec2 jitter = vec2( comicHash( cell + 11.3 ), comicHash( cell + 27.7 ) ) - 0.5;
-  float radius = 0.05 + comicHash( cell + 3.1 ) * 0.055;
-  float d = length( local - jitter * 0.55 );
-  float edge = max( footprint, 0.015 );
-  return 1.0 - smoothstep( radius - edge, radius + edge, d );
+  vec2 offset = local - jitter * 0.55;
+  float d = length( offset );
+  // Cells per pixel along the radius: the screen gradient of d.
+  vec2 radial = offset / max( d, 1e-5 );
+  float cellsPerPixel = length( vec2( dot( radial, dx ), dot( radial, dy ) ) );
+  // About one and a half pixels of edge; close up, the old 0.015-cell softness.
+  float edge = max( 0.75 * cellsPerPixel, 0.015 );
+  return ( 1.0 - smoothstep( radius - edge, radius + edge, d ) ) * visible;
 }
 `;
 
@@ -250,13 +298,15 @@ const FRAGMENT_HOOK = /* glsl */ `
 
   // --- stipple ------------------------------------------------------------
   vec2 stippleUv = vComicWorld.xz / uStippleCell;
-  float footprint = max( fwidth( stippleUv.x ), fwidth( stippleUv.y ) );
+  // Derivatives before any branch: they are undefined in non-uniform control flow.
+  vec2 stippleDx = dFdx( stippleUv );
+  vec2 stippleDy = dFdy( stippleUv );
+  float stippleStretch = comicStretch( stippleDx, stippleDy );
   // The Clean style (render/cleanstyle.ts, cleanStyle.z) keeps the ground's colour and
   // strata but not its ink dots: specks under a pixel or two crawl as the car moves.
   float fade = cleanStyle.z > 0.0 ? 0.0 : 1.0 - smoothstep( uStippleRange * 0.35, uStippleRange, viewDist );
-  fade *= 1.0 - smoothstep( 0.35, 0.9, footprint );
-  if ( fade > 0.001 ) {
-    float dots = comicStipple( stippleUv, footprint ) * fade;
+  if ( fade > 0.001 && stippleStretch < ${STIPPLE_MAX_STRETCH.toFixed(4)} ) {
+    float dots = ${comicStippleCall(COMIC_STIPPLE_KEEP)} * fade;
     // Dots gather on flatter ground, where a pen would use them; slopes get the
     // contour lines instead, so the two never fight over the same pixels.
     dots *= mix( 0.35, 1.0, abs( vComicNormal.y ) );

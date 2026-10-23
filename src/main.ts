@@ -117,7 +117,6 @@ import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
 import { advanceCloudShadows } from './render/cloudshadow';
 import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainmesh';
-import { HeatHaze } from './render/heathaze';
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
@@ -528,8 +527,6 @@ async function boot(): Promise<void> {
   const mirageSchedule = new MirageSchedule(world.seed, road.length);
   const mirage = new DistantMirage(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
   const mirageTableau = new MirageTableau(renderer.scene, road, terrain, world.seed, origin, mirageSchedule);
-  // Heat-haze inputs: surface heat and the ground the view is grazing.
-  const heatHaze = new HeatHaze(terrain, road);
   // Rain, flying dust and blown sand: three instanced draws, each off in fair weather.
   const weatherParticles = new WeatherParticles(renderer.scene, world.seed);
   // The water standing in the rare dug basins (world/lakes.ts). Render-only, and it
@@ -717,8 +714,16 @@ async function boot(): Promise<void> {
         // phone, so it is printed rather than left to be inferred.
         const spotSlots = vehicleLightSlotsFor(s.graphicsQuality, mobilePresentation);
         const stars = starMagnitudeFor(s.graphicsQuality, mobilePresentation);
+        // What the loop actually schedules, not the setting: a 144 cap on a 60 Hz panel
+        // presents at 60, and the report must not claim otherwise (core/loop.ts).
+        const pacing = loop.presentation;
+        const hz = (value: number | null): string => (value === null ? '?' : value.toFixed(1));
         const framesPerSecond =
-          s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
+          pacing.capFps === null
+            ? `uncapped @ ${hz(pacing.callbackHz)} Hz`
+            : pacing.mode === 'divisor'
+              ? `cap ${pacing.capFps} -> every ${pacing.divisor} of ${hz(pacing.callbackHz)} Hz = ${hz(pacing.scheduledHz)} FPS`
+              : `cap ${pacing.capFps} -> ${pacing.mode} @ ${hz(pacing.scheduledHz)} FPS (display ${hz(pacing.callbackHz)} Hz)`;
         const frame = renderer.frameSize;
         const shown = renderer.presentedSize;
         const chosen = s.graphicsQuality === 'retro' ? `${s.retroLines} lines` : `screen x${s.frameScale}`;
@@ -726,7 +731,7 @@ async function boot(): Promise<void> {
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
           `resolution ${frame.width}x${frame.height} (${chosen}), `
             + `${((frame.width * frame.height) / 1_000_000).toFixed(2)} Mpx, `
-            + `${shown.shrunk ? `shrunk onto ${shown.width}x${shown.height}, ` : ''}`
+            + `${shown.fit} onto ${shown.displayWidth}x${shown.displayHeight}, `
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
@@ -966,8 +971,8 @@ async function boot(): Promise<void> {
   }
 
   // A save may leave the player capsule behind the car they were driving. Establish
-  // the local nine-tile desert physics patch and synchronously build the current road
-  // chunk before the loading cover leaves, so starter bodies have solid support.
+  // the local solid desert square and synchronously settle the current road chunk
+  // before the loading cover leaves, so starter bodies have solid support.
   const initialGround = savedDrivenCar ?? player.absolutePosition;
   const initialProjection = road.project(initialGround.x, initialGround.z, world.state.player.s);
   worldWork.beginFrame(frameId);
@@ -1131,6 +1136,10 @@ async function boot(): Promise<void> {
     const anchorZ = Number.isFinite(anchor.z) ? anchor.z : world.state.player.z;
     const projection = road.project(anchorX, anchorZ);
     const roadPoint = road.sampleAt(projection.s);
+    // The chunk under the rescue point may have been built visual-only while the body
+    // was out in the desert. The streamer's queue would promote it over several frames;
+    // the next physics step needs it solid, so settle it now (ChunkStreamer.prime).
+    streamer.prime(projection.s, 0);
     if (carFallen && driving) {
       // ALONG THE ROAD, NOT LEVEL. The centreline's own elevation with a level body
       // is a car buried to its rear axle on anything but a flat stretch: the grade
@@ -2640,7 +2649,6 @@ async function boot(): Promise<void> {
       veil: Math.min(0.6, 0.45 * weather.haze + 0.3 * weather.rain + 0.12 * weather.cloud) * (1 - weather.dust),
       weatherFog: sky.dustFogDensity,
       dustInside: sky.dustSightFogDensity,
-      airThick: Math.min(1, weather.dust + weather.haze * 0.6 + weather.front * weather.front * 0.7),
     });
 
     // Render-only illusions: neither one owns physics, terrain, streamed props, or
@@ -2655,27 +2663,16 @@ async function boot(): Promise<void> {
     advanceCloudShadows(world.seed, frameDt, sky.dayFactor, origin.x, origin.z);
     sky.clouds.update(world.seed, renderer.camera);
     advanceDesertGlitter(frameDt, sky.dayFactor);
-    // Heat haze, after the cloud field has advanced: the shade over the ground ahead
-    // is one of its inputs (render/heathaze.ts).
-    renderer.setHeatHaze(
-      heatHaze.update(frameDt, {
-        camera: renderer.camera,
-        originX: origin.x,
-        originZ: origin.z,
-        hintS: activeS,
-        sunHeight: sky.sunDirection.y,
-        timeOfDay: s.timeOfDay,
-        dayLength: DAY_LENGTH,
-        seed: world.seed,
-      }),
-    );
+    // The ground under the camera, for the blown sand and the dust wall's footing.
+    const groundUnderCam = terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS);
+    renderer.setEyeAboveGround(cam.y - groundUnderCam);
     const frameLines = renderer.frameHeight;
     weatherParticles.update(
       frameDt,
       renderer.camera,
       origin.x,
       origin.z,
-      terrain.heightAt(cam.x + origin.x, cam.z + origin.z, activeS),
+      groundUnderCam,
       frameLines,
       renderer.fog,
       sky.dayFactor,
@@ -2913,7 +2910,6 @@ async function boot(): Promise<void> {
     // the whole day-night transition, count towards the GPU average.
     renderer.setGpuTimingEligible(!gpuTimingFrozen && !sky.didBakeEnvironmentThisFrame);
     rebasedThisFrame = false;
-    renderer.setDaylight(sky.dayFactor);
     renderer.setItemViewEffects(
       s.player.wornSunShades?.tint ?? null,
       usingBinoculars,
@@ -3042,16 +3038,6 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
-    heatHaze: import.meta.env.DEV
-      ? {
-          get enabled() {
-            return renderer.heatHaze;
-          },
-          setEnabled: (on: boolean) => {
-            renderer.heatHaze = on;
-          },
-        }
-      : undefined,
     ink: import.meta.env.DEV
       ? {
           get enabled() {

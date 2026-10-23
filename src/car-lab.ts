@@ -513,7 +513,6 @@ export async function bootCarLab(): Promise<void> {
     const cam = renderer.camera.position;
     renderer.camera.getWorldDirection(view);
     sky.update(CALENDAR, (state.timeHours / 24) * DAY_LENGTH, 0, 0, cam.x, cam.y, cam.z, view.x, view.z);
-    renderer.setDaylight(sky.dayFactor);
     renderer.render();
   };
 

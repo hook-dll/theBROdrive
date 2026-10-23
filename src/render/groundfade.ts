@@ -16,8 +16,18 @@ import { DESERT_TILE_SIZE } from '../world/deserttiledata';
  * tiles round the player's own (world/deserttiles.ts) — and is gone before it would
  * stand on vista. The window, not a radius: a radius small enough to be safe in the
  * window's nearest direction threw away props the tiles still carry in its corners.
- * A screen-space dither keeps the shader opaque (no sorting, no transparency pass);
- * at that range a saguaro is a few pixels tall and the pattern cannot be seen.
+ * The dissolve keeps the shader opaque (no sorting, no transparency pass) by
+ * discarding a growing share of the prop's surface. Which share is decided by a hashed
+ * alpha test (Wyman & McGuire, "Hashed Alpha Testing", 2017): a hash of the prop's
+ * own position on a lattice about one pixel across, so the pattern is fixed to the prop
+ * rather than to the screen. The old screen-space dither stood still while the world
+ * slid under it, so the half-dissolved props on the skyline crawled whenever the car
+ * moved. The lattice size comes from the position's own screen derivatives, rounded to
+ * a power of two, with the hashes of the two neighbouring sizes blended (and the blend
+ * remapped back to a uniform threshold) so that approaching a prop changes its pattern
+ * gradually rather than in a jump at each size. Its coordinates are the ones the
+ * mesh's own group holds (the tile's, for the tiles' props), which a rebase moves as a
+ * whole, so a rebase changes nothing either.
  */
 
 /** Tiles each side of the player's own that the visual window holds. */
@@ -25,7 +35,7 @@ const WINDOW_TILES = 2;
 /** Metres inside the window edge over which a prop dissolves. */
 const FADE_M = 60;
 
-const FADE_KEY = 'ground-fade-v2';
+const FADE_KEY = 'ground-fade-v3';
 const patched = new WeakSet<THREE.Material>();
 
 /** The window in SCENE coordinates: (minX, minZ, maxX, maxZ). */
@@ -71,7 +81,7 @@ export function applyGroundFade<T extends THREE.MeshStandardMaterial>(material: 
     previousCompile.call(material, shader, renderer);
     shader.uniforms.uGroundWindow = uGroundWindow;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vGroundFadeXZ;')
+      .replace('#include <common>', '#include <common>\nvarying vec2 vGroundFadeXZ;\nvarying vec3 vGroundFadeLocal;')
       .replace(
         '#include <project_vertex>',
         `#include <project_vertex>
@@ -80,20 +90,51 @@ export function applyGroundFade<T extends THREE.MeshStandardMaterial>(material: 
 		#ifdef USE_INSTANCING
 		groundFadeWorld = instanceMatrix * groundFadeWorld;
 		#endif
+		vGroundFadeLocal = groundFadeWorld.xyz;
 		vGroundFadeXZ = ( modelMatrix * groundFadeWorld ).xz;
 	}`,
       );
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vGroundFadeXZ;\nuniform vec4 uGroundWindow;')
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec2 vGroundFadeXZ;
+varying vec3 vGroundFadeLocal;
+uniform vec4 uGroundWindow;
+float groundFadeHash( vec3 p ) {
+	p = fract( p * 0.1031 );
+	p += dot( p, p.zyx + 31.32 );
+	return fract( ( p.x + p.y ) * p.z );
+}`,
+      )
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
 	{
 		vec2 groundFadeIn = min( vGroundFadeXZ - uGroundWindow.xy, uGroundWindow.zw - vGroundFadeXZ );
 		float groundFade = 1.0 - smoothstep( 0.0, ${FADE_M.toFixed(1)}, min( groundFadeIn.x, groundFadeIn.y ) );
+		// Derivatives before the branch: they are undefined in non-uniform control flow.
+		float groundFadeStep = max( length( dFdx( vGroundFadeLocal ) ), length( dFdy( vGroundFadeLocal ) ) );
 		if ( groundFade > 0.0 ) {
-			float dither = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) );
-			if ( dither < groundFade ) discard;
+			// Lattice cells per metre so that one cell is about one pixel, as a power of two
+			// and the next one up, blended by where the true size falls between them.
+			float level = log2( 1.0 / max( groundFadeStep, 1e-6 ) );
+			float levelLow = floor( level );
+			float blend = level - levelLow;
+			float x = mix(
+				groundFadeHash( floor( exp2( levelLow ) * vGroundFadeLocal ) ),
+				groundFadeHash( floor( exp2( levelLow + 1.0 ) * vGroundFadeLocal ) ),
+				blend
+			);
+			// The blend of two uniform hashes is not uniform; its CDF makes it so again,
+			// so the share discarded stays exactly groundFade at every blend.
+			float a = clamp( min( blend, 1.0 - blend ), 1e-4, 0.5 );
+			float threshold = x < a
+				? x * x / ( 2.0 * a * ( 1.0 - a ) )
+				: x < 1.0 - a
+					? ( x - 0.5 * a ) / ( 1.0 - a )
+					: 1.0 - ( 1.0 - x ) * ( 1.0 - x ) / ( 2.0 * a * ( 1.0 - a ) );
+			if ( threshold < groundFade ) discard;
 		}
 	}`,
       );

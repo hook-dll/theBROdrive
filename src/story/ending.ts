@@ -1146,11 +1146,6 @@ export async function playEnding(opts: EndingOptions): Promise<void> {
   // aeroplane and the ridges a tenth of the way to the horizon's colour everywhere past
   // 320 m, on top of the scene's own fog. A tenth of that keeps the far air while the
   // sand stays sand; the grade takes a little more colour back than the game's 1.0.
-  renderer.setDaylight(1);
-  // The shimmer is scaled by the eye's height above the ground, and this ending's eyes
-  // are 2 m for the first three shots and eight to sixteen for the last one, so the
-  // value is a compromise rather than the 1.6 m a car's windscreen assumes.
-  renderer.setHeatHaze({ shimmer: 0.18, mirage: 0.06, eyeAboveM: 4.5, groundSlope: 0.02 });
   renderer.setWeather({
     wallM: -1,
     windX: 1,
@@ -1162,7 +1157,6 @@ export async function playEnding(opts: EndingOptions): Promise<void> {
     air: SKY_HORIZON,
     saturation: 1.06,
     veil: 0.04,
-    airThick: 0.12,
     weatherFog: FOG_DENSITY,
     dustInside: 0,
   });

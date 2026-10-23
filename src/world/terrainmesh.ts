@@ -1,7 +1,7 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import { SurfaceType } from '../core/surfaces';
-import { applyComicShading } from '../render/comic';
+import { COMIC_STIPPLE_KEEP, applyComicShading, comicStippleCall } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyGroundLight } from '../render/groundlight';
 import { CLEAN_SMOOTH_NORMALS } from '../render/cleanstyle';
@@ -54,6 +54,14 @@ export const NEAR_TERRAIN_REACH = 1500;
  * `main.ts` catches anything that gets past it anyway.
  */
 const PHYSICS_LATERAL = 600;
+/**
+ * Most triangles one terrain collider slab may hold: the road's slab size
+ * (`COLLIDER_SLAB_QUADS` in roadmesh.ts, ~540 triangles, about a millisecond of Rapier
+ * BVH build). Slabs are cut at field-row boundaries, closing before a row whose drawn
+ * triangles could take them past this. By the grid constants below a field row draws
+ * about 420 triangles and keeps about 390 of them, so today every slab is one 8 m row.
+ */
+const COLLIDER_SLAB_TRIANGLES = 540;
 /** Lateral spacing growth factor; resolution falls off away from the road. */
 const LATERAL_RATIO = 1.35;
 /**
@@ -268,14 +276,17 @@ export const DESERT_TILE_FADE_GONE = DESERT_TILE_SIZE * 2;
  * as a shadow lying beside the road.
  */
 const SHOULDER_GRIT_FRAGMENT = /* glsl */ `
-if ( vShoulderGrit > 0.001 ) {
-  vec2 fineUv = vComicWorld.xz / 0.16;
-  float fineFoot = max( fwidth( fineUv.x ), fwidth( fineUv.y ) );
-  float fine = comicStipple( fineUv, fineFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, fineFoot ) );
-  vec2 coarseUv = vComicWorld.xz / 0.42 + 7.3;
-  float coarseFoot = max( fwidth( coarseUv.x ), fwidth( coarseUv.y ) );
-  float coarse = comicStipple( coarseUv, coarseFoot ) * ( 1.0 - smoothstep( 0.3, 0.8, coarseFoot ) );
-  gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.45 - coarse * 1.0 );
+{
+  // Derivatives before the branch: they are undefined in non-uniform control flow.
+  vec2 gritDx = dFdx( vComicWorld.xz );
+  vec2 gritDy = dFdy( vComicWorld.xz );
+  float gritStretch = comicStretch( gritDx, gritDy );
+  if ( vShoulderGrit > 0.001 ) {
+    // Each size's dots fade by their own projected width (render/comic.ts comicStipple).
+    float fine = comicStipple( vComicWorld.xz / 0.16, gritDx / 0.16, gritDy / 0.16, gritStretch / 0.16, ${COMIC_STIPPLE_KEEP} );
+    float coarse = comicStipple( vComicWorld.xz / 0.42 + 7.3, gritDx / 0.42, gritDy / 0.42, gritStretch / 0.42, ${COMIC_STIPPLE_KEEP} );
+    gl_FragColor.rgb *= 1.0 - vShoulderGrit * ( fine * 0.45 - coarse * 1.0 );
+  }
 }
 #include <tonemapping_fragment>`;
 
@@ -388,16 +399,6 @@ float glitterHash( vec2 p ) {
   vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
   p3 += dot( p3, p3.yzx + 33.33 );
   return fract( ( p3.x + p3.y ) * p3.z );
-}
-float groundStipple( vec2 world, float footprint, float keepBelow ) {
-  vec2 cell = floor( world );
-  vec2 local = fract( world ) - 0.5;
-  if ( comicHash( cell ) > keepBelow ) return 0.0;
-  vec2 jitter = vec2( comicHash( cell + 11.3 ), comicHash( cell + 27.7 ) ) - 0.5;
-  float radius = 0.05 + comicHash( cell + 3.1 ) * 0.055;
-  float d = length( local - jitter * 0.55 );
-  float edge = max( footprint, 0.015 );
-  return 1.0 - smoothstep( radius - edge, radius + edge, d );
 }`;
 
 /**
@@ -672,7 +673,7 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
         `#include <common>\n${grit ? 'varying float vShoulderGrit;\n' : ''}${GROUND_FRAGMENT_PARS}`,
       )
       .replace('#include <color_fragment>', GROUND_COLOR_HOOK(grit))
-      .replace('comicStipple( stippleUv, footprint )', 'groundStipple( stippleUv, footprint, vGroundSurface.x )')
+      .replace(comicStippleCall(COMIC_STIPPLE_KEEP), comicStippleCall('vGroundSurface.x'))
       .replace('#include <opaque_fragment>', GROUND_GLITTER_HOOK);
     if (grit) fragment = fragment.replace('#include <tonemapping_fragment>', SHOULDER_GRIT_FRAGMENT);
     // The ground keeps its interpolated normals in the Clean style (render/cleanstyle.ts).
@@ -730,6 +731,15 @@ interface BuiltTerrain {
   readonly lateralOf: Float32Array;
   /** The drawn triangles: folds, unowned ground and the road quad already removed. */
   readonly index: Uint32Array;
+  /** Field-lattice rows (`S_STEP` apart) the chunk spans, both ends included. */
+  readonly sCount: number;
+  /**
+   * Where in `index` field row `si`'s cells begin; entry `sCount - 1` is where the field
+   * lattice's triangles end and the refined grid's begin.
+   */
+  readonly fieldRowStart: Int32Array;
+  /** Where in `index` refined row `j`'s cells begin; the last entry is the end of `index`. */
+  readonly fineRowStart: Int32Array;
 }
 
 /**
@@ -936,25 +946,46 @@ export class TerrainMeshProvider implements ChunkProvider {
   constructor(private readonly roadDistance: RoadDistance) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
+    const iterator = this.buildSteps(ctx);
+    let result = iterator.next();
+    while (!result.done) result = iterator.next();
+    return result.value;
+  }
+
+  /**
+   * The chunk's terrain in resumable steps: one per field row and per refined row of
+   * the mesh, then one per collider slab (see `buildColliderSlabs`). Colliders are
+   * built disabled; ChunkStreamer switches them on when it attaches the contribution.
+   */
+  *buildSteps(ctx: ChunkContext): Generator<void, ChunkContent | null> {
     // Every chunk owns a full CHUNK_LENGTH span, even outside the road: the
     // negative and past-end chunks are the desert apron. `ctx.sStart`/`ctx.sEnd`
     // are clamped to the road and therefore empty out there, so derive the span
     // from the chunk index instead.
     const sStart = ctx.chunkIndex * CHUNK_LENGTH;
     const sEnd = (ctx.chunkIndex + 1) * CHUNK_LENGTH;
-
-    const built = this.buildVisual(ctx, sStart, sEnd);
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
-
-    if (ctx.hasPhysics) {
-      this.addCollider(ctx, built, bodies, colliders);
+    /** The mesh's geometry once built: freed here if the build never completes. */
+    const geometries: THREE.BufferGeometry[] = [];
+    let completed = false;
+    try {
+      const built = yield* this.buildVisualSteps(ctx, sStart, sEnd);
+      geometries.push(built.geometry);
+      if (ctx.hasPhysics) yield* this.buildColliderSlabs(ctx, built, bodies, colliders);
+      completed = true;
+      return { group: built.group, bodies, colliders, dispose: () => built.geometry.dispose() };
+    } finally {
+      // Cancelled part-way (a rebase, the chunk leaving the window): nothing of it was
+      // attached, so everything it made is still this generator's to free.
+      if (!completed) {
+        for (const body of bodies) ctx.physics.removeBody(body);
+        for (const geometry of geometries) geometry.dispose();
+      }
     }
-
-    return { group: built.group, bodies, colliders, dispose: () => built.geometry.dispose() };
   }
 
-  private buildVisual(ctx: ChunkContext, sStart: number, sEnd: number): BuiltTerrain {
+  private *buildVisualSteps(ctx: ChunkContext, sStart: number, sEnd: number): Generator<void, BuiltTerrain> {
     const { road, terrain } = ctx;
     // The floating origin, frozen at build time: every height and surface sample
     // below stays absolute, and the subtraction happens only where a coordinate is
@@ -1027,6 +1058,9 @@ export class TerrainMeshProvider implements ChunkProvider {
         colors[vi * 3 + 1] = sandLinear.g;
         colors[vi * 3 + 2] = sandLinear.b;
       }
+      // Field rows carry every expensive height sample; a job may stop between them.
+      // Nothing below reads `rowFrame` or `sandLinear` across a yield.
+      yield;
     }
 
     /**
@@ -1080,6 +1114,7 @@ export class TerrainMeshProvider implements ChunkProvider {
         validCells[si * (latCount - 1) + li] = 1;
       }
     }
+    yield;
 
     /**
      * Where each refined column and row sits in the field lattice: the pair of rings
@@ -1172,6 +1207,7 @@ export class TerrainMeshProvider implements ChunkProvider {
         colors[vi * 3 + 1] = sandLinear.g;
         colors[vi * 3 + 2] = sandLinear.b;
       }
+      yield;
     }
 
     // Index only valid cells. The single quad spanning the road is also skipped
@@ -1182,8 +1218,13 @@ export class TerrainMeshProvider implements ChunkProvider {
     const maxTriangles =
       (sCount - 1) * (latCount - 1) * 2 + (fineRows - 1) * (fineCount - 1) * 2;
     const index = new Uint32Array(maxTriangles * 3);
+    // Row by row, so the collider can be cut into slabs along the road without
+    // re-deciding which cells exist (see `buildColliderSlabs`).
+    const fieldRowStart = new Int32Array(sCount);
+    const fineRowStart = new Int32Array(fineRows);
     let written = 0;
     for (let si = 0; si < sCount - 1; si++) {
+      fieldRowStart[si] = written;
       for (let li = 0; li < latCount - 1; li++) {
         if (validCells[si * (latCount - 1) + li] === 0) continue;
         const here = laterals[li]!;
@@ -1202,7 +1243,9 @@ export class TerrainMeshProvider implements ChunkProvider {
         index[written++] = c;
       }
     }
+    fieldRowStart[sCount - 1] = written;
     for (let j = 0; j + 1 < fineRows; j++) {
+      fineRowStart[j] = written;
       const validRow = rowLow[j]! * (latCount - 1);
       const rowBase = fieldCount + j * fineCount;
       for (let c = 0; c + 1 < fineCount; c++) {
@@ -1223,7 +1266,9 @@ export class TerrainMeshProvider implements ChunkProvider {
         index[written++] = cc;
       }
     }
+    fineRowStart[fineRows - 1] = written;
     const drawn = index.subarray(0, written);
+    yield;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -1247,11 +1292,15 @@ export class TerrainMeshProvider implements ChunkProvider {
       positions,
       lateralOf,
       index: drawn,
+      sCount,
+      fieldRowStart,
+      fineRowStart,
     };
   }
 
   /**
-   * Solid ground: the drawn triangles that lie inside `PHYSICS_LATERAL`.
+   * Solid ground: the drawn triangles that lie inside `PHYSICS_LATERAL`, one trimesh
+   * per slab of field rows.
    *
    * Filtering the DRAWN list is the whole trick. The collider costs no extra terrain
    * sampling (the expensive part is already paid), and it cannot disagree with what is
@@ -1259,62 +1308,96 @@ export class TerrainMeshProvider implements ChunkProvider {
    * never re-decides any of them — it only drops what is too far out to stand on. The
    * previous axis-aligned heightfield sampled the terrain a second time on its own 2 m
    * lattice, which cost more than the mesh and still only reached 60 m.
+   *
+   * SLABS, as the road's (`COLLIDER_SLAB_QUADS` in roadmesh.ts): Rapier builds a BVH
+   * inside every `trimesh` call, an uninterruptible native call that grows with the
+   * triangle count, so one collider per chunk let one scheduler job own a frame. Slabs
+   * are cut at field-row boundaries and hold at most `COLLIDER_SLAB_TRIANGLES` (unless
+   * one row alone holds more), and the generator yields after each. Slabs are the same
+   * triangles over the same vertex values, and neighbouring slabs share their boundary
+   * row's vertices, so the solid surface is unchanged and has no seam to fall through.
    */
-  private addCollider(
+  private *buildColliderSlabs(
     ctx: ChunkContext,
     built: BuiltTerrain,
     bodies: RAPIER.RigidBody[],
     colliders: RAPIER.Collider[],
-  ): void {
-    const { positions, lateralOf, index } = built;
+  ): Generator<void, void> {
+    const { positions, lateralOf, index, sCount, fieldRowStart, fineRowStart } = built;
 
-    // Compact the kept triangles' vertices into their own array. Handing Rapier the
-    // whole buffer and indexing only part of it looks tempting, but a trimesh's AABB
-    // spans every vertex it was given: the collider would claim a kilometres-wide box
-    // in the broad phase and every query in the world would test against it. Measured:
-    // 32 ms/frame with the full array, 14 ms with this copy.
+    // Each slab compacts its kept triangles' vertices into their own array. Handing
+    // Rapier the whole buffer and indexing only part of it looks tempting, but a
+    // trimesh's AABB spans every vertex it was given: the collider would claim a
+    // kilometres-wide box in the broad phase and every query in the world would test
+    // against it. Measured: 32 ms/frame with the full array, 14 ms with the copy.
     const remap = new Int32Array(positions.length / 3).fill(-1);
+    /** Source vertex of each slab vertex, in slab order; also what resets `remap`. */
+    const sources = new Int32Array(positions.length / 3);
     const kept = new Uint32Array(index.length);
     let written = 0;
     let used = 0;
-    for (let t = 0; t + 2 < index.length; t += 3) {
-      const a = index[t]!;
-      const b = index[t + 1]!;
-      const c = index[t + 2]!;
-      if (
-        Math.abs(lateralOf[a]!) > PHYSICS_LATERAL ||
-        Math.abs(lateralOf[b]!) > PHYSICS_LATERAL ||
-        Math.abs(lateralOf[c]!) > PHYSICS_LATERAL
-      ) {
-        continue;
+    const keep = (from: number, to: number): void => {
+      for (let t = from; t + 2 < to; t += 3) {
+        const a = index[t]!;
+        const b = index[t + 1]!;
+        const c = index[t + 2]!;
+        if (
+          Math.abs(lateralOf[a]!) > PHYSICS_LATERAL ||
+          Math.abs(lateralOf[b]!) > PHYSICS_LATERAL ||
+          Math.abs(lateralOf[c]!) > PHYSICS_LATERAL
+        ) {
+          continue;
+        }
+        for (let k = t; k < t + 3; k++) {
+          const v = index[k]!;
+          if (remap[v]! < 0) {
+            remap[v] = used;
+            sources[used++] = v;
+          }
+          kept[written++] = remap[v]!;
+        }
       }
-      if (remap[a]! < 0) remap[a] = used++;
-      if (remap[b]! < 0) remap[b] = used++;
-      if (remap[c]! < 0) remap[c] = used++;
-      kept[written++] = remap[a]!;
-      kept[written++] = remap[b]!;
-      kept[written++] = remap[c]!;
-    }
-    if (written === 0) return;
+    };
 
-    const vertices = new Float32Array(used * 3);
-    for (let v = 0; v < remap.length; v++) {
-      const dst = remap[v]!;
-      if (dst < 0) continue;
-      vertices[dst * 3] = positions[v * 3]!;
-      vertices[dst * 3 + 1] = positions[v * 3 + 1]!;
-      vertices[dst * 3 + 2] = positions[v * 3 + 2]!;
-    }
+    const flush = (): void => {
+      const vertices = new Float32Array(used * 3);
+      for (let v = 0; v < used; v++) {
+        const src = sources[v]!;
+        vertices[v * 3] = positions[src * 3]!;
+        vertices[v * 3 + 1] = positions[src * 3 + 1]!;
+        vertices[v * 3 + 2] = positions[src * 3 + 2]!;
+        remap[src] = -1;
+      }
+      // `vertices` is copied verbatim from the already-relative `positions` above, so
+      // the trimesh receives origin-relative vertices — no second subtraction here.
+      const collider = ctx.physics.addStaticTrimesh(
+        vertices,
+        kept.slice(0, written),
+        TERRAIN_COLLIDER_SURFACE,
+      );
+      collider.setEnabled(false);
+      colliders.push(collider);
+      const body = collider.parent();
+      if (body) bodies.push(body);
+      written = 0;
+      used = 0;
+    };
 
-    // `vertices` is copied verbatim from the already-relative `positions` above, so
-    // the trimesh receives origin-relative vertices — no second subtraction here.
-    const collider = ctx.physics.addStaticTrimesh(
-      vertices,
-      kept.subarray(0, written),
-      TERRAIN_COLLIDER_SURFACE,
-    );
-    colliders.push(collider);
-    const body = collider.parent();
-    if (body) bodies.push(body);
+    for (let si = 0; si < sCount - 1; si++) {
+      // Field row `si` and the refined rows that subdivide it: the same 8 m of road.
+      const fieldFrom = fieldRowStart[si]!;
+      const fieldTo = fieldRowStart[si + 1]!;
+      const fineFrom = fineRowStart[si * FINE_SUBDIVISIONS]!;
+      const fineTo = fineRowStart[(si + 1) * FINE_SUBDIVISIONS]!;
+      // A row's drawn triangles bound what it can keep. A single row past the cap is
+      // still one slab: rows are the finest cut that shares whole vertex rows.
+      if (written > 0 && written + (fieldTo - fieldFrom) + (fineTo - fineFrom) > COLLIDER_SLAB_TRIANGLES * 3) {
+        flush();
+        yield;
+      }
+      keep(fieldFrom, fieldTo);
+      keep(fineFrom, fineTo);
+    }
+    if (written > 0) flush();
   }
 }

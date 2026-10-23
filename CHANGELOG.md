@@ -18,9 +18,6 @@
   whatever the setting: the supersample smooths the edges and FXAA only softened the
   distance. Measured on the M2 Pro in that window, Medium, GPU median, alternating runs:
   Screen 7.3-7.5 ms, x1.5 11.4-12.8, x2 14.4-14.7; no program linked by any change.
-- DEV: HEAT HAZE A/B (pause menu "Heat haze"; `Renderer.heatHaze`). Turns the shimmer
-  and the mirage off for the session, as on the cheapest tier. They only exist from
-  mid-morning to late afternoon on hot ground (at 13:00, shimmer 0.87 to 0).
 - DEV: ROADSIDE PROP SHADOWS A/B (pause menu "Roadside prop shadows";
   `InstanceBatches.setPropShadows`, `BatchKind.propShadows`, `ChunkStreamer.setPropShadows`).
   The scatter's rocks and cacti along the road neither cast nor receive sun shadows
@@ -32,6 +29,47 @@
 
 ### Changed
 
+- HEAT HAZE IS GONE (`render/hazeshader.ts`, `core/renderer.ts` `setEyeAboveGround`;
+  `render/heathaze.ts`, `tools/haze-probe.ts` and the dev "Heat haze" A/B removed). The
+  finishing pass no longer displaces the picture by a moving refraction field, draws the
+  hot-ground mirage or lays the daylight sand veil over the horizon band. Middle-distance
+  geometry (45 m and out) was being resampled through a warped UV and then FXAA'd, which
+  read as blur and shimmer at the screen's own resolution. Weather fog, the dust wall and
+  the dust inside a storm stay; the wall now takes its eye height from the ground under
+  the camera. A frozen world redrawn 0.7 s apart is now bit-identical (it was not: the
+  haze phase ran on the wall clock).
+- FADES THAT DO NOT CRAWL (`render/groundfade.ts`, `render/comic.ts` `comicStipple`
+  `comicStretch`, `world/terrainmesh.ts` shoulder grit and tile pebbles). The dissolve at
+  the edge of the tile window is a hashed alpha test on the prop's own position instead of
+  a screen-pixel dither, so half-dissolved props no longer swim as the car moves. Ground
+  stipple fades by each dot's own width on screen (full at 2 px, gone at 1 px) instead of
+  by distance, so sub-pixel dots no longer crawl between about 28 and 80 m; on flat ground
+  from the chase camera at 1080p the dots now end some 10-15 m out.
+- FRAME CAP LOCKED TO THE REFRESH (`core/loop.ts` `GameLoop.presentation`,
+  `PresentationMode`). The loop measures the display's callback rate and meets a cap by
+  drawing every refresh (`display`), every n-th (`divisor`, e.g. 60 on 120 Hz) or at the
+  refresh nearest each deadline (`deadline`, e.g. 60 on 144 Hz), never twice in one
+  refresh. 144 on a 144.1 Hz panel no longer drops a frame every few seconds. The frame
+  report prints the mode and the rate actually scheduled, and `Renderer.presentedSize`
+  says whether the frame is `native`, `stretched` (a deliberately smaller frame the
+  browser scales up), `shrunk` or `pixelated`, with the display's own pixels.
+- BACK ON THE ROAD WITHOUT A ONE-FRAME REBUILD (`world/chunks.ts` `ChunkPromotion`,
+  `ChunkStreamer.prime`; `world/workqueue.ts` `WORLD_JOB_SLICE_MS`; `world/terrainmesh.ts`
+  `TerrainMeshProvider.buildSteps`; `world/deserttiles.ts`). Returning to the road from the
+  open desert used to rebuild every visual-only chunk of the physics band synchronously,
+  35-50 ms each in one frame; those chunks are now PROMOTED one provider per scheduler job,
+  each old contribution drawn until its physical replacement is attached, nearest chunk
+  first. A rebase cancels only the build in flight; nothing drawn or solid is taken away.
+  Only `prime` settles a chunk synchronously: at boot, and now for the fall rescue. Every
+  scheduler job gets a deadline (1 ms, never past the frame budget) and must stop at it or
+  be one bounded stage; the DEV `[perf] streaming` line names any job that overruns. The
+  road-fan terrain (labs and tools; not registered in the game) builds row by row, its
+  collider in slabs of at most ~540 triangles like the road's. Desert tiles stage their
+  heightfield and prop colliders disabled and switch them on together; far-from-road
+  generation is entered at 1100 m and left at 900 m instead of
+  flipping at 900 m; and a mode switch no longer tears the window down: each tile of the
+  old mode stays drawn and solid until its replacement is ready. `refreshProvider` (unused
+  since the POI spacing setting went) is gone.
 - A FRAME TALLER THAN THE SCREEN IS SHRUNK BY THE GAME, NOT THE BROWSER
   (`core/renderer.ts` `resize`, `frameTarget`, `presentMaterial`;
   `render/presentshader.ts`; `render/hazeshader.ts` `uEncodeOutput`). The canvas used to
