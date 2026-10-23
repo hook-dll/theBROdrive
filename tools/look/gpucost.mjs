@@ -17,7 +17,7 @@
  *   - every shadow pass skipped (`shadowMap.autoUpdate = false`): drawing the shadow
  *     maps, not sampling them;
  *   - FXAA the other way round from the rung's own;
- *   - the frame at 540 and 720 lines (`Renderer.setRenderHeight`), which separates the
+ *   - the frame at x0.5 and x0.75 of the screen (`Renderer.setFrameScale`), which separates the
  *     per-pixel half of the frame from the rest; on Very Low instead its buffer one whole factor
  *     finer (540 lines on a 1080-line display, `Settings.retroLines`);
  *   - each part of the world hidden in turn — every chunk provider's content together
@@ -285,9 +285,9 @@ try {
         }
         if (!retro) {
           changes.set(`fxaa ${fxaa ? 'off' : 'on'}`, [() => r.setFxaa(!fxaa), () => r.setFxaa(fxaa)]);
-          const own = window.__bro.state().settings.renderHeight;
-          for (const height of [540, 720]) {
-            changes.set(`render height ${height}p`, [() => r.setRenderHeight(height), () => r.setRenderHeight(own)]);
+          const own = window.__bro.state().settings.frameScale;
+          for (const scale of [0.5, 0.75]) {
+            changes.set(`frame x${scale}`, [() => r.setFrameScale(scale), () => r.setFrameScale(own)]);
           }
         } else {
           // The retro buffer one whole factor finer: 540 lines on a 1080-line display.

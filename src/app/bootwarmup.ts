@@ -258,7 +258,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
       ctx.renderer.setFxaa(settings.fxaa);
       ctx.renderer.setShadowMode(settings.shadows);
       ctx.sky.setShadowMode(settings.shadows);
-      ctx.renderer.setRenderHeight(settings.renderHeight);
+      ctx.renderer.setFrameScale(settings.frameScale);
       ctx.renderer.setQuality(tier);
       ctx.sky.setQuality(tier, ctx.mobilePresentation);
       const horizon = viewDistanceFor(settings.viewDistance, ctx.mobilePresentation);

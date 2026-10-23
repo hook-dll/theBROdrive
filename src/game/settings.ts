@@ -52,9 +52,10 @@ export type TimeOfDayPreset = 'morning' | 'noon' | 'evening' | 'midnight';
  * on an Intel N100 at 4K and `standard` on a 4090 at 4K were the same load, and the
  * only way down was `acceptable` at 1.44 Mpx — a 5.8x cliff, with no rung in between.
  *
- * A fixed frame height makes a rung mean the same thing on a phone, a mini-PC and a
- * workstation, and it is the one number a player can read without arithmetic: 1080p is
- * 1080 lines on any screen, where "150%" on a 4K display promised 4953x2616.
+ * A ceiling in lines makes a rung mean the same thing on a phone, a mini-PC and a
+ * workstation: the frame's base is the screen's own pixels up to the rung's
+ * `screenLines`, so Low on a 4K television is 720 lines however big the panel is, and on
+ * a 1080-line monitor every rung but Low draws the screen's own pixels.
  */
 export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
 
@@ -64,14 +65,15 @@ export type GraphicsQuality = 'retro' | 'acceptable' | 'standard' | 'blessing';
  */
 export interface GraphicsTier {
   /**
-   * Default `Settings.renderHeight` on a desktop presentation: the lines a preset puts
-   * the frame at. Width follows the canvas aspect (core/renderer.ts `sceneFrameSize`).
-   * Always a number of lines, never `screen`: a preset is a cost, and the screen's own
-   * pixels are a different cost on every display.
+   * The most lines the frame's BASE is drawn at on a desktop presentation: the base is
+   * the screen's own device pixels (`Settings.frameScale` multiplies it), held to this
+   * height on a screen taller than it. On a 1080-line monitor it never bites below
+   * High's 1440; on a 4K television it is what keeps a mini-PC's Low at a ninth of the
+   * panel instead of all of it (see "THE RESOLUTION IS A NUMBER OF LINES" above).
    */
-  readonly renderHeight: FixedRenderHeight;
+  readonly screenLines: ScreenLines;
   /** The same under phone presentation, where a DPR of 3 invites millions. */
-  readonly mobileRenderHeight: FixedRenderHeight;
+  readonly mobileScreenLines: ScreenLines;
   /** Sun shadow map. The one per-frame pass a weak machine cannot afford at any size. */
   readonly shadows: boolean;
   /**
@@ -165,13 +167,12 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
   // was a bilinear stretch of fewer pixels, which reads as a broken image. This rung
   // draws a fixed low-resolution frame upscaled by whole pixels (render/retro.ts), so
   // the pixels are a style rather than a blur. Its frame height is `retroLines`, never
-  // `renderHeight`: the line count IS the look.
+  // the screen's: the line count IS the look.
   retro: {
-    // Not drawn on this rung. What a Very Low preset leaves in the setting: the lowest
-    // offered, so a player who leaves the rung by the Detail row alone lands on the
-    // lightest frame the other rungs have.
-    renderHeight: 540,
-    mobileRenderHeight: 540,
+    // Not drawn on this rung. What a Very Low preset leaves behind for a player who
+    // leaves the rung by the Detail row alone: the lightest base the other rungs have.
+    screenLines: 540,
+    mobileScreenLines: 540,
     shadows: false,
     sunShadowMapSize: 2048,
     fxaa: false,
@@ -188,8 +189,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
   acceptable: {
     // 720 lines on a desktop: the old 1280x720 floor of this rung, a mini-PC on a 4K
     // television shading a ninth of the panel. A phone gets 540.
-    renderHeight: 720,
-    mobileRenderHeight: 540,
+    screenLines: 720,
+    mobileScreenLines: 540,
     shadows: false,
     sunShadowMapSize: 2048,
     fxaa: false,
@@ -204,8 +205,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     mirrorScale: 0.5,
   },
   standard: {
-    renderHeight: 1080,
-    mobileRenderHeight: 720,
+    screenLines: 1080,
+    mobileScreenLines: 720,
     shadows: true,
     sunShadowMapSize: 2048,
     fxaa: true,
@@ -226,8 +227,8 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // 1440 on a desktop: native on a 1440p panel, supersampled on 1080p, 1.5x upscaled
     // on 4K. A phone's screen cannot resolve more than 720 lines at arm's length, and
     // the heat a phone pays for pixels is the player's to buy, not the preset's.
-    renderHeight: 1440,
-    mobileRenderHeight: 720,
+    screenLines: 1440,
+    mobileScreenLines: 720,
     shadows: true,
     sunShadowMapSize: 4096,
     fxaa: true,
@@ -416,40 +417,34 @@ export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {
     : DEFAULT_MIRROR_FRAME_RATE;
 }
 
-/**
- * Offered frame heights, in lines: the frame is drawn at exactly this many rows, its
- * width from the canvas aspect, and shown full-window.
- *
- * Lines, not a percentage of the display: a percentage needs a stated base, and the base
- * is the one thing a player cannot see — 150% on a 4K display was 4953x2616. Four fixed
- * numbers mean the same picture on every screen, and nothing moves them but the player:
- * the game used to walk the resolution down by GPU timing, which a browser without
- * `EXT_disjoint_timer_query_webgl2` (Safari, most Android WebViews) could never do, so
- * the automatic mode was a different control on different browsers.
- */
-export const FIXED_RENDER_HEIGHTS = [540, 720, 1080, 1440] as const;
-export type FixedRenderHeight = (typeof FIXED_RENDER_HEIGHTS)[number];
-/**
- * The row the player picks from: the four heights, then `screen` — exactly the canvas's
- * own device pixels, one frame pixel to one display pixel.
- *
- * WHY A FIFTH CHOICE THAT IS NOT A NUMBER. None of the four heights is a screen's own
- * lines unless the canvas happens to be exactly that tall, and a browser window almost
- * never is: a maximised window on a 1080-line monitor has about 990 lines under its tabs
- * and address bar, so 1080p there is drawn 1.09x and shrunk, 1440p 1.45x. `screen` is
- * the one choice that is never resampled at all, and it is still a base the player can
- * see — the row quotes its pixels. It is never a preset's height (see `GraphicsTier`).
- */
-export const RENDER_HEIGHTS = [...FIXED_RENDER_HEIGHTS, 'screen'] as const;
-export type RenderHeight = (typeof RENDER_HEIGHTS)[number];
+/** Most lines a rung's frame base is ever held to; see `GraphicsTier.screenLines`. */
+export type ScreenLines = 540 | 720 | 1080 | 1440;
 
-/** The height a rung's preset puts the frame at, for this presentation. */
-export function renderHeightDefault(
-  quality: GraphicsQuality,
-  mobilePresentation: boolean,
-): FixedRenderHeight {
+/**
+ * The Resolution row: the frame as a multiple of its BASE, which is the canvas's own
+ * device pixels held to the rung's `screenLines`. 1 is the screen one for one (where the
+ * rung's ceiling does not bite), below it the frame is drawn smaller and stretched by
+ * the compositor, above it the frame is drawn bigger and averaged down to the screen by
+ * the game (render/presentshader.ts): supersampling, which is the only antialiasing
+ * here that smooths what is thinner than a pixel. Bounded at 2x the canvas's CSS size.
+ *
+ * WHY A MULTIPLE AND NOT LINES ANY MORE. The row used to be 540/720/1080/1440 lines, and
+ * a browser window is almost never one of those: a maximised window on a 1080-line
+ * monitor has about 990 lines under its tabs, so every choice was resampled, 1440p by
+ * 1.45x. A base the player can see (the row quotes its pixels) answers the objection a
+ * bare percentage met — "150%" of a 4K display was 4953x2616 — and the rung's ceiling
+ * keeps what the lines were for: a weak machine's cost does not grow with the panel.
+ *
+ * Not `renderScale`: that key once held a DPR multiplier, and a save that still carries
+ * it must not come back as a supersample.
+ */
+export const FRAME_SCALES = [0.5, 0.75, 1, 1.5, 2] as const;
+export type FrameScale = (typeof FRAME_SCALES)[number];
+
+/** The ceiling on a rung's frame base, for this presentation. */
+export function screenLinesFor(quality: GraphicsQuality, mobilePresentation: boolean): ScreenLines {
   const tier = GRAPHICS_TIERS[quality];
-  return mobilePresentation ? tier.mobileRenderHeight : tier.renderHeight;
+  return mobilePresentation ? tier.mobileScreenLines : tier.screenLines;
 }
 
 /**
@@ -548,14 +543,15 @@ export interface Settings {
    */
   graphicsQualitySource: GraphicsQualitySource;
   /**
-   * Frame height, lines; see `RENDER_HEIGHTS`. Ignored on Very Low, which draws
-   * `retroLines`.
+   * The frame as a multiple of the screen; see `FRAME_SCALES`. Ignored on Very Low,
+   * which draws `retroLines`.
    *
-   * The rung answers "what can this machine afford" in three steps; this answers "how
-   * many pixels do I want", and the game never moves it: a preset sets it to the rung's
-   * own height (`renderHeightDefault`), and only the player changes it after that.
+   * The rung answers "what can this machine afford" in three steps, including the most
+   * lines the screen is taken at (`GraphicsTier.screenLines`); this answers "how many
+   * pixels do I want", and the game never moves it: a preset sets it to 1, and only the
+   * player changes it after that.
    */
-  renderHeight: RenderHeight;
+  frameScale: FrameScale;
   /** Very Low's frame height, lines; see `RETRO_LINE_CHOICES`. Ignored on every other rung. */
   retroLines: RetroLines;
   /**
@@ -726,9 +722,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // guessing, and not true of measuring, which is what the launch settle already does.
   graphicsQuality: 'standard',
   graphicsQualitySource: 'default',
-  // The Medium rung's desktop height; a phone's first launch takes its own
-  // (`PHONE_FIRST_LAUNCH`).
-  renderHeight: GRAPHICS_TIERS.standard.renderHeight,
+  // The screen itself, under the rung's ceiling.
+  frameScale: 1,
   retroLines: 360,
   fxaa: true,
   shadows: 'full',
@@ -794,7 +789,7 @@ export function withQualityPreset(
     graphicsQualitySource: source,
     viewDistance: preset,
     trafficDensity: preset,
-    renderHeight: renderHeightDefault(quality, mobilePresentation),
+    frameScale: 1,
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
     shadows: shadowModeDefault(quality),
@@ -804,8 +799,8 @@ export function withQualityPreset(
 }
 
 /**
- * The preset these settings are exactly on, or null for `Custom`. The frame height is
- * compared off Very Low and its line count on it, because each rung offers only the one.
+ * The preset these settings are exactly on, or null for `Custom`. The frame is compared
+ * off Very Low as the screen (multiple 1) and on it as its own line count.
  */
 export function qualityPresetOf(settings: Settings, mobilePresentation: boolean): QualityPreset | null {
   const preset = qualityPresetForDetail(settings.graphicsQuality);
@@ -818,7 +813,7 @@ export function qualityPresetOf(settings: Settings, mobilePresentation: boolean)
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro'
       ? settings.retroLines === 360
-      : settings.renderHeight === renderHeightDefault(settings.graphicsQuality, mobilePresentation));
+      : settings.frameScale === 1);
   return onPreset ? preset : null;
 }
 
@@ -846,7 +841,7 @@ export const PHONE_FIRST_LAUNCH = {
   graphicsQualitySource: 'device',
   fxaa: false,
   shadows: 'off',
-  renderHeight: GRAPHICS_TIERS.acceptable.mobileRenderHeight,
+  frameScale: 1,
   viewDistance: 'very_low',
   trafficDensity: 'very_low',
 } as const satisfies Partial<Settings>;
@@ -969,12 +964,11 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
         || obj.graphicsQualitySource === 'measured'
         ? obj.graphicsQualitySource
         : 'chosen',
-    // Snapped to an offered height rather than clamped, so a hand-edited 1000 cannot
+    // Snapped to an offered multiple rather than clamped, so a hand-edited 1.3 cannot
     // become a resolution the menu has no button for. Preferences from before the
-    // heights carry a `renderScale` instead (a percentage, or null for automatic); none
-    // of those names a height, so they land on the rung's own, as a preset would.
-    renderHeight: RENDER_HEIGHTS.find((height) => height === obj.renderHeight)
-      ?? renderHeightDefault(graphicsQuality, mobilePresentation),
+    // multiples carry a `renderHeight` (lines) or an older `renderScale` (a DPR
+    // percentage); neither is this, so they land on the screen, as a preset would.
+    frameScale: FRAME_SCALES.find((scale) => scale === obj.frameScale) ?? 1,
     retroLines: retroLinesFrom(obj.retroLines),
     // Not a player setting any more (no slider): a save's old value is dropped so
     // every player gets the authored view.

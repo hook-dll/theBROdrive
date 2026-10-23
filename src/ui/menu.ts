@@ -28,7 +28,7 @@ import type {
   GraphicsQuality,
   GraphicsQualitySource,
   QualityPreset,
-  RenderHeight,
+  FrameScale,
   Settings,
   TimeOfDayPreset,
 } from '../game/settings';
@@ -37,7 +37,8 @@ import {
   DEFAULT_SETTINGS,
   PHONE_FIRST_LAUNCH,
   QUALITY_PRESET_DETAIL,
-  RENDER_HEIGHTS,
+  FRAME_SCALES,
+  screenLinesFor,
   TRAFFIC_CAPS,
   qualityPresetOf,
   shadowModeDefault,
@@ -98,16 +99,15 @@ function el(tag: string, cls?: string): HTMLElement {
 }
 
 /**
- * What each frame height is, beside the pixels it draws and how it meets the screen
- * (the Resolution row). Short and about the picture, not the rung: a height is the same
- * picture on every level.
+ * What each frame multiple is, beside the pixels it draws and how it meets the screen
+ * (the Resolution row). Short and about the picture, not the rung.
  */
-const RESOLUTION_NOTES: Record<RenderHeight, string> = {
-  540: 'The lightest on the graphics chip, and the softest.',
-  720: 'Light on the chip; soft on a big screen.',
-  1080: 'Full HD: sharp on most screens.',
-  1440: 'The sharpest, and the heaviest on the chip.',
-  screen: 'Exactly this screen\'s pixels, one for one: never stretched and never shrunk.',
+const FRAME_SCALE_NOTES: Record<FrameScale, string> = {
+  0.5: 'A quarter of the pixels: the lightest on the graphics chip, and the softest.',
+  0.75: 'About half the pixels: light on the chip, a little soft.',
+  1: 'Exactly the screen\'s pixels.',
+  1.5: 'Supersampled: smooth edges and steady thin detail, for about twice the chip\'s work.',
+  2: 'Supersampled four pixels to one: the smoothest, for about four times the chip\'s work.',
 };
 
 /**
@@ -1445,28 +1445,28 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           settings.retroLines = lines;
           changed();
         },
-      })))] : [segmented('Resolution', RENDER_HEIGHTS.map((height) => ({
-        label: height === 'screen' ? 'Screen' : `${height}p`,
+      })))] : [segmented('Resolution', FRAME_SCALES.map((scale) => ({
+        label: scale === 1 ? 'Screen' : `×${scale}`,
         icon: 'pixels',
         hint: () => {
-          const frame = sceneFrameSize(height, viewport);
-          // How the frame meets this screen, from its own device lines: the same choice
-          // is an upscale on a 4K panel and a supersample on a 1080p one.
-          const stretch = viewport.deviceHeight / frame.height;
-          return `${pixelsOf(frame)}. ${RESOLUTION_NOTES[height]} `
-            + (height === 'screen' && stretch > 1.01
-              ? `Held at twice the window's size: on this screen it is scaled up ${stretch.toFixed(1)}x.`
-              : height === 'screen'
-                ? ''
-                : stretch > 1.01
-                  ? `On this screen it is scaled up ${stretch.toFixed(1)}x.`
-                  : stretch < 0.99
-                    ? `Drawn ${(1 / stretch).toFixed(2)}x bigger than this screen and averaged down to it, which smooths every edge.`
-                    : 'This screen\'s own pixels.');
+          const ceiling = screenLinesFor(settings.graphicsQuality, mobilePresentation);
+          const frame = sceneFrameSize(scale, ceiling, viewport);
+          // How the frame meets this screen, from its own device lines.
+          const ratio = frame.height / viewport.deviceHeight;
+          const held = viewport.deviceHeight > ceiling
+            ? ` This level takes the screen at ${ceiling} lines at most.`
+            : '';
+          return `${pixelsOf(frame)}. ${FRAME_SCALE_NOTES[scale]}${held} `
+            + (ratio < 0.99
+              ? `On this screen it is stretched ${(1 / ratio).toFixed(2)}x.`
+              : ratio > 1.01
+                ? `Drawn ${ratio.toFixed(2)}x the screen and averaged down to it`
+                  + (ratio >= 1.4 ? ', so FXAA is left off.' : '.')
+                : 'This screen\'s own pixels, one for one.');
         },
-        active: () => settings.renderHeight === height,
+        active: () => settings.frameScale === scale,
         pick: () => {
-          settings.renderHeight = height;
+          settings.frameScale = scale;
           changed();
         },
       })))]),
@@ -1661,7 +1661,7 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
         {
           label: 'FXAA',
           icon: 'gfx3',
-          hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch.',
+          hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch. Left off at ×1.5 and ×2, whose extra pixels smooth the edges already.',
           active: () => settings.fxaa,
           pick: () => {
             settings.fxaa = true;
@@ -2604,7 +2604,7 @@ export class MainMenu {
         keyBindings: { ...base.keyBindings },
         graphicsQuality: base.graphicsQuality,
         graphicsQualitySource: base.graphicsQualitySource,
-        renderHeight: base.renderHeight,
+        frameScale: base.frameScale,
         retroLines: base.retroLines,
         fxaa: base.fxaa,
         shadows: base.shadows,
@@ -2641,7 +2641,7 @@ export class MainMenu {
           keyBindings: { ...settings.keyBindings },
           graphicsQuality: settings.graphicsQuality,
           graphicsQualitySource: settings.graphicsQualitySource,
-          renderHeight: settings.renderHeight,
+          frameScale: settings.frameScale,
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
           shadows: settings.shadows,

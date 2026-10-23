@@ -356,7 +356,7 @@ async function boot(): Promise<void> {
     world.state.settings.fxaa,
     DEFAULT_INK_STRENGTH,
     mobilePresentation,
-    world.state.settings.renderHeight,
+    world.state.settings.frameScale,
     world.state.settings.fieldOfView,
     world.state.settings.shadows,
   );
@@ -721,7 +721,7 @@ async function boot(): Promise<void> {
           s.frameRateLimit === null ? 'uncapped' : `${s.frameRateLimit} FPS (capped)`;
         const frame = renderer.frameSize;
         const shown = renderer.presentedSize;
-        const chosen = s.graphicsQuality === 'retro' ? `${s.retroLines}p` : s.renderHeight === 'screen' ? 'screen' : `${s.renderHeight}p`;
+        const chosen = s.graphicsQuality === 'retro' ? `${s.retroLines} lines` : `screen x${s.frameScale}`;
         const header = [
           `tier ${s.graphicsQuality}, ${mobilePresentation ? 'phone' : 'desktop'} presentation`,
           `resolution ${frame.width}x${frame.height} (${chosen}), `
@@ -3101,7 +3101,7 @@ async function boot(): Promise<void> {
       renderer.setFxaa(world.state.settings.fxaa);
       renderer.setShadowMode(world.state.settings.shadows);
       sky.setShadowMode(world.state.settings.shadows);
-      renderer.setRenderHeight(world.state.settings.renderHeight);
+      renderer.setFrameScale(world.state.settings.frameScale);
       renderer.setRetroLines(world.state.settings.retroLines);
       renderer.setStyle(world.state.settings.style);
       camera.setFieldOfView(world.state.settings.fieldOfView);

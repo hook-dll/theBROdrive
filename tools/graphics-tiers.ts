@@ -26,9 +26,8 @@ import {
   GRAPHICS_TIERS,
   presentationFpsFor,
   qualityPresetOf,
-  FIXED_RENDER_HEIGHTS,
-  RENDER_HEIGHTS,
-  renderHeightDefault,
+  FRAME_SCALES,
+  screenLinesFor,
   sanitizeSettings,
   starMagnitudeFor,
   vehicleLightSlotsFor,
@@ -66,26 +65,26 @@ const DISPLAYS: readonly { name: string; css: [number, number]; dpr: number; mob
 // because the rungs differ in what they can afford long before they differ in what they
 // will attempt.
 const COST_KEYS = [
-  'renderHeight',
+  'screenLines',
   'starMagnitude',
   'mobileStarMagnitude',
   'vehicleLightSlots',
   'mobileVehicleLightSlots',
 ] as const;
-const WILLINGNESS_KEYS = ['mobileRenderHeight', 'headlightDistanceScale', 'mirrorScale'] as const;
+const WILLINGNESS_KEYS = ['mobileScreenLines', 'headlightDistanceScale', 'mirrorScale'] as const;
 
-console.log('rung         lines   phone lines   stars   car lamps');
+console.log('rung       max lines   phone lines   stars   car lamps');
 let previous: GraphicsQuality | null = null;
 for (const quality of LADDER) {
   const tier = GRAPHICS_TIERS[quality];
   console.log(
-    `${quality.padEnd(12)} ${String(tier.renderHeight).padStart(5)} ` +
-      `${String(tier.mobileRenderHeight).padStart(13)} ` +
+    `${quality.padEnd(12)} ${String(tier.screenLines).padStart(5)} ` +
+      `${String(tier.mobileScreenLines).padStart(13)} ` +
       `${tier.starMagnitude.toFixed(1).padStart(7)} ` +
       `${String(tier.vehicleLightSlots).padStart(11)}`,
   );
 
-  if (tier.mobileRenderHeight > tier.renderHeight) {
+  if (tier.mobileScreenLines > tier.screenLines) {
     failures.push(`${quality}: a phone is handed more lines than a desktop`);
   }
   if (previous !== null) {
@@ -186,9 +185,9 @@ if (GRAPHICS_TIERS.acceptable.shadows) {
   console.log(String.fromCharCode(10) + `phone light cost at each rung's own frame height, on ${phone.name}`);
   console.log('rung         pixels      slots   evaluations/frame   at 60 FPS');
   for (const quality of LADDER) {
-    // The phone column throughout: the height a phone's preset gets is
-    // `mobileRenderHeight`, and the slot count is the phone's own.
-    const lines = GRAPHICS_TIERS[quality].mobileRenderHeight;
+    // The phone column throughout: a phone's preset draws the screen held to
+    // `mobileScreenLines`, and the slot count is the phone's own.
+    const lines = Math.min(GRAPHICS_TIERS[quality].mobileScreenLines, Math.round(phone.css[1] * phone.dpr));
     const pixels = Math.floor((lines * phone.css[0]) / phone.css[1]) * lines;
     const slots = vehicleLightSlotsFor(quality, true);
     const perFrame = pixels * slots;
@@ -247,20 +246,19 @@ function checkRates(): void {
   }
 }
 
-// --- 2. the frame is the height the player chose ---------------------------------
+// --- 2. the frame is the multiple the player chose ------------------------------
 //
 // Four things must hold, and each of them is a way the control could quietly stop
 // being one:
 //
-//  - IT IS EXACT. A height drawn on a canvas tall enough for it is that many lines, on
-//    every display at every device-pixel-ratio: the size is floored from `cssHeight x
-//    ratio`, so a ratio one ulp short draws 1079 lines and the menu says 1080.
-//  - IT IS BOUNDED. Past a ratio of 2 more lines are not sharpness, so a short canvas
-//    draws twice its CSS height, and the menu quotes that rather than the label.
-//  - THE ROW MOVES. A taller choice never draws fewer lines than a shorter one.
-//  - `screen` IS THE SCREEN: the canvas's own device pixels wherever the DPR is 2 or
-//    less, and the bound above it.
-console.log('\ndisplay                       height     drawn');
+//  - THE SCREEN IS THE SCREEN. At x1 under a ceiling that does not bite, the frame is
+//    the canvas's own device pixels exactly, at every device-pixel-ratio up to 2.
+//  - THE CEILING HOLDS. A screen taller than the rung's `screenLines` is taken at that
+//    many lines, and every multiple is of that, so a weak rung's cost does not grow
+//    with the panel.
+//  - IT IS BOUNDED. Past twice the CSS height more lines are not sharpness.
+//  - THE ROW MOVES. A bigger multiple never draws fewer lines than a smaller one.
+console.log('\ndisplay                       rung         scale     drawn');
 const canvasOf = (cssWidth: number, cssHeight: number, dpr: number) => ({
   cssWidth,
   cssHeight,
@@ -270,43 +268,51 @@ const canvasOf = (cssWidth: number, cssHeight: number, dpr: number) => ({
 for (const display of DISPLAYS) {
   const [cssWidth, cssHeight] = display.css;
   const canvas = canvasOf(cssWidth, cssHeight, display.dpr);
-  let previousLines = 0;
-  for (const height of RENDER_HEIGHTS) {
-    const frame = sceneFrameSize(height, canvas);
-    console.log(
-      `${display.name.padEnd(29)} ${(height === 'screen' ? 'screen' : `${height}p`).padStart(6)} `
-        + `${`${frame.width}x${frame.height}`.padStart(11)}`,
-    );
-    const expected = height === 'screen'
-      ? (display.dpr <= 2 ? canvas.deviceHeight : Math.floor(cssHeight * 2))
-      : Math.min(height, Math.floor(cssHeight * 2));
-    if (frame.height !== expected) {
-      failures.push(`${display.name} at ${height} draws ${frame.height} lines, not ${expected}`);
+  for (const quality of LADDER) {
+    const ceiling = screenLinesFor(quality, display.mobile);
+    let previousLines = 0;
+    for (const scale of FRAME_SCALES) {
+      const frame = sceneFrameSize(scale, ceiling, canvas);
+      console.log(
+        `${display.name.padEnd(29)} ${quality.padEnd(12)} ${`x${scale}`.padStart(5)} `
+          + `${`${frame.width}x${frame.height}`.padStart(11)}`,
+      );
+      const base = Math.min(canvas.deviceHeight, ceiling);
+      const expected = Math.min(Math.floor(base * scale), Math.floor(cssHeight * 2));
+      if (frame.height !== expected) {
+        failures.push(`${display.name} on ${quality} at x${scale} draws ${frame.height} lines, not ${expected}`);
+      }
+      if (scale === 1 && base === canvas.deviceHeight && frame.width !== canvas.deviceWidth) {
+        failures.push(`${display.name} on ${quality} at x1 is ${frame.width} wide, not the screen's ${canvas.deviceWidth}`);
+      }
+      if (frame.height < previousLines) {
+        failures.push(`${display.name} on ${quality} at x${scale} draws fewer lines than the multiple below it`);
+      }
+      previousLines = frame.height;
     }
-    if (height !== 'screen' && frame.height < previousLines) {
-      failures.push(`${display.name} at ${height}p draws fewer lines than the choice below it`);
-    }
-    if (height !== 'screen') previousLines = frame.height;
   }
 }
 // Every height a canvas could be, not just the listed displays: the ulp is per height.
 for (let cssHeight = 300; cssHeight <= 2400; cssHeight++) {
-  for (const height of FIXED_RENDER_HEIGHTS) {
-    const lines = sceneFrameSize(height, canvasOf(cssHeight, cssHeight, 1)).height;
-    if (lines !== Math.min(height, Math.floor(cssHeight * 2))) {
-      failures.push(`a ${cssHeight}-pixel canvas at ${height}p draws ${lines} lines`);
+  for (const ceiling of [540, 720, 1080, 1440]) {
+    for (const scale of FRAME_SCALES) {
+      const lines = sceneFrameSize(scale, ceiling, canvasOf(cssHeight, cssHeight, 1)).height;
+      const expected = Math.min(Math.floor(Math.min(cssHeight, ceiling) * scale), cssHeight * 2);
+      if (lines !== expected) {
+        failures.push(`a ${cssHeight}-pixel canvas under ${ceiling} at x${scale} draws ${lines} lines, not ${expected}`);
+      }
     }
   }
 }
 
 // AND NO CLIFF. The failure this whole bench was written for was a middle rung 5.8x the
 // weakest on a 4K television, with nothing in between, so a machine that could not
-// afford it had to fall all the way to the bottom. The rungs' own heights must keep every
-// step within 4x in pixels, on a desktop and on a phone.
+// afford it had to fall all the way to the bottom. The rungs' ceilings must keep every
+// step within 4x in pixels on a screen tall enough for both, desktop and phone.
 for (const mobile of [false, true]) {
   for (let i = 1; i < LADDER.length; i++) {
-    const below = renderHeightDefault(LADDER[i - 1]!, mobile);
-    const above = renderHeightDefault(LADDER[i]!, mobile);
+    const below = screenLinesFor(LADDER[i - 1]!, mobile);
+    const above = screenLinesFor(LADDER[i]!, mobile);
     const ratio = (above * above) / (below * below);
     if (ratio > 4) {
       failures.push(
@@ -334,7 +340,7 @@ for (const mobile of [false, true]) {
         { frameRateLimit: 60 },
         on.graphicsQuality === 'retro'
           ? { retroLines: 540 }
-          : { renderHeight: RENDER_HEIGHTS.find((height) => height !== on.renderHeight)! },
+          : { frameScale: 1.5 },
       ];
       for (const off of offs) {
         if (qualityPresetOf({ ...on, ...off }, mobile) !== null) {
@@ -353,22 +359,19 @@ for (const mobile of [false, true]) {
   }
   if (qualityPresetOf(old, false) !== null) failures.push('a stored mix of quality values reads as a preset');
 
-  // A stored height the menu offers is kept; anything else — an old `renderScale`, a
-  // hand-edited 1000 — lands on the rung's own height for the presentation, never on a
-  // resolution the menu has no button for.
-  for (const height of RENDER_HEIGHTS) {
-    if (sanitizeSettings({ renderHeight: height }, false).renderHeight !== height) {
-      failures.push(`a saved height of ${height} was not kept`);
+  // A stored multiple the menu offers is kept; anything else — a stored height in lines
+  // from before the multiples, an old `renderScale` DPR percentage, a hand-edited 1.3 —
+  // lands on the screen, never on a resolution the menu has no button for.
+  for (const scale of FRAME_SCALES) {
+    if (sanitizeSettings({ frameScale: scale }, false).frameScale !== scale) {
+      failures.push(`a saved multiple of ${scale} was not kept`);
     }
   }
   for (const mobile of [false, true]) {
-    for (const stale of [{ renderScale: 1.5 }, { renderScale: null }, { renderHeight: 1000 }, {}]) {
+    for (const stale of [{ renderScale: 1.5 }, { renderScale: null }, { renderHeight: 1440 }, { frameScale: 1.3 }, {}]) {
       const migrated = sanitizeSettings({ graphicsQuality: 'blessing', ...stale }, mobile);
-      if (migrated.renderHeight !== renderHeightDefault('blessing', mobile)) {
-        failures.push(
-          `${JSON.stringify(stale)} became ${migrated.renderHeight}p, not the rung's own `
-            + `${renderHeightDefault('blessing', mobile)}p (${mobile ? 'phone' : 'desktop'})`,
-        );
+      if (migrated.frameScale !== 1) {
+        failures.push(`${JSON.stringify(stale)} became x${migrated.frameScale}, not the screen (${mobile ? 'phone' : 'desktop'})`);
       }
     }
   }

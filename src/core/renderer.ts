@@ -20,12 +20,12 @@ import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import {
   DEFAULT_FIELD_OF_VIEW,
   DEFAULT_INK_STRENGTH,
-  renderHeightDefault,
+  screenLinesFor,
   shadowModeDefault,
   shadowModeFor,
   type ShadowMode,
   type GraphicsQuality,
-  type RenderHeight,
+  type FrameScale,
   type RetroLines,
   type VisualStyle,
 } from '../game/settings';
@@ -108,30 +108,43 @@ export interface CanvasPixels {
 }
 
 /**
- * The scene frame a chosen height draws on this canvas: `renderHeight` lines, the width
- * at the canvas's own aspect; or for `screen` exactly the device pixels the canvas
- * covers.
+ * The scene frame a multiple draws on this canvas: the screen's device lines, held to
+ * the rung's `screenLines`, times `scale`, bounded at `MAX_PIXEL_RATIO` times the CSS
+ * height; the width at the canvas's own aspect. Where that comes out at the screen's own
+ * height it is the screen's device pixels exactly, so a frame meant to be one for one
+ * never misses by the rounding of the width.
  *
  * Exported because the menu quotes the frame this produces: one function, so the row
  * cannot name a resolution the renderer is not drawing. Half a line of headroom because
  * the size is `floor(cssHeight x ratio)`, and `H / h x h` can land one ulp under `H`.
  */
 export function sceneFrameSize(
-  renderHeight: RenderHeight,
+  scale: FrameScale,
+  screenLines: number,
   canvas: CanvasPixels,
 ): { readonly width: number; readonly height: number } {
   const cssWidth = Math.max(1, canvas.cssWidth);
   const cssHeight = Math.max(1, canvas.cssHeight);
-  if (renderHeight === 'screen' && canvas.deviceHeight <= cssHeight * MAX_PIXEL_RATIO) {
+  const base = Math.min(canvas.deviceHeight, screenLines);
+  const lines = Math.max(1, Math.min(Math.floor(base * scale), Math.floor(cssHeight * MAX_PIXEL_RATIO)));
+  if (lines === canvas.deviceHeight) {
     return { width: Math.max(1, canvas.deviceWidth), height: Math.max(1, canvas.deviceHeight) };
   }
-  const lines = renderHeight === 'screen' ? Number.POSITIVE_INFINITY : renderHeight;
-  const ratio = Math.min(MAX_PIXEL_RATIO, (lines + 0.5) / cssHeight);
+  const ratio = (lines + 0.5) / cssHeight;
   return {
     width: Math.max(1, Math.floor(cssWidth * ratio)),
     height: Math.max(1, Math.floor(cssHeight * ratio)),
   };
 }
+
+/**
+ * How far past the screen a frame must be drawn before FXAA is left off: from here the
+ * average of the frame's extra pixels (render/presentshader.ts) smooths the edges, and
+ * FXAA over it only softens what is far away. 1.4 so that x1.5 of a screen whose base
+ * the rung's ceiling did not shorten always counts, and 1080p-ish frames on a 990-line
+ * window (1.09x) keep it.
+ */
+const SUPERSAMPLE_WITHOUT_FXAA = 1.4;
 
 /**
  * The layer of meshes that only cast shadows: the near traffic cars' stand-ins
@@ -373,6 +386,8 @@ export class Renderer {
   private readonly sceneSize = new THREE.Vector2(1, 1);
   /** Whether the frame is taller than the canvas's device pixels and is shrunk onto it. */
   private shrinking = false;
+  /** Frame lines per screen line; 0 on the retro rung. Decides FXAA (`applyFxaa`). */
+  private supersample = 1;
   /**
    * The device pixels the canvas covers, from a `device-pixel-content-box` observer,
    * which is exact where `clientWidth x devicePixelRatio` is not at a fractional ratio;
@@ -443,10 +458,10 @@ export class Renderer {
     inkStrength = DEFAULT_INK_STRENGTH,
     private readonly mobilePresentation = prefersMobilePresentation(),
     /**
-     * `Settings.renderHeight`, lines; a lab without the setting draws its rung's own.
-     * The retro rung ignores it for `retroLines`.
+     * `Settings.frameScale`; a lab without the setting draws the screen. The retro rung
+     * ignores it for `retroLines`.
      */
-    private renderHeight: RenderHeight = renderHeightDefault(quality, mobilePresentation),
+    private frameScale: FrameScale = 1,
     fieldOfView = DEFAULT_FIELD_OF_VIEW,
     /** `Settings.shadows`; a lab without the setting draws its rung's default. */
     shadowMode: ShadowMode = shadowModeDefault(quality),
@@ -926,7 +941,7 @@ export class Renderer {
         height: Math.max(1, Math.floor(canvas.cssHeight * ratio)),
       };
     }
-    return sceneFrameSize(this.renderHeight, canvas);
+    return sceneFrameSize(this.frameScale, screenLinesFor(this.quality, this.mobilePresentation), canvas);
   }
 
   /**
@@ -963,6 +978,8 @@ export class Renderer {
     const frame = this.frameSizeFor(canvas);
     this.sceneSize.set(frame.width, frame.height);
     this.shrinking = this.quality !== 'retro' && frame.height > canvas.deviceHeight;
+    this.supersample = this.quality === 'retro' ? 0 : frame.height / canvas.deviceHeight;
+    this.applyFxaa();
     const width = this.shrinking ? canvas.deviceWidth : frame.width;
     const height = this.shrinking ? canvas.deviceHeight : frame.height;
     const element = this.renderer.domElement;
@@ -1470,10 +1487,10 @@ export class Renderer {
     this.applyResolution();
   }
 
-  /** Installs the player's frame height (`Settings.renderHeight`); no effect on the retro rung. */
-  setRenderHeight(height: RenderHeight): void {
-    if (height === this.renderHeight) return;
-    this.renderHeight = height;
+  /** Installs the player's frame multiple (`Settings.frameScale`); no effect on the retro rung. */
+  setFrameScale(scale: FrameScale): void {
+    if (scale === this.frameScale) return;
+    this.frameScale = scale;
     if (this.quality === 'retro') return;
     this.applyResolution();
   }
@@ -1526,10 +1543,19 @@ export class Renderer {
     if (this.renderer.shadowMap.enabled !== enabled) this.renderer.shadowMap.enabled = enabled;
   }
 
-  /** `Settings.fxaa`: a uniform the pass branches on, so no program and no target change. */
+  /**
+   * `Settings.fxaa`: a uniform the pass branches on, so no program and no target change.
+   * Never on the retro rung, and left off while the frame is supersampled by
+   * `SUPERSAMPLE_WITHOUT_FXAA` or more, whatever the setting says.
+   */
   setFxaa(enabled: boolean): void {
     this.fxaa = enabled;
-    this.hazeMaterial.uniforms.uFxaa.value = enabled && this.quality !== 'retro' ? 1 : 0;
+    this.applyFxaa();
+  }
+
+  private applyFxaa(): void {
+    const on = this.fxaa && this.quality !== 'retro' && this.supersample < SUPERSAMPLE_WITHOUT_FXAA;
+    this.hazeMaterial.uniforms.uFxaa.value = on ? 1 : 0;
   }
 
   /**

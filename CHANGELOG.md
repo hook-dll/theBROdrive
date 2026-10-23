@@ -4,15 +4,20 @@
 
 ### Added
 
-- RESOLUTION "SCREEN" (`game/settings.ts` `RENDER_HEIGHTS`, `FIXED_RENDER_HEIGHTS`;
-  `core/renderer.ts` `sceneFrameSize`). A fifth choice in the Resolution row: exactly the
-  device pixels the canvas covers, one frame pixel to one screen pixel, read from a
-  `device-pixel-content-box` observer (rounded `clientWidth x DPR` where the browser has
-  none), bounded at 2x the CSS size like the other heights. Never a preset's height. A
-  maximised window on a 1080-line monitor is about 1920x990, so none of the fixed heights
-  landed on it: 1080p there is 2095x1080, 1440p 2793x1440 (the "4.02 Mpx"). Measured on
-  the M2 Pro in that window, chase view, GPU median: Screen 5.3-5.7 ms, 1080p 6.4, 1440p
-  10.0.
+- RESOLUTION IS A MULTIPLE OF THE SCREEN (`game/settings.ts` `FRAME_SCALES`,
+  `Settings.frameScale`, `GraphicsTier.screenLines`, `screenLinesFor`; `core/renderer.ts`
+  `sceneFrameSize`, `setFrameScale`). The row is now x0.5, x0.75, Screen, x1.5, x2 of the
+  canvas's own device pixels (read from a `device-pixel-content-box` observer, rounded
+  `clientWidth x DPR` where the browser has none), replacing 540p/720p/1080p/1440p and
+  the short-lived `screen` height. A maximised window on a 1080-line monitor is about
+  1920x990, so none of the fixed heights ever landed on it: 1440p there was 2793x1440,
+  the "4.02 Mpx". The rung's old height is now a CEILING on the base (`screenLines`: Low
+  720, Medium 1080, High 1440; phones 540/720), so Low on a 4K television still draws
+  720 lines and every multiple is of that. Presets set x1. Saves with `renderHeight`
+  (or the older `renderScale`) land on Screen. Above 1.4x the screen FXAA is left off
+  whatever the setting: the supersample smooths the edges and FXAA only softened the
+  distance. Measured on the M2 Pro in that window, Medium, GPU median, alternating runs:
+  Screen 7.3-7.5 ms, x1.5 11.4-12.8, x2 14.4-14.7; no program linked by any change.
 - DEV: HEAT HAZE A/B (pause menu "Heat haze"; `Renderer.heatHaze`). Turns the shimmer
   and the mirage off for the session, as on the cheapest tier. They only exist from
   mid-morning to late afternoon on hot ground (at 13:00, shimmer 0.87 to 0).
