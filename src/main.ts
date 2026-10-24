@@ -3094,6 +3094,19 @@ async function boot(): Promise<void> {
           setFloor: (value: number | null) => {
             traffic.floor = value;
           },
+          get driverMix() {
+            return traffic.driverMix;
+          },
+          get driverMixOverridden() {
+            return traffic.driverMixOverridden;
+          },
+          get liveMix() {
+            const status = traffic.status;
+            return [status.sleeper, status.hurried, status.frantic] as const;
+          },
+          setDriverMix: (value: readonly [number, number, number] | null) => {
+            traffic.driverMix = value;
+          },
         }
       : undefined,
     ink: import.meta.env.DEV

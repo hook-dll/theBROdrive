@@ -155,6 +155,18 @@ const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> =
   kit_vaz1111: SLOW_CAR,
 };
 /**
+ * The stream's expected `[sleeper, hurried, frantic]` mix under `DRIVER_ODDS`: bodies
+ * are drawn uniformly from `CAR_MODELS`, so it is the plain mean of their odds.
+ */
+export const PER_CAR_DRIVER_MIX: readonly [number, number, number] = (() => {
+  const sum = [0, 0, 0];
+  for (const model of CAR_MODELS) {
+    const odds = DRIVER_ODDS[model.id] ?? FAST_CAR;
+    for (let k = 0; k < 3; k++) sum[k]! += odds[k]!;
+  }
+  return [sum[0]! / CAR_MODELS.length, sum[1]! / CAR_MODELS.length, sum[2]! / CAR_MODELS.length];
+})();
+/**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
  * a hurry in whatever he owns — with the power dealt with by fitting one: the BMW M30,
@@ -3580,7 +3592,7 @@ export class RoadTraffic {
     speedCap: number;
     pace: number;
   } {
-    const [sleeperOdds, hurriedOdds] = DRIVER_ODDS[modelId] ?? FAST_CAR;
+    const [sleeperOdds, hurriedOdds] = this.mixOverride ?? DRIVER_ODDS[modelId] ?? FAST_CAR;
     const styleRoll = this.random();
     if (styleRoll < sleeperOdds) {
       const first = !this.carList.some((car) => !car.rival && car.direction === direction);
@@ -3694,6 +3706,35 @@ export class RoadTraffic {
     const cap = this.trafficCap;
     this.desiredCount = this.scaleDesiredCount(cap);
     this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
+  }
+
+  private mixOverride: readonly [number, number, number] | null = null;
+
+  /**
+   * The `[sleeper, hurried, frantic]` shares new spawns are drawn with: the per-car
+   * odds' mean (`PER_CAR_DRIVER_MIX`), or the dev menu's override, which then applies
+   * to every body alike. `null` hands it back to the per-car odds. Cars already on the
+   * road keep their drivers; the stream turns over to the new mix as it recycles.
+   */
+  get driverMix(): readonly [number, number, number] {
+    return this.mixOverride ?? PER_CAR_DRIVER_MIX;
+  }
+
+  /** True while the dev override, not the per-car odds, picks the drivers. */
+  get driverMixOverridden(): boolean {
+    return this.mixOverride !== null;
+  }
+
+  set driverMix(value: readonly [number, number, number] | null) {
+    if (value === null) {
+      this.mixOverride = null;
+      return;
+    }
+    const clean = value.map((share) => Math.max(0, share));
+    const total = clean[0]! + clean[1]! + clean[2]!;
+    this.mixOverride = total > 0
+      ? [clean[0]! / total, clean[1]! / total, clean[2]! / total]
+      : PER_CAR_DRIVER_MIX;
   }
 
   /** The fewest cars a density draw can ask for against the present cap. */

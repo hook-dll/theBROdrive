@@ -806,6 +806,13 @@ export interface PauseHooks {
     readonly count: number;
     setCap(value: number | null): void;
     setFloor(value: number | null): void;
+    /** `[sleeper, hurried, frantic]` shares new spawns are drawn with, summing to 1. */
+    readonly driverMix: readonly [number, number, number];
+    /** False while the per-car odds pick the drivers (`driverMix` is then their mean). */
+    readonly driverMixOverridden: boolean;
+    /** Live cars by driver, in the same order as `driverMix`. */
+    readonly liveMix: readonly [number, number, number];
+    setDriverMix(value: readonly [number, number, number] | null): void;
   };
   /**
    * Record a fully fuelled car into the world.
@@ -2887,7 +2894,7 @@ export class MainMenu {
             get: () => number,
             format: (value: number) => string,
             set: (value: number) => void,
-          ): HTMLElement => {
+          ): { row: HTMLElement; paint: () => void } => {
             const row = el('label', 'menu-dev-traffic-row');
             const name = el('span', 'menu-dev-traffic-name');
             const value = el('output', 'menu-chip');
@@ -2910,10 +2917,51 @@ export class MainMenu {
             name.textContent = label;
             paint();
             row.append(name, value, slider);
-            return row;
+            return { row, paint };
           };
+
+          // The driver mix: three shares that always make 100. Moving one hands what it
+          // gave up, or takes what it needs, from the other two in proportion to what
+          // they hold now (evenly if both are at nothing), so their ratio survives.
+          const mix = traffic.driverMix.map((share) => Math.round(share * 100));
+          mix[2] = 100 - mix[0]! - mix[1]!;
+          const mixReadout = text('', 'menu-dev-traffic-readout');
+          const paintMixReadout = (): void => {
+            const [s, h, f] = traffic.liveMix;
+            const source = traffic.driverMixOverridden ? 'this mix' : 'per-car odds';
+            mixReadout.textContent = `New cars from ${source} · live ${s} sleeper, ${h} hurried, ${f} frantic`;
+          };
+          const mixKnobs: { row: HTMLElement; paint: () => void }[] = [];
+          const setShare = (index: number, value: number): void => {
+            const others = [0, 1, 2].filter((k) => k !== index) as [number, number];
+            const rest = 100 - value;
+            const held = mix[others[0]]! + mix[others[1]]!;
+            const first = held > 0 ? Math.round((rest * mix[others[0]]!) / held) : Math.floor(rest / 2);
+            mix[index] = value;
+            mix[others[0]] = first;
+            mix[others[1]] = rest - first;
+            traffic.setDriverMix([mix[0]! / 100, mix[1]! / 100, mix[2]! / 100]);
+            for (const k of mixKnobs) k.paint();
+            paintMixReadout();
+          };
+          const mixLabels = ['Sleeper', 'Hurried', 'Frantic'];
+          for (let index = 0; index < 3; index++) {
+            mixKnobs.push(
+              knob(mixLabels[index]!, 0, 100, () => mix[index]!, (v) => `${v}%`, (v) => setShare(index, v)),
+            );
+          }
+          const perCar = button('menu-button', 'Per-car odds');
+          perCar.type = 'button';
+          perCar.addEventListener('click', () => {
+            traffic.setDriverMix(null);
+            traffic.driverMix.forEach((share, k) => (mix[k] = Math.round(share * 100)));
+            mix[2] = 100 - mix[0]! - mix[1]!;
+            for (const k of mixKnobs) k.paint();
+            paintMixReadout();
+          });
+
           box.append(
-            knob('Cars', 2, 64, () => traffic.cap, String, (v) => traffic.setCap(v)),
+            knob('Cars', 2, 64, () => traffic.cap, String, (v) => traffic.setCap(v)).row,
             knob(
               'Low end',
               0,
@@ -2921,10 +2969,14 @@ export class MainMenu {
               () => Math.round(traffic.floor * 100),
               (v) => `${v}%`,
               (v) => traffic.setFloor(v / 100),
-            ),
+            ).row,
             readout,
+            ...mixKnobs.map((k) => k.row),
+            mixReadout,
+            perCar,
           );
           paintReadout();
+          paintMixReadout();
           devTools.push(box);
         }
         if (import.meta.env.DEV && devTools.length > 0) {
