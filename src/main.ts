@@ -28,7 +28,6 @@ import {
 import { warmPoiStructures } from './world/poistructures';
 import {
   Inventory,
-  isBrokenThing,
   type CameraItem,
   type ContractCargoItem,
 } from './items/items';
@@ -50,8 +49,9 @@ import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { MachineFocus } from './player/machinefocus';
 import { ContractRuntime } from './contracts/runtime';
+import { isContractClosed } from './contracts/registry';
 import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
-import type { ContractPlace } from './contracts/types';
+import { urgentRemainingS, type ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
 import { IMMOVABLE, Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
@@ -1547,7 +1547,7 @@ async function boot(): Promise<void> {
   // Contract walk: keeps each contract's world objects, the race and the delivery
   // target in step with where its cargo is, and wears each thing by the knocks, drops
   // and the ride it takes.
-  const contracts = new ContractRuntime(world, ride);
+  const contracts = new ContractRuntime(world, ride, (carId) => vehicles.get(carId)?.impactTotal ?? null);
   let rideCarId: string | null = null;
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
@@ -1565,12 +1565,21 @@ async function boot(): Promise<void> {
    */
   let deliveryMinIndexNext = Infinity;
   let deliveryMinIndex = Infinity;
+  /**
+   * Seconds left on the most pressing urgent contract aboard (in hand or in the car being
+   * driven), gathered like `deliveryMinIndex`; null with none aboard. Shown on the bead
+   * line's label.
+   */
+  let urgentLeftNext: number | null = null;
+  let urgentLeft: number | null = null;
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
-    if (isBrokenThing(item)) return;
+    if (isContractClosed(item, world.state.completedContractIds)) return;
     if (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
       deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
+      const left = urgentRemainingS(item);
+      if (left !== null) urgentLeftNext = urgentLeftNext === null ? left : Math.min(urgentLeftNext, left);
     }
   };
 
@@ -1670,7 +1679,7 @@ async function boot(): Promise<void> {
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
     if (race.progress(activeS, raceProgress)) {
-      hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0);
+      hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0, '', urgentLeft);
     } else if (deliveryMinIndex !== Infinity) {
       // No race: the bead line runs from the last post behind to the nearest one
       // ahead that will sign for the cargo, named. It stays the target until the car is
@@ -1679,7 +1688,7 @@ async function boot(): Promise<void> {
       const targetS = postStop(world.seed, target).s;
       const fromS = target > 0 ? Math.min(activeS, postStop(world.seed, target - 1).s) : 0;
       const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
-      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS));
+      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS), urgentLeft);
     } else {
       // No contract: the same line to the next post ahead, drawn idle.
       const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, 0);
@@ -1826,8 +1835,12 @@ async function boot(): Promise<void> {
     // state; its clock was advanced at the top of this step.
     frameProfiler?.begin('contracts');
     deliveryMinIndexNext = Infinity;
-    contracts.tick(onContractItem);
+    urgentLeftNext = null;
+    // The urgent clocks run on the step's own seconds, but not while the watch winds the
+    // day forward (a paused game runs no step at all).
+    contracts.tick(onContractItem, watchFastForwardProgress < 1 ? 0 : dt);
     deliveryMinIndex = deliveryMinIndexNext;
+    urgentLeft = urgentLeftNext;
     frameProfiler?.end('contracts');
 
     // Recover only after Rapier has produced the escaped pose, before the

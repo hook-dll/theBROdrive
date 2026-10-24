@@ -38,7 +38,8 @@ function isCargo(item: Item | null | undefined): item is ContractCargoItem {
 
 /**
  * Condition lost per unit of shell damage the car takes: the same knocks that scratch
- * the paint (`SCRATCH_*`, vehicle/vehicletuning.ts: (severity − 1.8 m/s) × 0.06). A
+ * the paint (`SCRATCH_*`, vehicle/vehicletuning.ts: (severity − 1.8 m/s) × 0.06), read
+ * from the body's unsaturated running total (`CarImpacts`). A
  * 5 m/s shunt scratches 0.19, so it costs a fragile thing 29% in a comfort-1 car, 20% in
  * a comfort-3 one and 13% in a comfort-5 one; an ordinary thing a fifth of that (4% at
  * comfort 3). Three hard shunts in a comfort-3 car break a fragile thing.
@@ -73,18 +74,35 @@ export function wearThing(item: ContractCargoItem, wear: number): void {
   if (condition < BROKEN_BELOW) item.progress.broken = true;
 }
 
+/**
+ * The shell damage a live car has taken since it was built (vehicle/vehicle.ts
+ * `impactTotal`), or null for a car with no live body. Unlike `CarState.scratches` it never
+ * saturates and the sponge never lowers it, so a fully scratched car still passes on its
+ * knocks.
+ */
+export type CarImpacts = (carId: string) => number | null;
+
 export class ContractRuntime {
-  /** Each car's `scratches` at the last tick, to see the knocks it took since. */
-  private readonly lastScratches = new Map<string, number>();
+  /** Each live car's `impactTotal` at the last tick, to see the knocks it took since. */
+  private readonly lastImpact = new Map<string, number>();
   /** Where each live thing was at the last tick, to see a drop (runtime-only). */
   private readonly lastPlace = new Map<string, ContractPlace>();
+  /** Simulation seconds the urgent clocks advance this tick (`tick`). */
+  private clockS = 0;
 
   constructor(
     private readonly world: GameWorld,
     private readonly ride: RideMeter,
+    private readonly impacts: CarImpacts,
   ) {}
 
-  tick(onContractItem: ContractItemVisitor): void {
+  /**
+   * One fixed step. `clockS` is what the urgent clocks advance: the step's simulation
+   * seconds, or 0 while the watch winds the day forward. A paused game or an open menu
+   * runs no step at all, so no clock moves then.
+   */
+  tick(onContractItem: ContractItemVisitor, clockS: number): void {
+    this.clockS = clockS;
     const state = this.world.state;
     const player = state.player;
     // The ride is the car the player drives; whatever was driven since the last tick.
@@ -123,9 +141,14 @@ export class ContractRuntime {
 
   /** `carBorneWear` of the knocks `car` took since the last tick and the ride driven in it. */
   private carWear(carId: string, car: CarState, rideExcess: number): number {
-    // Only gains count: the sponge polishing scratches off is no knock.
-    const knock = Math.max(0, car.scratches - (this.lastScratches.get(carId) ?? car.scratches));
-    this.lastScratches.set(carId, car.scratches);
+    const impact = this.impacts(carId);
+    let knock = 0;
+    if (impact === null) this.lastImpact.delete(carId);
+    else {
+      // A body built afresh starts its total at 0: no knock from that.
+      knock = Math.max(0, impact - (this.lastImpact.get(carId) ?? impact));
+      this.lastImpact.set(carId, impact);
+    }
     if (knock <= 0 && rideExcess <= 0) return 0;
     return carBorneWear(carModel(car.modelId).comfort, knock, rideExcess);
   }
@@ -142,7 +165,13 @@ export class ContractRuntime {
     onContractItem(item, place, carId);
     // A hand-made or very old item may lack the record; the runtime owns it.
     if (!item.progress) item.progress = defaultProgress();
-    if (place !== 'post') item.progress.started = true;
+    if (place !== 'post') {
+      item.progress.started = true;
+      // The urgent clock runs from TAKE, wherever the thing is (`ContractProgress.elapsedS`).
+      if (item.urgentS !== undefined && !item.progress.broken && this.clockS > 0) {
+        item.progress.elapsedS = (item.progress.elapsedS ?? 0) + this.clockS;
+      }
+    }
     const thing = contractThing(item);
     if (!thingWears(thing) || item.progress.broken) return;
     const previous = this.lastPlace.get(item.id);

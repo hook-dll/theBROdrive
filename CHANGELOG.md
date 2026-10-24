@@ -69,8 +69,9 @@
   - The label shows "· 87%" when the condition is below 100%.
 - BROKEN THINGS. Below 30% a thing breaks (`ContractProgress.broken`, saved;
   `isBrokenThing`):
-  - its contract closes at that moment, and every post refuses it with "THE TRAY WILL NOT
-    TAKE IT · the old TV set is broken: no post will sign for it";
+  - its contract closes at that moment, and no post signs for it as a delivery; any
+    post's tray takes it back as a return to sender (no pay) so the player can be rid
+    of it;
   - a race for it is lost;
   - it no longer wears, no longer counts towards the delivery hint or the G-force widget,
     and is labelled "broken old TV set";
@@ -78,12 +79,45 @@
   - its stand-in mesh is darkened, and box looks get a black zig-zag crack across the
     front and the top. The hand, boot, cabin and ground views redraw a thing the moment it
     breaks.
+- THREE JOBS AT ONCE (game-design2.md §7.4; `contracts/registry.ts`
+  `activeContractIds`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`). An active contract
+  is a contract item out of a post's stock — in the hands or the pack, any car's boot or
+  cabin, or lying loose — that is neither broken nor completed/returned; a teddy party is
+  one, a haul is its papers. With three out, TAKE refuses with "three jobs already out —
+  hand one in or return it" and every offer card says so.
+- RETURN TO SENDER (`contracts/registry.ts` `contractReturnRefusal`; `world/post.ts`
+  `takeBack`). Any post's tray takes back a thing in hand that it will not sign for as a
+  delivery: no pay, no sticker, the contract is closed (recorded in
+  `completedContractIds` without a kind, so the delivery ledger does not count it) and
+  frees its place. The hand-in card reads RETURN — NO PAY. A valid delivery always wins.
+  A haul goes back as it is delivered: papers in hand and its trailer or car on that
+  post's lay-by by its kind's rule, and the load is taken in. Returning one teddy closes
+  its party; the other teddies become leftovers any tray takes.
+- URGENT CONTRACTS (game-design2.md §7.5; `contracts/offers.ts` `urgentDeadlineS`,
+  `ContractCargoItem.urgentS`, `ContractProgress.elapsedS`). A quarter of the offers on
+  any card (never the drive's first) are urgent. The clock is road km to the destination
+  at 45 km/h plus 2 minutes, rounded up to 10 s (a 3 km hop: 6:00), and counts
+  simulation seconds since TAKE in the fixed step only: not while paused or in a menu,
+  not during the pocket watch's fast-forward. It is saved on the item; a party's teddies
+  share it. Shown on the card's band (URGENT 6:00), the item label (· 5:12, · LATE) and
+  the HUD route label (⏱ 5:12) while an urgent thing is in hand or in the driven car. On
+  time pays +50% of the pay; late pays the plain pay and no sticker.
+- STICKER ONLY FOR CAREFUL DELIVERY (game-design2.md §7.7; `contracts/registry.ts`
+  `earnsSticker`, `deliveryQuality`; `STICKER_QUALITY`). Money always; the envelope only
+  at condition ≥ 90% (teddies: their ride quality ≥ 90%) and not late. The hand-in card
+  says which: "a sticker envelope comes with it", "85%: no sticker (needs 90%)", "late:
+  no sticker"; its band reads HAND IN · ON TIME / · LATE for an urgent one.
+- `__bro.thing(id, size?, urgent?)` can spawn an urgent thing.
 
 ### Fixed
 
 - A post showed the green HAND IN card ("PUT THE CARPET IN THE TRAY") for a thing it
   would refuse, its own cargo among them; the card now says THE TRAY WILL NOT TAKE IT
   with the reason, as the tray already did (`world/post.ts` `handInCard`).
+- A fully scratched car stopped passing knocks to its cargo: the wear read the paint's
+  scratch level, which saturates at 1. It now reads `Vehicle.impactTotal`, a runtime
+  running sum of every collision's shell damage that neither saturates nor is sponged
+  off (`contracts/runtime.ts` `CarImpacts`).
 - Wording: "PUT DAD'S TOOL BOX IN THE TRAY" (no "THE" before a possessive name), and
   "[F] lay carpet … across the rear bench" instead of "on the seat".
 

@@ -11,6 +11,8 @@
  * post or the one after with `RACE_SHARE` chance, drawn per offer (contracts/race.ts).
  * Bulky things and hauls never race: the rivals' boot copy would not hold them. The
  * drive's very first offer is a plain ordinary thing, never a race.
+ * URGENT is the other modifier, on any card: `URGENT_SHARE` of the offers (never the
+ * drive's first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
  *
  * A post never runs dry: an offer taken out is replaced in its slot by the next ROUND of
  * that slot (`nextOffer`), drawn the same way, so the machine always shows one offer of
@@ -37,6 +39,16 @@ const THING_DOMAIN = 0x4f464b31; // 'OFK1'
 const RACE_DOMAIN = 0x4f465231; // 'OFR1'
 /** Share of the ordinary, fragile and teddy offers that are a race. */
 const RACE_SHARE = 0.3;
+const URGENT_DOMAIN = 0x4f465531; // 'OFU1'
+/** Share of the offers, any card, that are urgent (game-design2.md §7.5). */
+const URGENT_SHARE = 0.25;
+/**
+ * The urgent clock: the road distance to the destination at `URGENT_KMH`, a brisk but
+ * fair average with the stops and the bends in it, plus `URGENT_SLACK_S` for loading and
+ * the walk to the tray, rounded up to ten seconds. A 3 km hop is 6:00.
+ */
+const URGENT_KMH = 45;
+const URGENT_SLACK_S = 120;
 /** Offers a post holds: one per card. */
 export const POST_OFFER_COUNT = POST_CARDS.length;
 
@@ -65,6 +77,12 @@ export function offerDestinationIndex(item: ContractCargoItem): number {
   return item.sourceCourierIndex + (item.raceLegs ?? 1);
 }
 
+/** An urgent contract's clock from post `source` to post `destination`, seconds; see `URGENT_KMH`. */
+export function urgentDeadlineS(seed: number, source: number, destination: number): number {
+  const km = Math.max(0, postStop(seed, destination).s - postStop(seed, source).s) / 1000;
+  return Math.ceil((km / URGENT_KMH * 3600 + URGENT_SLACK_S) / 10) * 10;
+}
+
 /**
  * A fresh contract for `thing` sent from post `courierIndex` to the next one (or a
  * race's finish `raceLegs` posts on), under `id`, its draws from `generatedSeed`. The
@@ -77,6 +95,7 @@ export function makeContract(
   thing: ThingId,
   generatedSeed: number,
   raceLegs?: 1 | 2,
+  urgent = false,
 ): ContractCargoItem {
   const item: ContractCargoItem = {
     type: 'contract_cargo',
@@ -88,6 +107,7 @@ export function makeContract(
     destination: placeNameAt(seed, postStop(seed, courierIndex + (raceLegs ?? 1)).s),
     progress: defaultProgress(),
   };
+  if (urgent) item.urgentS = urgentDeadlineS(seed, courierIndex, courierIndex + (raceLegs ?? 1));
   if (raceLegs !== undefined) item.raceLegs = raceLegs;
   dressContractOffer(item);
   return item;
@@ -108,6 +128,7 @@ export function generateContractOffer(
   const raceLegs = card === 'bulky' || first || raceRoll >= RACE_SHARE
     ? undefined
     : raceRoll < RACE_SHARE / 2 ? 1 : 2;
+  const urgent = !first && hash01(seed, URGENT_DOMAIN, courierIndex, key) < URGENT_SHARE;
   return makeContract(
     seed,
     offerId(courierIndex, slot, round),
@@ -115,6 +136,7 @@ export function generateContractOffer(
     thing.id,
     hash(seed, OFFER_DOMAIN, courierIndex, key),
     raceLegs,
+    urgent,
   );
 }
 

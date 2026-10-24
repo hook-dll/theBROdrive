@@ -5,6 +5,7 @@ import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
 import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
 import { formatMoney } from '../economy/economy';
+import { formatClock } from '../contracts/types';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -233,6 +234,8 @@ export class Hud {
   private raceLabelKey = Number.NaN;
   /** The destination post's place name last written to the route label. */
   private raceLabelPlace = '';
+  /** The urgent clock last appended to the route label, '' with none. */
+  private raceLabelClock = '';
   private warningsSignature = '';
   /**
    * The mode the faces are currently painted for, so the class writes happen on a
@@ -779,7 +782,9 @@ export class Hud {
    * and 1 at the nearest one ahead that will sign for the cargo, `remainingM` away;
    * `place` is that post's place name (world/placenames.ts). `idle`: the same line to the
    * next post with no contract to take there, drawn grey and faint, there to be watched
-   * rather than followed. A bead is moved only when it shifts half a pixel.
+   * rather than followed. `urgentS`: seconds left on the most pressing urgent contract
+   * aboard (negative once late), appended to the label as a clock; null with none. A bead
+   * is moved only when it shifts half a pixel.
    */
   setRouteProgress(
     kind: 'race' | 'delivery' | 'idle',
@@ -787,6 +792,7 @@ export class Hud {
     rivals: readonly number[],
     remainingM: number,
     place = '',
+    urgentS: number | null = null,
   ): void {
     if (this.disposed) return;
     if (kind !== this.raceKind) {
@@ -797,16 +803,18 @@ export class Hud {
       this.raceLabelKey = Number.NaN;
     }
     // Tenths of a kilometre out, tens of metres within one: the label is rebuilt only
-    // when that reading or the place changes, not every tick.
+    // when that reading, the clock's second or the place changes, not every tick.
     const near = remainingM < 1000;
     const key = kind === 'race' ? -1 : near ? Math.round(remainingM / 10) : 1e6 + Math.round(remainingM / 100);
-    if (key !== this.raceLabelKey || place !== this.raceLabelPlace) {
+    const clock = urgentS === null ? '' : ` · ⏱ ${formatClock(urgentS)}`;
+    if (key !== this.raceLabelKey || place !== this.raceLabelPlace || clock !== this.raceLabelClock) {
       this.raceLabelKey = key;
       this.raceLabelPlace = place;
+      this.raceLabelClock = clock;
       const to = place ? `POST · ${place}` : 'POST';
-      this.raceLabelEl.textContent = kind === 'race'
+      this.raceLabelEl.textContent = (kind === 'race'
         ? 'RACE'
-        : near ? `${to} ${key * 10} m` : `${to} ${((key - 1e6) / 10).toFixed(1)} km`;
+        : near ? `${to} ${key * 10} m` : `${to} ${((key - 1e6) / 10).toFixed(1)} km`) + clock;
     }
     const count = kind === 'race' ? rivals.length + 1 : 1;
     while (this.raceBeads.length < count) {

@@ -15,6 +15,7 @@
 
 import type { CarState, GameWorld } from '../game/state';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
+import { isLate, URGENT_BONUS } from '../contracts/types';
 import { contractThing, type ContractCargoItem, type Item } from '../items/items';
 import { variant, type PartKind } from '../parts/registry';
 import { postStop } from '../world/poststops';
@@ -93,13 +94,15 @@ export function deliveryPay(baseKopecks: number, sourceKm: number, quality: numb
  * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
  * distance, with the thing's condition (contracts/runtime.ts) or a passenger party's ride
  * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
- * last) as the quality.
+ * last) as the quality, and an urgent contract on time `URGENT_BONUS` more (late, the
+ * plain pay).
  */
 export function contractPay(seed: number, item: ContractCargoItem): number {
   const thing = contractThing(item);
   const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
   const quality = item.party ? passengerQuality(item) : item.progress.condition ?? 1;
-  return deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1);
+  const pay = deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1);
+  return item.urgentS !== undefined && !isLate(item) ? Math.round(pay * (1 + URGENT_BONUS)) : pay;
 }
 
 // ---------------------------------------------------------------------------

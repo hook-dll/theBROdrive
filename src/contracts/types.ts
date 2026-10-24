@@ -64,10 +64,46 @@ export interface ContractProgress {
    */
   comfort?: number;
   harsh?: number;
+  /**
+   * An urgent contract's clock: simulation seconds since TAKE (`ContractRuntime.tick`).
+   * It runs only in the fixed step while the game runs — never while paused, in a menu,
+   * or under the watch's fast-forward — and is saved here so a reload keeps it. Every
+   * teddy of a party is released at the same TAKE and ticked alike, so a party shares one
+   * clock. Absent on a contract that is not urgent or not yet taken.
+   */
+  elapsedS?: number;
 }
 
 /** Below this condition a thing is broken (game-design2.md §11.1). */
 export const BROKEN_BELOW = 0.3;
+
+/**
+ * A delivery earns its sticker envelope only at this quality or better (a thing's
+ * condition, a party's `passengerQuality`), and only on time (game-design2.md §7.7).
+ */
+export const STICKER_QUALITY = 0.9;
+
+/** An urgent delivery on time pays this share of its pay on top (§7.5). */
+export const URGENT_BONUS = 0.5;
+
+/** Seconds left on an urgent contract's clock, negative once late; null when it is not urgent. */
+export function urgentRemainingS(item: { readonly urgentS?: number; readonly progress: ContractProgress }): number | null {
+  if (item.urgentS === undefined) return null;
+  return item.urgentS - (item.progress?.elapsedS ?? 0);
+}
+
+/** An urgent contract whose clock has run out: no urgent bonus, no sticker, base pay. */
+export function isLate(item: { readonly urgentS?: number; readonly progress: ContractProgress }): boolean {
+  const left = urgentRemainingS(item);
+  return left !== null && left < 0;
+}
+
+/** A clock reading as `m:ss` (`LATE` once run out), for the card, the label and the HUD. */
+export function formatClock(seconds: number): string {
+  if (seconds < 0) return 'LATE';
+  const whole = Math.ceil(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
 
 /** A fresh, unstarted contract. */
 export function defaultProgress(): ContractProgress {

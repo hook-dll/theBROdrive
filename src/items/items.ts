@@ -2,7 +2,7 @@ import type { PartInstance } from '../parts/registry';
 import { variant } from '../parts/registry';
 import { stickerDef, type StickerKind } from './stickercatalog';
 import { carPaintSwatch } from '../vehicle/carpaint';
-import type { ContractKind, ContractProgress } from '../contracts/types';
+import { formatClock, urgentRemainingS, type ContractKind, type ContractProgress } from '../contracts/types';
 import { isHaulThing, thingDef, thingItemMass, thingKind, type ThingDef, type ThingId } from './things';
 
 /**
@@ -235,6 +235,12 @@ export interface ContractCargoItem {
    */
   raceLegs?: 1 | 2;
   /**
+   * An urgent offer (contracts/offers.ts `urgentDeadlineS`): the seconds of simulation it
+   * has from TAKE, against `progress.elapsedS`. On time it pays `URGENT_BONUS` on top;
+   * late it pays the base and earns no sticker. Absent on an ordinary offer.
+   */
+  urgentS?: number;
+  /**
    * The place name of the post it is bound for, printed on its label (world/placenames.ts).
    * Absent on cargo from before the post machines.
    */
@@ -400,8 +406,10 @@ export function itemLabel(item: Item): string {
       const worn = percent < 100 ? ` · ${percent}%` : '';
       const to = item.destination ? ` → ${item.destination}` : '';
       const race = item.raceLegs ? ' · race' : '';
+      const left = urgentRemainingS(item);
+      const clock = left === null ? '' : ` · ${formatClock(left)}`;
       const name = item.party ? `teddy passenger · party of ${item.party.size}` : isHaulThing(thing) ? `${thing.name} papers` : thing.name;
-      return `${name}${to}${race}${worn}`;
+      return `${name}${to}${race}${clock}${worn}`;
     }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.

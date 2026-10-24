@@ -3,17 +3,24 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { nextOffer, offerDestinationIndex, postStock } from '../contracts/offers';
 import {
+  ACTIVE_CONTRACT_LIMIT,
+  activeContractIds,
   contractAcceptRefusal,
   contractDeliveryEffect,
   contractPosting,
   contractRelease,
+  contractReturnRefusal,
   contractRewardSticker,
+  deliveryQuality,
+  earnsSticker,
+  isContractClosed,
 } from '../contracts/registry';
-import type { ContractKind, DeliveryProbe } from '../contracts/types';
+import { formatClock, isLate, urgentRemainingS, type ContractKind, type DeliveryEffect, type DeliveryProbe } from '../contracts/types';
 import { isContractCarId, postHaulPlace } from '../contracts/world';
 import { contractPay, formatMoney } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import {
+  contractIdOf,
   contractKindOf,
   contractThing,
   isHaul,
@@ -48,11 +55,17 @@ import { postId, postStop, type PostStop } from './poststops';
  * (`nextOffer`): the machine never runs dry.
  *
  * The TRAY takes things too, which its painted label says: clicked with a thing bound
- * here in hand, the machine draws it in, pays into the player's money and drops the
- * signed sticker envelope into the tray. A haul is handed in the same way, with its
- * trailer or car on the lay-by and its papers in hand, in the pack or in a boot. Worked
- * with a thing for here, the window shows the HAND-IN card first: what to put in the
- * tray and what it pays, or why the tray will not take it.
+ * here in hand, the machine draws it in, pays into the player's money and, for a
+ * delivery handled with care and on time (registry.ts `earnsSticker`), drops the signed
+ * sticker envelope into the tray. A haul is handed in the same way, with its trailer or
+ * car on the lay-by and its papers in hand, in the pack or in a boot. A thing this post
+ * will not sign for goes back as a RETURN TO SENDER (`contractReturnRefusal`): no pay, no
+ * sticker, the job closed. Worked with a thing for here, the window shows the HAND-IN
+ * card first: what to put in the tray, what it pays and whether a sticker comes, that
+ * it is a return, or why the tray will not take it.
+ *
+ * TAKE refuses while the player already has `ACTIVE_CONTRACT_LIMIT` jobs out
+ * (`activeContractIds`), and the cards' footer says so.
  *
  * What the machine holds is saved in `WorldState.courierStorage` (`courier_storage`
  * delta, the saved shape of the courier days): see `postStock`. Things an old save left in
@@ -75,6 +88,14 @@ const CARD_BAND: Readonly<Record<PostCard, string>> = {
 };
 /** A race card's band, whatever its property. */
 const RACE_BAND = '#a2452f';
+/** The hand-in card's band: a delivery, a return to sender, a refusal. */
+const HAND_IN_BAND: Readonly<Record<HandInCard['mode'], string>> = {
+  deliver: '#2f6a3a',
+  return: '#6a5a2f',
+  refused: '#7a3a2a',
+};
+/** What the machine says when TAKE is refused for the limit. */
+const LIMIT_TEXT = 'three jobs already out — hand one in or return it';
 registerCardMachineSigns(POST_LOOK);
 
 /** A car counts as standing on the post's lay-by inside this radius of its haul place, m. */
@@ -82,13 +103,13 @@ const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
 
-/** What the card's band calls the offer: its property, a haul's kind, a race. */
+/** What the card's band calls the offer: its property, a haul's kind, a race, an urgent clock. */
 function bandText(offer: ContractCargoItem, thing: ThingDef): string {
   const card = thingCard(thing);
   const property = isHaul(offer) ? 'HAUL' : card === 'teddies' ? 'TEDDIES' : card.toUpperCase();
-  if (offer.raceLegs === 1) return `${property} · RACE 1 STOP`;
-  if (offer.raceLegs === 2) return `${property} · RACE 2 STOPS`;
-  return property;
+  const urgent = offer.urgentS === undefined ? '' : ` · URGENT ${formatClock(offer.urgentS)}`;
+  if (offer.raceLegs) return urgent ? `${property} · RACE ${offer.raceLegs}${urgent}` : `${property} · RACE ${offer.raceLegs} STOP${offer.raceLegs > 1 ? 'S' : ''}`;
+  return `${property}${urgent}`;
 }
 
 /** The card's second line after the pay: the tags, a party, a heavy thing's mass. */
@@ -134,13 +155,16 @@ function cargoNoun(item: ContractCargoItem): string {
 
 /**
  * The card the window shows first while the player works the machine with cargo for
- * here: what to put in the tray (`ok`), or why it will not take it. `key` tells two apart.
+ * here: what to put in the tray for a delivery or a return, or why it will not take it.
+ * `key` tells two apart.
  */
 interface HandInCard {
   readonly key: string;
-  readonly ok: boolean;
+  readonly mode: 'deliver' | 'return' | 'refused';
+  readonly band: string;
   readonly headline: string;
   readonly lines: readonly string[];
+  readonly footer: string;
 }
 
 /**
@@ -181,11 +205,12 @@ export function buildPost(
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
-/** A delivery the tray would take now: the cargo and where it is held. */
+/** What the tray would take now: the cargo, where it is held, and whether it is delivered or returned. */
 interface Posting {
   readonly item: ContractCargoItem;
   /** In the pack (or the hands), or in a car's boot cell or cabin place. */
   readonly from: { readonly carId: string; readonly cell: number; readonly cabin: boolean } | null;
+  readonly mode: 'deliver' | 'return';
 }
 
 class PostMachine extends CardMachine {
@@ -197,6 +222,8 @@ class PostMachine extends CardMachine {
   private handIn: HandInCard | null = null;
   /** The model of the car standing on the lay-by when the cards were last painted, or null. */
   private laybyModel: CarModelDef | null = null;
+  /** The player has `ACTIVE_CONTRACT_LIMIT` contracts out: TAKE refuses (`refreshLimit`). */
+  private atLimit = false;
 
   constructor(
     private readonly world: GameWorld,
@@ -253,12 +280,12 @@ class PostMachine extends CardMachine {
     if (this.handIn && index === 0) {
       const card = this.handIn;
       paintCardFace(g, w, h, {
-        band: card.ok ? '#2f6a3a' : '#7a3a2a',
-        bandText: card.ok ? 'HAND IN' : 'NOT TAKEN HERE',
+        band: HAND_IN_BAND[card.mode],
+        bandText: card.band,
         corner: `1/${count}`,
         headline: card.headline,
         lines: card.lines,
-        footer: card.ok ? 'the pay goes into your money' : '',
+        footer: card.footer,
       });
       return;
     }
@@ -270,6 +297,8 @@ class PostMachine extends CardMachine {
       `→ ${offer.destination ?? 'the next post'} · ${km.toFixed(1)} km`,
       `${formatMoney(contractPay(this.world.seed, offer))} · ${tagText(offer, thing)}`,
     ];
+    // At the limit the card says so before any note: TAKE will refuse it.
+    if (this.atLimit) lines.push('three jobs out: hand one in or return it');
     const haul = haulNote(thing);
     if (haul) lines.push(haul);
     if (offer.raceLegs) lines.push('three rivals race you to it');
@@ -284,12 +313,25 @@ class PostMachine extends CardMachine {
     });
   }
 
+  /** True when the player already has `ACTIVE_CONTRACT_LIMIT` contracts out; repaints on a change. */
+  private refreshLimit(): void {
+    const atLimit = activeContractIds(this.world.state).size >= ACTIVE_CONTRACT_LIMIT;
+    if (atLimit === this.atLimit) return;
+    this.atLimit = atLimit;
+    this.cardsChanged();
+  }
+
   protected pressButton(ctx: FixtureContext, index: number): FoleyEvent {
     // TAKE on the hand-in card: it is the tray that takes cargo in.
     if (this.handIn && index === 0) return this.refuse();
     const slot = index - this.lead;
     const offer = this.offers[slot];
     if (!offer) return 'click';
+    this.refreshLimit();
+    if (this.atLimit) {
+      ctx.toast(LIMIT_TEXT);
+      return this.refuse();
+    }
     // The stock first, so the cargo never exists twice: the slot's next offer stands in.
     this.offers[slot] = nextOffer(this.world.seed, offer);
     this.saveStock();
@@ -297,6 +339,7 @@ class PostMachine extends CardMachine {
     // A haul's papers fall into the tray like any thing (`contractRelease`: a teddy party
     // is one teddy each); its load is on the lay-by.
     this.give(ctx, contractRelease(offer));
+    this.refreshLimit();
     return 'mount';
   }
 
@@ -315,6 +358,7 @@ class PostMachine extends CardMachine {
       this.cardsChanged();
     }
     this.showHandIn(this.handInCard(ctx));
+    this.refreshLimit();
     if (this.strays.length === 0) return;
     // What a courier's boot held in an old save comes back here, once.
     const strays = this.strays;
@@ -326,19 +370,40 @@ class PostMachine extends CardMachine {
   /** The hand-in card for what the player brought, or null when he brought nothing for here. */
   private handInCard(ctx: FixtureContext): HandInCard | null {
     const { posting, refusal } = this.posting(ctx);
-    if (posting && !refusal) {
+    if (posting) {
       const item = posting.item;
-      const completes = contractPosting(item, this.world.state.completedContractIds).completes;
-      const lines = [
-        item.party ? 'teddy passenger' : contractThing(item).name,
-        completes ? `pays ${formatMoney(contractPay(this.world.seed, item))}` : 'paid with the last of the party',
-      ];
+      const name = item.party ? 'teddy passenger' : contractThing(item).name;
       const headline = posting.from === null && ctx.held?.id === item.id
         ? `PUT ${cargoNoun(item)} IN THE TRAY`
         : 'CLICK THE TRAY TO HAND IT IN';
-      return { key: `ok:${item.id}:${headline}:${lines.join('|')}`, ok: true, headline, lines };
+      let card: Omit<HandInCard, 'key'>;
+      if (posting.mode === 'return') {
+        const closed = isContractClosed(item, this.world.state.completedContractIds);
+        card = {
+          mode: 'return',
+          band: 'RETURN — NO PAY',
+          headline,
+          lines: closed
+            ? [name, 'the post takes it off your hands', 'no pay, no sticker']
+            : [name, 'back to the sender', 'no pay, no sticker'],
+          footer: closed ? '' : 'the job is closed and off your list',
+        };
+      } else {
+        const completes = contractPosting(item, this.world.state.completedContractIds).completes;
+        const left = urgentRemainingS(item);
+        const lines = [name];
+        if (!completes) lines.push('paid with the last of the party');
+        else {
+          lines.push(`pays ${formatMoney(contractPay(this.world.seed, item))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`);
+          lines.push(stickerLine(item));
+        }
+        card = { mode: 'deliver', band: left === null ? 'HAND IN' : left < 0 ? 'HAND IN · LATE' : 'HAND IN · ON TIME', headline, lines, footer: 'the pay goes into your money' };
+      }
+      return { ...card, key: `${card.mode}:${item.id}:${card.headline}:${card.lines.join('|')}` };
     }
-    if (refusal) return { key: `no:${refusal}`, ok: false, headline: 'THE TRAY WILL NOT TAKE IT', lines: [refusal] };
+    if (refusal) {
+      return { key: `no:${refusal}`, mode: 'refused', band: 'NOT TAKEN HERE', headline: 'THE TRAY WILL NOT TAKE IT', lines: [refusal], footer: '' };
+    }
     return null;
   }
 
@@ -357,11 +422,22 @@ class PostMachine extends CardMachine {
     return ctx.probe(this.stop.index, this.haulX, this.haulZ);
   }
 
-  /** What the tray would take: the cargo in hand, else a haul's papers bound here. */
+  /**
+   * What the tray would take: the cargo in hand, else a haul's papers bound here. Cargo
+   * in hand that this post will not sign for may still go back as a return
+   * (`contractReturnRefusal`); a delivery always wins over a return.
+   */
   private posting(ctx: FixtureContext): { posting: Posting | null; refusal: string | null } {
     const held = ctx.held;
+    const completed = this.world.state.completedContractIds;
     if (held?.type === 'contract_cargo') {
-      return { posting: { item: held, from: null }, refusal: contractAcceptRefusal(held, this.probe(ctx)) };
+      const probe = this.probe(ctx);
+      if (!isContractClosed(held, completed) && contractAcceptRefusal(held, probe) === null) {
+        return { posting: { item: held, from: null, mode: 'deliver' }, refusal: null };
+      }
+      const back = contractReturnRefusal(held, probe, completed);
+      if (back === null) return { posting: { item: held, from: null, mode: 'return' }, refusal: null };
+      return { posting: null, refusal: back };
     }
     if (held !== null) return { posting: null, refusal: null };
     // Empty hands: a haul is handed in by its papers wherever they are, with its trailer
@@ -372,7 +448,7 @@ class PostMachine extends CardMachine {
       // Papers from this post itself are the job just taken, not one to hand in.
       if (item.sourceCourierIndex >= this.stop.index) return null;
       const why = contractAcceptRefusal(item, this.probe(ctx));
-      if (why === null) return { item, from };
+      if (why === null) return { item, from, mode: 'deliver' };
       refusal ??= why;
       return null;
     };
@@ -395,10 +471,11 @@ class PostMachine extends CardMachine {
 
   protected override useTray(ctx: FixtureContext): FoleyEvent | null {
     const { posting, refusal } = this.posting(ctx);
-    if (!posting || refusal) return posting || refusal ? 'refused' : null;
+    if (!posting) return refusal ? 'refused' : null;
     const item = posting.item;
     const probe = this.probe(ctx);
     const effect = contractDeliveryEffect(item, probe);
+    if (posting.mode === 'return') return this.takeBack(ctx, item, effect);
     const result = contractPosting(item, this.world.state.completedContractIds);
     if (posting.from) {
       const { carId, cell, cabin } = posting.from;
@@ -414,6 +491,7 @@ class PostMachine extends CardMachine {
     }
     const contractId = result.contractId;
     const pay = contractPay(this.world.seed, item) + ctx.racePay(contractId);
+    const sticker = earnsSticker(item);
     // The completed id and the ledger first; the kind's own world change (the trailer or
     // car taken in) after it, so a crash between the halves cannot pay twice.
     this.saveStock({ consumedItemId: item.id, completedContractId: contractId, completedContractKind: contractKindOf(item) });
@@ -421,6 +499,12 @@ class PostMachine extends CardMachine {
     ctx.give(item.id);
     // Paid first, before the envelope drops and the machine lets go.
     ctx.credit(pay);
+    this.refreshLimit();
+    if (!sticker) {
+      // Paid, but no envelope: worn under 90% or late (§7.7).
+      this.showHandIn(this.handInCard(ctx));
+      return 'coin';
+    }
     const envelope: StickerEnvelopeItem = {
       type: 'sticker_envelope',
       id: `${contractId}:signed:${this.stop.index}`,
@@ -430,4 +514,30 @@ class PostMachine extends CardMachine {
     this.give(ctx, [envelope]);
     return 'coin';
   }
+
+  /**
+   * RETURN TO SENDER: the tray takes `item` back with no pay and no sticker, and its
+   * contract is closed — recorded in `completedContractIds` without a kind, so the ledger
+   * does not count it and it no longer counts against the limit. A teddy closes its whole
+   * party: the rest of it are leftovers any tray takes. A haul's load goes in with its
+   * papers (`effect`, the same world change as a delivery).
+   */
+  private takeBack(ctx: FixtureContext, item: ContractCargoItem, effect: DeliveryEffect | null): FoleyEvent {
+    const contractId = contractIdOf(item);
+    const open = !this.world.state.completedContractIds.includes(contractId);
+    this.swingChute(true);
+    this.saveStock(open ? { consumedItemId: item.id, completedContractId: contractId } : { consumedItemId: item.id });
+    if (effect?.deltas) for (const delta of effect.deltas) this.world.apply(delta);
+    ctx.give(item.id);
+    this.showHandIn(this.handInCard(ctx));
+    this.refreshLimit();
+    return 'drop';
+  }
+}
+
+/** The hand-in card's line on the sticker envelope: whether this delivery earns one, and why not. */
+function stickerLine(item: ContractCargoItem): string {
+  if (earnsSticker(item)) return 'a sticker envelope comes with it';
+  if (isLate(item)) return 'late: no sticker';
+  return `${Math.round(deliveryQuality(item) * 100)}%: no sticker (needs 90%)`;
 }

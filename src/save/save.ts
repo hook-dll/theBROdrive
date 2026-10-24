@@ -1048,7 +1048,8 @@ function legacyCoinKopecks(
 
 /**
  * Rebuilds a contract's saved progress: `started`, a thing's `condition` and `broken`,
- * and a passenger's ride (`comfort`, `harsh`, harsh moments scaled by the car's comfort)
+ * and a passenger's ride (`comfort`, `harsh`, harsh moments scaled by the car's comfort),
+ * and an urgent contract's clock (`elapsedS`)
  * when it has them. Older saves also carry heat, violated and status fields from when
  * deliveries were scored; they are dropped.
  */
@@ -1064,6 +1065,9 @@ function sanitizeContractProgress(raw: unknown): ContractProgress {
   }
   if (typeof obj.harsh === 'number' && Number.isFinite(obj.harsh) && obj.harsh > 0) {
     progress.harsh = obj.harsh;
+  }
+  if (typeof obj.elapsedS === 'number' && Number.isFinite(obj.elapsedS) && obj.elapsedS > 0) {
+    progress.elapsedS = obj.elapsedS;
   }
   return progress;
 }
@@ -1214,6 +1218,7 @@ function migrateItem(raw: unknown, where: string): Item {
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
         progress: sanitizeContractProgress(obj.progress),
         ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
+        ...(typeof obj.urgentS === 'number' && Number.isFinite(obj.urgentS) && obj.urgentS > 0 ? { urgentS: obj.urgentS } : {}),
       };
       if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
       // A passenger's party: its contract id and 1–3 teddies. Anything else is dropped,

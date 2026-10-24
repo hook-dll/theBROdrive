@@ -5,14 +5,64 @@
  * runtime call.
  */
 
-import { contractKindOf, contractThing, isBrokenThing, type ContractCargoItem } from '../items/items';
+import type { WorldState } from '../game/state';
+import { contractIdOf, contractKindOf, contractThing, isBrokenThing, type ContractCargoItem, type Item } from '../items/items';
 import type { StickerKind } from '../items/stickercatalog';
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
-import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
+import { teddyPartyIds, passengerQuality, teddyPassengersKind } from './kinds/teddyPassengers';
 import { trailerKind } from './kinds/trailer';
-import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
+import { CONTRACT_KIND_IDS, isLate, STICKER_QUALITY, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
+
+/** At most this many contracts are active at once, anywhere (game-design2.md §7.4). */
+export const ACTIVE_CONTRACT_LIMIT = 3;
+
+/**
+ * A contract item whose contract is closed: broken (`isBrokenThing`), or its contract
+ * (`contractIdOf`) already completed or returned (`completedContractIds`) — a teddy left
+ * over from a party returned at a post. It is only a souvenir: no post pays for it, it is
+ * not counted against the limit, and any post's tray takes it to be rid of it.
+ */
+export function isContractClosed(item: ContractCargoItem, completedIds: readonly string[]): boolean {
+  return isBrokenThing(item) || completedIds.includes(contractIdOf(item));
+}
+
+/**
+ * THE definition of an active contract: a contract item out of a post's stock — in the
+ * hands or the pack, in any car's boot or cabin, or lying loose — that is not closed
+ * (`isContractClosed`). A haul is its papers, wherever they are; a teddy party is one
+ * contract however many of its teddies are out. Returns the active contracts' ids
+ * (`contractIdOf`); its size is what `ACTIVE_CONTRACT_LIMIT` caps.
+ */
+export function activeContractIds(state: WorldState): Set<string> {
+  const ids = new Set<string>();
+  const consider = (item: Item | null | undefined): void => {
+    if (item?.type !== 'contract_cargo' || isContractClosed(item, state.completedContractIds)) return;
+    ids.add(contractIdOf(item));
+  };
+  state.player.carried.forEach(consider);
+  for (const car of Object.values(state.cars)) {
+    car.storage.forEach(consider);
+    car.cabin.forEach(consider);
+  }
+  for (const loose of Object.values(state.looseItems)) consider(loose.item);
+  return ids;
+}
+
+/** The delivery's quality, 0..1: a thing's condition, a passenger party's ride. */
+export function deliveryQuality(item: ContractCargoItem): number {
+  return item.party ? passengerQuality(item) : item.progress.condition ?? 1;
+}
+
+/**
+ * Whether the delivery of `item` earns its sticker envelope (§7.7): handled with care
+ * (`deliveryQuality` at least `STICKER_QUALITY`) and, when urgent, on time. Money is
+ * paid either way.
+ */
+export function earnsSticker(item: ContractCargoItem): boolean {
+  return deliveryQuality(item) >= STICKER_QUALITY && !isLate(item);
+}
 
 const CONTRACT_KINDS: readonly ContractKindDef[] = [
   thingKind,
@@ -100,6 +150,25 @@ export function contractAcceptRefusal(
   if (item.raceLegs !== undefined && probe.targetPostIndex < item.sourceCourierIndex + item.raceLegs) {
     return 'this one races on to the next post';
   }
+  return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
+}
+
+/**
+ * Why this post's tray may not take `item` back as a RETURN TO SENDER, or null. Asked
+ * only when the post will not sign for it as a delivery (`contractAcceptRefusal`): a
+ * valid delivery always wins. A return pays nothing and earns no sticker; it closes the
+ * contract and frees its place under `ACTIVE_CONTRACT_LIMIT`. Any post takes a thing back
+ * from the hand, and a closed one (`isContractClosed`: broken, or the leftover teddy of
+ * a returned party) to be rid of it. A haul goes back as a delivery does: its papers in
+ * hand and its load on this post's lay-by by its kind's own rule (a trailer on the pad,
+ * a car parked there empty), and the load is taken in with them.
+ */
+export function contractReturnRefusal(
+  item: ContractCargoItem,
+  probe: DeliveryProbe,
+  completedIds: readonly string[],
+): string | null {
+  if (isContractClosed(item, completedIds)) return null;
   return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
 }
 

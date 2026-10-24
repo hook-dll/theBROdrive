@@ -1304,6 +1304,13 @@ export class Vehicle implements Rebasable {
   private previousOwnDragRollingDeltaMps = 0;
   private impactThisStep = false;
   private readonly impactState = { severityMps: 0, localX: 0, localY: 0, localZ: 0 };
+  /**
+   * Every collision's shell damage (`SCRATCH_*`) added up since this body was built,
+   * unclamped: the paint's `scratches` saturate at 1 and the sponge polishes them off, so
+   * the contract runtime (contracts/runtime.ts `CarImpacts`) reads knocks from this
+   * running total instead. Runtime only, never saved.
+   */
+  impactTotal = 0;
   private readonly rotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   /** Reused application point for the lateral impulse; see the note where it is used. */
   private readonly lateralPoint = { x: 0, y: 0, z: 0 };
@@ -3497,6 +3504,7 @@ export class Vehicle implements Rebasable {
             SCRATCH_PER_SEVERITY_MPS,
         );
         if (scratchGain > 0) {
+          this.impactTotal += scratchGain;
           this.localBodyScratches = clamp(this.localBodyScratches + scratchGain, 0, 1);
           bodyConditionChanged = true;
         }
