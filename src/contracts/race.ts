@@ -42,7 +42,7 @@
 import { hash, hash01 } from '../core/rng';
 import { formatMoney, RUB } from '../economy/economy';
 import { shouldShelter } from '../vehicle/weatherpace';
-import { contractIdOf, type ContractCargoItem } from '../items/items';
+import { contractIdOf, contractThing, type ContractCargoItem } from '../items/items';
 import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { postStop } from '../world/poststops';
@@ -458,7 +458,7 @@ export class RivalRace {
     };
     this.host.reserveHandIn(postS, true);
     this.notify(
-      `race on — three rivals carry the same ${item.cargoName} to ${legs === 1 ? 'the next post' : 'the post after next'}`,
+      `race on — three rivals carry the same ${contractThing(item).name} to ${legs === 1 ? 'the next post' : 'the post after next'}`,
     );
   }
 
@@ -558,7 +558,7 @@ export class RivalRace {
       return;
     }
     race.delivered++;
-    this.notify(`${rival.label} handed in the ${race.cargo.cargoName} — rival ${race.delivered} of ${RIVAL_COUNT} done`);
+    this.notify(`${rival.label} handed in the ${contractThing(race.cargo).name} — rival ${race.delivered} of ${RIVAL_COUNT} done`);
   }
 
   /** Its run is over; it drives on as ordinary traffic, or vanishes as a ghost. */

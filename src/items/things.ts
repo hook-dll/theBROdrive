@@ -1,0 +1,183 @@
+/**
+ * THE BOY'S THINGS (game-design2.md §7.3): everything a post sends is one of these, a
+ * thing from the boy's room and his life. A contract item names its thing by id
+ * (`ContractCargoItem.thing`), and everything else about it — what it is called, its
+ * tags, its mass, where it rides, its base pay and which card of the post offers it —
+ * is read from here.
+ *
+ * WHERE IT RIDES (`place`):
+ * - `cells`: in a boot, taking `boot` cells of its grid (vehicle/trunk.ts); `seat` things
+ *   (the cushions) may also lie on a seat instead;
+ * - `bench`: across the whole rear bench and nowhere else (the carpet);
+ * - `seats`: passengers on the passenger seats (the teddies, contracts/kinds/teddyPassengers.ts);
+ * - `trailer`, `tow`, `transfer`: a haul (contracts/world.ts) — the load on a contract
+ *   trailer, a broken toy car pulled to the repair on the bar, a toy car driven to a
+ *   friend. What is carried is its papers, one boot cell.
+ *
+ * Ids are saved on items: never rename one.
+ */
+
+import type { ContractKind } from '../contracts/types';
+
+/** A thing's constant tags. Urgency is the post's, not the thing's. */
+export type ThingTag = 'ordinary' | 'bulky' | 'fragile';
+
+export type ThingId =
+  | 'pencils'
+  | 'globe'
+  | 'cushions'
+  | 'table_lamp'
+  | 'tea_service'
+  | 'record_player'
+  | 'tool_box'
+  | 'fishing_rods'
+  | 'sledge'
+  | 'carpet'
+  | 'tv_set'
+  | 'aquarium'
+  | 'wardrobe'
+  | 'piano'
+  | 'sofa'
+  | 'bed'
+  | 'broken_toy_car'
+  | 'toy_car'
+  | 'teddies';
+
+export type ThingPlace = 'cells' | 'bench' | 'seats' | 'trailer' | 'tow' | 'transfer';
+
+/** Boot cells a thing takes: `columns` across the grid by `rows` up, never turned. */
+export interface BootFootprint {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+/** The mesh a thing is drawn with (render/partmesh.ts); absent: a box of `size` in its tag's colour. */
+export type ThingLook = 'carpet' | 'teddy' | 'lamp' | 'crate';
+
+export interface ThingDef {
+  readonly id: ThingId;
+  /** What the card, the prompts and the HUD call it. */
+  readonly name: string;
+  readonly tags: readonly ThingTag[];
+  /** Its own mass, kg: what the boot, the seat or the trailer's bed carries. 0 for a car. */
+  readonly massKg: number;
+  /** Base pay of its delivery at home (km index 1), kopecks: `deliveryPay`. */
+  readonly payKopecks: number;
+  readonly place: ThingPlace;
+  /** Boot cells, for a `cells` thing. */
+  readonly boot?: BootFootprint;
+  /** A `cells` thing that may lie on a seat instead (the cushions). */
+  readonly seat?: true;
+  readonly look?: ThingLook;
+  /** The stand-in box, metres (x across, y up, z along), for a thing without a `look`. */
+  readonly size?: readonly [number, number, number];
+}
+
+const RUB = 100;
+const ONE: BootFootprint = { columns: 1, rows: 1 };
+const TWO: BootFootprint = { columns: 2, rows: 1 };
+const STRIP: BootFootprint = { columns: 4, rows: 1 };
+const SQUARE: BootFootprint = { columns: 2, rows: 2 };
+
+export const THINGS: readonly ThingDef[] = [
+  { id: 'pencils', name: 'box of pencils', tags: ['ordinary'], massKg: 0.5, payKopecks: 2 * RUB, place: 'cells', boot: ONE, size: [0.24, 0.06, 0.18] },
+  { id: 'globe', name: 'school globe', tags: ['fragile'], massKg: 1.5, payKopecks: 4 * RUB, place: 'cells', boot: ONE, size: [0.3, 0.36, 0.3] },
+  { id: 'cushions', name: 'sofa cushions', tags: ['ordinary'], massKg: 2, payKopecks: 3 * RUB, place: 'cells', boot: TWO, seat: true, size: [0.4, 0.22, 0.38] },
+  { id: 'table_lamp', name: 'table lamp', tags: ['fragile'], massKg: 2.5, payKopecks: 5 * RUB, place: 'cells', boot: TWO, look: 'lamp' },
+  { id: 'tea_service', name: 'tea service', tags: ['fragile'], massKg: 7, payKopecks: 6 * RUB, place: 'cells', boot: TWO, size: [0.5, 0.22, 0.34] },
+  { id: 'record_player', name: 'record player', tags: ['fragile'], massKg: 6, payKopecks: 6 * RUB, place: 'cells', boot: TWO, size: [0.46, 0.16, 0.36] },
+  { id: 'tool_box', name: "dad's tool box", tags: ['ordinary'], massKg: 30, payKopecks: 5 * RUB, place: 'cells', boot: TWO, look: 'crate' },
+  { id: 'fishing_rods', name: 'fishing rods', tags: ['bulky'], massKg: 3, payKopecks: 4 * RUB, place: 'cells', boot: STRIP, size: [1.3, 0.08, 0.12] },
+  { id: 'sledge', name: 'sledge', tags: ['bulky'], massKg: 5, payKopecks: 4 * RUB, place: 'cells', boot: STRIP, size: [1.0, 0.18, 0.38] },
+  { id: 'carpet', name: 'carpet', tags: ['bulky'], massKg: 12, payKopecks: 5 * RUB, place: 'bench', look: 'carpet' },
+  { id: 'tv_set', name: 'old TV set', tags: ['bulky', 'fragile'], massKg: 25, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE, size: [0.56, 0.48, 0.46] },
+  { id: 'aquarium', name: 'aquarium', tags: ['bulky', 'fragile'], massKg: 18, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE, size: [0.6, 0.42, 0.34] },
+  { id: 'wardrobe', name: 'wardrobe', tags: ['bulky'], massKg: 110, payKopecks: 9 * RUB, place: 'trailer' },
+  { id: 'piano', name: 'piano', tags: ['bulky'], massKg: 230, payKopecks: 11 * RUB, place: 'trailer' },
+  { id: 'sofa', name: 'sofa', tags: ['bulky'], massKg: 70, payKopecks: 9 * RUB, place: 'trailer' },
+  // The long load: longer than the trailer's bed, it overhangs both ends (contracts/world.ts).
+  { id: 'bed', name: 'bed', tags: ['bulky'], massKg: 90, payKopecks: 10 * RUB, place: 'trailer' },
+  { id: 'broken_toy_car', name: 'broken toy car', tags: [], massKg: 0, payKopecks: 9 * RUB, place: 'tow' },
+  { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, payKopecks: 9 * RUB, place: 'transfer' },
+  // Per teddy: a party is one teddy item each.
+  { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, payKopecks: 3 * RUB, place: 'seats', look: 'teddy' },
+];
+
+const BY_ID = new Map<string, ThingDef>(THINGS.map((def) => [def.id, def]));
+
+export function isThingId(value: unknown): value is ThingId {
+  return typeof value === 'string' && BY_ID.has(value);
+}
+
+export function thingDef(id: ThingId): ThingDef {
+  const def = BY_ID.get(id);
+  if (!def) throw new Error(`Unknown thing "${id}"`);
+  return def;
+}
+
+export function hasTag(def: ThingDef, tag: ThingTag): boolean {
+  return def.tags.includes(tag);
+}
+
+/** A haul: a trailer, a towed car or a driven car, handed in by its papers. */
+export function isHaulThing(def: ThingDef): boolean {
+  return def.place === 'trailer' || def.place === 'tow' || def.place === 'transfer';
+}
+
+/** The contract machinery the thing rides on (contracts/registry.ts). */
+export function thingKind(def: ThingDef): ContractKind {
+  switch (def.place) {
+    case 'cells':
+    case 'bench':
+      return 'thing';
+    case 'seats':
+      return 'teddy_passengers';
+    case 'trailer':
+      return 'trailer';
+    case 'tow':
+      return 'towing';
+    case 'transfer':
+      return 'car_transfer';
+  }
+}
+
+/** Haul papers in the hand, kg. */
+const PAPERS_KG = 0.1;
+
+/** What one item of the thing weighs in the hand, the boot or on a seat: a haul's papers. */
+export function thingItemMass(def: ThingDef): number {
+  return isHaulThing(def) ? PAPERS_KG : def.massKg;
+}
+
+/** The boot cells the thing's item takes, or null when it never rides in a boot. */
+export function thingBootFootprint(def: ThingDef): BootFootprint | null {
+  if (def.place === 'cells') return def.boot ?? ONE;
+  return isHaulThing(def) ? ONE : null;
+}
+
+/**
+ * The four cards of a post (§7.2), one per property: an ordinary thing, a fragile
+ * thing, a bulky thing or a haul, the teddies. A bulky thing that is fragile too (the
+ * TV, the aquarium) is a bulky card's.
+ */
+export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'teddies';
+export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky', 'teddies'];
+
+export function thingCard(def: ThingDef): PostCard {
+  if (def.place === 'seats') return 'teddies';
+  if (isHaulThing(def) || hasTag(def, 'bulky')) return 'bulky';
+  if (hasTag(def, 'fragile')) return 'fragile';
+  return 'ordinary';
+}
+
+const CARD_THINGS: Readonly<Record<PostCard, readonly ThingDef[]>> = {
+  ordinary: THINGS.filter((def) => thingCard(def) === 'ordinary'),
+  fragile: THINGS.filter((def) => thingCard(def) === 'fragile'),
+  bulky: THINGS.filter((def) => thingCard(def) === 'bulky'),
+  teddies: THINGS.filter((def) => thingCard(def) === 'teddies'),
+};
+
+/** The things a card draws from, in catalogue order. */
+export function cardThings(card: PostCard): readonly ThingDef[] {
+  return CARD_THINGS[card];
+}

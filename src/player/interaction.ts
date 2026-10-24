@@ -15,9 +15,9 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { contractThing, drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
-import { CABIN_PLACES, cabinIndex, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
+import { CABIN_PLACES, cabinIndex, cabinRule, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
 import type { CarStats, PartInstance } from '../parts/registry';
 import {
@@ -32,12 +32,18 @@ import type { TrailerField } from '../vehicle/trailer';
 import { carModel } from '../vehicle/carmodels';
 import { carPaintSwatch, visiblePaintHex } from '../vehicle/carpaint';
 import {
+  bootAnchorAt,
+  bootFootprint,
+  bootFreeAnchor,
+  bootHolds,
+  bootOwner,
   intersectStorageGrid,
   STORAGE_LID_CHANNELS,
   storageGridCentreLocal,
   storageRevealDistance,
   type StorageGridShape,
   type StorageSide,
+  type TrunkGrid,
   type TrunkGridRayHit,
   type TrunkViewState,
 } from '../vehicle/trunk';
@@ -365,8 +371,6 @@ export interface CarLookup {
 
 /** What the composition root does for a world fixture (world/fixturefield.ts `FixtureContext`). */
 export interface InteractionHooks {
-  /** Opens the PIN dial with the game held still; `opened` runs once it is dialled right. */
-  dial(pin: string, opened: () => void): void;
   /** A one-line message on the HUD. */
   toast(text: string): void;
   /** F on a machine worked up close (`WorldFixture.focus`): frame it (player/machinefocus.ts). */
@@ -531,16 +535,38 @@ function isGlassHit(hit: THREE.Intersection): boolean {
 }
 
 /**
- * Longest thing a boot's cell takes, metres: a rolled carpet is longer, and goes across
- * the rear bench instead (vehicle/cabin.ts).
+ * Longest ordinary thing (not one of the boy's, which take cells by their footprint) a
+ * boot's cell takes, metres.
  */
 const BOOT_ITEM_MAX_M = 0.8;
 /** A teddy passenger offered to the boot or the bonnet (contracts/kinds/teddyPassengers.ts). */
 const PASSENGER_SEAT_ONLY = 'passengers ride on a seat';
 
-/** Why `item` does not go in a boot, or null. A passenger rides only on a seat. */
-function bootRefusal(item: Item): string | null {
+/**
+ * Why `item` does not go in this boot at the aimed `cell`, or null. A passenger rides
+ * only on a seat and the carpet across the rear bench; one of the boy's things takes
+ * its footprint's cells (vehicle/trunk.ts `bootAnchorAt`), all free, round the aimed
+ * one; anything else one cell, if it is not too long for it. `model` names the car.
+ */
+function bootRefusal(
+  storage: readonly (Item | null)[],
+  grid: TrunkGrid,
+  cell: number,
+  item: Item,
+  model: string,
+): string | null {
   if (isPassenger(item)) return PASSENGER_SEAT_ONLY;
+  if (item.type === 'contract_cargo') {
+    const name = contractThing(item).name;
+    const footprint = bootFootprint(item);
+    if (!footprint) return `the ${name} goes across the whole rear bench`;
+    if (bootAnchorAt(storage, grid, cell, footprint) >= 0) return null;
+    const size = `${footprint.columns}×${footprint.rows} cells`;
+    if (!bootHolds(grid, footprint)) return `the ${name} takes ${size} — it won't fit the ${model}'s boot`;
+    if (bootFreeAnchor(storage, grid, footprint) >= 0) return `the ${name} takes ${size} — aim where they are free`;
+    return `no room for the ${name}: it takes ${size}`;
+  }
+  if (bootOwner(storage, grid, cell) >= 0) return 'that cell is taken';
   const size = cabinItemBounds(item);
   return Math.max(size.x, size.z) > BOOT_ITEM_MAX_M ? `the ${itemLabel(item)} is too long for the boot — lay it across the back seat` : null;
 }
@@ -548,25 +574,34 @@ function bootRefusal(item: Item): string | null {
 export type TrunkCellAction = 'none' | 'refused' | 'stored' | 'retrieved';
 
 /**
- * Moves one aimed cell between trunk and pack. Occupancy wins over held state:
- * looking at an item retrieves that exact item even while another item is held.
+ * Moves one aimed cell between a compartment and the pack. Occupancy wins over held
+ * state: aimed at a cell something covers, that exact thing comes out, whole, even while
+ * another is held. A boot (`grid`) stores the held thing at the anchor its footprint
+ * fits at round the aimed cell (vehicle/trunk.ts `bootAnchorAt`), or refuses it; a
+ * bonnet (`grid` null) holds one part per cell. `cell` in the result is the cell the
+ * `car_storage` / `car_bonnet` delta writes.
  */
 export function operateTrunkCell(
   storage: readonly (Item | null)[],
+  grid: TrunkGrid | null,
   cell: number,
   held: Item | null,
   inventory: Inventory,
-): { action: TrunkCellAction; item: Item | null } {
-  if (cell < 0 || cell >= storage.length) return { action: 'none', item: null };
-  const stored = storage[cell];
+): { action: TrunkCellAction; item: Item | null; cell: number } {
+  if (cell < 0 || cell >= storage.length) return { action: 'none', item: null, cell };
+  const at = grid ? bootOwner(storage, grid, cell) : storage[cell] ? cell : -1;
+  const stored = at >= 0 ? storage[at] : null;
   if (stored) {
-    if (!inventory.add(stored)) return { action: 'refused', item: stored };
-    return { action: 'retrieved', item: null };
+    if (!inventory.add(stored)) return { action: 'refused', item: stored, cell: at };
+    return { action: 'retrieved', item: null, cell: at };
   }
-  if (!held) return { action: 'none', item: null };
+  if (!held) return { action: 'none', item: null, cell };
+  const footprint = grid ? bootFootprint(held) : null;
+  const anchor = !grid ? cell : footprint ? bootAnchorAt(storage, grid, cell, footprint) : -1;
+  if (anchor < 0) return { action: 'refused', item: null, cell };
   const removed = inventory.remove(held.id);
-  if (!removed) return { action: 'none', item: null };
-  return { action: 'stored', item: removed };
+  if (!removed) return { action: 'none', item: null, cell };
+  return { action: 'stored', item: removed, cell: anchor };
 }
 
 export class Interaction {
@@ -698,7 +733,6 @@ export class Interaction {
         return probe;
       },
       racePay: (contractId: string) => self.racePay(contractId),
-      dial: (pin: string, opened: () => void) => self.hooks.dial(pin, opened),
       toast: (text: string) => self.hooks.toast(text),
     };
   })();
@@ -751,7 +785,7 @@ export class Interaction {
     private readonly racePay: (contractId: string) => number,
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,
-    /** What the composition root does for a fixture: the PIN dial, a HUD toast. */
+    /** What the composition root does for a fixture: a HUD toast, the machine focus. */
     private readonly hooks: InteractionHooks,
   ) {
     // A kit car is drawn merged and picked by the parts it was built of (render/kitdraw.ts).
@@ -2221,9 +2255,13 @@ export class Interaction {
       if (!this.isStorageOpen(t)) return `[F] open ${label}`;
 
       // The grid itself shows which cells hold what, so the prompt names only what F
-      // does: no cell numbers, counters or "empty" readouts.
+      // does: no cell numbers, counters or "empty" readouts. A boot's cell is answered by
+      // whatever covers it (vehicle/trunk.ts `bootOwner`), a thing of several cells too.
       if (t.cell === null) return null;
-      const item = cells[t.cell];
+      const car = this.world.state.cars[t.id];
+      const boot = t.side === 'trunk' && car ? carModel(car.modelId) : null;
+      const at = boot ? bootOwner(cells, boot.trunkGrid, t.cell) : cells[t.cell] ? t.cell : -1;
+      const item = at >= 0 ? cells[at] : null;
       if (item) {
         // A fitted engine or radiator reports what it is holding.
         // Same resolution the pour uses, so the number you read is the number a can
@@ -2244,9 +2282,9 @@ export class Interaction {
         }
         return `[F] install ${itemLabel(held)}`;
       }
-      if (held && !cells[t.cell]) {
-        const tooLong = bootRefusal(held);
-        if (tooLong) return tooLong;
+      if (held && boot) {
+        const why = bootRefusal(cells, boot.trunkGrid, t.cell, held, boot.label);
+        if (why) return why;
       }
       if (held) return `[F] stow ${itemLabel(held)}`;
       return null;
@@ -2656,13 +2694,15 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
-      // The boot's length limit is the boot's: a bonnet cell is gated by its slot kind
-      // alone (`bonnetAccepts` above), and an engine is longer than any boot cell.
-      if (t.side !== 'bonnet' && held && !cells[t.cell] && bootRefusal(held)) {
+      // The boot's rules are the boot's: a bonnet cell is gated by its slot kind alone
+      // (`bonnetAccepts` above), and an engine is longer than any boot cell.
+      const car = this.world.state.cars[t.id];
+      const boot = t.side === 'trunk' && car ? carModel(car.modelId) : null;
+      if (boot && held && bootOwner(cells, boot.trunkGrid, t.cell) < 0 && bootRefusal(cells, boot.trunkGrid, t.cell, held, boot.label)) {
         this.sound = 'refused';
         return;
       }
-      const result = operateTrunkCell(cells, t.cell, held, this.inventory);
+      const result = operateTrunkCell(cells, boot?.trunkGrid ?? null, t.cell, held, this.inventory);
       if (result.action === 'refused') {
         this.sound = 'refused';
         return;
@@ -2671,10 +2711,10 @@ export class Interaction {
       if (t.side === 'bonnet') {
         // The delta itself moves the slot's fluid into the part coming out and out of
         // the part going in (`moveSlotFluid`, game/state.ts). Nothing to zero here.
-        this.world.apply({ t: 'car_bonnet', carId: t.id, cell: t.cell, item: result.item });
+        this.world.apply({ t: 'car_bonnet', carId: t.id, cell: result.cell, item: result.item });
         resolved.vehicle?.rebuild();
       } else {
-        this.world.apply({ t: 'car_storage', carId: t.id, cell: t.cell, item: result.item });
+        this.world.apply({ t: 'car_storage', carId: t.id, cell: result.cell, item: result.item });
       }
       this.sound = result.action === 'retrieved' ? 'pickup' : 'drop';
       return;
@@ -2832,7 +2872,9 @@ export class Interaction {
     }
     const held = this.inventory.held;
     if (held && this.cabinRefusal() !== null && seat !== 'driver') {
-      const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held), isPassenger(held));
+      const rule = cabinRule(held);
+      if (rule === null) return { kind: 'refuse', why: `the ${held.type === 'contract_cargo' ? contractThing(held).name : itemLabel(held)} rides in the boot` };
+      const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held), rule);
       if ('refusal' in lay) return { kind: 'refuse', why: lay.refusal };
       return { kind: 'lay', place: cabinIndex(lay.place), item: held };
     }
@@ -2841,14 +2883,26 @@ export class Interaction {
 
   /**
    * Why the player cannot sit down with what they carry, else null. The pack rides in
-   * the cabin, so a contract parcel in it was a second parcel aboard past the car's
-   * contract rule; a parcel goes in the boot or on a seat. And an engine does not fit
-   * on a lap.
+   * the cabin, so one of the boy's things in it goes where it rides first (vehicle/cabin.ts
+   * `cabinRule`): a teddy on a passenger seat, the carpet across the rear bench, a thing
+   * that may lie on a seat there or in the boot, the rest in the boot. And an engine does
+   * not fit on a lap.
    */
   private cabinRefusal(): string | null {
     for (const item of this.inventory.contents) {
-      if (isPassenger(item)) return `seat the ${itemLabel(item)} through a passenger door first`;
-      if (item.type === 'contract_cargo') return `stow the ${itemLabel(item)} in the boot or lay it on a seat first`;
+      if (item.type === 'contract_cargo') {
+        const name = contractThing(item).name;
+        switch (cabinRule(item)) {
+          case 'passenger':
+            return `seat the ${itemLabel(item)} through a passenger door first`;
+          case 'bench':
+            return `lay the ${name} across the rear bench first`;
+          case 'lay':
+            return `stow the ${itemLabel(item)} in the boot or lay it on a seat first`;
+          case null:
+            return `stow the ${name} in the boot first`;
+        }
+      }
       if (itemMass(item) > CABIN_ITEM_LIMIT_KG) return `the ${itemLabel(item)} won't fit in the cabin`;
     }
     return null;

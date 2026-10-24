@@ -1,5 +1,6 @@
 import type { CarState } from '../game/state';
-import type { Item } from '../items/items';
+import { contractThing, type Item } from '../items/items';
+import { hasTag } from '../items/things';
 
 /**
  * RIDE QUALITY: how the car the player drives is pushing what it carries.
@@ -145,12 +146,11 @@ export class RideMeter {
 
 /**
  * Whether a thing minds how it is driven: the HUD shows the G-force widget while the
- * driven car carries one. A fragile contract item (the courier's radio, a lamp) or a
- * teddy passenger.
+ * driven car carries one. A fragile contract thing or a teddy passenger.
  */
 export function rideSensitive(item: Item | null | undefined): boolean {
   if (item?.type !== 'contract_cargo') return false;
-  return item.contractKind === 'fragile_radio' || item.contractKind === 'teddy_passengers' || item.shape === 'lamp';
+  return item.thing === 'teddies' || hasTag(contractThing(item), 'fragile');
 }
 
 /** Something in `car`'s cabin or boot, or in the driver's own hands, is `rideSensitive`. */

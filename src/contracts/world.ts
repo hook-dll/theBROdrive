@@ -1,6 +1,6 @@
 /**
- * The world objects a contract is about: the loaded trailer of the trailer-equipment
- * and oversize kinds, and the car of the transfer and towing kinds.
+ * The world objects a haul is about: the loaded trailer of a trailer load, and the car
+ * of a car to tow or to drive over.
  *
  * A contract names its object after the offer (`generatedSeed`), so the same trailer
  * or car is the same object across a session, a save and a reload, with nothing
@@ -25,28 +25,17 @@ import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { TRAILER_BALL_Z } from '../vehicle/trailer';
-import type { ContractCargoItem } from '../items/items';
+import { contractKindOf, contractThing, type ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { laybyHaulLateral, laybyNear } from '../world/layby';
 import { postStop } from '../world/poststops';
 import type { ContractPlace } from './types';
 
-/** 'CTW1', 'CTL1', 'CTC1': the trailer cargo, the oversize load and the car model. */
-const EQUIPMENT_CARGO_DOMAIN = 0x43545731;
-const OVERSIZE_LOAD_DOMAIN = 0x43544c31;
-const OVERSIZE_MASS_DOMAIN = 0x43544d31;
+/** 'CTC1': the car model. */
 const CAR_MODEL_DOMAIN = 0x43544331;
 /** Where a contract car is staggered around its place, so two do not coincide. */
 const CAR_STAGGER_DOMAIN = 0x43545331;
-
-/** Equipment on the trailer of the trailer-equipment kind, kg: a real load, light
- *  enough to tow. */
-const EQUIPMENT_MIN_KG = 180;
-const EQUIPMENT_RANGE_KG = 241;
-/** Pipes or beams on the oversize trailer, kg. Well under the 700 kg bed limit. */
-const OVERSIZE_MIN_KG = 320;
-const OVERSIZE_RANGE_KG = 141;
 
 /**
  * The haul's place on the lay-by to the trailer parked behind it, m: half a car's
@@ -68,45 +57,38 @@ export interface ContractWorldDeps {
   readonly terrain: Terrain;
 }
 
-/** The trailer the equipment and oversize kinds are about. */
+const CONTRACT_TRAILER_PREFIX = 'contract-trailer:';
+const CONTRACT_CAR_PREFIX = 'contract-car:';
+
+/** The trailer a trailer load is about. */
 export function contractTrailerId(item: ContractCargoItem): string {
-  return `contract-trailer:${item.generatedSeed.toString(36)}`;
+  return `${CONTRACT_TRAILER_PREFIX}${item.generatedSeed.toString(36)}`;
 }
 
-/** The car the transfer kind is about. */
+/** The car a tow or a transfer is about. */
 export function contractCarId(item: ContractCargoItem): string {
-  return `contract-car:${item.generatedSeed.toString(36)}`;
+  return `${CONTRACT_CAR_PREFIX}${item.generatedSeed.toString(36)}`;
+}
+
+/** A car that is itself a haul (a car to tow or to drive over), not one of the player's. */
+export function isContractCarId(carId: string): boolean {
+  return carId.startsWith(CONTRACT_CAR_PREFIX);
 }
 
 /**
- * The overhanging load of an oversize trailer: a bundle of pipes or a pair of beams,
- * about 3.8 m long against a 2.8 m bed, so it overhangs each end by half a metre and
- * is what the traffic and the rocks get to hit. It was 5.5-5.8 m, and the front
- * overhang reached the towing car's tail: the trailer could hardly be hitched.
- * Deterministic from the offer seed.
+ * The long load (game-design2.md §7.3): the bed with its frame and boards, 3.2 m against
+ * the trailer's 2.8 m bed, so it overhangs each end and is what the traffic and the
+ * rocks get to hit. Every other trailer load rides as the bed's own crate.
  */
-export function oversizeLoad(seed: number): TrailerLoad {
-  return hash01(seed, OVERSIZE_LOAD_DOMAIN, 0) < 0.5
-    ? { kind: 'pipes', halfExtents: [0.6, 0.19, 1.85] }
-    : { kind: 'beams', halfExtents: [0.5, 0.3, 1.95] };
-}
+const BED_LOAD: TrailerLoad = { halfExtents: [0.8, 0.28, 1.6] };
 
 /**
- * Where an oversize load sits along the bed: its front end this far behind the tow
- * ball, the room the drawbar needs to swing under the overhang. So the 3.7 m pipes
- * ride centred (8% of the rig's weight on the ball) and the 3.9 m beams 0.1 m further
- * back, about 6% — a longer load is a lighter tongue, which is the real reason a long
- * load is the more nervous tow (vehicle/trailer.ts, `tongueLoadN`).
+ * Where the long load sits along the bed: its front end this far behind the tow ball,
+ * the room the drawbar needs to swing under the overhang. A longer load is a lighter
+ * tongue, which is the real reason a long load is the more nervous tow
+ * (vehicle/trailer.ts, `tongueLoadN`).
  */
-const OVERSIZE_BALL_CLEARANCE_M = 0.45;
-
-/** Mass on the bed of a contract trailer, kg. */
-export function contractTrailerCargoKg(item: ContractCargoItem): number {
-  if (item.contractKind === 'oversize') {
-    return OVERSIZE_MIN_KG + Math.floor(hash01(item.generatedSeed, OVERSIZE_MASS_DOMAIN) * OVERSIZE_RANGE_KG);
-  }
-  return EQUIPMENT_MIN_KG + Math.floor(hash01(item.generatedSeed, EQUIPMENT_CARGO_DOMAIN) * EQUIPMENT_RANGE_KG);
-}
+const LONG_LOAD_BALL_CLEARANCE_M = 0.45;
 
 interface HaulPose {
   x: number;
@@ -140,17 +122,10 @@ export function ensureContractWorldObjects(
   place: ContractPlace,
 ): void {
   if (place === 'post') return;
-  const kind = item.contractKind;
-  if (
-    kind !== 'trailer_equipment' &&
-    kind !== 'oversize' &&
-    kind !== 'car_transfer' &&
-    kind !== 'towing'
-  ) {
-    return;
-  }
+  const kind = contractKindOf(item);
+  if (kind !== 'trailer' && kind !== 'car_transfer' && kind !== 'towing') return;
   const pose = postHaulPlace(deps.world.seed, deps.road, item.sourceCourierIndex);
-  if (kind === 'trailer_equipment' || kind === 'oversize') spawnContractTrailer(deps, item, pose);
+  if (kind === 'trailer') spawnContractTrailer(deps, item, pose);
   else spawnContractCar(deps, item, pose);
 }
 
@@ -169,7 +144,8 @@ function spawnContractTrailer(
   const trailer: TrailerState = {
     id,
     hitchedTo: null,
-    cargoKg: contractTrailerCargoKg(item),
+    // The thing itself is the load: its own mass on the bed.
+    cargoKg: contractThing(item).massKg,
     x,
     // Clear of the ground so it drops onto its own suspension rather than starting
     // inside the terrain, exactly as a POI's spare trailer does.
@@ -180,10 +156,9 @@ function spawnContractTrailer(
     qz: 0,
     qw: Math.cos(yaw / 2),
   };
-  if (item.contractKind === 'oversize') {
-    const load = oversizeLoad(item.generatedSeed);
-    trailer.load = load;
-    trailer.cargoZ = TRAILER_BALL_Z - OVERSIZE_BALL_CLEARANCE_M - load.halfExtents[2];
+  if (item.thing === 'bed') {
+    trailer.load = BED_LOAD;
+    trailer.cargoZ = TRAILER_BALL_Z - LONG_LOAD_BALL_CLEARANCE_M - BED_LOAD.halfExtents[2];
   }
   deps.world.apply({ t: 'trailer_add', trailer });
 }
@@ -224,10 +199,10 @@ function spawnContractCar(
     car.qz = plane.qz;
     car.qw = plane.qw;
   }
-  // The towed car of the towing kind leaves the works with NO ENGINE: it cannot idle, it
-  // cannot be driven, and the papers commission a tow rather than a drive. Removing
-  // the part rather than destroying it is the honest state — there is nothing in
-  // the engine bay to fail, and the car's own mass drops by the engine's.
-  if (item.contractKind === 'towing') car.bonnet[0] = null;
+  // The broken toy car leaves for the repair with NO ENGINE: it cannot idle, it cannot
+  // be driven, and the papers commission a tow rather than a drive. Removing the part
+  // rather than destroying it is the honest state — there is nothing in the engine bay
+  // to fail, and the car's own mass drops by the engine's.
+  if (contractKindOf(item) === 'towing') car.bonnet[0] = null;
   deps.world.apply({ t: 'car_add', car });
 }

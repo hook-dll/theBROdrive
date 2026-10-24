@@ -14,9 +14,9 @@
  */
 
 import type { CarState, GameWorld } from '../game/state';
-import type { ContractKind } from '../contracts/types';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
-import type { ContractCargoItem, Item } from '../items/items';
+import { contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { hasTag } from '../items/things';
 import { variant, type PartKind } from '../parts/registry';
 import { postStop } from '../world/poststops';
 
@@ -72,51 +72,37 @@ export function credit(world: GameWorld, kopecks: number): void {
 // Delivery pay
 // ---------------------------------------------------------------------------
 
-/**
- * Base pay of one delivery by kind, kopecks at home (km index 1). Per delivery, not
- * per km. A nine-kilometre hop burns about half a litre in the Oka (20 kopecks of
- * petrol, `PRICE_TABLE`), so a parcel leaves most of its three rubles towards oil,
- * filters and the next car; the bigger kinds pay for the bigger car they need.
- */
-export const DELIVERY_BASE_PAY: Readonly<Record<ContractKind, number>> = {
-  parcel: 3 * RUB,
-  heavy_crate: 5 * RUB,
-  fragile_radio: 6 * RUB,
-  trailer_equipment: 9 * RUB,
-  oversize: 11 * RUB,
-  towing: 9 * RUB,
-  car_transfer: 9 * RUB,
-  teddy_passengers: 3 * RUB,
-};
-
-/** Each passenger of a party past the first adds this share of the kind's base pay. */
+/** Each passenger of a party past the first adds this share of the base pay. */
 const EXTRA_PASSENGER_SHARE = 0.5;
 
 /**
- * Kopecks one delivery pays: base by kind × the SOURCE post stop's km index × the
- * delivery's quality (0..1; a fragile radio's condition, a passenger party's ride,
- * 1 for every other kind), and for a party of `passengers` teddies half the base again
- * for each past the first. Never below one kopeck: a delivered contract always pays
- * something.
+ * Kopecks one delivery pays: the thing's base pay at home (items/things.ts
+ * `payKopecks`; a nine-kilometre hop burns about half a litre in the Oka, 20 kopecks of
+ * petrol, so a three-ruble thing leaves most of it towards oil, filters and the next car)
+ * × the SOURCE post stop's km index × the delivery's quality (0..1; a fragile thing's
+ * condition, a passenger party's ride, 1 for every other thing), and for a party of
+ * `passengers` teddies half the base again for each past the first. Never below one
+ * kopeck: a delivered contract always pays something.
  */
-export function deliveryPay(kind: ContractKind, sourceKm: number, quality: number, passengers = 1): number {
+export function deliveryPay(baseKopecks: number, sourceKm: number, quality: number, passengers = 1): number {
   const q = Math.min(1, Math.max(0, quality));
   const party = 1 + EXTRA_PASSENGER_SHARE * Math.max(0, passengers - 1);
-  return Math.max(1, Math.round(DELIVERY_BASE_PAY[kind] * party * kmIndex(sourceKm) * q));
+  return Math.max(1, Math.round(baseKopecks * party * kmIndex(sourceKm) * q));
 }
 
 /**
  * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
- * distance, with a fragile radio's condition or a passenger party's ride
+ * distance, with a fragile thing's condition or a passenger party's ride
  * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
  * last) as the quality.
  */
 export function contractPay(seed: number, item: ContractCargoItem): number {
+  const thing = contractThing(item);
   const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
-  const quality = item.contractKind === 'fragile_radio'
-    ? item.progress.condition ?? 1
-    : item.contractKind === 'teddy_passengers' ? passengerQuality(item) : 1;
-  return deliveryPay(item.contractKind, sourceKm, quality, item.party?.size ?? 1);
+  const quality = item.party
+    ? passengerQuality(item)
+    : hasTag(thing, 'fragile') ? item.progress.condition ?? 1 : 1;
+  return deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1);
 }
 
 // ---------------------------------------------------------------------------

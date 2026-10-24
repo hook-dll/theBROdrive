@@ -60,7 +60,6 @@ import * as THREE from 'three';
 import { installAssetShim } from './assetshim';
 import { benchCarState } from './benchcar';
 import { installDocumentShim } from './domshim';
-import { defaultProgress } from '../src/contracts/types';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
@@ -241,19 +240,13 @@ function buildRoad(humps: readonly Hump[]): { vertices: Float32Array; indices: U
   return { vertices: new Float32Array(vertices), indices: new Uint32Array(indices) };
 }
 
-/** A delivered `heavy_crate`, exactly as the contract kitchen hands one over. */
-function heavyCrateItem(id: string, kg: number): Item {
-  return {
-    type: 'contract_cargo',
-    id,
-    sourceCourierIndex: 0,
-    contractKind: 'heavy_crate',
-    cargoName: 'heavy crate',
-    rewardStickerKind: 'chevrons',
-    generatedSeed: 1,
-    massKg: kg,
-    progress: defaultProgress(),
-  };
+/**
+ * A load of `kg` in the hold: the catalogue has no thing that heavy any more (the heavy
+ * crate is gone), so a quarry item of that mass stands in — `itemMass` is what
+ * `Vehicle.computeStats` sums, whatever the item is.
+ */
+function holdLoadItem(id: string, kg: number): Item {
+  return { type: 'quarry', id, species: 'load', mass: kg };
 }
 
 /**
@@ -347,7 +340,7 @@ async function makeRig(modelId: string): Promise<Rig> {
 /** Puts `kg` of crate in the first boot cell and lets the car re-solve for it. */
 function loadCargo(rig: Rig, kg: number): void {
   if (kg <= 0) return;
-  rig.state.storage[0] = heavyCrateItem(`crate-${kg}`, kg);
+  rig.state.storage[0] = holdLoadItem(`load-${kg}`, kg);
   rig.vehicle.refreshLoad();
 }
 

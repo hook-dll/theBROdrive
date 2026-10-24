@@ -842,17 +842,16 @@ check(
       loadCarModel,
       (text) => toasts.push(text),
     );
-    const item = {
+    const item: ContractCargoItem = {
+      type: 'contract_cargo',
       id: `bench-race-${side}`,
       sourceCourierIndex: courier.index - 1,
+      thing: 'pencils',
+      rewardStickerKind: 'star',
       raceLegs: 1,
       generatedSeed: 7 + side,
-      cargoName: 'parcel',
-      type: 'contract_cargo',
-      contractKind: 'parcel',
-      massKg: 6,
-      progress: {},
-    } as unknown as ContractCargoItem;
+      progress: { started: false },
+    };
     race.observe(item, 'hand', layby.s - 2200);
     const playerS = layby.s + 150;
     if (side === -1) {

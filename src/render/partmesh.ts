@@ -25,7 +25,8 @@ import type {
   ToolKind,
   WeaponKind,
 } from '../items/items';
-import { spongeSpent } from '../items/items';
+import { contractThing, spongeSpent } from '../items/items';
+import { hasTag, isHaulThing, type ThingDef } from '../items/things';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 import { applyComicShading } from './comic';
 
@@ -1220,6 +1221,7 @@ function createPhotographMesh(imageDataUrl: string): THREE.Group {
   return root;
 }
 
+/** A parcel tied with string: what a haul's papers come in. */
 function buildContractParcelInto(b: MeshBuilder): void {
   const paper = flat(0x8f6847, 0.92);
   const string = flat(0x3a281c, 0.96);
@@ -1230,7 +1232,7 @@ function buildContractParcelInto(b: MeshBuilder): void {
   b.box('contract_parcel_label', 0.15, 0.075, 0.006, label, [0.045, 0.025, 0.088]);
 }
 
-/** A heavy crate: a wooden box with corner slats and a paper label. */
+/** A tool box: a wooden box with corner slats and a paper label. */
 function buildContractCrateInto(b: MeshBuilder): void {
   const wood = flat(0x7a5533, 0.94);
   const slat = flat(0x5e4028, 0.94);
@@ -1242,18 +1244,21 @@ function buildContractCrateInto(b: MeshBuilder): void {
   b.box('contract_crate_label', 0.18, 0.1, 0.006, paper, [0.06, 0.06, 0.181]);
 }
 
-/** A valve radio: a wooden shell, a face plate, a dial and a speaker grille. */
-function buildContractRadioInto(b: MeshBuilder): void {
-  const shell = flat(0x6b4a2f, 0.85);
-  const face = flat(0xd8c9a8, 0.8);
-  const dark = flat(0x2b2320, 0.6);
-  const metal = cond(0xb9a06a, 0.7, 0.45);
-  b.box('contract_radio_body', 0.4, 0.26, 0.18, shell, [0, 0, 0]);
-  b.box('contract_radio_face', 0.34, 0.2, 0.02, face, [0, 0, 0.095]);
-  b.cylinder('contract_radio_dial', 0.06, 0.06, 0.02, 16, dark, [-0.11, 0.02, 0.107], AXIS_Z);
-  b.box('contract_radio_dial_pin', 0.008, 0.05, 0.006, metal, [-0.11, 0.02, 0.118]);
-  b.box('contract_radio_grille', 0.16, 0.14, 0.012, dark, [0.09, 0, 0.106]);
-  b.box('contract_radio_handle', 0.16, 0.02, 0.02, metal, [0, 0.15, 0]);
+/**
+ * The stand-in for a thing without a model of its own yet (items/things.ts `size`): a
+ * box wrapped in paper of its tag's colour — fragile pale blue, bulky green, ordinary
+ * brown — tied with string, a label on its face. Flat materials only, like the parcel.
+ */
+function buildContractThingBoxInto(b: MeshBuilder, thing: ThingDef): void {
+  const [x, y, z] = thing.size ?? [0.3, 0.2, 0.2];
+  const colour = hasTag(thing, 'fragile') ? 0xa9bfcc : hasTag(thing, 'bulky') ? 0x5d7a52 : 0x8f6847;
+  const paper = flat(colour, 0.92);
+  const string = flat(0x3a281c, 0.96);
+  const label = flat(0xd9c8a5, 0.9);
+  b.box(`contract_thing_${thing.id}`, x, y, z, paper, [0, 0, 0]);
+  b.box(`contract_thing_${thing.id}_string_x`, 0.018, y + 0.005, z + 0.006, string, [0, 0, 0]);
+  b.box(`contract_thing_${thing.id}_string_y`, x + 0.005, 0.018, z + 0.006, string, [0, 0, 0]);
+  b.box(`contract_thing_${thing.id}_label`, Math.min(0.15, x * 0.4), Math.min(0.075, y * 0.5), 0.006, label, [x * 0.18, y * 0.15, z / 2 + 0.003]);
 }
 
 /**
@@ -1498,24 +1503,21 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'pocket_watch':
       return createPocketWatchMesh();
     case 'contract_cargo': {
-      // The crate and the radio get their own cheap primitive shape so the cargo is
-      // recognisable in the hand and the boot; every other kind is the parcel.
-      switch (item.contractKind) {
-        case 'heavy_crate':
+      // A haul is carried as its papers; a thing with a model of its own is drawn with
+      // it; every other thing is a box of its size in its tag's colour.
+      const thing = contractThing(item);
+      if (isHaulThing(thing)) return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
+      switch (thing.look) {
+        case 'carpet':
+          return buildGroup(itemBlueprint('contract_carpet', buildContractCarpetInto).instructions);
+        case 'teddy':
+          return buildGroup(itemBlueprint('contract_teddy', buildContractTeddyInto).instructions);
+        case 'lamp':
+          return buildGroup(itemBlueprint('contract_lamp', buildContractLampInto).instructions);
+        case 'crate':
           return buildGroup(itemBlueprint('contract_crate', buildContractCrateInto).instructions);
-        case 'fragile_radio':
-          return buildGroup(itemBlueprint('contract_radio', buildContractRadioInto).instructions);
-        default:
-          if (item.shape === 'carpet') {
-            return buildGroup(itemBlueprint('contract_carpet', buildContractCarpetInto).instructions);
-          }
-          if (item.shape === 'teddy') {
-            return buildGroup(itemBlueprint('contract_teddy', buildContractTeddyInto).instructions);
-          }
-          if (item.shape === 'lamp') {
-            return buildGroup(itemBlueprint('contract_lamp', buildContractLampInto).instructions);
-          }
-          return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
+        case undefined:
+          return buildGroup(itemBlueprint(`contract_thing_${thing.id}`, (b) => buildContractThingBoxInto(b, thing)).instructions);
       }
     }
     case 'sticker_envelope':

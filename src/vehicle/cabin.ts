@@ -1,4 +1,4 @@
-import type { Item } from '../items/items';
+import { contractThing, type Item } from '../items/items';
 import type { PlayerSeat } from '../game/state';
 
 /**
@@ -18,6 +18,10 @@ import type { PlayerSeat } from '../game/state';
  * only what older saves left there when things could still slide off a seat; they are
  * taken from like any other place. A teddy passenger sits only on a seat of its own —
  * the front passenger's or a half of the bench — upright and facing forward (`SIT_ON`).
+ *
+ * The boy's things (items/things.ts) keep to where they ride (`cabinRule`): the carpet
+ * only across the whole rear bench, the cushions and a haul's papers on any seat they
+ * fit like anything else, and every other thing only in a boot.
  *
  * Pure: no three.js. The view is vehicle/cabincargo.ts.
  */
@@ -143,6 +147,34 @@ export function layFit(bounds: ItemBounds, room: PlaceRoom): { turned: boolean }
 export type CabinRooms = readonly (PlaceRoom | null)[];
 
 /**
+ * How a thing may lie in the cabin: `lay`, on any place reached through a door that it
+ * fits (`LAY_ON`); `passenger`, sat up on a seat of its own (`SIT_ON`); `bench`, only
+ * across the whole rear bench (`BENCH_ONLY`).
+ */
+export type CabinRule = 'lay' | 'passenger' | 'bench';
+
+/**
+ * How `item` may lie in the cabin, or null for a thing that rides only in a boot
+ * (game-design2.md §7.3): a teddy is a passenger, the carpet goes across the bench, the
+ * cushions and a haul's papers lie on a seat like any other thing, and the rest of the
+ * boy's things keep to the boot.
+ */
+export function cabinRule(item: Item): CabinRule | null {
+  if (item.type !== 'contract_cargo') return 'lay';
+  const thing = contractThing(item);
+  switch (thing.place) {
+    case 'seats':
+      return 'passenger';
+    case 'bench':
+      return 'bench';
+    case 'cells':
+      return thing.seat ? 'lay' : null;
+    default:
+      return 'lay';
+  }
+}
+
+/**
  * The places a PASSENGER (a teddy, contracts/kinds/teddyPassengers.ts) is sat on through
  * each door: a seat of its own, never the whole bench, the floor, the boot or the
  * driver's seat.
@@ -154,20 +186,32 @@ const SIT_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   'rear-right': ['bench_r'],
 };
 
+/** The one place a bench-only thing (the carpet) lies, through either rear door. */
+const BENCH_ONLY: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+  driver: [],
+  passenger: [],
+  'rear-left': ['bench'],
+  'rear-right': ['bench'],
+};
+
 /**
- * Where a thing in hand goes through `seat`'s door: the first place reached from it
- * that is free and fits, or why not. A `passenger` goes only on a seat of its own
- * (`SIT_ON`), sitting up and facing forward: unturned, or not at all.
+ * Where a thing in hand goes through `seat`'s door under its `rule`: the first place
+ * reached from it that is free and fits, or why not. A `passenger` goes only on a seat
+ * of its own (`SIT_ON`), sitting up and facing forward: unturned, or not at all.
  */
 export function layPlace(
   cabin: readonly (Item | null)[],
   rooms: CabinRooms,
   seat: PlayerSeat,
   bounds: ItemBounds,
-  passenger = false,
+  rule: CabinRule,
 ): { place: CabinPlace } | { refusal: string } {
-  const places = passenger ? SIT_ON[seat] : LAY_ON[seat];
-  if (places.length === 0) return { refusal: passenger ? 'passengers ride on a passenger seat' : 'keep the driver\'s seat clear' };
+  const passenger = rule === 'passenger';
+  const places = passenger ? SIT_ON[seat] : rule === 'bench' ? BENCH_ONLY[seat] : LAY_ON[seat];
+  if (places.length === 0) {
+    if (passenger) return { refusal: 'passengers ride on a passenger seat' };
+    return { refusal: rule === 'bench' ? 'it goes across the whole rear bench — through a rear door' : 'keep the driver\'s seat clear' };
+  }
   let fitsSomewhere = false;
   for (const place of places) {
     const room = rooms[cabinIndex(place)];
@@ -178,9 +222,10 @@ export function layPlace(
   }
   if (!fitsSomewhere) {
     if (passenger) return { refusal: 'no seat for a passenger here' };
+    if (rule === 'bench') return { refusal: 'it does not fit across this bench' };
     return { refusal: seat === 'passenger' ? 'too big for the front seat — try the back' : 'too big for the seat' };
   }
-  return { refusal: 'there is something on the seat already' };
+  return { refusal: rule === 'bench' ? 'clear the rear bench first' : 'there is something on the seat already' };
 }
 
 /** The place something is taken from through `seat`'s door, or null. */

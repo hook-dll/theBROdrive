@@ -1,6 +1,7 @@
 /**
- * Towing (kind 17): the papers for one specific immobilised car, which has to be
- * delivered to the next post ON THE BAR — pulled there behind a working car.
+ * A broken toy car to the repair (game-design2.md §7.3): the papers for one specific
+ * immobilised car, which has to be delivered to the next post ON THE BAR — pulled there
+ * behind a working car.
  *
  * The car is spawned on the SOURCE post's lay-by the first time the post's lever
  * hands over its papers (`contracts/world.ts`), named after the offer seed, with NO ENGINE
@@ -22,8 +23,6 @@ const DELIVERY_RANGE_M = 20;
 
 export const towingKind: ContractKindDef = {
   kind: 'towing',
-  weight: 1,
-  offerNames: ['tow papers', 'recovery papers', 'breakdown tow order', 'tow docket'],
   signatureSticker: 'learner',
   acceptRefusal: (item, probe) => {
     const carId = contractCarId(item);

@@ -29,9 +29,6 @@ import { defaultProgress, type ContractKindDef } from '../types';
 /** The party-size draw, from the offer's own seed. */
 const PARTY_DOMAIN = 0x54444231; // 'TDB1'
 
-/** One stuffed bear, kg. */
-const TEDDY_MASS_KG = 0.6;
-
 /** Each harsh moment costs this share of the pay. */
 const HARSH_PAY_SHARE = 0.1;
 /** However the passengers were driven, a delivered party pays at least this share. */
@@ -95,17 +92,13 @@ export function trackPassengerRide(ride: RideMeter, car: CarState): void {
 
 /** True for a passenger: what may ride only on a seat. */
 export function isPassenger(item: Item | null | undefined): boolean {
-  return item?.type === 'contract_cargo' && item.contractKind === 'teddy_passengers';
+  return item?.type === 'contract_cargo' && item.thing === 'teddies';
 }
 
 export const teddyPassengersKind: ContractKindDef = {
   kind: 'teddy_passengers',
-  weight: 2,
-  offerNames: ['teddy passengers', 'teddy bears on a trip', 'bears to visit', 'teddy party'],
   signatureSticker: null,
-  massKg: () => TEDDY_MASS_KG,
   dressOffer(offer) {
-    offer.shape = 'teddy';
     offer.party = { id: offer.id, size: teddyPartySize(offer.generatedSeed) };
   },
   release(offer) {
@@ -114,10 +107,7 @@ export const teddyPassengersKind: ContractKindDef = {
     return teddyPartyIds(party).map((id): ContractCargoItem => ({
       ...offer,
       id,
-      cargoName: 'teddy passenger',
-      shape: 'teddy',
       party,
-      massKg: TEDDY_MASS_KG,
       progress: defaultProgress(),
     }));
   },

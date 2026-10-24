@@ -240,7 +240,7 @@ export interface TrailerState {
    * the bed.
    */
   cargoZ?: number;
-  /** Oversize load description, or absent for an ordinary flatbed. */
+  /** A load longer than the bed (the bed, contracts/world.ts), or absent for an ordinary flatbed. */
   load?: TrailerLoad;
   x: number;
   y: number;
@@ -255,20 +255,16 @@ export interface TrailerState {
 /**
  * A load lashed to a trailer bed that overhangs it.
  *
- * An oversize contract is the only producer today. The shape is state, not a mesh
- * detail: the trailer builds a real collider from `halfExtents`, so whatever the
- * overhang hits is hit for real, and it lives in the save so a reloaded trailer is
- * the same physical object. Mass is NOT here — it is the bed's `cargoKg`, so it
- * takes the one mass path every trailer already uses.
+ * The long trailer load of a contract (the bed) is the only producer. The shape is
+ * state, not a mesh detail: the trailer builds a real collider from `halfExtents`, so
+ * whatever the overhang hits is hit for real, and it lives in the save so a reloaded
+ * trailer is the same physical object. Mass is NOT here — it is the bed's `cargoKg`, so
+ * it takes the one mass path every trailer already uses.
  */
 export interface TrailerLoad {
-  /** Which load it is: 'pipes' or 'beams'. Saved; never renamed. */
-  readonly kind: TrailerLoadKind;
   /** Half-extents of the load box, m. Longer than the bed, so it overhangs. */
   readonly halfExtents: readonly [number, number, number];
 }
-
-export type TrailerLoadKind = 'pipes' | 'beams';
 
 
 /**
@@ -347,8 +343,7 @@ export interface WorldState {
   completedContractIds: string[];
   /**
    * The delivery ledger: completed deliveries counted by contract kind, written with
-   * the completed id (`courier_storage`): the record the delivery skills will read
-   * (game-design2.md §12). Saves from before the ledger rebuild it from their completed ids.
+   * the completed id (`courier_storage`).
    */
   deliveriesByKind: Partial<Record<ContractKind, number>>;
   /**

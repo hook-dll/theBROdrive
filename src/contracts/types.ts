@@ -2,43 +2,35 @@
  * The physical contract system's shared shapes.
  *
  * A contract is not a journal entry: it is a `contract_cargo` item that exists in
- * one physical place (a post's stock, a hand, a car boot, the ground). What makes
- * two of them different is `contractKind`, and every kind's behaviour lives in its
- * own module under `kinds/` behind `ContractKindDef` (registry.ts). This file holds
- * only what all of them share: the kind ids, the progress record that is saved ON
- * the item, and the delivery-time world view the kinds read.
+ * one physical place (a post's stock, a hand, a car boot, the ground). What it is, is
+ * its THING (items/things.ts): one of the boy's things, whose place decides the
+ * machinery it rides on — its `ContractKind`, whose behaviour lives in its own module
+ * under `kinds/` behind `ContractKindDef` (registry.ts). This file holds only what all
+ * of them share: the kind ids, the progress record that is saved ON the item, and the
+ * delivery-time world view the kinds read.
  *
- * NOTHING IS SCORED ON THE WAY but the fragile radio's condition: knocks to the car
- * it rides in and drops to the ground wear it down, and the delivery pays that share
- * of its pay (economy/economy.ts `deliveryPay`). The other thing remembered on the
- * item is whether it has left its source post (`progress.started`), which the
- * rival race reads.
- *
- * `kind` ids are saved: never rename one.
+ * NOTHING IS SCORED ON THE WAY but a fragile thing's condition: knocks to the car it
+ * rides in and drops to the ground wear it down, and the delivery pays that share of
+ * its pay (economy/economy.ts `deliveryPay`). The other thing remembered on the item
+ * is whether it has left its source post (`progress.started`), which the rival race
+ * reads.
  */
 
 import type { CarState, WorldDelta } from '../game/state';
 import type { ContractCargoItem } from '../items/items';
 import type { StickerKind } from '../items/stickercatalog';
 
-/** The catalog kinds. English snake_case ids, saved, never renamed. */
-export type ContractKind =
-  | 'parcel'
-  | 'heavy_crate'
-  | 'fragile_radio'
-  | 'trailer_equipment'
-  | 'oversize'
-  | 'towing'
-  | 'car_transfer'
-  | 'teddy_passengers';
+/**
+ * The machinery a thing rides on: a thing carried by hand (boot, seat, bench), a
+ * trailer load, a towed car, a car driven over, teddy passengers. Counted by id in the
+ * saved delivery ledger: never rename one.
+ */
+export type ContractKind = 'thing' | 'trailer' | 'towing' | 'car_transfer' | 'teddy_passengers';
 
 /** Every declared kind id, for the save validator. */
 export const CONTRACT_KIND_IDS: Record<ContractKind, true> = {
-  parcel: true,
-  heavy_crate: true,
-  fragile_radio: true,
-  trailer_equipment: true,
-  oversize: true,
+  thing: true,
+  trailer: true,
   towing: true,
   car_transfer: true,
   teddy_passengers: true,
@@ -52,8 +44,8 @@ export interface ContractProgress {
   /** Set the first time the cargo leaves its source post. */
   started: boolean;
   /**
-   * A fragile radio's condition, 1 (as signed out) down to 0; the delivery's quality.
-   * Absent on every other kind and on a radio not yet knocked.
+   * A fragile thing's condition, 1 (as signed out) down to 0; the delivery's quality.
+   * Absent on every other thing and on a fragile one not yet knocked.
    */
   condition?: number;
   /**
@@ -111,20 +103,14 @@ export interface DeliveryEffect {
   readonly deltas?: readonly WorldDelta[];
 }
 
-/** The registry entry for one kind: how it is offered, delivered and rewarded. */
+/** The registry entry for one kind: how it is delivered and rewarded. */
 export interface ContractKindDef {
   readonly kind: ContractKind;
-  /** Relative chance of being drawn as a post offer. Parcel is the common one. */
-  readonly weight: number;
-  /** Cargo names this kind draws from, per offer. */
-  readonly offerNames: readonly string[];
   /**
    * The sticker every delivery of this kind pays. `null` means the kind has no
-   * signature and pays the offer's seed-random reward (parcel).
+   * signature and pays the offer's seed-random reward.
    */
   readonly signatureSticker: StickerKind | null;
-  /** Cargo mass this kind adds to a car or a pair of hands, kg. Omitted = 12 kg. */
-  readonly massKg?: (seed: number) => number;
   /**
    * Why this post may not accept the cargo, or null. Called after the base rule
    * (a post never signs cargo from itself or further down the road).
@@ -137,8 +123,8 @@ export interface ContractKindDef {
    */
   readonly onDelivered?: (item: ContractCargoItem, probe: DeliveryProbe) => DeliveryEffect | null;
   /**
-   * Finishes a freshly generated offer of this kind: its look (`shape`) and, for a
-   * passenger contract, its `party`. Called last by `generateContractOffer`.
+   * Finishes a freshly generated offer of this kind: a passenger contract's `party`.
+   * Called last by `generateContractOffer`.
    */
   readonly dressOffer?: (offer: ContractCargoItem) => void;
   /**

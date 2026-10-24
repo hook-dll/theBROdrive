@@ -36,7 +36,7 @@ function lookKey(item: Item): string {
     case 'quarry':
       return `quarry:${item.mass}`;
     case 'contract_cargo':
-      return `cargo:${item.contractKind}:${item.shape ?? ''}`;
+      return `cargo:${item.thing}`;
     default:
       return item.type;
   }

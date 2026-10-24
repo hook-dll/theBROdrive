@@ -1,5 +1,6 @@
 import type * as THREE from 'three';
-import type { Item } from '../items/items';
+import { contractThing, type Item } from '../items/items';
+import { thingBootFootprint, type BootFootprint } from '../items/things';
 import { BONNET_SLOT_COUNT } from './bonnet';
 
 /**
@@ -27,6 +28,113 @@ const STORAGE_GRID_BOTTOM_Y_FRACTION = -0.35;
 
 export function trunkCellCount(grid: TrunkGrid): number {
   return grid.columns * grid.rows;
+}
+
+// ---------------------------------------------------------------------------
+// Boot occupancy
+//
+// A thing may take several cells of the grid (items/things.ts `BootFootprint`): it is
+// stored ONCE, in its ANCHOR cell — the top-left of the cells it takes, as the player
+// sees the grid — and every other cell it covers holds null. What covers a cell is
+// derived from the anchors (`bootOwner`), never stored, so a save holds the boot as it
+// always did and nothing can disagree with it. Nothing is turned.
+// ---------------------------------------------------------------------------
+
+const ONE_CELL: BootFootprint = { columns: 1, rows: 1 };
+
+/** The cells `item` takes in a boot, or null when it never rides in one (a teddy, the carpet). */
+export function bootFootprint(item: Item): BootFootprint | null {
+  return item.type === 'contract_cargo' ? thingBootFootprint(contractThing(item)) : ONE_CELL;
+}
+
+/** True when `footprint` anchored at `anchor` lies inside the grid. */
+function inGrid(grid: TrunkGrid, anchor: number, footprint: BootFootprint): boolean {
+  if (anchor < 0 || anchor >= trunkCellCount(grid)) return false;
+  return anchor % grid.columns + footprint.columns <= grid.columns
+    && Math.floor(anchor / grid.columns) + footprint.rows <= grid.rows;
+}
+
+/** True when `footprint` anchored at `anchor` covers `cell`. */
+function covers(grid: TrunkGrid, anchor: number, footprint: BootFootprint, cell: number): boolean {
+  const dc = cell % grid.columns - anchor % grid.columns;
+  const dr = Math.floor(cell / grid.columns) - Math.floor(anchor / grid.columns);
+  return dc >= 0 && dc < footprint.columns && dr >= 0 && dr < footprint.rows;
+}
+
+/** The anchor of the item covering `cell`, or -1 when the cell is free. */
+export function bootOwner(storage: readonly (Item | null)[], grid: TrunkGrid, cell: number): number {
+  for (let anchor = 0; anchor < storage.length; anchor++) {
+    const item = storage[anchor];
+    if (item && covers(grid, anchor, bootFootprint(item) ?? ONE_CELL, cell)) return anchor;
+  }
+  return -1;
+}
+
+/** True when `footprint` fits at `anchor`: inside the grid, every cell it takes free. */
+export function bootFits(
+  storage: readonly (Item | null)[],
+  grid: TrunkGrid,
+  anchor: number,
+  footprint: BootFootprint,
+): boolean {
+  if (!inGrid(grid, anchor, footprint)) return false;
+  for (let r = 0; r < footprint.rows; r++) {
+    for (let c = 0; c < footprint.columns; c++) {
+      if (bootOwner(storage, grid, anchor + r * grid.columns + c) >= 0) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Where a thing of `footprint` goes when the player aims at `cell`: the anchor of the
+ * first placement covering that cell that fits, trying the cell itself as the top-left
+ * first and then shifting left and up. -1 when none covering it fits.
+ */
+export function bootAnchorAt(
+  storage: readonly (Item | null)[],
+  grid: TrunkGrid,
+  cell: number,
+  footprint: BootFootprint,
+): number {
+  const column = cell % grid.columns;
+  const row = Math.floor(cell / grid.columns);
+  for (let dr = 0; dr < footprint.rows; dr++) {
+    for (let dc = 0; dc < footprint.columns; dc++) {
+      if (column - dc < 0 || row - dr < 0) continue;
+      const anchor = cell - dr * grid.columns - dc;
+      if (bootFits(storage, grid, anchor, footprint)) return anchor;
+    }
+  }
+  return -1;
+}
+
+/** The first anchor anywhere in the boot where `footprint` fits, or -1. */
+export function bootFreeAnchor(storage: readonly (Item | null)[], grid: TrunkGrid, footprint: BootFootprint): number {
+  for (let anchor = 0; anchor < trunkCellCount(grid); anchor++) {
+    if (bootFits(storage, grid, anchor, footprint)) return anchor;
+  }
+  return -1;
+}
+
+/** True when a grid is big enough for `footprint` at all, empty. */
+export function bootHolds(grid: TrunkGrid, footprint: BootFootprint): boolean {
+  return footprint.columns <= grid.columns && footprint.rows <= grid.rows;
+}
+
+/**
+ * A boot read from a save, made sound: an item that does not fit at its anchor (out of
+ * the grid, over another, or a thing that never rides in a boot) is dropped, earlier
+ * anchors first. Cells are kept in place, not moved.
+ */
+export function normalizeBoot(storage: (Item | null)[], grid: TrunkGrid): void {
+  const kept = storage.slice();
+  storage.fill(null);
+  for (let anchor = 0; anchor < kept.length; anchor++) {
+    const item = kept[anchor];
+    const footprint = item ? bootFootprint(item) : null;
+    if (item && footprint && bootFits(storage, grid, anchor, footprint)) storage[anchor] = item;
+  }
 }
 
 export type StorageSide = 'trunk' | 'bonnet';

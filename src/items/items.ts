@@ -3,6 +3,7 @@ import { variant } from '../parts/registry';
 import { stickerDef, type StickerKind } from './stickercatalog';
 import { carPaintSwatch } from '../vehicle/carpaint';
 import type { ContractKind, ContractProgress } from '../contracts/types';
+import { isHaulThing, thingDef, thingItemMass, thingKind, type ThingDef, type ThingId } from './things';
 
 /**
  * Everything the player can hold, carry or use.
@@ -210,26 +211,23 @@ export interface PocketWatchItem {
 
 export type { StickerKind } from './stickercatalog';
 
-/** A contract cargo's own look when it is not its kind's box; see `ContractCargoItem.shape`. */
-export type CargoShape = 'carpet' | 'teddy' | 'lamp';
-export const CARGO_SHAPES: readonly CargoShape[] = ['carpet', 'teddy', 'lamp'];
-
-/** A physical task object. Its source index is the complete delivery contract. */
+/**
+ * A contract: one of the boy's things (items/things.ts) sent from a post. Its source
+ * index is the complete delivery contract; its thing decides the name, the tags, the
+ * mass, where it rides and the pay.
+ */
 export interface ContractCargoItem {
   readonly type: 'contract_cargo';
   readonly id: string;
   readonly sourceCourierIndex: number;
-  /** Which catalog kind this is; see contracts/types.ts. */
-  readonly contractKind: ContractKind;
-  readonly cargoName: string;
+  /** The catalogue thing it is (items/things.ts); its machinery is `contractKindOf`. */
+  readonly thing: ThingId;
   /**
    * The ordinary sticker a delivery pays. Kinds with a signature reward pay that
-   * instead when their condition held, so this is the fallback for every kind.
+   * instead, so this is the fallback for every kind.
    */
   readonly rewardStickerKind: StickerKind;
   readonly generatedSeed: number;
-  /** Cargo mass, kg, when the kind carries more than the usual 12 (heavy crate). */
-  massKg?: number;
   /**
    * A race offer: how many posts on its destination is, 1 or 2. The cargo is
    * signed only from there on, three rivals carry the same thing there, and the
@@ -241,19 +239,6 @@ export interface ContractCargoItem {
    * Absent on cargo from before the post machines.
    */
   readonly destination?: string;
-  /**
-   * A registered parcel's six-digit PIN, printed on its label: the receiving post's slot
-   * opens only after it is dialled (ui/dial.ts). Absent on every other cargo.
-   */
-  readonly registeredPin?: string;
-  /**
-   * How it looks when it is not a box of its kind (a special parcel or a passenger):
-   * `carpet`, a rug rolled up and tied, longer than a front seat, a half of the bench or
-   * the boot is wide (vehicle/cabin.ts), so it goes across the whole rear bench;
-   * `teddy`, a stuffed bear; `lamp`, a table lamp with a milk-glass shade. Absent: the
-   * kind's own shape.
-   */
-  shape?: CargoShape;
   /**
    * A passenger contract's party (contracts/kinds/teddyPassengers.ts): the contract's id,
    * shared by every teddy of it, and how many teddies it is. The offer carries it too, so
@@ -276,6 +261,21 @@ export interface CargoParty {
 /** The contract an item belongs to: its party's id for a passenger, its own id otherwise. */
 export function contractIdOf(item: ContractCargoItem): string {
   return item.party?.id ?? item.id;
+}
+
+/** The catalogue entry of a contract's thing. */
+export function contractThing(item: ContractCargoItem): ThingDef {
+  return thingDef(item.thing);
+}
+
+/** The contract machinery the item rides on (contracts/registry.ts), from its thing. */
+export function contractKindOf(item: ContractCargoItem): ContractKind {
+  return thingKind(contractThing(item));
+}
+
+/** A haul's papers: the thing is a trailer load, a towed car or a car to drive over. */
+export function isHaul(item: ContractCargoItem): boolean {
+  return isHaulThing(contractThing(item));
 }
 
 /** Signed physical reward, consumed only when its sticker is confirmed on a car. */
@@ -333,30 +333,6 @@ export function litreText(litres: number): string {
   return `${litres.toFixed(1)} L`;
 }
 
-/** Kinds that bring a trailer or a second car: the courier's fourth, "big haul" offer. */
-const HAUL_KINDS: Readonly<Partial<Record<ContractKind, true>>> = {
-  trailer_equipment: true,
-  oversize: true,
-  towing: true,
-  car_transfer: true,
-};
-
-/** True for a kind that is a haul rather than something carried in a boot. */
-export function isHaulKind(kind: ContractKind): boolean {
-  return HAUL_KINDS[kind] === true;
-}
-
-/**
- * The short title a post's display shows before the cargo's name, so the four offers
- * read at a glance: a sticker run, a race to the next post (a ruble to the winner),
- * a race two posts on (two rubles), and a haul with a trailer or a car in tow.
- */
-export function contractTier(item: ContractCargoItem): string {
-  if (item.raceLegs === 1) return 'race · 1 stop';
-  if (item.raceLegs === 2) return 'race · 2 stops';
-  return isHaulKind(item.contractKind) ? 'big haul' : 'easy run';
-}
-
 /** Display name for the HUD and interaction prompts. */
 export function itemLabel(item: Item): string {
   switch (item.type) {
@@ -408,13 +384,14 @@ export function itemLabel(item: Item): string {
     case 'pocket_watch':
       return 'pocket watch';
     case 'contract_cargo': {
-      // A knocked radio says how much of its pay it still carries.
+      // A knocked fragile thing says how much of its pay it still carries.
+      const thing = contractThing(item);
       const condition = item.progress?.condition;
       const worn = condition !== undefined && condition < 1 ? ` · ${Math.round(condition * 100)}%` : '';
       const to = item.destination ? ` → ${item.destination}` : '';
-      const pin = item.registeredPin ? ` · registered, PIN ${item.registeredPin}` : '';
-      const party = item.party ? ` · party of ${item.party.size}` : '';
-      return `${contractTier(item)}: ${item.cargoName}${party}${to}${pin}${worn}`;
+      const race = item.raceLegs ? ' · race' : '';
+      const name = item.party ? `teddy passenger · party of ${item.party.size}` : isHaulThing(thing) ? `${thing.name} papers` : thing.name;
+      return `${name}${to}${race}${worn}`;
     }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.
@@ -466,8 +443,7 @@ export function itemMass(item: Item): number {
     case 'pocket_watch':
       return 0.12;
     case 'contract_cargo':
-      // A heavy crate carries its own mass; every other contract is a parcel.
-      return item.massKg ?? 12;
+      return thingItemMass(contractThing(item));
     case 'sticker_envelope':
       return 0.08;
   }

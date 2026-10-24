@@ -11,9 +11,10 @@
 
 import * as THREE from 'three';
 import type { BirdFlock } from '../agents/birds';
-import { STICKERS, stickerKindForSeed } from '../items/stickercatalog';
-import { teddyPassengersKind } from '../contracts/kinds/teddyPassengers';
-import { defaultProgress } from '../contracts/types';
+import { STICKERS } from '../items/stickercatalog';
+import { makeContract } from '../contracts/offers';
+import { contractRelease } from '../contracts/registry';
+import { isThingId, THINGS } from '../items/things';
 import { uprightStickerRoll } from '../render/stickers';
 import { stickerAtlas } from '../render/stickerart';
 import type { TumbleweedField } from '../agents/tumbleweed';
@@ -23,7 +24,7 @@ import type { PhysicsWorld } from '../core/physics';
 import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
-import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type ContractCargoItem, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type Item } from '../items/items';
 import { credit, formatMoney, RUB } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
@@ -50,7 +51,7 @@ import type { Autopilot } from '../vehicle/autopilot';
 import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
 import { poisBetween } from '../world/poi';
-import { postStop } from '../world/poststops';
+import { postBracket, postStop } from '../world/poststops';
 import { settlementLayout, spotPose } from '../world/settlement';
 import type { DebrisField } from '../world/debris';
 import type { DesertTileStreamer } from '../world/deserttiles';
@@ -648,38 +649,35 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
   /**
-   * `teddies(size?)`: a teddy-passenger party of `size` (1–3; the seed's roll when
-   * omitted) signed out at the first post, dropped side by side in front of the player
-   * as the post machine's tray would release it (contracts/kinds/teddyPassengers.ts).
-   * Returns the party id.
+   * `thing(id, size?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
+   * 'tv_set', 'carpet', 'piano', 'teddies') signed out at the post nearest the player
+   * and bound for the next, dropped in front of him as the post machine's tray would
+   * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted), a
+   * haul as its papers, whose trailer or car then appears on that post's lay-by
+   * (contracts/world.ts). Returns the contract id.
    */
-  dev['teddies'] = (size?: number): string => {
-    const offer: ContractCargoItem = {
-      type: 'contract_cargo',
-      id: `dev:teddies:${ctx.world.runtimePartId()}`,
-      sourceCourierIndex: 0,
-      contractKind: 'teddy_passengers',
-      cargoName: 'teddy passengers',
-      rewardStickerKind: stickerKindForSeed(Date.now() >>> 0),
-      generatedSeed: Date.now() >>> 0,
-      progress: defaultProgress(),
-    };
-    teddyPassengersKind.dressOffer!(offer);
-    if (size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
+  dev['thing'] = (id: string, size?: number): string => {
+    if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
+    const seed = ctx.world.seed;
+    const { before, after } = postBracket(seed, ctx.world.state.player.s);
+    const playerS = ctx.world.state.player.s;
+    const source = before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
+    const offer = makeContract(seed, `dev:thing:${ctx.world.runtimePartId()}`, source, id, Date.now() >>> 0);
+    if (offer.party && size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
     const eye = ctx.camera.eyePosition;
     const dir = ctx.camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;
     const fx = dir.x / flat;
     const fz = dir.z / flat;
-    const teddies = teddyPassengersKind.release!(offer);
-    teddies.forEach((teddy, k) => {
-      const side = (k - (teddies.length - 1) / 2) * 0.45;
+    const items = contractRelease(offer);
+    items.forEach((item, k) => {
+      const side = (k - (items.length - 1) / 2) * 0.45;
       const x = eye.x + fx * 1.2 - fz * side;
       const z = eye.z + fz * 1.2 + fx * side;
       const ground = ctx.physics.raycast({ x, y: eye.y + SPAWN_PROBE_HEIGHT, z }, { x: 0, y: -1, z: 0 }, SPAWN_PROBE_HEIGHT + 12, ctx.player.rigidBody);
-      ctx.loose.spawnItem(teddy, x + ctx.origin.x, (ground ? ground.point.y : eye.y) + 0.3, z + ctx.origin.z);
+      ctx.loose.spawnItem(item, x + ctx.origin.x, (ground ? ground.point.y : eye.y) + 0.3, z + ctx.origin.z);
     });
-    ctx.hud.setToast(`spawned ${teddies.length} teddy passenger${teddies.length === 1 ? '' : 's'}`);
+    ctx.hud.setToast(`spawned ${itemLabel(items[0]!)}${items.length > 1 ? ` ×${items.length}` : ''} from post ${source}`);
     return offer.id;
   };
   /**

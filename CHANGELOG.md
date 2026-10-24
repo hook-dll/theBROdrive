@@ -16,12 +16,49 @@
   stock keeps its own fixed eight cells. Comfort 1–5 is on every model and
   `comfortFactor` maps it to 1.0/0.85/0.7/0.55/0.45; nothing reads it yet.
 - `economy/economy.ts` `carUniqueness(car)`: a car's uniqueness, its sticker count.
+- THE BOY'S THINGS (game-design2.md §7.2–7.3; `items/things.ts` `THINGS`, `ThingDef`,
+  `thingCard`, `thingKind`, `thingBootFootprint`). A contract is now one catalogue thing
+  (`ContractCargoItem.thing`): box of pencils, school globe, sofa cushions, table lamp,
+  tea service, record player, dad's tool box (30 kg), fishing rods and sledge (1×4
+  strip), carpet (whole rear bench), old TV set and aquarium (2×2), wardrobe, piano,
+  sofa and bed (trailer), broken toy car (tow), toy car (drive to a friend), teddy
+  passengers. Name, tags (ordinary/bulky/fragile), mass, footprint and base pay come
+  from the catalogue; kinds are `thing`, `trailer`, `towing`, `car_transfer`,
+  `teddy_passengers`, derived from the thing (`contractKindOf`).
+- MULTI-CELL BOOT THINGS (`vehicle/trunk.ts` `bootOwner`, `bootFits`, `bootAnchorAt`,
+  `bootFreeAnchor`, `normalizeBoot`). A thing is stored once at its top-left anchor cell,
+  every cell it covers is derived; it is placed round the aimed cell only where all its
+  cells are free, comes out whole from any of them, is drawn once across its span with
+  every covered cell lit (`render/trunkview.ts`), and a save drops a thing that no longer
+  fits. A refusal says why ("no room for the old TV set: it takes 2×2 cells", "… won't
+  fit the VAZ-1111 Oka's boot"). Ordinary items stay one cell.
+- Cabin rule (`vehicle/cabin.ts` `cabinRule`, `CabinRule`): the carpet lies only across
+  the whole rear bench, cushions and haul papers on any seat they fit, teddies on
+  passenger seats, every other thing only in a boot.
+- THE POST'S FOUR CARDS by property: ordinary, fragile, bulky-or-haul, teddies. A card
+  prints the thing, destination, km, pay, tags (and mass from 20 kg), a haul's note, a
+  race note and "won't fit your <model>" when the car on the lay-by has too small a boot
+  grid; TAKE always gives. Race is a 30 % seeded modifier per ordinary/fragile/teddy
+  offer (1 or 2 stops); the drive's first offer is a plain ordinary thing.
+- Pay is the thing's base pay × km index (`deliveryPay(baseKopecks, …)`); fragile wear
+  (`contracts/runtime.ts`) and the G-force widget (`rideSensitive`) follow the fragile tag.
+- Trailer loads: the thing's mass on the bed; the bed is the long load overhanging the
+  trailer (`TrailerLoad` is now just a box, the pipes/beams variants are gone).
+- Placeholder meshes: a box of the thing's size in its tag's colour; carpet, teddy, lamp
+  and tool box (crate) keep their meshes; haul papers are the parcel.
+- Dev: `__bro.thing(id, size?)` drops a catalogue contract from the nearest post
+  (replaces `__bro.teddies`). `tools/trunk-grid.ts` checks footprints and save/load.
 
 ### Removed
 
 - Per-car contract slots (`CONTRACT_SLOTS`, `contractSlotsFor`, the interaction's
   `contractSlotsRefusal`, `items.ts` `contractsAmong`): any car takes any number of
   contracts until the global limit arrives.
+- The parcel, heavy crate, fragile radio and oversize kinds, `CARGO_SHAPES`,
+  `cargoName`/`massKg`/`shape` on cargo, `contractTier`, `isHaulKind`,
+  `DELIVERY_BASE_PAY`, the radio mesh, the ledger rebuild from old ids.
+- Registered parcels and the PIN dial (`registeredPin`, `ui/dial.ts`, the `dial` hook).
+- `contracts.md` (the old prototype doc).
 
 ## 0.24.0 — 2026-10-24
 

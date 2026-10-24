@@ -1,6 +1,7 @@
 /**
- * Car transfer (kind 18): the keys and registration for one specific car, which has
- * to be driven to the next post and handed over parked on its lay-by.
+ * A toy car to a friend (game-design2.md §7.3): the keys and registration for one
+ * specific car, which has to be driven to the next post and handed over parked on its
+ * lay-by.
  *
  * The car is a complete, serviceable car spawned on the SOURCE post's lay-by the first
  * time the post's lever hands over its papers (`contracts/world.ts`), named after the
@@ -23,8 +24,6 @@ const DELIVERY_RANGE_M = 20;
 
 export const carTransferKind: ContractKindDef = {
   kind: 'car_transfer',
-  weight: 1,
-  offerNames: ['car keys and papers', 'transfer papers', 'registration and keys', 'handover papers'],
   signatureSticker: 'number-07',
   acceptRefusal: (item, probe) => {
     const carId = contractCarId(item);

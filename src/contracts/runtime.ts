@@ -3,13 +3,15 @@
  * can be, marks the cargo started once it has left its source post, and hands
  * each item to the composition root (world objects, race, delivery target).
  *
- * Nothing is scored on the way: no impacts, drops or tips are tracked. The tick scans
- * state rather than holding its own list of contracts, so an item picked up, swapped
- * into another boot or dropped is followed with no bookkeeping.
+ * Nothing is scored on the way but a fragile thing's condition: the knocks the car it
+ * rides in takes and its drops to the ground wear it down. The tick scans state rather
+ * than holding its own list of contracts, so an item picked up, swapped into another
+ * boot or dropped is followed with no bookkeeping.
  */
 
 import type { GameWorld } from '../game/state';
-import type { ContractCargoItem, Item } from '../items/items';
+import { contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { hasTag } from '../items/things';
 import { defaultProgress, type ContractPlace } from './types';
 
 /**
@@ -25,18 +27,18 @@ function isCargo(item: Item | null | undefined): item is ContractCargoItem {
 }
 
 /**
- * A fragile radio loses this much condition per unit of shell damage the car it rides
+ * A fragile thing loses this much condition per unit of shell damage the car it rides
  * in takes: the same knocks that scratch the paint (`SCRATCH_*`, vehicle/vehicletuning.ts),
  * so a 5 m/s shunt costs it about a fifth.
  */
-const RADIO_WEAR_PER_SCRATCH = 1;
+const FRAGILE_WEAR_PER_SCRATCH = 1;
 /** One drop onto the ground from a hand or a boot. */
-const RADIO_DROP_WEAR = 0.12;
+const FRAGILE_DROP_WEAR = 0.12;
 
 export class ContractRuntime {
   /** Each car's `scratches` at the last tick, to see the knocks it took since. */
   private readonly lastScratches = new Map<string, number>();
-  /** Where each live radio was at the last tick, to see a drop (runtime-only). */
+  /** Where each live fragile thing was at the last tick, to see a drop (runtime-only). */
   private readonly lastPlace = new Map<string, ContractPlace>();
 
   constructor(private readonly world: GameWorld) {}
@@ -86,11 +88,11 @@ export class ContractRuntime {
     // A hand-made or very old item may lack the record; the runtime owns it.
     if (!item.progress) item.progress = defaultProgress();
     if (place !== 'post') item.progress.started = true;
-    if (item.contractKind !== 'fragile_radio') return;
+    if (!hasTag(contractThing(item), 'fragile')) return;
     const previous = this.lastPlace.get(item.id);
     this.lastPlace.set(item.id, place);
     const dropped = place === 'loose' && (previous === 'hand' || previous === 'car');
-    const wear = knock * RADIO_WEAR_PER_SCRATCH + (dropped ? RADIO_DROP_WEAR : 0);
+    const wear = knock * FRAGILE_WEAR_PER_SCRATCH + (dropped ? FRAGILE_DROP_WEAR : 0);
     if (wear > 0) item.progress.condition = Math.max(0, (item.progress.condition ?? 1) - wear);
   }
 }

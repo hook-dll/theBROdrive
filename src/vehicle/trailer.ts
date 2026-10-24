@@ -240,25 +240,18 @@ const CRATE_CENTRE_Y = BED_HALF[1] + CRATE_HALF[1];
 const CARGO_Z_LIMIT = BED_HALF[2] - CRATE_HALF[2];
 
 /**
- * An oversize load: a bed-length pile of pipes or a pair of beams that overhangs
- * BOTH ends of the 2.8 m bed. Only a contract trailer carries one.
+ * The long load (contracts/world.ts): a box that overhangs BOTH ends of the 2.8 m bed.
+ * Only a contract trailer carries one.
  *
- * The load is drawn as a real collider rather than decoration, which is the point of
- * the kind: the overhang can take a traffic car or a rock, and a blow that slows the
- * trailer is what voids the special reward. Its own mass rides the existing bed
- * payload path (`cargoKg`), so the car in front feels it through the tow ball exactly
- * like any other load.
+ * The load is a real collider rather than decoration: the overhang can take a traffic
+ * car or a rock. Its own mass rides the existing bed payload path (`cargoKg`), so the
+ * car in front feels it through the tow ball exactly like any other load.
+ *
+ * Its look: varnished wood against the dark bed, so the overhang reads from the
+ * driver's seat. Same shader features as the crate and the steel, so it links the
+ * program the trailer warm-up already compiles.
  */
-const LOAD_RADIUS = 0.19;
-/** Gap between the pipe centres, so three pipes span about 1.1 m. */
-const LOAD_PIPE_SPREAD = 0.38;
-
-/**
- * The oversize load's own look: bright sawn metal against the dark bed, so the
- * overhang reads from the driver's seat. Same shader features as the crate and the
- * steel, so it links the program the trailer warm-up already compiles.
- */
-const matLoad = new THREE.MeshStandardMaterial({ color: 0x9e988c, roughness: 0.55, metalness: 0.35 });
+const matLoad = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.7, metalness: 0.05 });
 
 /** Wheel spin is kept inside one turn, so a long haul cannot lose float precision. */
 const TWO_PI = Math.PI * 2;
@@ -585,8 +578,8 @@ export class Trailer implements Rebasable {
     this.crate.castShadow = true;
     this.root.add(this.crate);
 
-    // An oversize load (contract kinds 7): a real collider on the overhang plus the
-    // meshes that show it. The crate above is drawn for ordinary cargo only.
+    // A long load (contracts/world.ts): a real collider on the overhang plus the box
+    // that shows it. The crate above is drawn for ordinary cargo only.
     const load = state.load;
     if (load) {
       const [lx, ly, lz] = load.halfExtents;
@@ -599,26 +592,12 @@ export class Trailer implements Rebasable {
           .setRestitution(0.02),
         this.body,
       );
-      if (load.kind === 'pipes') {
-        // Three tubes lying along the bed, which is what makes it read as a pipe
-        // bundle rather than a crate. One shared cross-section per tube.
-        const geo = new THREE.CylinderGeometry(LOAD_RADIUS, LOAD_RADIUS, lz * 2, 10);
-        geo.rotateX(Math.PI / 2);
-        this.disposables.push(geo);
-        for (const offset of [-LOAD_PIPE_SPREAD, 0, LOAD_PIPE_SPREAD]) {
-          const mesh = new THREE.Mesh(geo, matLoad);
-          mesh.position.set(offset, BED_HALF[1] + LOAD_RADIUS, this.cargoZ);
-          mesh.castShadow = true;
-          this.root.add(mesh);
-        }
-      } else {
-        const geo = new THREE.BoxGeometry(lx * 2, ly * 2, lz * 2);
-        this.disposables.push(geo);
-        const mesh = new THREE.Mesh(geo, matLoad);
-        mesh.position.set(0, centreY, this.cargoZ);
-        mesh.castShadow = true;
-        this.root.add(mesh);
-      }
+      const geo = new THREE.BoxGeometry(lx * 2, ly * 2, lz * 2);
+      this.disposables.push(geo);
+      const mesh = new THREE.Mesh(geo, matLoad);
+      mesh.position.set(0, centreY, this.cargoZ);
+      mesh.castShadow = true;
+      this.root.add(mesh);
     }
 
     // The prop stand's leg and foot, matching the collider above.
@@ -1403,7 +1382,7 @@ export class Trailer implements Rebasable {
    * Mass, centre of mass, inertia and tongue load for the current load.
    *
    * Two solid boxes: the empty bed, whose mass sits low as a trailer's does, and the
-   * payload — the crate, or an oversize load's own box — at its centre on top of the
+   * payload — the crate, or a long load's own box — at its centre on top of the
    * bed, `cargoZ` along it. The inertia is the two boxes' own plus their offsets from
    * the combined centre (parallel axes), so a long load resists yaw in a way the crate
    * does not and a load pushed to the tailgate swings a longer arm. Blending the two
@@ -1510,9 +1489,9 @@ export class TrailerField {
       mesh.visible = false;
       this.warmup.add(mesh);
     }
-    // The oversize load's material shares the crate's shader features, but a contract
+    // The long load's material shares the crate's shader features, but a contract
     // trailer is spawned long after boot, so its one instance is compiled here with the
-    // rest rather than the first time a pipe bundle is drawn.
+    // rest rather than the first time a bed is drawn.
     const load = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), matLoad);
     load.castShadow = false;
     load.receiveShadow = false;

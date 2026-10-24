@@ -3,6 +3,8 @@ import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from '.
 import { setPartCondition } from './materials';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
+  bootFootprint,
+  bootOwner,
   storageCellBox,
   storageCellCount,
   TRUNK_MAX_CELL_COUNT,
@@ -78,6 +80,8 @@ export class TrunkView {
   private readonly poseQuaternion = new THREE.Quaternion();
   private readonly cellPosition = new THREE.Vector3();
   private readonly cellSize = new THREE.Vector3();
+  private readonly farPosition = new THREE.Vector3();
+  private readonly farSize = new THREE.Vector3();
 
   private itemSignature = '';
   /** What the panels were last laid out for; any change lays them out again. */
@@ -132,11 +136,15 @@ export class TrunkView {
       this.itemSignature = '';
     }
 
+    // A thing of several boot cells lights all of them when one is aimed at.
+    const trunk = view.side === 'trunk';
+    const selectedOwner = trunk && view.selectedCell !== null ? bootOwner(view.cells, shape.trunkGrid, view.selectedCell) : -1;
     for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
       const visible = this.laidOut[cell]! && cell < view.cells.length;
       this.panels[cell]!.visible = visible;
       this.borders[cell]!.visible = visible;
-      const selected = visible && cell === view.selectedCell;
+      const selected = visible && (cell === view.selectedCell
+        || (selectedOwner >= 0 && bootOwner(view.cells, shape.trunkGrid, cell) === selectedOwner));
       this.panels[cell]!.material = selected ? this.selectedPanelMaterial : this.panelMaterial;
       this.borders[cell]!.material = selected ? this.selectedBorderMaterial : this.borderMaterial;
     }
@@ -201,6 +209,21 @@ export class TrunkView {
       const item = view.cells[cell];
       if (!item) continue;
       if (!storageCellBox(cell, shape, view.side, this.cellPosition, this.cellSize)) continue;
+      // A thing of several boot cells is drawn once, across all of them: its anchor cell
+      // (the top-left) joined with the far corner of its footprint.
+      const footprint = bonnet ? null : bootFootprint(item);
+      const spans = footprint !== null && (footprint.columns > 1 || footprint.rows > 1);
+      if (spans) {
+        const far = cell + (footprint.rows - 1) * shape.trunkGrid.columns + footprint.columns - 1;
+        if (storageCellBox(far, shape, view.side, this.farPosition, this.farSize)) {
+          const minX = Math.min(this.cellPosition.x - this.cellSize.x / 2, this.farPosition.x - this.farSize.x / 2);
+          const maxX = Math.max(this.cellPosition.x + this.cellSize.x / 2, this.farPosition.x + this.farSize.x / 2);
+          const minY = Math.min(this.cellPosition.y - this.cellSize.y / 2, this.farPosition.y - this.farSize.y / 2);
+          const maxY = Math.max(this.cellPosition.y + this.cellSize.y / 2, this.farPosition.y + this.farSize.y / 2);
+          this.cellPosition.set((minX + maxX) / 2, (minY + maxY) / 2, this.cellPosition.z);
+          this.cellSize.set(maxX - minX, maxY - minY, this.cellSize.z);
+        }
+      }
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);
       const holder = new THREE.Group();
@@ -214,8 +237,12 @@ export class TrunkView {
         _box.setFromObject(mesh).getSize(_size);
         _box.getCenter(_centre);
         mesh.position.sub(_centre);
-        const longest = Math.max(_size.x, _size.y, _size.z, 1e-4);
-        holder.scale.setScalar((Math.min(this.cellSize.x, this.cellSize.y) * ITEM_FIT) / longest);
+        // One cell: the longest side to the cell's smaller one, as every item always was;
+        // a span: as large as its width and height both allow.
+        const scale = spans
+          ? Math.min(this.cellSize.x / Math.max(_size.x, 1e-4), this.cellSize.y / Math.max(_size.y, 1e-4))
+          : Math.min(this.cellSize.x, this.cellSize.y) / Math.max(_size.x, _size.y, _size.z, 1e-4);
+        holder.scale.setScalar(scale * ITEM_FIT);
         holder.position.copy(this.cellPosition);
         holder.position.z -= ITEM_FORWARD;
       }

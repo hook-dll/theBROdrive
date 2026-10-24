@@ -5,25 +5,18 @@
  * runtime call.
  */
 
-import type { ContractCargoItem } from '../items/items';
+import { contractKindOf, type ContractCargoItem } from '../items/items';
 import type { StickerKind } from '../items/stickercatalog';
 import { carTransferKind } from './kinds/carTransfer';
-import { fragileRadioKind } from './kinds/fragileRadio';
-import { heavyCrateKind } from './kinds/heavyCrate';
-import { oversizeKind } from './kinds/oversize';
-import { parcelKind } from './kinds/parcel';
+import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
 import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
-import { trailerEquipmentKind } from './kinds/trailerEquipment';
+import { trailerKind } from './kinds/trailer';
 import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
 
-/** Order matters: offers walk this list against their weights. */
-export const CONTRACT_KINDS: readonly ContractKindDef[] = [
-  parcelKind,
-  heavyCrateKind,
-  fragileRadioKind,
-  trailerEquipmentKind,
-  oversizeKind,
+const CONTRACT_KINDS: readonly ContractKindDef[] = [
+  thingKind,
+  trailerKind,
   towingKind,
   carTransferKind,
   teddyPassengersKind,
@@ -34,11 +27,11 @@ const BY_KIND = Object.fromEntries(
 ) as Partial<Record<ContractKind, ContractKindDef>>;
 
 /**
- * The module for a declared kind. A defensive fallback to the ordinary parcel: every
- * id that reaches here has a module, so this only covers a future id without one.
+ * The module for an item's kind. A defensive fallback to the plain thing: every kind
+ * has a module, so this only covers a future id without one.
  */
-export function contractKindDef(kind: ContractKind): ContractKindDef {
-  return BY_KIND[kind] ?? parcelKind;
+function contractKindDef(item: ContractCargoItem): ContractKindDef {
+  return BY_KIND[contractKindOf(item)] ?? thingKind;
 }
 
 /**
@@ -46,7 +39,12 @@ export function contractKindDef(kind: ContractKind): ContractKindDef {
  * of a party, else the offer item itself. All of them go into the tray together.
  */
 export function contractRelease(offer: ContractCargoItem): readonly ContractCargoItem[] {
-  return contractKindDef(offer.contractKind).release?.(offer) ?? [offer];
+  return contractKindDef(offer).release?.(offer) ?? [offer];
+}
+
+/** Finishes a freshly generated offer with what its kind adds (a passenger party). */
+export function dressContractOffer(offer: ContractCargoItem): void {
+  contractKindDef(offer).dressOffer?.(offer);
 }
 
 /** What posting one item does to its contract; see `contractPosting`. */
@@ -83,8 +81,8 @@ export function isContractKind(value: unknown): value is ContractKind {
 /**
  * Why this post may not accept the cargo, or null. The base rule — a post
  * never signs cargo from itself or one further down the road — applies to every
- * kind; a kind adds its own on top (trailer equipment needs its trailer in the yard,
- * car transfer needs its car parked empty).
+ * kind; a kind adds its own on top (a trailer load needs its trailer in the yard, a
+ * car to hand over needs it parked empty).
  *
  * `probe` is the world at the accepting post, built by the post machine and
  * handed to the prompt and the commit alike.
@@ -94,14 +92,14 @@ export function contractAcceptRefusal(
   probe: DeliveryProbe,
 ): string | null {
   if (probe.targetPostIndex <= item.sourceCourierIndex) {
-    return 'this post cannot sign its own parcel';
+    return 'this post cannot sign for its own things';
   }
   // A two-stop race is signed from its finish on: handing it in at the first stop
   // would end a two-ruble race at the distance of a one-ruble one.
   if (item.raceLegs !== undefined && probe.targetPostIndex < item.sourceCourierIndex + item.raceLegs) {
     return 'this one races on to the next post';
   }
-  return contractKindDef(item.contractKind).acceptRefusal?.(item, probe) ?? null;
+  return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
 }
 
 /**
@@ -109,7 +107,7 @@ export function contractAcceptRefusal(
  * seed-random reward for a kind without one. Nothing on the way is scored.
  */
 export function contractRewardSticker(item: ContractCargoItem): StickerKind {
-  return contractKindDef(item.contractKind).signatureSticker ?? item.rewardStickerKind;
+  return contractKindDef(item).signatureSticker ?? item.rewardStickerKind;
 }
 
 /**
@@ -119,5 +117,5 @@ export function contractRewardSticker(item: ContractCargoItem): StickerKind {
  * between the two halves leaves the cargo delivered and cannot pay twice.
  */
 export function contractDeliveryEffect(item: ContractCargoItem, probe: DeliveryProbe): DeliveryEffect | null {
-  return contractKindDef(item.contractKind).onDelivered?.(item, probe) ?? null;
+  return contractKindDef(item).onDelivered?.(item, probe) ?? null;
 }

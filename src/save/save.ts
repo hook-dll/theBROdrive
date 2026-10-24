@@ -21,11 +21,10 @@ import {
   SPONGE_CAPACITY_MIN,
   type ContractCargoItem,
   type Item,
-  CARGO_SHAPES,
 } from '../items/items';
+import { isThingId } from '../items/things';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
-import { generateContractOffer } from '../contracts/offers';
 import type { ContractKind, ContractProgress } from '../contracts/types';
 import {
   AIR_FILTER_CELL,
@@ -35,7 +34,7 @@ import {
   BONNET_SLOT_COUNT,
 } from '../vehicle/bonnet';
 import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
-import { trunkCellCount } from '../vehicle/trunk';
+import { bootFreeAnchor, normalizeBoot, trunkCellCount } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
@@ -591,7 +590,7 @@ export function migrateState(raw: unknown): WorldState {
       stickerKind: 'star',
       completedContractId: `legacy:delivery:${index}`,
     };
-    const cell = firstCar?.storage.findIndex((stored) => stored === null) ?? -1;
+    const cell = firstCar ? bootFreeAnchor(firstCar.storage, carModel(firstCar.modelId).trunkGrid, { columns: 1, rows: 1 }) : -1;
     if (firstCar && cell >= 0) {
       firstCar.storage[cell] = item;
     } else {
@@ -626,7 +625,7 @@ export function migrateState(raw: unknown): WorldState {
     cars,
     courierStorage,
     completedContractIds,
-    deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind, seed, completedContractIds),
+    deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind),
     trailers,
     looseParts,
     looseItems,
@@ -705,13 +704,12 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
 }
 
 /**
- * A trailer's oversize load. `halfExtents` sizes a real collider, so they are
- * bounded rather than trusted: a corrupt save must not hand Rapier a 40 m box.
+ * A trailer's long load. `halfExtents` sizes a real collider, so they are bounded
+ * rather than trusted: a corrupt save must not hand Rapier a 40 m box.
  */
 function migrateTrailerLoad(raw: unknown): TrailerLoad | null {
   if (raw === null || raw === undefined) return null;
   const obj = asRecord(raw, 'trailer load');
-  if (obj.kind !== 'pipes' && obj.kind !== 'beams') return null;
   const ext = obj.halfExtents;
   if (!Array.isArray(ext) || ext.length !== 3) return null;
   const half: [number, number, number] = [0, 0, 0];
@@ -720,7 +718,7 @@ function migrateTrailerLoad(raw: unknown): TrailerLoad | null {
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
     half[i] = Math.min(6, value);
   }
-  return { kind: obj.kind, halfExtents: half };
+  return { halfExtents: half };
 }
 
 /** Where a version 1 bonnet kept its fuel tank, between the radiator and the air filter. */
@@ -841,6 +839,8 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // silently gifting fluids it never tracked, and the first can fixes it.
   const storageCells = hasCarModel(modelId) ? trunkCellCount(carModel(modelId).trunkGrid) : 0;
   const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
+  // Each thing at its anchor, fitting its cells (vehicle/trunk.ts); a misfit is dropped.
+  if (hasCarModel(modelId)) normalizeBoot(storage, carModel(modelId).trunkGrid);
   const def = carModel(modelId);
   const savedBonnet = migrateBonnetLayout(raw.bonnet, version);
   const bonnet = savedBonnet === undefined
@@ -937,23 +937,6 @@ const LEGACY_VARIANT_IDS: Readonly<Record<string, string>> = {
   radiator_lada: 'radiator',
   radiator_standard: 'radiator',
   radiator_copper: 'radiator',
-};
-
-/** Contract kinds dropped from the catalogue; their saved cargo loads as a parcel. */
-const LEGACY_REMOVED_CONTRACT_KINDS: Readonly<Record<string, true>> = {
-  urgent_film: true,
-  medical_thermo: true,
-  one_tank: true,
-  dont_overheat: true,
-  clean_delivery: true,
-  long_haul: true,
-  night_courier: true,
-  part_order: true,
-  convoy: true,
-  bald_tyres: true,
-  sand_route: true,
-  desert_slalom: true,
-  photo_errand: true,
 };
 
 /**
@@ -1083,31 +1066,14 @@ function sanitizeContractProgress(raw: unknown): ContractProgress {
   return progress;
 }
 
-/**
- * The delivery ledger. A save from before it rebuilds the counts from its completed
- * ids: an offer's id (`courier:N:offer:S`) regenerates its kind from the seed, so the
- * licences a player earned before the ledger are not lost. Ids that are not offers
- * (legacy envelopes) count for nothing.
- */
-function migrateDeliveriesByKind(
-  raw: unknown,
-  seed: number,
-  completed: readonly string[],
-): Partial<Record<ContractKind, number>> {
+/** The delivery ledger: counts by contract kind, unknown kinds dropped. */
+function migrateDeliveriesByKind(raw: unknown): Partial<Record<ContractKind, number>> {
   const ledger: Partial<Record<ContractKind, number>> = {};
-  if (typeof raw === 'object' && raw !== null) {
-    for (const [kind, count] of Object.entries(raw as Record<string, unknown>)) {
-      if (!isContractKind(kind) || typeof count !== 'number' || !Number.isFinite(count)) continue;
-      const n = Math.max(0, Math.trunc(count));
-      if (n > 0) ledger[kind] = n;
-    }
-    return ledger;
-  }
-  for (const id of completed) {
-    const match = /^courier:(\d+):offer:([0-3])$/.exec(id);
-    if (!match) continue;
-    const kind = generateContractOffer(seed, Number(match[1]), Number(match[2])).contractKind;
-    ledger[kind] = (ledger[kind] ?? 0) + 1;
+  if (typeof raw !== 'object' || raw === null) return ledger;
+  for (const [kind, count] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isContractKind(kind) || typeof count !== 'number' || !Number.isFinite(count)) continue;
+    const n = Math.max(0, Math.trunc(count));
+    if (n > 0) ledger[kind] = n;
   }
   return ledger;
 }
@@ -1234,39 +1200,20 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'pocket_watch', id: obj.id };
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
-      // A kind dropped from the catalogue comes back as an ordinary parcel, keeping
-      // its name, sticker and seed so the cargo survives the load.
-      const contractKind = LEGACY_REMOVED_CONTRACT_KINDS[String(obj.contractKind)] === true
-        ? 'parcel'
-        : obj.contractKind;
-      if (
-        sourceCourierIndex < 0
-        || !isContractKind(contractKind)
-        || typeof obj.cargoName !== 'string'
-        || !isStickerKind(obj.rewardStickerKind)
-      ) {
+      if (sourceCourierIndex < 0 || !isThingId(obj.thing) || !isStickerKind(obj.rewardStickerKind)) {
         throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
       }
       const item: ContractCargoItem = {
         type: 'contract_cargo',
         id: obj.id,
         sourceCourierIndex,
-        contractKind,
-        cargoName: obj.cargoName,
+        thing: obj.thing,
         rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
         progress: sanitizeContractProgress(obj.progress),
         ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
-        ...(typeof obj.registeredPin === 'string' && /^\d{6}$/.test(obj.registeredPin)
-          ? { registeredPin: obj.registeredPin }
-          : {}),
       };
-      if (typeof obj.massKg === 'number' && Number.isFinite(obj.massKg) && obj.massKg > 0) {
-        item.massKg = obj.massKg;
-      }
       if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
-      const shape = CARGO_SHAPES.find((known) => known === obj.shape);
-      if (shape) item.shape = shape;
       // A passenger's party: its contract id and 1–3 teddies. Anything else is dropped,
       // and the teddy then delivers as a party of its own.
       const party = typeof obj.party === 'object' && obj.party !== null ? (obj.party as Record<string, unknown>) : null;

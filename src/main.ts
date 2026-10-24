@@ -122,7 +122,6 @@ import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { nextPostIndex, postStop } from './world/poststops';
 import { placeNameAt } from './world/placenames';
-import { dialPin } from './ui/dial';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -1230,25 +1229,6 @@ async function boot(): Promise<void> {
     (contractId) => race.winPay(contractId),
     fixtures,
     {
-      // The dial holds the game still, as the pause does; deferred out of the fixed step
-      // the [F] arrived in, so the loop is stopped between steps, never inside one.
-      dial: (pin, opened) => {
-        queueMicrotask(() => {
-          if (paused) return;
-          paused = true;
-          loop.stop();
-          pads.stopRumble();
-          if (document.pointerLockElement !== null) document.exitPointerLock();
-          void dialPin(uiRoot, pin).then((result) => {
-            input.resyncPad();
-            paused = false;
-            if (result === 'opened') opened();
-            loop.start();
-            // Back to looking about, unless a machine is still being worked by the cursor.
-            if (!machineFocus.working) void canvas.requestPointerLock().catch(() => undefined);
-          });
-        });
-      },
       toast: (text) => hud.setToast(text),
       focus: (fixtureId) => machineFocus.enter(fixtureId),
       // A machine that dropped something in its tray lets go, so the player sees it.
@@ -3071,6 +3051,28 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
+    traffic: import.meta.env.DEV
+      ? {
+          get cap() {
+            return traffic.cap;
+          },
+          get floor() {
+            return traffic.floor;
+          },
+          get target() {
+            return traffic.status.target;
+          },
+          get count() {
+            return traffic.status.count;
+          },
+          setCap: (value: number | null) => {
+            traffic.cap = value;
+          },
+          setFloor: (value: number | null) => {
+            traffic.floor = value;
+          },
+        }
+      : undefined,
     ink: import.meta.env.DEV
       ? {
           get enabled() {

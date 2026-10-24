@@ -50,11 +50,6 @@ export interface FixtureContext {
   probe(postIndex: number, x: number, z: number): DeliveryProbe;
   /** Kopecks a race win adds for handing contract `contractId` in now (contracts/race.ts). */
   racePay(contractId: string): number;
-  /**
-   * Opens the rotary dial (ui/dial.ts) for `pin` with the game held still; `opened` runs
-   * once the right number is dialled, never on a hang-up.
-   */
-  dial(pin: string, opened: () => void): void;
   /** A one-line message on the HUD. */
   toast(text: string): void;
 }

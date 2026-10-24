@@ -1062,6 +1062,33 @@
   letter-spacing: 0.06em;
 }
 
+/* Traffic knobs: name, value chip and slider per row, across the whole grid. */
+.menu-dev-traffic {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.menu-dev-traffic-row {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: space-between;
+  align-items: center;
+  row-gap: 4px;
+  font-size: var(--m-size-sm);
+  letter-spacing: 0.06em;
+}
+
+.menu-dev-traffic-row .menu-slider {
+  grid-column: 1 / -1;
+}
+
+.menu-dev-traffic-readout {
+  font-size: var(--m-size-sm);
+  opacity: 0.7;
+}
+
 /* The kilometre teleport: a number field beside its button, across the whole grid. */
 .menu-dev-jump {
   grid-column: 1 / -1;
