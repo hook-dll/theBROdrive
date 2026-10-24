@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import type { RebaseShift, WorldOrigin } from '../world/origin';
+import { groundMarkMaterial } from './groundmark';
 
 /**
  * Contact shadows under the wheels of every visible car.
@@ -45,46 +46,6 @@ const BASE_ALPHA = 0.34;
 const MAX_LOAD_SCALE = 1.15;
 /** Lift along the contact normal, metres: enough to clear z-fighting without floating. */
 const SURFACE_LIFT = 0.014;
-
-const VERTEX = /* glsl */ `
-attribute vec2 quad;
-attribute float alpha;
-varying vec2 vQuad;
-varying float vAlpha;
-#include <fog_pars_vertex>
-
-void main() {
-  vQuad = quad;
-  vAlpha = alpha;
-  vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-  gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
-}`;
-
-const FRAGMENT = /* glsl */ `
-varying vec2 vQuad;
-varying float vAlpha;
-#include <fog_pars_fragment>
-
-void main() {
-  // An ellipse with a soft shoulder rather than a hard edge: a contact patch is a
-  // pressure distribution, not a rectangle, and its edge is where the tyre stops
-  // touching — which is a gradient, not a line.
-  float d = length( vQuad );
-  float edge = 1.0 - smoothstep( 0.35, 1.0, d );
-  float visibility = 1.0;
-  #ifdef USE_FOG
-    #ifdef FOG_EXP2
-      visibility = exp( -fogDensity * fogDensity * vFogDepth * vFogDepth );
-    #else
-      visibility = 1.0 - smoothstep( fogNear, fogFar, vFogDepth );
-    #endif
-  #endif
-  // Zero source colour with a OneMinusSrcAlpha destination factor MULTIPLIES the light
-  // the ground already received, so a patch can only ever darken. It cannot glow at
-  // midnight, and it cannot brighten a bright surface into a highlight.
-  gl_FragColor = vec4( 0.0, 0.0, 0.0, vAlpha * edge * visibility );
-}`;
 
 export class ContactPatchField {
   private readonly geometry = new THREE.BufferGeometry();
@@ -134,22 +95,9 @@ export class ContactPatchField {
     this.geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     this.geometry.setDrawRange(0, 0);
 
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX,
-      fragmentShader: FRAGMENT,
-      uniforms: { ...THREE.UniformsLib.fog },
-      fog: true,
-      transparent: true,
-      blending: THREE.CustomBlending,
-      blendEquation: THREE.AddEquation,
-      blendSrc: THREE.ZeroFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      side: THREE.DoubleSide,
-    });
+    // An ellipse with a soft shoulder: a contact patch is a pressure distribution, not a
+    // rectangle (render/groundmark.ts, the tyre tracks' program too).
+    this.material = groundMarkMaterial(0.35);
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     // Patches move through the pool every frame, so the geometry's computed bounds are

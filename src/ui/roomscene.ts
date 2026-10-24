@@ -339,8 +339,9 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
   const brass = k.mat({ color: 0xb08a45, roughness: 0.35, metalness: 0.85 });
   const steel = k.mat({ color: 0xcfcac0, roughness: 0.25, metalness: 0.95 });
   const red = k.mat({ color: 0xa8302a, roughness: 0.38, metalness: 0.3 });
-  const glass = new THREE.MeshPhysicalMaterial({ color: 0x9fb4d0, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0, depthWrite: false });
-  k.disposables.push(glass);
+  // Standard, as everything else in the room: a physical material with none of its
+  // extras set draws the same and was a program of its own.
+  const glass = k.mat({ color: 0x9fb4d0, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0, depthWrite: false });
   const toyMat = k.mat({ vertexColors: true, roughness: 0.28, metalness: 0.25, side: THREE.DoubleSide });
 
   /* --- The shell ---------------------------------------------------- */
@@ -445,11 +446,12 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
   moonSprite.position.copy(moonDir).multiplyScalar(170).add(new THREE.Vector3(0, 1.3, 0));
   moonSprite.lookAt(0, 1.3, 0);
   scene.add(moonSprite);
-  // Outside lies under the moon at a grazing angle: matte (Lambert) so the sand and the
-  // road do not catch its sheen, and darker than daylight's, seen from a lit room.
-  const groundMat = new THREE.MeshLambertMaterial({ map: sandGround(), color: 0x8a7480 });
+  // Outside lies under the moon at a grazing angle: fully rough so the sand and the road
+  // do not catch its sheen, and darker than daylight's, seen from a lit room. (They were
+  // Lambert, two programs of their own; the room is otherwise all Standard.)
+  const groundMat = k.mat({ map: sandGround(), color: 0x8a7480, roughness: 1, metalness: 0 });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), groundMat);
-  k.disposables.push(ground.geometry, groundMat, groundMat.map!);
+  k.disposables.push(ground.geometry);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = GROUND_Y;
   scene.add(ground);
@@ -485,8 +487,7 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(index);
     geometry.computeVertexNormals();
-    const roadMat = new THREE.MeshLambertMaterial({ map: roadSurface(), color: 0x8a8690, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    k.disposables.push(roadMat, roadMat.map!);
+    const roadMat = k.mat({ map: roadSurface(), color: 0x8a8690, roughness: 1, metalness: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const road = new THREE.Mesh(geometry, roadMat);
     k.disposables.push(geometry);
     scene.add(road);

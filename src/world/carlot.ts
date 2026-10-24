@@ -8,7 +8,7 @@ import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { ChunkContext } from './chunks';
 import type { Poi } from './poi';
-import { box, C } from './poi/kit';
+import { box, C, mergeKitStatics } from './poi/kit';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
 import { emptyCabin } from '../vehicle/cabin';
 
@@ -135,6 +135,7 @@ export function buildLotSign(
   board.scale.set(0.64, 0.42, 1);
   board.position.set(0, 1.2, 0);
   root.add(board);
+  mergeKitStatics(root);
   group.add(root);
   market.registerLotSign(carId, root);
   registered.push(carId);

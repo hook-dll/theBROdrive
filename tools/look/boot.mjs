@@ -78,9 +78,10 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
   url.searchParams.set('seed', SEED);
   await page.goto(url.href, { waitUntil: 'load', timeout: 60000 });
 
-  const hasNewDrive = () => [...document.querySelectorAll('button')].some((b) => b.textContent === 'New drive');
+  // The title's first button: "New game" over its subtitle (it read "New drive" once).
+  const hasNewDrive = () => [...document.querySelectorAll('button')].some((b) => /^New (game|drive)/.test(b.textContent ?? ''));
   await until(page, hasNewDrive, null, 30000, 'the menu');
-  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'New drive')?.click());
+  await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /^New (game|drive)/.test(b.textContent ?? ''))?.click());
   await until(page, () => !!window.__bro, null, 60000, 'the game');
   // The boot cover measures the GPU and may still change the tier underneath; nothing
   // is set until it has gone (app/bootwarmup.ts hides it last).

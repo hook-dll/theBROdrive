@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { makeFlatMaterial } from '../../render/materials';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { flatMaterialRoughness, isFlatPalette, makeFlatMaterial, makeFlatPaletteMaterial } from '../../render/materials';
 
 export type Opening = readonly [start: number, end: number, bottom: number, top: number];
 type WallAxis = 'x' | 'z';
@@ -598,3 +599,126 @@ export function rug(parent: THREE.Object3D, x: number, z: number, width: number,
   );
 }
 
+
+const _toRoot = new THREE.Matrix4();
+const _rootInverse = new THREE.Matrix4();
+
+/** How `mergeKitStatics` merges. */
+export interface KitMergeOptions {
+  /**
+   * Bake every mesh under the root into the root, not each node's own meshes into that
+   * node: for a piece whose groups only place its parts (a building, a drum on a rack).
+   * A node tagged `userData.kitKeep` and everything under it is left out whole.
+   */
+  readonly deep?: boolean;
+  /**
+   * The merged geometry is a cached asset every placement shares (a building's,
+   * world/poivariantbuild.ts), not this piece's own: its meshes are not tagged for
+   * `disposeKitMerged`.
+   */
+  readonly shared?: boolean;
+}
+
+/**
+ * Collapses kit-built meshes into one mesh per material, and every flat colour
+ * (`material`, `box`, `cylinder`) at one roughness into ONE mesh with its colours in the
+ * vertices (`makeFlatPaletteMaterial`). A card machine was 40-odd boxes in a dozen colours,
+ * each colour a draw in the colour pass and another in the shadow pass; merged it is two
+ * or three of each.
+ *
+ * By default each node's own mesh children are merged into that node, so a moving part
+ * built as a group of boxes (a crank, a flap, a drawer) becomes one mesh that still moves
+ * with its group; `deep` bakes the whole tree into the root. Left alone: roof panels (the
+ * viewer hides them), door obstacles (clearance metadata), hidden meshes, anything tagged
+ * `userData.kitKeep` (a part that is shown, hidden, moved or repainted on its own), and
+ * any mesh with more than one material. A batch keeps its meshes' shadow flags.
+ *
+ * The merged geometry is this one piece's own unless `shared`: its meshes are tagged, and
+ * whoever streams the piece out frees them with `disposeKitMerged`.
+ */
+export function mergeKitStatics(root: THREE.Object3D, options: KitMergeOptions = {}): void {
+  const owned = options.shared !== true;
+  if (options.deep === true) {
+    mergeInto(root, true, owned);
+    return;
+  }
+  const parents: THREE.Object3D[] = [];
+  root.traverse((node) => {
+    if (!(node as THREE.Mesh).isMesh && node.children.length > 1) parents.push(node);
+  });
+  for (const parent of parents) mergeInto(parent, false, owned);
+}
+
+/** Frees the geometry `mergeKitStatics` built for the scenery under `root`. */
+export function disposeKitMerged(root: THREE.Object3D): void {
+  root.traverse((node) => {
+    if (node.userData.kitMerged === true) (node as THREE.Mesh).geometry.dispose();
+  });
+}
+
+function mergeInto(root: THREE.Object3D, deep: boolean, owned: boolean): void {
+  root.updateMatrixWorld(true);
+  _rootInverse.copy(root.matrixWorld).invert();
+  interface Batch { readonly material: THREE.Material; readonly palette: boolean; readonly cast: boolean; readonly receive: boolean; readonly meshes: THREE.Mesh[] }
+  const batches = new Map<string, Batch>();
+  const take = (object: THREE.Object3D): void => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || (mesh as THREE.InstancedMesh).isInstancedMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
+    if (mesh.userData.kitKeep === true || !mesh.visible || Array.isArray(mesh.material)) return;
+    if (mesh.userData.poiRoof === true || typeof mesh.userData.poiDoorObstacle === 'string') return;
+    const roughness = flatMaterialRoughness(mesh.material);
+    const material = roughness === undefined ? mesh.material : makeFlatPaletteMaterial(roughness);
+    const key = `${material.uuid}:${mesh.castShadow}:${mesh.receiveShadow}`;
+    const batch = batches.get(key);
+    if (batch) batch.meshes.push(mesh);
+    else batches.set(key, { material, palette: isFlatPalette(material), cast: mesh.castShadow, receive: mesh.receiveShadow, meshes: [mesh] });
+  };
+  const walk = (node: THREE.Object3D): void => {
+    for (const child of node.children) {
+      take(child);
+      if (child.userData.kitKeep !== true) walk(child);
+    }
+  };
+  if (deep) walk(root);
+  else for (const child of root.children) take(child);
+
+  const color = new THREE.Color();
+  for (const { material, palette, cast, receive, meshes } of batches.values()) {
+    if (meshes.length < 2) continue;
+    const indexed = meshes.every((mesh) => mesh.geometry.index !== null);
+    const parts: THREE.BufferGeometry[] = [];
+    for (const mesh of meshes) {
+      let geometry = mesh.geometry.clone();
+      for (const name of Object.keys(geometry.attributes)) {
+        // A palette mesh merged before (a machine dressed after its cabinet) keeps its colours.
+        if (name !== 'position' && name !== 'normal' && name !== 'uv' && !(palette && name === 'color')) geometry.deleteAttribute(name);
+      }
+      if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+      const count = geometry.getAttribute('position').count;
+      if (!geometry.getAttribute('uv')) geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+      if (palette && !geometry.getAttribute('color')) {
+        // Linear, as the material's own colour is: three reads vertex colours linear.
+        color.copy((mesh.material as THREE.MeshStandardMaterial).color);
+        const colors = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) color.toArray(colors, i * 3);
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      }
+      if (!indexed && geometry.index) geometry = geometry.toNonIndexed();
+      geometry.applyMatrix4(_toRoot.multiplyMatrices(_rootInverse, mesh.matrixWorld));
+      parts.push(geometry);
+    }
+    const merged = mergeGeometries(parts, false);
+    for (const part of parts) part.dispose();
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = receive;
+    if (owned) mesh.userData.kitMerged = true;
+    root.add(mesh);
+    for (const original of meshes) {
+      original.removeFromParent();
+      // An earlier merge's own buffer, merged again: nothing else holds it.
+      if (original.userData.kitMerged === true) original.geometry.dispose();
+    }
+  }
+}

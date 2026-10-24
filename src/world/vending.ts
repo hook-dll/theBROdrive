@@ -8,11 +8,11 @@ import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { STICKERS } from '../items/stickercatalog';
 import type { PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
-import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, type CardMachineParts } from './cardmachine';
+import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import type { Poi } from './poi';
-import { box, C } from './poi/kit';
+import { box, C, mergeKitStatics } from './poi/kit';
 
 /**
  * The SHOP machines: where the small things a driver needs are bought.
@@ -150,6 +150,7 @@ function vendingStock(
 }
 
 const SHOP_LOOK = { title: 'SHOP', body: C.fadedBlue, buttonLabel: 'BUY', buttonColour: 0xb03a2e } as const;
+registerCardMachineSigns(SHOP_LOOK);
 
 /** What the card says a ware is, and the colour of its band. */
 const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: string; readonly line: string }>> = {
@@ -208,8 +209,12 @@ export function buildShop(
     const colour = item.type === 'spray_can' ? item.paint : item.type === 'sun_shades' ? SHADE_LOOK[item.tint] : look.colour;
     const product = box(root, look.size, [PANEL_X, shelfY + 0.006 + look.size[1] / 2, CASE_FRONT - 0.08], colour);
     product.visible = false;
+    // Shown one at a time, on its card: never merged.
+    product.userData.kitKeep = true;
     products[slot] = product;
   }
+  // The showcase joins the cabinet's merged boxes.
+  mergeKitStatics(root);
 
   const machine = new ShopMachine(ctx.world, id, poi.s / 1000, items, wares, products, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));

@@ -73,6 +73,38 @@
 
 ### Changed
 
+- FEWER MATERIALS: ONE DRAW PER FINISH FOR KIT SCENERY, 94 -> 86 PROGRAMS. Measured with
+  `tools/look/draws.mjs` (new: draws per owner and every program's materials) at seed
+  flick, km 3/21/40: the scene pass at a post stop went from 376 to 283 draws; nothing
+  looks different (`tools/look/closeup.mjs`, new, before/after at the same pose: card
+  machine, barrels, key box, lot sign, artefacts, buildings within 0.2% of pixels); a
+  5-minute day-to-night `hitch.mjs` drive past posts, a lot and a mirage linked 0 programs.
+  - Kit scenery merges by finish (`poi/kit.ts` `mergeKitStatics`, `disposeKitMerged`):
+    every flat colour at one roughness becomes ONE mesh with its colours in the vertices
+    (`render/materials.ts` `makeFlatPaletteMaterial`, the program `pole-body` already
+    links; anchored in `marketProgramAnchor`). Card machines (72 meshes -> 22 at km 3),
+    barrel stands (34 -> 10), key boxes, lot signs, signposts; each moving part (crank,
+    flap, button, chute, lever, drawer, key, tap handle) is merged inside its own group;
+    parts shown, hidden or repainted on their own are tagged `kitKeep`. The buildings'
+    `mergePoiStatics` uses it too. The fixtures' merged geometry is freed with their chunk.
+  - Sign atlas (`market.ts` `registerAtlasSign`, `signMesh`): the card machines' titles,
+    buttons and tray labels and the drums' stencils, painted once on one canvas, so a
+    machine's boards and a stand's stencils are one draw each. Prices and place names
+    keep their own boards.
+  - Artefacts bake faceted normals (`faceted`) instead of `flatShading`: two programs
+    fewer, pixel-identical. Birds keep `flatShading` (their wings bend in the shader, so
+    the normals must follow); tumbleweed's instanced program is its own either way.
+  - The barrel cactus and the scrub paint their khaki into `matProp`'s vertices
+    (`matScrub` gone, one program).
+  - Tyre tracks and contact patches share one shader (`render/groundmark.ts`): a mark's
+    `quad` and an edge shoulder (0.72 track, 0.35 patch).
+  - Mirage solids, cards and blocks are one front-sided vertex-coloured program (4 -> 2):
+    crossed cards carry both faces (`crossedCardGeometry`), plain boxes are white in
+    their vertices (`whiteBoxGeometry`).
+  - The football's seams are painted into its leather (1024x512 maps, `paintFootballSeams`)
+    instead of a `LineSegments` overlay: a groove that keeps its size, one draw fewer.
+  - Title room: the outside sand and road and the window glass are Standard (were
+    Lambert and Physical, three programs of their own).
 - ROADSIDE ROCKS AND CACTI CAST AND RECEIVE SUN SHADOWS, as the desert tiles' props do
   (`props/scatter.ts` sets `castShadow`/`receiveShadow`; ground cover still does
   neither). It was a dev A/B; the switch and `InstanceBatches.setPropShadows`,

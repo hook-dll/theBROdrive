@@ -83,6 +83,10 @@ const conditionTemplates = new Map<string, THREE.MeshStandardMaterial>();
 
 /** Flat materials are shared outright: they carry no per-instance state. */
 const flatCache = new Map<string, THREE.MeshStandardMaterial>();
+/** Each flat material's roughness, for `flatMaterialRoughness`. */
+const flatRoughness = new WeakMap<THREE.Material, number>();
+/** The flat palettes (`makeFlatPaletteMaterial`), one per roughness. */
+const paletteCache = new Map<number, THREE.MeshStandardMaterial>();
 
 function conditionKey(baseColor: number, metalness: number, roughness: number): string {
   return `${baseColor}:${metalness}:${roughness}`;
@@ -1191,8 +1195,38 @@ export function makeFlatMaterial(color: number, roughness = 0.6): THREE.MeshStan
       { contourStrength: 0, stippleStrength: 0 },
     );
     flatCache.set(key, material);
+    flatRoughness.set(material, roughness);
   }
   return material;
+}
+
+/**
+ * Every flat colour at one roughness as ONE material: `makeFlatMaterial`'s, white, with
+ * the colour in the vertices. A kit-built piece of scenery (world/poi/kit.ts
+ * `mergeKitStatics`) is a dozen colours of boxes, each colour its own draw in the colour
+ * pass and the shadow pass; baked into one buffer with their colours it is one of each.
+ */
+export function makeFlatPaletteMaterial(roughness: number): THREE.MeshStandardMaterial {
+  let material = paletteCache.get(roughness);
+  if (material === undefined) {
+    material = applyComicShading(
+      new THREE.MeshStandardMaterial({ name: 'flat-palette', color: 0xffffff, vertexColors: true, roughness, metalness: 0 }),
+      { contourStrength: 0, stippleStrength: 0 },
+    );
+    paletteCache.set(roughness, material);
+  }
+  return material;
+}
+
+/** Whether `material` is one of the flat palettes. */
+export function isFlatPalette(material: THREE.Material): boolean {
+  for (const palette of paletteCache.values()) if (palette === material) return true;
+  return false;
+}
+
+/** The roughness a `makeFlatMaterial` material was made with; undefined for any other. */
+export function flatMaterialRoughness(material: THREE.Material): number | undefined {
+  return flatRoughness.get(material);
 }
 /**
  * FBXLoader still produces MeshPhongMaterial for the Soviet pack. The body shaders
@@ -1873,6 +1907,8 @@ function writeCondition(material: THREE.Material, dirt: number, rust: number): v
 export function disposeMaterialCache(): void {
   for (const material of conditionTemplates.values()) material.dispose();
   for (const material of flatCache.values()) material.dispose();
+  for (const material of paletteCache.values()) material.dispose();
   conditionTemplates.clear();
   flatCache.clear();
+  paletteCache.clear();
 }

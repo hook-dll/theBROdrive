@@ -826,10 +826,17 @@ function buildProfessionalCameraInto(b: MeshBuilder): void {
 }
 
 export const FOOTBALL_RADIUS = 0.11;
+/** Half the width of a stitched seam between two panels, metres. */
+const FOOTBALL_SEAM_HALF_WIDTH = 0.001;
+/**
+ * The seam in the leather's maps: lit as the leather is, so paler than the unlit line it
+ * once was (0x514e48), and a groove in the relief.
+ */
+const FOOTBALL_SEAM_ALBEDO = '#7b7870';
+const FOOTBALL_SEAM_RELIEF = '#5c5c5c';
 
 let footballSurfaceMaterial: THREE.MeshStandardMaterial | null = null;
 let footballPanelMaterial: THREE.MeshStandardMaterial | null = null;
-let footballSeamMaterial: THREE.LineBasicMaterial | null = null;
 
 const FOOTBALL_PHI = (1 + Math.sqrt(5)) / 2;
 const FOOTBALL_ICOSAHEDRON_VERTICES = [
@@ -927,8 +934,11 @@ function footballPentagonGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
-function footballSeamGeometry(): THREE.BufferGeometry {
-  const radius = FOOTBALL_RADIUS * 1.011;
+/**
+ * Every seam between two panels as the arc's two ends on the unit sphere: each edge of the
+ * truncated icosahedron, split at its middle as the panels' own outlines are.
+ */
+function footballSeams(): readonly (readonly [THREE.Vector3, THREE.Vector3])[] {
   const edges = new Map<string, readonly [number, number, number, number]>();
   const addPolygon = (nodes: readonly (readonly [number, number])[]): void => {
     for (let i = 0; i < nodes.length; i++) {
@@ -948,40 +958,73 @@ function footballSeamGeometry(): THREE.BufferGeometry {
     addPolygon([[a, b], [b, a], [b, c], [c, b], [c, a], [a, c]]);
   }
 
-  const positions: number[] = [];
+  const seams: (readonly [THREE.Vector3, THREE.Vector3])[] = [];
   for (const [a0, a1, b0, b1] of edges.values()) {
-    const a = footballTruncatedVertex(a0, a1, radius);
-    const b = footballTruncatedVertex(b0, b1, radius);
-    const middle = a.clone().add(b).normalize().multiplyScalar(radius);
-    positions.push(
-      a.x, a.y, a.z, middle.x, middle.y, middle.z,
-      middle.x, middle.y, middle.z, b.x, b.y, b.z,
-    );
+    seams.push([footballTruncatedVertex(a0, a1, 1), footballTruncatedVertex(b0, b1, 1)]);
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  return geometry;
+  return seams;
+}
+
+/**
+ * Paints the seams into the leather's maps, as the body's sphere unwraps them
+ * (`SphereGeometry`: u round from -X, v down from +Y): a groove a few millimetres wide in
+ * the texture, so it keeps its size at any distance and mips away cleanly. (It was a set
+ * of lines over the ball: a pixel wide however far off, and a program of their own.)
+ */
+function paintFootballSeams(albedo: CanvasRenderingContext2D, relief: CanvasRenderingContext2D, width: number, height: number): void {
+  const across = (FOOTBALL_SEAM_HALF_WIDTH * 2) / FOOTBALL_RADIUS;
+  const ry = Math.max(0.6, (across / Math.PI) * height * 0.5);
+  const point = new THREE.Vector3();
+  const dot = (x: number, y: number, rx: number): void => {
+    for (const [g, colour] of [[albedo, FOOTBALL_SEAM_ALBEDO], [relief, FOOTBALL_SEAM_RELIEF]] as const) {
+      g.fillStyle = colour;
+      for (const shift of [-width, 0, width]) {
+        g.beginPath();
+        g.ellipse(x + shift, y, rx, ry, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  };
+  for (const [from, to] of footballSeams()) {
+    const angle = from.angleTo(to);
+    // A dot every half texel along the arc.
+    const steps = Math.ceil((angle / Math.PI) * height * 2);
+    for (let i = 0; i <= steps; i++) {
+      point.copy(from).lerp(to, i / steps).normalize();
+      const theta = Math.acos(THREE.MathUtils.clamp(point.y, -1, 1));
+      let u = Math.atan2(point.z, -point.x) / (Math.PI * 2);
+      if (u < 0) u += 1;
+      const sin = Math.max(Math.sin(theta), 0.02);
+      dot(u * width, (theta / Math.PI) * height, Math.min(width / 4, ry / sin));
+    }
+  }
 }
 
 function footballMaterial(): THREE.MeshStandardMaterial {
   if (footballSurfaceMaterial) return footballSurfaceMaterial;
 
-  const size = 256;
+  // Fine enough for the seams to be a groove, not a smear: 1024 round the ball, 512
+  // pole to pole, so a texel is square on the equator.
+  const width = 1024;
+  const height = 512;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const reliefCanvas = document.createElement('canvas');
-  reliefCanvas.width = size;
-  reliefCanvas.height = size;
+  reliefCanvas.width = width;
+  reliefCanvas.height = height;
   const albedo = canvas.getContext('2d');
   const relief = reliefCanvas.getContext('2d');
   if (!albedo || !relief) throw new Error('Canvas 2D is required for the football surface');
   albedo.fillStyle = '#ded9cc';
-  albedo.fillRect(0, 0, size, size);
+  albedo.fillRect(0, 0, width, height);
   relief.fillStyle = '#858585';
-  relief.fillRect(0, 0, size, size);
+  relief.fillRect(0, 0, width, height);
 
-  // Fixed-seed pores and faint wear make the white panels read as pebbled leather.
+  // Fixed-seed pores and faint wear make the white panels read as pebbled leather. Laid
+  // on a 256 grid, each pore the size it was on the 256-square map this replaced.
+  const poreW = width / 256;
+  const poreH = height / 256;
   let seed = 0x4f1bbcdc;
   for (let i = 0; i < 2600; i++) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -989,10 +1032,11 @@ function footballMaterial(): THREE.MeshStandardMaterial {
     const y = (seed >>> 8) & 255;
     const light = (seed >>> 17) & 1;
     albedo.fillStyle = light ? 'rgba(255,255,255,0.05)' : 'rgba(55,48,39,0.045)';
-    albedo.fillRect(x, y, 1, 1);
+    albedo.fillRect(x * poreW, y * poreH, poreW, poreH);
     relief.fillStyle = light ? '#969696' : '#747474';
-    relief.fillRect(x, y, 1, 1);
+    relief.fillRect(x * poreW, y * poreH, poreW, poreH);
   }
+  paintFootballSeams(albedo, relief, width, height);
 
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
@@ -1037,13 +1081,6 @@ function createFootballMesh(): THREE.Group {
   panels.name = 'football_black_panels';
   root.add(panels);
 
-  footballSeamMaterial ??= new THREE.LineBasicMaterial({ color: 0x514e48 });
-  const seams = new THREE.LineSegments(
-    cachedGeo('football_panel_seams', footballSeamGeometry),
-    footballSeamMaterial,
-  );
-  seams.name = 'football_panel_seams';
-  root.add(seams);
   return root;
 }
 
@@ -1384,9 +1421,9 @@ export function createMedicineRemnantMesh(kind: MedicineRemnantKind): THREE.Obje
  * programs) mid-drive, and a spray tin the condition program on a boot that held no
  * part. The shapes: flat and glass (the bottle itself, its meshes as a loose item has
  * them, no shadows), condition (parts, cans, tins: one program for every condition
- * material), and the football's mapped and bumped leather and its seam lines. Every
- * other world item is built from these. Photographs are left out: only the player puts
- * them on the ground.
+ * material), and the football's mapped and bumped leather (its seams are painted in).
+ * Every other world item is built from these. Photographs are left out: only the player
+ * puts them on the ground.
  */
 export function itemProgramAnchor(): THREE.Object3D {
   const group = new THREE.Group();

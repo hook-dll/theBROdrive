@@ -122,16 +122,23 @@ export const CACTUS_TINT = displayColour(0xf3f8e6);
 const SHIP_TINT = displayColour(0xffe9d2);
 
 
-/** Two perpendicular copies of every triangle: a readable flat from any road angle. */
+/**
+ * Two perpendicular copies of every triangle: a readable flat from any road angle. Each
+ * copy is laid both ways round, so a card shows from behind with a front-sided material
+ * (`cardMaterial`): the program every other unlit mirage solid links, where a
+ * double-sided one was a program of its own.
+ */
 export function crossedCardGeometry(draw: (triangle: CardTriangle) => void): THREE.BufferGeometry {
   const positions: number[] = [];
   const colours: number[] = [];
   const triangle: CardTriangle = (ax, ay, bx, by, cx, cy, colour, z = 0) => {
     positions.push(
       ax, ay, z, bx, by, z, cx, cy, z,
+      ax, ay, z, cx, cy, z, bx, by, z,
       z, ay, -ax, z, by, -bx, z, cy, -cx,
+      z, ay, -ax, z, cy, -cx, z, by, -bx,
     );
-    for (let i = 0; i < 6; i++) colours.push(colour.r, colour.g, colour.b);
+    for (let i = 0; i < 12; i++) colours.push(colour.r, colour.g, colour.b);
   };
   draw(triangle);
   const geometry = new THREE.BufferGeometry();
@@ -431,14 +438,11 @@ function hullMaterial(): THREE.MeshBasicMaterial {
   });
 }
 
+/** A card's material: a solid's, as its geometry carries both faces (`crossedCardGeometry`). */
 export function cardMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     vertexColors: true,
-    side: THREE.DoubleSide,
-    // One pass for both sides: three's two-pass draw of a transparent double-sided
-    // material flips `side` with `needsUpdate` and looks the program up again twice a
-    // pass per mesh. A card is a flat plane, one face under each pixel either way.
-    forceSinglePass: true,
+    side: THREE.FrontSide,
     transparent: true,
     opacity: 0,
     depthWrite: true,
@@ -448,22 +452,32 @@ export function cardMaterial(): THREE.MeshBasicMaterial {
 }
 
 /**
- * Blocks are box instances, and the material may only ask for vertex colours when the
- * geometry actually carries them: `vertexColors: true` over a plain `BoxGeometry` made
- * the shader read a disabled attribute — a constant black — and multiplied every
- * building by zero, which is why the sandstone city once rendered as a silhouette.
- * Per-building paint arrives through `instanceColor` either way.
+ * Blocks are box instances in vertex colours: the toned boxes carry their faces' tones,
+ * the plain ones (windows, streets) white (`whiteBoxGeometry`), so all of them link the
+ * hulls' and cards' one program. The colours must be there: `vertexColors: true` over a
+ * plain `BoxGeometry` made the shader read a disabled attribute — a constant black — and
+ * multiplied every building by zero, which is why the sandstone city once rendered as a
+ * silhouette. Per-building paint arrives through `instanceColor` either way.
  */
-function blockMaterial(toned: boolean): THREE.MeshBasicMaterial {
+function blockMaterial(): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     color: 0xffffff,
-    vertexColors: toned,
+    vertexColors: true,
+    side: THREE.FrontSide,
     transparent: true,
     opacity: 0,
     depthWrite: true,
     fog: true,
     toneMapped: true,
   });
+}
+
+/** A unit box, white in its vertices: a block with no tones of its own. */
+function whiteBoxGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const count = geometry.getAttribute('position').count;
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
+  return geometry;
 }
 
 /**
@@ -631,11 +645,11 @@ export class MirageTableau {
     const palmMaterial = cardMaterial();
     const treeMaterial = cardMaterial();
     const cactusMaterial = cardMaterial();
-    const stoneMaterial = blockMaterial(true);
-    const windowMaterial = blockMaterial(false);
-    const accentMaterial = blockMaterial(true);
-    const roofMaterial = blockMaterial(true);
-    const streetMaterial = blockMaterial(false);
+    const stoneMaterial = blockMaterial();
+    const windowMaterial = blockMaterial();
+    const accentMaterial = blockMaterial();
+    const roofMaterial = blockMaterial();
+    const streetMaterial = blockMaterial();
     const shipMaterial = hullMaterial();
     this.materials = [
       palmMaterial,
@@ -654,7 +668,7 @@ export class MirageTableau {
     );
     this.trees = new THREE.InstancedMesh(treeGeometry(), treeMaterial, MAX_PLANTS);
     this.cacti = new THREE.InstancedMesh(cactusGeometry(), cactusMaterial, MAX_PLANTS);
-    const box = new THREE.BoxGeometry(1, 1, 1);
+    const box = whiteBoxGeometry();
     this.blocks = new THREE.InstancedMesh(tonedBoxGeometry(), stoneMaterial, MAX_BLOCKS);
     this.cityWindows = new THREE.InstancedMesh(box, windowMaterial, MAX_CITY_WINDOWS);
     this.cityAccents = new THREE.InstancedMesh(tonedBoxGeometry(), accentMaterial, MAX_CITY_ACCENTS);

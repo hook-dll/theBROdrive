@@ -74,7 +74,6 @@ const matObsidian = new THREE.MeshStandardMaterial({
   color: 0x15141c,
   roughness: 0.22,
   metalness: 0.55,
-  flatShading: true,
 });
 const matGlassFused = new THREE.MeshStandardMaterial({
   color: 0x2a2a30,
@@ -93,13 +92,11 @@ const matStone = new THREE.MeshStandardMaterial({
   color: 0x9a7a5c,
   roughness: 0.95,
   metalness: 0,
-  flatShading: true,
 });
 const matRingMetal = new THREE.MeshStandardMaterial({
   color: 0x2c2f38,
   roughness: 0.35,
   metalness: 0.8,
-  flatShading: true,
 });
 
 /** A glow material whose intensity breathes between `lo` and `hi` over `period` s. */
@@ -110,8 +107,7 @@ function glow(color: THREE.Color, lo: number, hi: number, period: number, phase 
     emissiveIntensity: (lo + hi) / 2,
     roughness: 0.4,
     metalness: 0,
-    flatShading: true,
-    userData: { lo, hi, period, phase },
+      userData: { lo, hi, period, phase },
   });
 }
 
@@ -129,8 +125,7 @@ const crystalMats: readonly THREE.MeshStandardMaterial[] = [0, 0.33, 0.66, 1].ma
     emissiveIntensity: 0.35,
     roughness: 0.18,
     metalness: 0.1,
-    flatShading: true,
-    transparent: true,
+      transparent: true,
     opacity: 0.88,
   });
 });
@@ -145,6 +140,18 @@ function breathe(material: THREE.MeshStandardMaterial, t: number): void {
 // ---------------------------------------------------------------------------
 // Geometry, shared
 // ---------------------------------------------------------------------------
+
+/**
+ * Every face its own normal, baked: the cut-stone look `flatShading` drew from screen
+ * derivatives, in the plain program the rest of the scenery's materials already link
+ * (a `flatShading` material is a program of its own).
+ */
+function faceted(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const flat = geometry.index ? geometry.toNonIndexed() : geometry;
+  flat.computeVertexNormals();
+  if (flat !== geometry) geometry.dispose();
+  return flat;
+}
 
 /** A tall slab, a little narrower at the top: the monolith. */
 const slabGeo = (() => {
@@ -163,13 +170,13 @@ const seamGeo = new THREE.BoxGeometry(0.05, 3.3, 0.02);
 const glyphGeo = new THREE.BoxGeometry(0.28, 0.05, 0.02);
 const discGeo = new THREE.CylinderGeometry(2.3, 2.5, 0.08, 40);
 const scorchGeo = new THREE.CircleGeometry(3.6, 40).rotateX(-Math.PI / 2);
-const groundRingGeo = new THREE.TorusGeometry(1.7, 0.05, 6, 64).rotateX(Math.PI / 2);
-const pebbleGeo = new THREE.IcosahedronGeometry(1, 0);
-const coreGeo = new THREE.OctahedronGeometry(0.55, 0);
-const standingGeo = new THREE.CylinderGeometry(0.22, 0.34, 1.6, 5).translate(0, 0.8, 0);
-const crystalBodyGeo = new THREE.CylinderGeometry(1, 1, 1, 6).translate(0, 0.5, 0);
-const crystalTipGeo = new THREE.ConeGeometry(1, 0.9, 6).translate(0, 0.45, 0);
-const gateRingGeo = new THREE.TorusGeometry(2.7, 0.3, 10, 48);
+const groundRingGeo = faceted(new THREE.TorusGeometry(1.7, 0.05, 6, 64).rotateX(Math.PI / 2));
+const pebbleGeo = faceted(new THREE.IcosahedronGeometry(1, 0));
+const coreGeo = faceted(new THREE.OctahedronGeometry(0.55, 0));
+const standingGeo = faceted(new THREE.CylinderGeometry(0.22, 0.34, 1.6, 5).translate(0, 0.8, 0));
+const crystalBodyGeo = faceted(new THREE.CylinderGeometry(1, 1, 1, 6).translate(0, 0.5, 0));
+const crystalTipGeo = faceted(new THREE.ConeGeometry(1, 0.9, 6).translate(0, 0.45, 0));
+const gateRingGeo = faceted(new THREE.TorusGeometry(2.7, 0.3, 10, 48));
 const gateLampGeo = new THREE.BoxGeometry(0.2, 0.62, 0.66);
 const membraneGeo = new THREE.CircleGeometry(2.42, 48);
 
@@ -222,6 +229,7 @@ const matMembrane = new THREE.ShaderMaterial({
 
 function root(b: ArtifactBuild, yaw: number): THREE.Group {
   const g = new THREE.Group();
+  g.name = 'artifact';
   g.position.set(b.x - b.ctx.originX, b.y, b.z - b.ctx.originZ);
   g.rotation.y = yaw;
   b.group.add(g);

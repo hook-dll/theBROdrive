@@ -6,7 +6,7 @@ import { desertAt } from './regions';
 import { laybysBetween, type Layby } from './layby';
 import { SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
-import { box, C } from './poi/kit';
+import { box, C, disposeKitMerged, mergeKitStatics } from './poi/kit';
 import { addStatic } from './props/scatter';
 import { paintPlate, plateStyle, RING_GLYPH } from './signplates';
 import { SIGNPOST_ALONG_M, SIGNPOST_OUT_M } from './settlement';
@@ -129,6 +129,7 @@ export class SignpostProvider implements ChunkProvider {
       board.scale.set(BOARD_W, BOARD_H, 1);
       board.position.set(0, BOARD_Y, 0);
       root.add(board);
+      mergeKitStatics(root);
       group.add(root);
 
       if (ctx.hasPhysics) {
@@ -155,6 +156,7 @@ export class SignpostProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
+        disposeKitMerged(group);
         for (const material of materials) {
           material.map?.dispose();
           material.dispose();

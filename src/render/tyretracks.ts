@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 import type { WheelSprayState } from '../vehicle/vehicle';
 import type { RebaseShift, WorldOrigin } from '../world/origin';
+import { groundMarkMaterial } from './groundmark';
 
 /**
  * Visual tyre tracks on sand.
@@ -33,42 +34,6 @@ interface WheelCursor {
   nz: number;
 }
 
-const VERTEX = /* glsl */ `
-attribute float across;
-attribute float alpha;
-varying float vAcross;
-varying float vAlpha;
-#include <fog_pars_vertex>
-
-void main() {
-  vAcross = across;
-  vAlpha = alpha;
-  vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-  gl_Position = projectionMatrix * mvPosition;
-  #include <fog_vertex>
-}`;
-
-const FRAGMENT = /* glsl */ `
-varying float vAcross;
-varying float vAlpha;
-#include <fog_pars_fragment>
-
-void main() {
-  float edge = 1.0 - smoothstep( 0.72, 1.0, abs( vAcross ) );
-  float visibility = 1.0;
-  #ifdef USE_FOG
-    #ifdef FOG_EXP2
-      visibility = exp( -fogDensity * fogDensity * vFogDepth * vFogDepth );
-    #else
-      visibility = 1.0 - smoothstep( fogNear, fogFar, vFogDepth );
-    #endif
-  #endif
-  // Zero source colour plus OneMinusSrcAlpha destination blending darkens whatever
-  // light the terrain already received. Tracks can never glow independently at night.
-  gl_FragColor = vec4( 0.0, 0.0, 0.0, vAlpha * edge * visibility );
-}`;
-
-
 export class SandTyreTracks {
   private readonly geometry = new THREE.BufferGeometry();
   private readonly material: THREE.ShaderMaterial;
@@ -86,15 +51,16 @@ export class SandTyreTracks {
     private readonly scene: THREE.Scene,
     origin: WorldOrigin,
   ) {
-    const across = new Float32Array(SEGMENT_CAPACITY * 4);
+    // Each corner's place across the track, as the mark's `quad` (x across, y unused).
+    const across = new Float32Array(SEGMENT_CAPACITY * 4 * 2);
     const indices = new Uint32Array(SEGMENT_CAPACITY * 6);
     for (let i = 0; i < SEGMENT_CAPACITY; i++) {
       const v = i * 4;
       const o = i * 6;
-      across[v] = -1;
-      across[v + 1] = 1;
-      across[v + 2] = -1;
-      across[v + 3] = 1;
+      across[v * 2] = -1;
+      across[v * 2 + 2] = 1;
+      across[v * 2 + 4] = -1;
+      across[v * 2 + 6] = 1;
       indices[o] = v;
       indices[o + 1] = v + 2;
       indices[o + 2] = v + 1;
@@ -108,29 +74,14 @@ export class SandTyreTracks {
     this.alphaAttr = new THREE.BufferAttribute(this.alpha, 1);
     this.alphaAttr.setUsage(THREE.DynamicDrawUsage);
     this.geometry.setAttribute('position', this.positionAttr);
-    this.geometry.setAttribute('across', new THREE.BufferAttribute(across, 1));
+    this.geometry.setAttribute('quad', new THREE.BufferAttribute(across, 2));
     this.geometry.setAttribute('alpha', this.alphaAttr);
     this.geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     this.geometry.setDrawRange(0, 0);
 
-    this.material = new THREE.ShaderMaterial({
-      vertexShader: VERTEX,
-      fragmentShader: FRAGMENT,
-      uniforms: {
-        ...THREE.UniformsLib.fog,
-      },
-      fog: true,
-      transparent: true,
-      blending: THREE.CustomBlending,
-      blendEquation: THREE.AddEquation,
-      blendSrc: THREE.ZeroFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
-      side: THREE.DoubleSide,
-    });
+    // Faded across the width only (`quad.y` is 0): the contact patches' program
+    // (render/groundmark.ts) with a wider flat floor.
+    this.material = groundMarkMaterial(0.72);
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     // Marks move through the ring after the geometry's first bounds calculation.

@@ -7,9 +7,9 @@ import type { GameWorld } from '../game/state';
 import { canTakes, fillCan, litreText, type FluidKind } from '../items/items';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureField, type FixtureHoldResult, type WorldFixture } from './fixturefield';
-import { SIGN_PLANE, signMaterial } from './market';
+import { registerAtlasSign, signMesh } from './market';
 import type { Poi } from './poi';
-import { box, C, cylinder } from './poi/kit';
+import { box, C, cylinder, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
 /**
@@ -44,6 +44,9 @@ const HOOP: Readonly<Record<FluidKind, number>> = { petrol: 0x7a2012, oil: 0x866
 /** The stream from the tap. */
 const STREAM: Readonly<Record<FluidKind, number>> = { petrol: 0xd9cf9a, oil: 0x8a5a14, water: 0xa9c9dd };
 const STENCIL: Readonly<Record<FluidKind, string>> = { petrol: 'PETROL', oil: 'OIL', water: 'WATER' };
+/** A stencil plate's paint and canvas size; the three are on the sign atlas, one draw. */
+const STENCIL_BOARD = ['#ece4cf', '#1d1b18', 256, 96] as const;
+for (const text of Object.values(STENCIL)) registerAtlasSign([text], ...STENCIL_BOARD);
 
 // The stand, local metres: base centre at the origin, front facing -Z.
 /** A 200 L drum, a touch short. */
@@ -135,7 +138,7 @@ export function buildBarrelStand(
     cylinder(drum, R - 0.012, R - 0.012, 0.012, 18, [0, RACK_H + DRUM_H + 0.006, 0], HOOP[fluid]);
     cylinder(drum, 0.035, 0.035, 0.02, 8, [R * 0.5, RACK_H + DRUM_H + 0.016, R * 0.2], C.darkMetal);
     // The stencil: a plate on the front.
-    const plate = new THREE.Mesh(SIGN_PLANE, signMaterial([STENCIL[fluid]], '#ece4cf', '#1d1b18', 256, 96));
+    const plate = signMesh([STENCIL[fluid]], ...STENCIL_BOARD);
     plate.scale.set(0.22, 0.085, 1);
     plate.position.set(0, RACK_H + DRUM_H * 0.47, -R - 0.006);
     plate.rotation.y = Math.PI;
@@ -146,12 +149,15 @@ export function buildBarrelStand(
     box(drum, [0.06, 0.05, 0.05], [0, TAP_Y, -R - 0.075], C.darkMetal);
     box(drum, [0.026, 0.05, 0.026], [0, TAP_Y - 0.045, SPOUT_Z], C.metal);
     const handle = new THREE.Group();
+    // Turned by the tap: kept out of the stand's merge.
+    handle.userData.kitKeep = true;
     handle.position.set(0, TAP_Y + 0.03, -R - 0.075);
     box(handle, [0.12, 0.016, 0.022], [0.05, 0, 0], 0xb0261c);
     drum.add(handle);
     const stream = box(drum, [0.018, STREAM_LEN, 0.018], [0, TAP_Y - 0.07 - STREAM_LEN / 2, SPOUT_Z], STREAM[fluid]);
     stream.castShadow = false;
     stream.visible = false;
+    stream.userData.kitKeep = true;
 
     const id = barrelId(poi.index, fluid);
     drums.push(new Barrel(
@@ -166,6 +172,9 @@ export function buildBarrelStand(
       stream,
     ));
   });
+  // The drums only stand on the rack: the whole stand in one draw per finish, its three
+  // stencils in one; the handles and the streams keep their own.
+  mergeKitStatics(root, { deep: true });
   group.add(root);
 
   if (!ctx.hasPhysics) return;

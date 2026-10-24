@@ -20,7 +20,7 @@ import {
   type Item,
   type StickerEnvelopeItem,
 } from '../items/items';
-import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, type CardMachineParts } from './cardmachine';
+import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import { paintSign, SIGN_PLANE } from './market';
@@ -68,6 +68,7 @@ const TIER_BAND: Readonly<Record<string, string>> = {
   'race · 2 stops': '#a2452f',
   'big haul': '#2f4f7a',
 };
+registerCardMachineSigns(POST_LOOK);
 
 /** The cargo kind as the card prints it. */
 function kindText(offer: ContractCargoItem): string {

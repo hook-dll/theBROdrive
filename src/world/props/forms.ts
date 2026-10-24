@@ -59,8 +59,10 @@ const ROCK = 0x815f42;
  */
 const matProp = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
 
-// The barrel cactus and the scrub, about 0.7 m: the scatter's other small forms.
-const matScrub = applyGroundFade(new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 }));
+// The barrel cactus and the scrub, about 0.7 m: the scatter's other small forms, in
+// `matProp` too, their dry khaki in the vertices (it was a material of its own, and a
+// program of its own beside `matProp`'s).
+const SCRUB = 0xab8a55;
 
 /**
  * Paints a part one colour as `material.color = hex` would: the hex decoded from sRGB,
@@ -498,8 +500,8 @@ let _scrubForm: PropForm | null = null;
 export function scrubForm(): PropForm {
   _scrubForm ??= {
     id: 'scrub',
-    geometry: buildScrub(),
-    material: matScrub,
+    geometry: paintAsMaterial(buildScrub(), SCRUB),
+    material: matProp,
     baseRadius: 0.42,
     height: 0.45,
     collider: 'capsule',
@@ -536,7 +538,7 @@ export function sandForms(): PropForm[] {
   if (!_sandForms) {
     _sandForms = [
       { id: 'saguaro', geometry: cactus(buildSaguaro()), material: matProp, baseRadius: 0.4, height: 6.4, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.75, maxScale: 1.35, weight: 1, vary: { stretch: 0.18, spread: 0.1, lean: 0.07 } },
-      { id: 'barrel', geometry: buildBarrel(), material: matScrub, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7, weight: 1 },
+      { id: 'barrel', geometry: paintAsMaterial(buildBarrel(), SCRUB), material: matProp, baseRadius: 0.34, height: 0.55, collider: 'capsule', sink: 0.18, rotate3d: false, minScale: 0.8, maxScale: 1.7, weight: 1 },
       { id: 'deadstick', geometry: paintAsMaterial(buildDeadStick(), DEAD_WOOD), material: matProp, baseRadius: 0.06, height: 1.8, collider: 'capsule', sink: 0, rotate3d: false, minScale: 0.7, maxScale: 1.5, weight: 1 },
       trunkForm(),
       scrubForm(),
@@ -844,14 +846,14 @@ function pieceTable(): Record<string, readonly PropPiece[]> {
         { geometry: cactus(armPiece(-1)), material: matProp, offset: [-1.05, 5.15, 0], capsule: [1.05, 0.14], mass: 16 },
       ],
       barrel: [
-        { geometry: lump(0.19), material: matScrub, offset: [0.1, 0.12, 0.05], capsule: [0.06, 0.16], mass: 4 },
-        { geometry: lump(0.17), material: matScrub, offset: [-0.12, 0.14, -0.08], capsule: [0.05, 0.14], mass: 3 },
-        { geometry: lump(0.15), material: matScrub, offset: [0.02, 0.3, -0.1], capsule: [0.05, 0.13], mass: 3 },
+        { geometry: paintAsMaterial(lump(0.19), SCRUB), material: matProp, offset: [0.1, 0.12, 0.05], capsule: [0.06, 0.16], mass: 4 },
+        { geometry: paintAsMaterial(lump(0.17), SCRUB), material: matProp, offset: [-0.12, 0.14, -0.08], capsule: [0.05, 0.14], mass: 3 },
+        { geometry: paintAsMaterial(lump(0.15), SCRUB), material: matProp, offset: [0.02, 0.3, -0.1], capsule: [0.05, 0.13], mass: 3 },
       ],
       scrub: [
-        { geometry: lump(0.34, 0.65), material: matScrub, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4, looseSoil: true },
-        { geometry: lump(0.24, 0.65), material: matScrub, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2, looseSoil: true },
-        { geometry: lump(0.2, 0.65), material: matScrub, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2, looseSoil: true },
+        { geometry: paintAsMaterial(lump(0.34, 0.65), SCRUB), material: matProp, offset: [0, 0.22, 0], capsule: [0.07, 0.28], mass: 4, looseSoil: true },
+        { geometry: paintAsMaterial(lump(0.24, 0.65), SCRUB), material: matProp, offset: [0.28, 0.15, 0.1], capsule: [0.05, 0.2], mass: 2, looseSoil: true },
+        { geometry: paintAsMaterial(lump(0.2, 0.65), SCRUB), material: matProp, offset: [-0.2, 0.14, -0.22], capsule: [0.04, 0.17], mass: 2, looseSoil: true },
       ],
       // A post that has been hit: the blade snaps in two and the reflector chip goes
       // its own way. Light parts with a low mass, so a car that clips one scatters

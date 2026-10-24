@@ -5,8 +5,8 @@ import { SurfaceType } from '../core/surfaces';
 import type { Item } from '../items/items';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureFocus, type WorldFixture } from './fixturefield';
-import { paintSign, SIGN_PLANE, signMaterial } from './market';
-import { box, C, cylinder } from './poi/kit';
+import { paintSign, registerAtlasSign, signMesh } from './market';
+import { box, C, cylinder, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
 /**
@@ -135,6 +135,21 @@ export interface CardMachineParts {
   readonly yaw: number;
 }
 
+/** The boards' paint and canvas size: title, button plate, tray label. */
+const TITLE_BOARD = ['#f2ecd8', '#1f3f7a', 512, 128] as const;
+const BUTTON_BOARD = ['#f2ecd8', '#26221c', 256, 64] as const;
+const TRAY_BOARD = ['#f2ecd8', '#7a1f12', 512, 64] as const;
+
+/**
+ * Puts a machine kind's boards on the sign atlas (world/market.ts `registerAtlasSign`), so
+ * they draw as one. Call at module load, beside the kind's look.
+ */
+export function registerCardMachineSigns(look: CardMachineLook): void {
+  registerAtlasSign([look.title], ...TITLE_BOARD);
+  registerAtlasSign([look.buttonLabel], ...BUTTON_BOARD);
+  if (look.trayLabel) registerAtlasSign([look.trayLabel], ...TRAY_BOARD);
+}
+
 /**
  * Builds the cabinet at ABSOLUTE (`x`, `z`) on the sand, its front turned by `yaw`, on the
  * lowest ground under it and its tray. In the physics band it is solid and its tray holds
@@ -173,7 +188,7 @@ export function buildCardMachine(
   for (const sx of [-1, 1]) {
     box(root, [0.04, H - 0.1, 0.04], [sx * (W / 2 - 0.01), H / 2 + 0.02, FRONT + 0.01], C.darkMetal);
   }
-  const board = new THREE.Mesh(SIGN_PLANE, signMaterial([look.title], '#f2ecd8', '#1f3f7a', 512, 128));
+  const board = signMesh([look.title], ...TITLE_BOARD);
   board.scale.set(0.86, 0.2, 1);
   board.position.set(0, BOARD_Y, FRONT - 0.006);
   board.rotation.y = Math.PI;
@@ -206,6 +221,8 @@ export function buildCardMachine(
   for (const mesh of [staticTop, staticBottom]) {
     mesh.position.set(0, CARD_Y, CARD_Z);
     mesh.rotation.y = Math.PI;
+    // The flips show and hide the window's halves one by one: never merged.
+    mesh.userData.kitKeep = true;
     root.add(mesh);
   }
   // The flap, hinged across the middle: the card's top half facing the viewer, and on
@@ -216,6 +233,7 @@ export function buildCardMachine(
   flapFront.rotation.y = Math.PI;
   const flapBack = half(HALF_BOTTOM, cardB);
   flapBack.rotation.z = Math.PI;
+  flapFront.userData.kitKeep = flapBack.userData.kitKeep = true;
   flap.add(flapFront, flapBack);
   root.add(flap);
 
@@ -236,7 +254,7 @@ export function buildCardMachine(
   cylinder(buttonCap, 0.03, 0.03, 0.04, 12, [0, 0, -0.01], C.darkMetal, [Math.PI / 2, 0, 0]);
   cylinder(buttonCap, 0.062, 0.066, 0.035, 20, [0, 0, -0.045], look.buttonColour, [Math.PI / 2, 0, 0]);
   root.add(buttonCap);
-  const buttonPlate = new THREE.Mesh(SIGN_PLANE, signMaterial([look.buttonLabel], '#f2ecd8', '#26221c', 256, 64));
+  const buttonPlate = signMesh([look.buttonLabel], ...BUTTON_BOARD);
   buttonPlate.scale.set(0.17, 0.045, 1);
   buttonPlate.position.set(BUTTON_X, BUTTON_Y - 0.12, FRONT - 0.003);
   buttonPlate.rotation.y = Math.PI;
@@ -257,13 +275,15 @@ export function buildCardMachine(
   box(root, [TRAY_W + 0.04, TRAY_FLOOR - 0.03, TRAY_D], [0, (TRAY_FLOOR - 0.03) / 2, TRAY_Z], look.body);
   // The tray's label: what goes in, and where.
   if (look.trayLabel) {
-    const label = new THREE.Mesh(SIGN_PLANE, signMaterial([look.trayLabel], '#f2ecd8', '#7a1f12', 512, 64));
+    const label = signMesh([look.trayLabel], ...TRAY_BOARD);
     label.scale.set(0.5, 0.0625, 1);
     label.position.set(0, TRAY_LABEL_Y, FRONT - 0.003);
     label.rotation.y = Math.PI;
     root.add(label);
   }
 
+  // The cabinet's boxes in one draw per finish, each moving part's in one of its own.
+  mergeKitStatics(root);
   group.add(root);
 
   if (ctx.hasPhysics) {

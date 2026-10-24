@@ -6,6 +6,7 @@ import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { MarketField } from './market';
 import { buildShop } from './vending';
+import { disposeKitMerged } from './poi/kit';
 import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
   carModelMeasure,
@@ -775,6 +776,8 @@ export class PoiProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
+        // The fixtures' merged boxes (world/poi/kit.ts `mergeKitStatics`) are this chunk's own.
+        disposeKitMerged(group);
         this.market.forget(registeredMarket);
         this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();

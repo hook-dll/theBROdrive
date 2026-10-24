@@ -8,7 +8,7 @@ import { carModel } from '../vehicle/carmodels';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureField, type FixtureFocus, type WorldFixture } from './fixturefield';
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
-import { box, C } from './poi/kit';
+import { box, C, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
 /**
@@ -141,6 +141,8 @@ export function buildKeyBox(
   key.visible = false;
   drawer.add(key);
 
+  // The box's, the lever's, the drawer's and the key's parts, each in one draw per finish.
+  mergeKitStatics(root);
   group.add(root);
   if (!ctx.hasPhysics) return;
 
