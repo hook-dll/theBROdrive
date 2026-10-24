@@ -194,6 +194,19 @@
   and `setProgram` 38.7 → 27.7 ms a second on autopilot; no new programs (95 before
   and after).
 
+- NO HITCH AS THE LOADING COVER LIFTS, NO DUPLICATE DEPTH PROGRAMS (`core/renderer.ts`
+  `primeLightState`, `drawHiddenOnce`; `app/bootwarmup.ts`). Program anchors are hidden,
+  so the boot compile linked their programs but no covered frame drew them: the first
+  real draw of each (Three's first use, `getProgramInfoLog` and every uniform's location,
+  plus the driver's pipeline) landed just after the cover, 7 programs in the first 0.6 s
+  of a resumed drive and a 58-175 ms frame. The cover now draws the scene pass once with
+  every hidden drawable shown and none culled, lights left as they are. And Three draws
+  the shadow pass before it sets up the frame's lights, so the first boot frame linked
+  its casters' depth programs keyed to no lights and the next frame linked them again:
+  the light state is now loaded before that frame. Measured (dev build, seed flick):
+  resumed in the car 100 programs before, 95 after; new drive 96 to 95; no program
+  linked or first drawn after the cover, no frame over 25 ms in the first 10 s.
+
 ### Fixed
 
 - THE AUTOPILOT DRIVES OFF FROM NEUTRAL AND OFF THE HANDBRAKE (`core/input.ts`

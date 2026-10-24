@@ -708,6 +708,57 @@ export class Renderer {
   }
 
   /**
+   * Loads the scene's light state into the render state its frames use, drawing nothing.
+   *
+   * Three's `render` draws the shadow pass BEFORE it sets up the frame's lights (three
+   * r185 `WebGLRenderer.render`), and a depth program's key carries the light counts. On
+   * the scene's very first frame that state is empty, so every caster the sun's pass met
+   * linked a depth program keyed to no lights, and the next frame linked the same shader
+   * again under the real counts: four duplicates on a drive resumed in the car (100
+   * programs against a new drive's 96). Called before the first frame, the pass meets the
+   * real counts from its first draw. `compile` with an empty object collects the scene's
+   * lights into the same render state and compiles nothing.
+   */
+  primeLightState(): void {
+    this.renderer.compile(new THREE.Object3D(), this.camera, this.scene);
+  }
+
+  /**
+   * Draws the scene pass once with every hidden drawable shown and none culled, lights
+   * excepted, for the loading cover.
+   *
+   * Linked is not drawn. Program anchors are hidden (`visible = false`), so the boot
+   * compile links their programs but no covered frame draws them, and the first real
+   * draw of each paid Three's first use (`getProgramInfoLog`, every uniform's location)
+   * and the driver's pipeline build on the main thread: measured on a resumed drive, 7
+   * programs first drawn in the first 0.6 s after the cover, a 58-175 ms frame. This
+   * pays it under the cover. Lights keep their effective visibility: one more light is
+   * a different program for every lit material.
+   */
+  drawHiddenOnce(): void {
+    const restored: { object: THREE.Object3D; visible: boolean; culled: boolean }[] = [];
+    const visit = (object: THREE.Object3D, shown: boolean): void => {
+      const effective = shown && object.visible;
+      restored.push({ object, visible: object.visible, culled: object.frustumCulled });
+      object.visible = (object as THREE.Light).isLight ? effective : true;
+      object.frustumCulled = false;
+      for (const child of object.children) visit(child, effective);
+    };
+    visit(this.scene, true);
+    const previousTarget = this.renderer.getRenderTarget();
+    try {
+      this.renderer.setRenderTarget(this.hazeTarget);
+      this.renderer.render(this.scene, this.camera);
+    } finally {
+      this.renderer.setRenderTarget(previousTarget);
+      for (const { object, visible, culled } of restored) {
+        object.visible = visible;
+        object.frustumCulled = culled;
+      }
+    }
+  }
+
+  /**
    * Compiles `object`'s programs exactly as the frame will draw them — the scene pass
    * against this scene's lights, fog and environment, into `hazeTarget`, and, where
    * shadows are on, the depth programs its casters take in the shadow passes — and

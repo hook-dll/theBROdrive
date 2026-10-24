@@ -304,6 +304,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   // model as it loads (render/carmodel.ts, program anchors), the ones already loaded
   // first. The second draw uploads every remaining texture, shadow and PMREM result;
   // its GPU fence is the final barrier.
+  ctx.renderer.primeLightState();
   render(0, 0);
   await Promise.all([
     ctx.renderer.waitForFrameShaders(),
@@ -314,6 +315,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   // ms body build plus its template and anchor in the first minute of the drive: a
   // dozen hitches, and on ANGLE a program link each. The cover waits for them.
   await Promise.all(CAR_MODELS.map((def) => loadCarModel(def.id)));
+  ctx.renderer.drawHiddenOnce();
   render(0, 0);
   await ctx.renderer.waitForSubmittedFrame();
   await measureLaunchFrame();
