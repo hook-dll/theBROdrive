@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.24.0 — 2026-10-24
+
+Desert regions with their own land and people, a lighter frame (kit scenery in one draw per finish, 94 -> 86 shader programs, a program budget checked by every dev build), F as the one interaction key and the cabin view on boarding, a 480 Hz wheel loop for the player's cars, resolution as a multiple of the screen, roadside rocks and cacti in shadow, a frame cap locked to the refresh, the boot's `isReady` crash fixed, and heat haze and the Clean style removed.
 
 ### Added
 
