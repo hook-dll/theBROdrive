@@ -3079,6 +3079,9 @@ async function boot(): Promise<void> {
           get floor() {
             return traffic.floor;
           },
+          get floorCount() {
+            return traffic.floorCount;
+          },
           get target() {
             return traffic.status.target;
           },

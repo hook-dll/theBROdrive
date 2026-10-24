@@ -800,6 +800,8 @@ export interface PauseHooks {
   traffic?: {
     readonly cap: number;
     readonly floor: number;
+    /** `floor` as cars against the present `cap`: the low end of the draw's range. */
+    readonly floorCount: number;
     readonly target: number;
     readonly count: number;
     setCap(value: number | null): void;
@@ -2875,7 +2877,8 @@ export class MainMenu {
           const box = el('div', 'menu-dev-traffic');
           const readout = text('', 'menu-dev-traffic-readout');
           const paintReadout = (): void => {
-            readout.textContent = `Traffic: ${traffic.count} live, target ${traffic.target} of ${traffic.cap}`;
+            readout.textContent =
+              `Range ${traffic.floorCount}-${traffic.cap} cars · now aiming for ${traffic.target}, ${traffic.count} live`;
           };
           const knob = (
             label: string,

@@ -3673,14 +3673,17 @@ export class RoadTraffic {
 
   set cap(value: number | null) {
     this.capOverride = value === null ? null : Math.min(64, Math.max(0, Math.round(value)));
+    // Rescaled now, not on the next step, so a paused menu reads the new target.
+    this.desiredCount = this.scaleDesiredCount(this.trafficCap);
   }
 
   private floorOverride: number | null = null;
 
   /**
    * The quiet end of the density draw as a fraction of the cap: `DENSITY_FLOOR`, or the
-   * dev menu's override (`null` hands it back). A change re-rolls at once, so the knob
-   * is seen on the road now rather than at the next 36-72 s rotation.
+   * dev menu's override (`null` hands it back). A change does not re-roll: the present
+   * target holds, raised to the new floor if it now lies under it, so dragging the knob
+   * moves the range and nothing random.
    */
   get floor(): number {
     return this.floorOverride ?? DENSITY_FLOOR;
@@ -3688,8 +3691,19 @@ export class RoadTraffic {
 
   set floor(value: number | null) {
     this.floorOverride = value === null ? null : Math.min(1, Math.max(0, value));
-    this.redrawDesiredCount();
-    this.densityTimer = this.drawDensityInterval();
+    const cap = this.trafficCap;
+    this.desiredCount = this.scaleDesiredCount(cap);
+    this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
+  }
+
+  /** The fewest cars a density draw can ask for against the present cap. */
+  get floorCount(): number {
+    return this.minDesiredCount(this.trafficCap);
+  }
+
+  private minDesiredCount(cap: number): number {
+    if (cap <= 0) return 0;
+    return Math.min(cap, Math.max(1, Math.ceil(cap * this.floor)));
   }
 
   /** Re-roll at the established cadence against the present cap. */
@@ -3701,7 +3715,7 @@ export class RoadTraffic {
 
   private scaleDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    return Math.min(cap, Math.max(1, Math.round(cap * this.densityFraction)));
+    return Math.min(cap, Math.max(this.minDesiredCount(cap), Math.round(cap * this.densityFraction)));
   }
 
   /**
@@ -3713,8 +3727,7 @@ export class RoadTraffic {
    */
   private drawDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    if (cap === 1) return 1;
-    const floor = Math.max(1, Math.ceil(cap * this.floor));
+    const floor = this.minDesiredCount(cap);
     return floor + Math.floor(this.random() * (cap - floor + 1));
   }
 
