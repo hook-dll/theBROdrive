@@ -4,6 +4,15 @@
 
 ### Added
 
+- SHADER PROGRAM BUDGET (`render/programbudget.ts`, `config/program-budget.json`,
+  `tools/look/programs.mjs`, `.omp/rules/materials.md`). Every dev boot checks the
+  programs linked behind the loading cover against the tier's list (retro 66, acceptable
+  64, standard 87, high 87) and prints `[program budget]` with the materials of every
+  program not on it; any program linked after the boot is reported as a mid-drive link.
+  `programs.mjs` boots each tier and lists new and dropped programs, `--write` updates
+  the list on purpose. Programs are named by a hash of three's cache key: stable across
+  runs. The rule lists which shared material to use for each kind of new thing.
+
 - THE DESERT'S REGIONS ARE PLACES, NOT ONLY COLOURS (`world/regions.ts`, new: the ring
   `DESERTS` moved here from `gradient.ts` with `desertAt`, `PALETTE_CYCLE_M`,
   `desertSpanAt`; `regionAt`, `RegionMix`, `CULTURES`, `calibrateRoadWeights`). Every
@@ -297,6 +306,12 @@
   linked or first drawn after the cover, no frame over 25 ms in the first 10 s.
 
 ### Fixed
+
+- `Cannot read properties of undefined (reading 'isReady')` at boot: three's
+  `compileAsync` polls each material's program from a timer and threw when the material
+  was disposed first (New game pressed while the title room was still linking). Every
+  call goes through `render/compileasync.ts` `compileAsyncSafe`, which counts a freed
+  material as done.
 
 - THE AUTOPILOT DRIVES OFF FROM NEUTRAL AND OFF THE HANDBRAKE (`core/input.ts`
   `InputFrame.autoShift`, `releaseHandbrake`; `vehicle/autopilot.ts` `drive`;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compileAsyncSafe } from './compileasync';
 import type { GraphicsQuality } from '../game/settings';
 import { weather } from '../world/weather';
 import { airDusk, airFog, airSky, airSun } from './airfog';
@@ -869,8 +870,8 @@ export class CloudLayer {
     try {
       this.webgl.setRenderTarget(this.map);
       return Promise.all([
-        this.webgl.compileAsync(this.coverageScene, this.passCamera),
-        this.webgl.compileAsync(this.blurScene, this.passCamera),
+        compileAsyncSafe(this.webgl, this.coverageScene, this.passCamera),
+        compileAsyncSafe(this.webgl, this.blurScene, this.passCamera),
       ]);
     } finally {
       this.webgl.setRenderTarget(previous);

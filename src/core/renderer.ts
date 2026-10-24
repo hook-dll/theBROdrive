@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compileAsyncSafe } from '../render/compileasync';
 import { SandColor } from '../render/desertdust';
 import '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
@@ -695,10 +696,10 @@ export class Renderer {
     const previousTarget = this.renderer.getRenderTarget();
     try {
       this.renderer.setRenderTarget(this.frameTarget);
-      const framedReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
+      const framedReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
       this.renderer.setRenderTarget(null);
-      const postReady = this.renderer.compileAsync(this.hazeScene, this.hazeCamera);
-      const presentReady = this.renderer.compileAsync(this.presentScene, this.hazeCamera);
+      const postReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
+      const presentReady = compileAsyncSafe(this.renderer, this.presentScene, this.hazeCamera);
       const shadeReady = this.cloudShadowPass?.compile();
       await Promise.all([sceneReady, depthReady, framedReady, postReady, presentReady, shadeReady]);
     } finally {
@@ -779,7 +780,7 @@ export class Renderer {
     const previousTarget = this.renderer.getRenderTarget();
     this.renderer.setRenderTarget(this.hazeTarget);
     try {
-      const scene = this.renderer.compileAsync(object, this.camera, this.scene);
+      const scene = compileAsyncSafe(this.renderer, object, this.camera, this.scene);
       if (!this.renderer.shadowMap.enabled) return scene;
       return Promise.all([scene, this.compileShadowDepth(object)]);
     } finally {
@@ -863,7 +864,7 @@ export class Renderer {
     const previousTarget = this.renderer.getRenderTarget();
     this.renderer.setRenderTarget(this.hazeTarget);
     try {
-      return this.renderer.compileAsync(object, this.camera, this.scene);
+      return compileAsyncSafe(this.renderer, object, this.camera, this.scene);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       this.scene.fog = fog;

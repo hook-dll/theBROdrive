@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { watchLateLinks } from './render/programbudget';
 import { FrameProfiler } from './core/frameprofiler';
 import { PerfOverlay } from './ui/perfoverlay';
 import { activeBuildProfile, buildProfileFor, installBuildProfile } from './render/retro';
@@ -670,6 +671,11 @@ async function boot(): Promise<void> {
       })
     : null;
   let knownPrograms = 0;
+  // Dev: a program linked mid-drive is reported with its materials (render/programbudget.ts).
+  let booted = false;
+  const lateLinks = import.meta.env.DEV
+    ? watchLateLinks(renderer.renderer, renderer.scene, () => booted, () => world.state.settings)
+    : null;
 
   /**
    * The frame cost readout, as text, for the pause menu's development screen.
@@ -2935,6 +2941,7 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('draw');
     renderer.render();
     frameProfiler?.end('draw');
+    lateLinks?.();
     if (frameProfiler) {
       // Programs linked this frame: the usual cause of a hitch inside `draw`.
       const programs = renderer.renderer.info.programs ?? [];
@@ -3266,6 +3273,7 @@ async function boot(): Promise<void> {
       return undetected;
     },
   });
+  booted = true;
   // Start only after every frame callback dependency exists. Starting above the
   // TouchControls declaration lets a fast first RAF hit its temporal dead zone.
   loop.start();

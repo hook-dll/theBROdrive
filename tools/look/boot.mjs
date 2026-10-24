@@ -47,7 +47,9 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
   page.on('pageerror', (e) => console.log('pageerror: ' + e.message));
   page.on('console', (m) => {
     const t = m.text();
-    if (/error|shader/i.test(t)) console.log('console: ' + t.slice(0, 800));
+    // Every console.error, whatever it says: the dev build's program budget
+    // (render/programbudget.ts) reports through it.
+    if (m.type() === 'error' || /error|shader/i.test(t)) console.log('console: ' + t.slice(0, 800));
   });
   // The tier goes into the stored preferences BEFORE the page runs, which is the path a
   // player's own choice takes: the renderer, the light budget and the retro rung all

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compileAsyncSafe } from '../render/compileasync';
 import { buildRoomScene, type RoomScene } from './roomscene';
 
 /**
@@ -280,7 +281,7 @@ export class TitleRoom {
    */
   private async prepare(renderer: THREE.WebGLRenderer, room: RoomScene): Promise<void> {
     try {
-      await renderer.compileAsync(room.scene, this.camera);
+      await compileAsyncSafe(renderer, room.scene, this.camera);
     } catch (error) {
       console.error('title room: compiling the room failed', error);
     }

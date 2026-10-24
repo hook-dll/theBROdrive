@@ -1,0 +1,1226 @@
+{
+  "retro": [
+    {
+      "id": "4256187f189cd7e7",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "be9937871f2f66f7",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "4bd7c72f692309ff",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "16ceae0379adc07b",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "89be48daafad8c2e",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "581a3f837b014f03",
+      "label": "car-shadow-hull: no material in the scene"
+    },
+    {
+      "id": "bd6ae53137ec4021",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "64714508d7e54dca",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "0edeb4caf6ff7d26",
+      "label": "far-car: MeshStandardMaterial \"far-car\" #ffffff vc double [instanced] in far-car-program-anchor"
+    },
+    {
+      "id": "076305bf89cbdc27",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "f657b468e5f21990",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "1ce6f089542b0e41",
+      "label": "mirror_glass_inner: MeshBasicMaterial \"mirror_glass_inner\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_left\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_right\" #ffffff map in mirror-anchor"
+    },
+    {
+      "id": "b3986f81bd3261dd",
+      "label": "PMREMGGXConvolution: no material in the scene"
+    },
+    {
+      "id": "9d5586e66c570b24",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc [instanced] in pole-anchor | MeshStandardMaterial \"pole-body\" #ffffff vc [instanced]"
+    },
+    {
+      "id": "bee01e5f8a995c3f",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc in pole-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in market-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in signposts (+3)"
+    },
+    {
+      "id": "59fa98dadea6a806",
+      "label": "pole-wire: MeshStandardMaterial \"pole-wire\" #ffffff vc transparent in pole-anchor"
+    },
+    {
+      "id": "b681593321af887b",
+      "label": "unnamed: LineBasicMaterial #d9c8ad transparent in vehicle-storage-grid"
+    },
+    {
+      "id": "2c9efbd702bd802f",
+      "label": "unnamed: LineBasicMaterial #ffffff vc"
+    },
+    {
+      "id": "326f9278970ac072",
+      "label": "unnamed: MeshBasicMaterial #17120f transparent double in vehicle-storage-grid"
+    },
+    {
+      "id": "11bf745852bd0f28",
+      "label": "unnamed: MeshBasicMaterial #2a1a0e vc transparent [instanced]"
+    },
+    {
+      "id": "f1b4d68f67a2007f",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "5cb2320d0ddf0611",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent | MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "cc13daa43d65f68c",
+      "label": "unnamed: MeshStandardMaterial #25231f"
+    },
+    {
+      "id": "fb6d33c6cf8f0d42",
+      "label": "unnamed: MeshStandardMaterial #2a241e flat double"
+    },
+    {
+      "id": "e4392eaa18c035b6",
+      "label": "unnamed: MeshStandardMaterial #3b2a22 transparent in artifact-anchor | MeshStandardMaterial #3ab8a5 transparent in artifact-anchor | MeshStandardMaterial #5e9fb0 transparent in artifact-anchor (+2)"
+    },
+    {
+      "id": "9ae468ed7e49d985",
+      "label": "unnamed: MeshStandardMaterial #765234 flat double [instanced]"
+    },
+    {
+      "id": "fe3e35434564ec0b",
+      "label": "unnamed: MeshStandardMaterial #8a4319 transparent double in medicine_bottle_body | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_shoulder | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_neck"
+    },
+    {
+      "id": "097dc8ad87a30631",
+      "label": "unnamed: MeshStandardMaterial #9e988c | MeshStandardMaterial #2a2a30 in artifact-anchor | MeshStandardMaterial #2e9687 in artifact-anchor (+6)"
+    },
+    {
+      "id": "44454a36b0a7891e",
+      "label": "unnamed: MeshStandardMaterial #d6d1c3 [instanced] in delineator-anchor | MeshStandardMaterial #b9a179 [instanced] in delineator-anchor | MeshStandardMaterial #d6d1c3 (+1)"
+    },
+    {
+      "id": "f7b8f5de76ce051c",
+      "label": "unnamed: MeshStandardMaterial #f2ead8 in medicine_pill_0_body | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_l | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_r (+20)"
+    },
+    {
+      "id": "48fc65fee7d72f64",
+      "label": "unnamed: MeshStandardMaterial #ffffff flat double [instanced]"
+    },
+    {
+      "id": "fcccd42adbe4763a",
+      "label": "unnamed: MeshStandardMaterial #ffffff in item_anchor_condition"
+    },
+    {
+      "id": "53b31a225f04c7cc",
+      "label": "unnamed: MeshStandardMaterial #ffffff map double"
+    },
+    {
+      "id": "f0d9395e78513bf8",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in football_body"
+    },
+    {
+      "id": "abdb5b0dce2d2a51",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in monument-anchor | MeshStandardMaterial #ffffff map in market-anchor | MeshStandardMaterial #ffffff map in signposts (+2)"
+    },
+    {
+      "id": "5ec1ae8c4d1388bc",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc"
+    },
+    {
+      "id": "b95a33097d55b58d",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc | MeshStandardMaterial #ffffff map vc in layby"
+    },
+    {
+      "id": "977641309409c052",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "4044e95e67981494",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "5f66ba80ccf7af68",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "4d3da771dcccc3ad",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "bb09a27fcb87a12f",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "0920b079ce0b86d9",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc [instanced]"
+    },
+    {
+      "id": "0b3241f93ced413d",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc | MeshStandardMaterial #ffffff vc [instanced]"
+    },
+    {
+      "id": "7c0070ce9e7ed898",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent double"
+    },
+    {
+      "id": "a9a3dcf9082905ed",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent in sidetrack-anchor"
+    },
+    {
+      "id": "9e46bc6eb6e66cf4",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3a3ea3f66689bddc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "6cd4214607a22148",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "050d0a0273634d1c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "05708a89ac832339",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "67480fb469fc79c2",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "8c52bcd0ffd09792",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "fe3ac27c84221832",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "4be77ccc4e6df3a8",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "58856eb4b75dc40c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "e7dc355b91bbcd3b",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "bfa07af7eb28983f",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "acb34d792134e719",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "04bb6ba9e5b11c99",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "834c0fc1ec3555ed",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "b5e80a4ad939b532",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "c56bcc915a7fabd1",
+      "label": "unnamed: ShaderMaterial transparent"
+    },
+    {
+      "id": "421fe14b8fa1df2b",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "2f12820fe4579167",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "994b3cdeecff86ea",
+      "label": "unnamed: ShaderMaterial transparent double in artifact-anchor"
+    }
+  ],
+  "acceptable": [
+    {
+      "id": "4256187f189cd7e7",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "be9937871f2f66f7",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "4bd7c72f692309ff",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "16ceae0379adc07b",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "89be48daafad8c2e",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "581a3f837b014f03",
+      "label": "car-shadow-hull: no material in the scene"
+    },
+    {
+      "id": "bd6ae53137ec4021",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "64714508d7e54dca",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "0edeb4caf6ff7d26",
+      "label": "far-car: MeshStandardMaterial \"far-car\" #ffffff vc double [instanced] in far-car-program-anchor"
+    },
+    {
+      "id": "076305bf89cbdc27",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "f657b468e5f21990",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "1ce6f089542b0e41",
+      "label": "mirror_glass_inner: MeshBasicMaterial \"mirror_glass_inner\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_left\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_right\" #ffffff map in mirror-anchor"
+    },
+    {
+      "id": "b3986f81bd3261dd",
+      "label": "PMREMGGXConvolution: no material in the scene"
+    },
+    {
+      "id": "9d5586e66c570b24",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc [instanced] in pole-anchor | MeshStandardMaterial \"pole-body\" #ffffff vc [instanced]"
+    },
+    {
+      "id": "bee01e5f8a995c3f",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc in pole-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in market-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in signposts (+3)"
+    },
+    {
+      "id": "59fa98dadea6a806",
+      "label": "pole-wire: MeshStandardMaterial \"pole-wire\" #ffffff vc transparent in pole-anchor | MeshStandardMaterial \"pole-wire\" #ffffff vc transparent"
+    },
+    {
+      "id": "b681593321af887b",
+      "label": "unnamed: LineBasicMaterial #d9c8ad transparent in vehicle-storage-grid"
+    },
+    {
+      "id": "326f9278970ac072",
+      "label": "unnamed: MeshBasicMaterial #17120f transparent double in vehicle-storage-grid"
+    },
+    {
+      "id": "11bf745852bd0f28",
+      "label": "unnamed: MeshBasicMaterial #2a1a0e vc transparent [instanced]"
+    },
+    {
+      "id": "f1b4d68f67a2007f",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "5cb2320d0ddf0611",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent | MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "cc13daa43d65f68c",
+      "label": "unnamed: MeshStandardMaterial #25231f"
+    },
+    {
+      "id": "fb6d33c6cf8f0d42",
+      "label": "unnamed: MeshStandardMaterial #2a241e flat double"
+    },
+    {
+      "id": "e4392eaa18c035b6",
+      "label": "unnamed: MeshStandardMaterial #3b2a22 transparent in artifact-anchor | MeshStandardMaterial #3ab8a5 transparent in artifact-anchor | MeshStandardMaterial #5e9fb0 transparent in artifact-anchor (+2)"
+    },
+    {
+      "id": "9ae468ed7e49d985",
+      "label": "unnamed: MeshStandardMaterial #765234 flat double [instanced]"
+    },
+    {
+      "id": "fe3e35434564ec0b",
+      "label": "unnamed: MeshStandardMaterial #8a4319 transparent double in medicine_bottle_body | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_shoulder | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_neck"
+    },
+    {
+      "id": "097dc8ad87a30631",
+      "label": "unnamed: MeshStandardMaterial #9e988c | MeshStandardMaterial #2a2a30 in artifact-anchor | MeshStandardMaterial #2e9687 in artifact-anchor (+6)"
+    },
+    {
+      "id": "44454a36b0a7891e",
+      "label": "unnamed: MeshStandardMaterial #d6d1c3 [instanced] in delineator-anchor | MeshStandardMaterial #b9a179 [instanced] in delineator-anchor | MeshStandardMaterial #d6d1c3 (+1)"
+    },
+    {
+      "id": "f7b8f5de76ce051c",
+      "label": "unnamed: MeshStandardMaterial #f2ead8 in medicine_pill_0_body | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_l | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_r (+20)"
+    },
+    {
+      "id": "48fc65fee7d72f64",
+      "label": "unnamed: MeshStandardMaterial #ffffff flat double [instanced]"
+    },
+    {
+      "id": "fcccd42adbe4763a",
+      "label": "unnamed: MeshStandardMaterial #ffffff in item_anchor_condition"
+    },
+    {
+      "id": "53b31a225f04c7cc",
+      "label": "unnamed: MeshStandardMaterial #ffffff map double"
+    },
+    {
+      "id": "f0d9395e78513bf8",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in football_body"
+    },
+    {
+      "id": "abdb5b0dce2d2a51",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in monument-anchor | MeshStandardMaterial #ffffff map in market-anchor | MeshStandardMaterial #ffffff map in signposts (+2)"
+    },
+    {
+      "id": "5ec1ae8c4d1388bc",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc"
+    },
+    {
+      "id": "b95a33097d55b58d",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc | MeshStandardMaterial #ffffff map vc in layby"
+    },
+    {
+      "id": "977641309409c052",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "4044e95e67981494",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "5f66ba80ccf7af68",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "4d3da771dcccc3ad",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "bb09a27fcb87a12f",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "0b3241f93ced413d",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc | MeshStandardMaterial #ffffff vc [instanced]"
+    },
+    {
+      "id": "7c0070ce9e7ed898",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent double"
+    },
+    {
+      "id": "a9a3dcf9082905ed",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent in sidetrack-anchor"
+    },
+    {
+      "id": "9e46bc6eb6e66cf4",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3a3ea3f66689bddc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "6cd4214607a22148",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "09b0653009d7c048",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "05708a89ac832339",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "67480fb469fc79c2",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "8c52bcd0ffd09792",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "fe3ac27c84221832",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "748574deaa18fcfc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "58856eb4b75dc40c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "e7dc355b91bbcd3b",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "bfa07af7eb28983f",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "acb34d792134e719",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "04bb6ba9e5b11c99",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "834c0fc1ec3555ed",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "b5e80a4ad939b532",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "c56bcc915a7fabd1",
+      "label": "unnamed: ShaderMaterial transparent"
+    },
+    {
+      "id": "421fe14b8fa1df2b",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "2f12820fe4579167",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "994b3cdeecff86ea",
+      "label": "unnamed: ShaderMaterial transparent double in artifact-anchor"
+    }
+  ],
+  "standard": [
+    {
+      "id": "daa7f8fdd6cce96d",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "b5b5c1feaba6ef02",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "138ecefd1481bfe9",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "dafc4859e05d02b1",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "dbce94d88a2ad0c4",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "b13351c413e772b6",
+      "label": "car-shadow-hull: no material in the scene"
+    },
+    {
+      "id": "654553554c14c2dd",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "5fa740eb906cb03b",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "1e6bf4632ad74e8b",
+      "label": "far-car: MeshStandardMaterial \"far-car\" #ffffff vc double [instanced] in far-car-program-anchor"
+    },
+    {
+      "id": "d3f584563ad347be",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "01f96fe57e023cf1",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "263b204781e24ca7",
+      "label": "kit-cast-depth: no material in the scene"
+    },
+    {
+      "id": "ab50ebaea1a22974",
+      "label": "kit-cast-depth: no material in the scene"
+    },
+    {
+      "id": "f8e21c2258a3e896",
+      "label": "mirror_glass_inner: MeshBasicMaterial \"mirror_glass_inner\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_left\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_right\" #ffffff map in mirror-anchor"
+    },
+    {
+      "id": "b3986f81bd3261dd",
+      "label": "PMREMGGXConvolution: no material in the scene"
+    },
+    {
+      "id": "a27cc8c3f48b3e53",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc [instanced] in pole-anchor | MeshStandardMaterial \"pole-body\" #ffffff vc [instanced]"
+    },
+    {
+      "id": "ec734ff6c913b3a0",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc in pole-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in market-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in signposts (+3)"
+    },
+    {
+      "id": "02fb090d5867a0f1",
+      "label": "pole-wire: MeshStandardMaterial \"pole-wire\" #ffffff vc transparent in pole-anchor | MeshStandardMaterial \"pole-wire\" #ffffff vc transparent"
+    },
+    {
+      "id": "ddb7d3d857aa7108",
+      "label": "unnamed: LineBasicMaterial #d9c8ad transparent in vehicle-storage-grid"
+    },
+    {
+      "id": "60c66b2341f062e3",
+      "label": "unnamed: MeshBasicMaterial #17120f transparent double in vehicle-storage-grid"
+    },
+    {
+      "id": "14f55a1bbeb240ab",
+      "label": "unnamed: MeshBasicMaterial #2a1a0e vc transparent [instanced]"
+    },
+    {
+      "id": "cb85cfbcff5f5c6c",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "0e63870e1d351f2c",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent | MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "829804cbff187db3",
+      "label": "unnamed: MeshStandardMaterial #25231f"
+    },
+    {
+      "id": "8a0601a3a7f4164b",
+      "label": "unnamed: MeshStandardMaterial #2a241e flat double"
+    },
+    {
+      "id": "3d1991d9cddfc369",
+      "label": "unnamed: MeshStandardMaterial #3b2a22 transparent in artifact-anchor | MeshStandardMaterial #3ab8a5 transparent in artifact-anchor | MeshStandardMaterial #5e9fb0 transparent in artifact-anchor (+2)"
+    },
+    {
+      "id": "7f56c060c6ed5320",
+      "label": "unnamed: MeshStandardMaterial #765234 flat double [instanced]"
+    },
+    {
+      "id": "a5c031f2301b356c",
+      "label": "unnamed: MeshStandardMaterial #8a4319 transparent double in medicine_bottle_body | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_shoulder | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_neck"
+    },
+    {
+      "id": "a1806112d76eb52a",
+      "label": "unnamed: MeshStandardMaterial #9e988c | MeshStandardMaterial #2a2a30 in artifact-anchor | MeshStandardMaterial #2e9687 in artifact-anchor (+6)"
+    },
+    {
+      "id": "b8b931dd6aacda65",
+      "label": "unnamed: MeshStandardMaterial #d6d1c3 [instanced] in delineator-anchor | MeshStandardMaterial #b9a179 [instanced] in delineator-anchor | MeshStandardMaterial #d6d1c3 (+1)"
+    },
+    {
+      "id": "45ff71bb05101443",
+      "label": "unnamed: MeshStandardMaterial #f2ead8 in medicine_pill_0_body | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_l | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_r (+20)"
+    },
+    {
+      "id": "a559daade0891575",
+      "label": "unnamed: MeshStandardMaterial #ffffff flat double [instanced]"
+    },
+    {
+      "id": "496e2269ba197ecd",
+      "label": "unnamed: MeshStandardMaterial #ffffff in item_anchor_condition"
+    },
+    {
+      "id": "1c97b7477253ce37",
+      "label": "unnamed: MeshStandardMaterial #ffffff map double"
+    },
+    {
+      "id": "3f1fb53b44bbd333",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in football_body"
+    },
+    {
+      "id": "be27167210ba3d70",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in monument-anchor | MeshStandardMaterial #ffffff map in market-anchor | MeshStandardMaterial #ffffff map in signposts (+2)"
+    },
+    {
+      "id": "058595f7c6ca961f",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc"
+    },
+    {
+      "id": "15e97df8358f85ea",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc | MeshStandardMaterial #ffffff map vc in layby"
+    },
+    {
+      "id": "6eceda7117d18149",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "dd0f6e6744f6b837",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "212d95b38f76880b",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "fdd7e65c053e0902",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "8c7ddf0cca212050",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "9c65803cc826ed06",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc | MeshStandardMaterial #ffffff vc [instanced]"
+    },
+    {
+      "id": "6aff5720d9b9f49e",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent double"
+    },
+    {
+      "id": "ef70ce2a22bf047e",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent in sidetrack-anchor"
+    },
+    {
+      "id": "9e46bc6eb6e66cf4",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3a3ea3f66689bddc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "6cd4214607a22148",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3f4c6706b67ae35a",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "09b0653009d7c048",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "b04fc38de122fbb5",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "b9f679d03bf8c3fa",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "84087149a8aafb89",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "5a3f717f8bd2dcc7",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "da574b3eb8b3e07e",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "61a90ad8af3a6824",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "cd59dc93d50d534b",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "c087dd1e876b5864",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "d6eee560acd07aa6",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "0fc21dd9b9480269",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "9689de1b8fa9cbb3",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "77f3df1ed3df6712",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "7e0f0b58496e0d9a",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "983fb3162c01dc2c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "63299cfd2d94c451",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "51a9a31f21a1c1f7",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "1b1d7e756635c249",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "a3b60cd9e4a2db79",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "1219818f4887e7df",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "8ab03d7159a2e681",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "ca3cb54c84ba4a02",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "0e5cb45eede3e784",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "748574deaa18fcfc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "58856eb4b75dc40c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "724c08df6795cd57",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "54d53955eac55885",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "4c306b24bee5f094",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "eb7edb2b05bb2ffb",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "92bfb61da86f2b75",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "80d118cd0a60c955",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "cb03bdc281023b16",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "ef0e66ad881150a5",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "b6185fd51e57823d",
+      "label": "unnamed: ShaderMaterial transparent"
+    },
+    {
+      "id": "66d8aa51b24ce7bd",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "c6378ca9ff2fd3ed",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "3fb0d8948c64cb78",
+      "label": "unnamed: ShaderMaterial transparent double in artifact-anchor"
+    }
+  ],
+  "blessing": [
+    {
+      "id": "7ef17ede9d865b70",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "f93253d19d301c0d",
+      "label": "__DEFAULT: no material in the scene"
+    },
+    {
+      "id": "7b90699e3fd225ee",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "3d7bcb724dd1b316",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "42f5970dc1f47175",
+      "label": "car-glass-clear: no material in the scene"
+    },
+    {
+      "id": "c67c6ea16d838bc9",
+      "label": "car-shadow-hull: no material in the scene"
+    },
+    {
+      "id": "77dd3eacc417a220",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "a77324b251c38a82",
+      "label": "car-sticker-decal: no material in the scene"
+    },
+    {
+      "id": "0c05576adec0c3e4",
+      "label": "far-car: MeshStandardMaterial \"far-car\" #ffffff vc double [instanced] in far-car-program-anchor"
+    },
+    {
+      "id": "fcd776c380fe6ac3",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "f7ae8c94e67989d6",
+      "label": "kit-body: no material in the scene"
+    },
+    {
+      "id": "bb5f2d12d4cb77ba",
+      "label": "kit-cast-depth: no material in the scene"
+    },
+    {
+      "id": "648d744715339407",
+      "label": "kit-cast-depth: no material in the scene"
+    },
+    {
+      "id": "4c0902bbd8da08cb",
+      "label": "mirror_glass_inner: MeshBasicMaterial \"mirror_glass_inner\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_left\" #ffffff map in mirror-anchor | MeshBasicMaterial \"mirror_glass_right\" #ffffff map in mirror-anchor"
+    },
+    {
+      "id": "b3986f81bd3261dd",
+      "label": "PMREMGGXConvolution: no material in the scene"
+    },
+    {
+      "id": "a069794c3dbf87cc",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc [instanced] in pole-anchor | MeshStandardMaterial \"pole-body\" #ffffff vc [instanced]"
+    },
+    {
+      "id": "6fd7717969eed829",
+      "label": "pole-body: MeshStandardMaterial \"pole-body\" #ffffff vc in pole-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in market-anchor | MeshStandardMaterial \"flat-palette\" #ffffff vc in signposts (+3)"
+    },
+    {
+      "id": "a0a9666cb415f5d6",
+      "label": "pole-wire: MeshStandardMaterial \"pole-wire\" #ffffff vc transparent in pole-anchor | MeshStandardMaterial \"pole-wire\" #ffffff vc transparent"
+    },
+    {
+      "id": "a9e54d89baf871bd",
+      "label": "unnamed: LineBasicMaterial #d9c8ad transparent in vehicle-storage-grid"
+    },
+    {
+      "id": "1a9a2162d2ba9312",
+      "label": "unnamed: MeshBasicMaterial #17120f transparent double in vehicle-storage-grid"
+    },
+    {
+      "id": "53172824701fa07a",
+      "label": "unnamed: MeshBasicMaterial #2a1a0e vc transparent [instanced]"
+    },
+    {
+      "id": "99d5ae1b81bf9adb",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "8b23f8135440c21b",
+      "label": "unnamed: MeshBasicMaterial #ffffff vc transparent | MeshBasicMaterial #ffffff vc transparent [instanced]"
+    },
+    {
+      "id": "d942caa2bcc1a32c",
+      "label": "unnamed: MeshStandardMaterial #25231f"
+    },
+    {
+      "id": "1b8a3bbaebb7ea24",
+      "label": "unnamed: MeshStandardMaterial #2a241e flat double"
+    },
+    {
+      "id": "fce20a488ed1a86e",
+      "label": "unnamed: MeshStandardMaterial #3b2a22 transparent in artifact-anchor | MeshStandardMaterial #3ab8a5 transparent in artifact-anchor | MeshStandardMaterial #5e9fb0 transparent in artifact-anchor (+2)"
+    },
+    {
+      "id": "915937658784eea9",
+      "label": "unnamed: MeshStandardMaterial #765234 flat double [instanced]"
+    },
+    {
+      "id": "cb110ba9aee4801d",
+      "label": "unnamed: MeshStandardMaterial #8a4319 transparent double in medicine_bottle_body | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_shoulder | MeshStandardMaterial #8a4319 transparent double in medicine_bottle_neck"
+    },
+    {
+      "id": "d5c778bf3dce54c7",
+      "label": "unnamed: MeshStandardMaterial #9e988c | MeshStandardMaterial #2a2a30 in artifact-anchor | MeshStandardMaterial #2e9687 in artifact-anchor (+6)"
+    },
+    {
+      "id": "1984bffc69b92e92",
+      "label": "unnamed: MeshStandardMaterial #d6d1c3 [instanced] in delineator-anchor | MeshStandardMaterial #b9a179 [instanced] in delineator-anchor | MeshStandardMaterial #d6d1c3 (+1)"
+    },
+    {
+      "id": "b7880e78f4ff9d3c",
+      "label": "unnamed: MeshStandardMaterial #f2ead8 in medicine_pill_0_body | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_l | MeshStandardMaterial #f2ead8 in medicine_pill_0_end_r (+20)"
+    },
+    {
+      "id": "b43442722bd99ee2",
+      "label": "unnamed: MeshStandardMaterial #ffffff flat double [instanced]"
+    },
+    {
+      "id": "6a2b30d05649997a",
+      "label": "unnamed: MeshStandardMaterial #ffffff in item_anchor_condition"
+    },
+    {
+      "id": "3071b7e64c1f6146",
+      "label": "unnamed: MeshStandardMaterial #ffffff map double"
+    },
+    {
+      "id": "655250f89a699618",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in football_body"
+    },
+    {
+      "id": "4604799f8732cabf",
+      "label": "unnamed: MeshStandardMaterial #ffffff map in monument-anchor | MeshStandardMaterial #ffffff map in market-anchor | MeshStandardMaterial #ffffff map in signposts (+2)"
+    },
+    {
+      "id": "d8e1e586ba566c3c",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc"
+    },
+    {
+      "id": "704ddd5ba562ca0b",
+      "label": "unnamed: MeshStandardMaterial #ffffff map vc | MeshStandardMaterial #ffffff map vc in layby"
+    },
+    {
+      "id": "4745a79eb2fc9c4e",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "3930fbe4fec275e8",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "94faa036c5684864",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "a8820f7f8ed04a1f",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "da4f3bbdc865ab59",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc"
+    },
+    {
+      "id": "ea8441d37900142b",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc | MeshStandardMaterial #ffffff vc [instanced]"
+    },
+    {
+      "id": "5b057025750f6469",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent double"
+    },
+    {
+      "id": "a09e330be72a2e03",
+      "label": "unnamed: MeshStandardMaterial #ffffff vc transparent in sidetrack-anchor"
+    },
+    {
+      "id": "9e46bc6eb6e66cf4",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3a3ea3f66689bddc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "6cd4214607a22148",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "2a30c73544348701",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "09b0653009d7c048",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "5a5feaccf43a98d0",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "5137a4df43ba0657",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "fea942d688d7fc0e",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "d6a6207a19fc8dfe",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "3c5762b9eae90ccd",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "f971c4dfa273a2b7",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "4571f604f60c0da6",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "f60080213d9a3ee5",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "1505e7e38c9f42f3",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "7eacba46012a685e",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "612f53283443f934",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "5dcb2c213d2d95f9",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "b5aa9c778119075f",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "b645f68d11aa692d",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "266453f2142390a0",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "64717f70c77de730",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "2f8f7aeefd35ff3e",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "eafbfc72a09e2f48",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "fb888c04554de6f8",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "6c1f3a561c0ff5f6",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "8c2733878f38f127",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "56809ee94eba1c05",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "748574deaa18fcfc",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "58856eb4b75dc40c",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "1d818224da7ef92a",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "e12b848620a77292",
+      "label": "unnamed: no material in the scene"
+    },
+    {
+      "id": "4bb658d723d731c7",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "c8548d18539d2d02",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "4f633b0ed9dad4d8",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "94c3487e412a5d1c",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "38894371b7a730a5",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "b8f3c97cc4abc24a",
+      "label": "unnamed: ShaderMaterial"
+    },
+    {
+      "id": "ce040e06b7633674",
+      "label": "unnamed: ShaderMaterial transparent"
+    },
+    {
+      "id": "ef3d226a9b7f7050",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "3cf45ef6eb4d9644",
+      "label": "unnamed: ShaderMaterial transparent double"
+    },
+    {
+      "id": "2317206f45240f4f",
+      "label": "unnamed: ShaderMaterial transparent double in artifact-anchor"
+    }
+  ]
+}

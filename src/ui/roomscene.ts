@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { compileAsyncSafe } from '../render/compileasync';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../vehicle/carmodels';
 import { factoryPaintHex } from '../vehicle/carpaint';
@@ -1229,7 +1230,7 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
     };
     const before = renderer.getRenderTarget();
     renderer.setRenderTarget(target);
-    const linked = renderer.compileAsync(studio, cam);
+    const linked = compileAsyncSafe(renderer, studio, cam);
     renderer.setRenderTarget(before);
     void linked.then(() => {
       if (disposed) {

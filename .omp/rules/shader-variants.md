@@ -24,6 +24,9 @@ A variant is the program cache key, not the material object. These all make a ne
 
 ## Checking
 
+Every dev boot compares its programs with `config/program-budget.json` and reports any program linked mid-drive (`render/programbudget.ts`, `tools/look/programs.mjs`; see materials.md).
+
+
 In the dev build, wrap `__bro.renderer.renderer.render` and count `info.programs.length` growth inside the call while you exercise the new content. Anything above zero mid-drive is a freeze on Windows. `__broSpikes` also notes `new programs: …` on a hitch.
 
 Known one-offs still compiled on first draw: POI kit materials (world/poi/kit.ts). The sidetrack decal and everything at the 20 km marks have boot anchors now (`sidetrackProgramAnchor`, `monumentProgramAnchor`).

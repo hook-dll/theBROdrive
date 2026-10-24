@@ -9,6 +9,7 @@
  */
 
 import type { GameLoop } from '../core/loop';
+import { checkProgramBudget } from '../render/programbudget';
 import type { Renderer } from '../core/renderer';
 import {
   GRAPHICS_TIERS,
@@ -321,4 +322,8 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   await measureLaunchFrame();
   if (ctx.takeTierUndetected()) await detectGraphicsTier();
   ctx.loading.classList.add('is-hidden');
+  // Dev: every program linked so far against the tier's allowance (render/programbudget.ts).
+  if (import.meta.env.DEV) {
+    checkProgramBudget(ctx.renderer.renderer, ctx.renderer.scene, ctx.world.state.settings.graphicsQuality);
+  }
 }
