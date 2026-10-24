@@ -595,9 +595,10 @@ setDesertGroundArclength(0);
  * pixel over 100, a speck the owner still could not find. 0.8 puts the brightest at
  * 130-140, a couple of dozen pixels a frame over 100 and a couple of hundred over 40,
  * against sand at 6: points of light, still one grain per half square metre near the
- * eye, so it is a starfield on the sand and not a carpet of light.
+ * eye, so it is a starfield on the sand and not a carpet of light. The owner then found
+ * 0.8 too bright and asked for half: 0.4.
  */
-const GLITTER_PEAK = 0.8;
+const GLITTER_PEAK = 0.4;
 
 /**
  * Per rendered frame: the glitter comes up as the day goes (`dayFactor` from the sky),
