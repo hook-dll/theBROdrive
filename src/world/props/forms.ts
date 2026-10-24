@@ -765,13 +765,21 @@ export function desertPropForms(surface: SurfaceType): readonly DesertPropForm[]
  * Weighted pick from a surface's forms. A uniform pick made every member equally
  * likely, which is right for five ordinary props and wrong for a landmark: a tree
  * that stands nine metres over the sand has to be rarer than a barrel cactus.
+ *
+ * `bias` multiplies a form's own weight by id: the region's (world/regions.ts
+ * `RegionMix.forms`), which is how dragon trees come out of hiding in palm country and
+ * saguaro leaves the lava. A form it does not name keeps its weight.
  */
-export function pickDesertForm(forms: readonly DesertPropForm[], roll: number): DesertPropForm {
+export function pickDesertForm(
+  forms: readonly DesertPropForm[],
+  roll: number,
+  bias?: Readonly<Record<string, number>>,
+): DesertPropForm {
   let total = 0;
-  for (const form of forms) total += form.weight;
+  for (const form of forms) total += form.weight * (bias?.[form.id] ?? 1);
   let cursor = roll * total;
   for (const form of forms) {
-    cursor -= form.weight;
+    cursor -= form.weight * (bias?.[form.id] ?? 1);
     if (cursor < 0) return form;
   }
   return forms[forms.length - 1]!;

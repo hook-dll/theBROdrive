@@ -58,8 +58,9 @@ import { SwellWalk } from './roadswells';
  *     after the homestead is rolling or esses.
  * 11: closer corners and wider radius ranges on every kind but switchbacks.
  * 12: the swell table, built in the walk; also bump on any change to the swells.
+ * 13: each district's kind is weighted by the desert region it opens in (world/regions.ts).
  */
-export const SPINE_FORMAT = 12;
+export const SPINE_FORMAT = 13;
 
 export interface RoadSpine {
   /** Road length the tables were built for, metres. */

@@ -4,6 +4,55 @@
 
 ### Added
 
+- THE DESERT'S REGIONS ARE PLACES, NOT ONLY COLOURS (`world/regions.ts`, new: the ring
+  `DESERTS` moved here from `gradient.ts` with `desertAt`, `PALETTE_CYCLE_M`,
+  `desertSpanAt`; `regionAt`, `RegionMix`, `CULTURES`, `calibrateRoadWeights`). Every
+  system used to roll its own independent dice, so ten kilometres anywhere were a fair
+  sample of everything: an izba beside a trulli beside a pueblo, the same mesa count and
+  cactus density in every desert. Now each of the 28 deserts' sign emblem is its LAND
+  and it has a PEOPLE, and the existing draws read them; nothing new is built.
+  - Land (`RegionProfile`): mesa occupancy (`mesas.ts`, read at the road branch nearest
+    the cell), sand and rock form density and the forms' weights (`props/scatter.ts`,
+    `deserttiledata.ts`, `deserttiles.ts` through `pickDesertForm`'s new `bias`), lone
+    houses and desert buildings (`poislots.ts`, `poi.ts`), relay masts, and the road
+    character draw (`roadcharacter.ts`). Table country has 2.9x the mesas, the erg 0.2x;
+    cactus country 2.3x the cacti; palm country shows dragon trees x6 and baobabs x7;
+    the moon and the lava have no saguaro, but rock and dead wood; the lava climbs in
+    switchbacks (31% of its road, 13% overall) and almost never runs pan (1.5%), the
+    sun's road is 26% pan, the powerline country 35% highway with 4x the masts; lone
+    houses run from 2.2 per 100 km on the moon to 9.5 in the powerline country.
+  - People: nine cultures (frontier, mexico, sahara, veld, mediterranean, north, soviet,
+    asia, modern); 72% of a region's buildings are its own (`CULTURE_SHARE`), the rest
+    from the whole catalogue; a settlement falls back to its culture's lived-in houses.
+    `rollStructure` takes the arclength.
+  - THE RING KEEPS ITS TOTALS. Each density is divided by its distance-weighted ring
+    mean (`tools/region-census.ts`: every mean 1.00), so the owner's scarcity is only
+    redistributed. Road kinds are matrix-scaled so each keeps its share of the road:
+    over 8 seeds x 3000 km, pan 14.8% before and 15.3% after, every other kind within a
+    point. A plain per-kind mean had pushed the pan to 16%.
+  - Mesa field, scatter and tile props blend across a boundary on the same
+    smootherstep as the sand. Tile props: up to 12 per tile (`MAX_TILE_PROPS`, was 5).
+  - Measured: `mesa-clearance` PASS (9 seeds, 0 intrusions, 0.05-0.09 ms per cell);
+    `spine-verify`, `road-selfcross`, `road-condition`, `poi-placement` pass; a jump
+    settles in 7.2-8.6 s, against 7.1-8.8 s on main in the same tab.
+  - Old saves and cached spines are invalid: `SPINE_FORMAT` 13, and the houses, mesas
+    and props under a saved position move.
+- LONE HOUSES' BARRELS CLEAR THE SIGNPOST AND THE WALL (`world/settlement.ts`
+  `SIGNPOST_ALONG_M`, `SIGNPOST_OUT_M`, now read by `signposts.ts`; `LONE_BARRELS_GAP_M`
+  1.5 to 2.5). Towards the pad's start only if they clear the board: the butterfly
+  roof's 25 m put them on it. The gap was exactly the bench's 1.5 m house margin. Both
+  showed once regions put more of those houses on the road (`poi-placement`: 0 overlaps).
+
+- A LOST GRAPHICS CONTEXT STOPS THE DRIVE INSTEAD OF A WHITE SCREEN (`main.ts`,
+  `webglcontextlost` on the game canvas). A driver reset (Windows TDR,
+  `DXGI_ERROR_DEVICE_HUNG`) or the browser reclaiming the GPU used to leave the canvas
+  white while the simulation, the autopilot and the sound carried on blind. Now the loop
+  and the sound stop, the drive is saved and marked for resume, and a full-screen notice
+  offers Reload, which lands back in the car. Nothing is rebuilt in place. An autopilot
+  soak beforehand (23 min of driving plus jumps across 300 km, WebGL
+  allocations counted) found no GPU leak: buffers plateau near 178 MB and textures near
+  239 MB, with programs and the JS heap flat.
+
 - RESOLUTION IS A MULTIPLE OF THE SCREEN (`game/settings.ts` `FRAME_SCALES`,
   `Settings.frameScale`, `GraphicsTier.screenLines`, `screenLinesFor`; `core/renderer.ts`
   `sceneFrameSize`, `setFrameScale`). The row is now x0.5, x0.75, Screen, x1.5, x2 of the

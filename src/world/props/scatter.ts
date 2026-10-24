@@ -15,6 +15,7 @@ import { groundCoverActive, lightGeometryActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { hash01 } from '../../core/rng';
+import { newRegionMix, regionAt } from '../regions';
 import { SurfaceType } from '../../core/surfaces';
 import { ROAD_HALF_WIDTH } from '../road';
 import { laybyKeepsClear } from '../layby';
@@ -320,10 +321,18 @@ export class ScatterProvider implements ChunkProvider {
     const cellLMax = Math.ceil(MAX_LAT / CELL_L) + 1;
     let occupancyCells = 0;
     const mesas = mesaFieldOf(ctx.road, ctx.terrain);
+    // Densities at the ring's mean, scaled by each row's region (world/regions.ts). This
+    // build's own buffer: the generator yields mid-row, and another chunk's build runs then.
+    const regionBuffer = newRegionMix();
 
     for (let cs = cellSStart; cs <= cellSEnd; cs++) {
       const centreS = (cs + 0.5) * CELL_S;
       if (centreS < ctx.sStart || centreS >= ctx.sEnd) continue;
+      // The row's region, once: its 6 m are nothing against a region's kilometres.
+      const region = regionAt(centreS, regionBuffer);
+      const rockDensity = ROCK_DENSITY * region.rocks;
+      const sandDensity = CACTUS_DENSITY * region.flora;
+      const anyDensity = Math.max(rockDensity, sandDensity);
       for (let cl = -cellLMax; cl <= cellLMax; cl++) {
         cell: {
           // CHEAPEST TEST FIRST, and that ordering is the whole reason this can afford
@@ -331,7 +340,7 @@ export class ScatterProvider implements ChunkProvider {
           // samples below are hundreds of times more expensive. Rolling first throws
           // away nine cells in ten before either is touched.
           const roll = hash01(seed, TAG_SCATTER, cs, cl);
-          if (roll >= ROCK_DENSITY) break cell;
+          if (roll >= anyDensity) break cell;
 
           const centreL = (cl + 0.5) * CELL_L;
           if (Math.abs(centreL) < MIN_LAT) break cell;
@@ -352,7 +361,7 @@ export class ScatterProvider implements ChunkProvider {
           // fence line. Still only arithmetic: no sampling yet.
           const t = Math.min(1, Math.max(0, (absLateral - FULL_LAT) / (MAX_LAT - FULL_LAT)));
           const fade = 1 - t * t * (3 - 2 * t);
-          if (roll >= ROCK_DENSITY * fade) break cell;
+          if (roll >= anyDensity * fade) break cell;
 
           const p = ctx.road.offsetPoint(s, lateral);
           // Not inside a mesa's footprint (world/mesas.ts): that ground is rock wall.
@@ -367,16 +376,16 @@ export class ScatterProvider implements ChunkProvider {
           let density: number;
           if (surface === SurfaceType.Rock) {
             forms = rockForms();
-            density = ROCK_DENSITY;
+            density = rockDensity;
           } else if (surface === SurfaceType.Sand) {
             forms = sandForms();
-            density = CACTUS_DENSITY;
+            density = sandDensity;
           } else {
             break cell;
           }
           if (roll >= density * fade) break cell;
 
-          const form = pickDesertForm(forms, hash01(seed, TAG_SCATTER, cs, cl, 3));
+          const form = pickDesertForm(forms, hash01(seed, TAG_SCATTER, cs, cl, 3), region.forms);
 
           // A prop already knocked down stays down. Same guard `lootedPois` is for a
           // looted stop: the chunk is rebuilt every time it crosses the physics radius,

@@ -2,6 +2,7 @@ import { hash, hash01 } from '../core/rng';
 import { POST_GAP_MIN_M, postBracket, postS } from './poststops';
 import { DWELLINGS } from './dwellings/list';
 import { ROAD_LENGTH } from './road';
+import { CULTURES, CULTURE_SHARE, cultureAt, newRegionMix, regionAt, type Culture } from './regions';
 
 /**
  * The roadside stops' PURE ROLLS: which slots are occupied, by which building, on
@@ -19,8 +20,14 @@ import { ROAD_LENGTH } from './road';
  * settlements. So no two roadside stops are ever closer than that, the first one is the
  * first post, and a slot's arclength comes from the seed alone.
  */
-/** Fraction of long gaps that hold a lone house; the rest read as empty desert. */
+/**
+ * Fraction of long gaps that hold a lone house, at the ring's mean; the rest read as
+ * empty desert. Each region scales it by its `houses` (world/regions.ts): the moon is
+ * empty for twenty kilometres, the powerline country lived in.
+ */
 const LONE_OCCUPANCY = 0.55;
+/** No region fills every gap: a gap is still sometimes just desert. */
+const LONE_OCCUPANCY_MAX = 0.92;
 /** Domain tag for the POI hash stream, distinct from every other subsystem. */
 const POI_DOMAIN = 0x504f4931; // 'POI1'
 
@@ -64,7 +71,8 @@ export function roadsideSlotS(seed: number, slot: number): number {
   const at = postS(seed, k);
   const next = postS(seed, k + 1);
   const room = (next - at) / 2 - POST_GAP_MIN_M;
-  const s = room < 0 || hash01(seed, POI_DOMAIN, slot) >= LONE_OCCUPANCY
+  const occupancy = Math.min(LONE_OCCUPANCY_MAX, LONE_OCCUPANCY * regionAt((at + next) / 2, regionScratch).houses);
+  const s = room < 0 || hash01(seed, POI_DOMAIN, slot) >= occupancy
     ? NaN
     : (at + next) / 2 + (hash01(seed, POI_DOMAIN, slot, 5) - 0.5) * 2 * room;
   bySlot.set(slot, s);
@@ -131,6 +139,29 @@ const VARIANT_SETBACK_SPAN_M = 12;
 export const MAST_IDS = ['standing-tower', 'relay-cluster'] as const;
 /** Masts, then every dwelling: the length of world/poistructures.ts `POI_STRUCTURES`. */
 const STRUCTURE_COUNT = MAST_IDS.length + DWELLINGS.length;
+/** The masts' share of a desert or gap roll at the ring's mean, as the uniform roll gave them. */
+const MAST_SHARE = MAST_IDS.length / STRUCTURE_COUNT;
+/** A mast is never more than this share of a region's buildings. */
+const MAST_SHARE_MAX = 0.3;
+
+const regionScratch = newRegionMix();
+
+/** Structure index of a dwelling id; throws on a culture naming a house that does not exist. */
+function structureOf(id: string): number {
+  const index = DWELLINGS.findIndex((definition) => definition.id === id);
+  if (index < 0) throw new Error(`Unknown dwelling ${id} in a culture`);
+  return MAST_IDS.length + index;
+}
+
+/** A table with one entry per culture. */
+function byCulture(make: (culture: Culture) => readonly number[]): Readonly<Record<Culture, readonly number[]>> {
+  const out = {} as Record<Culture, readonly number[]>;
+  for (const culture of Object.keys(CULTURES) as Culture[]) out[culture] = make(culture);
+  return out;
+}
+
+/** Each culture's houses as structure indices. */
+const CULTURE_STRUCTURES = byCulture((culture) => CULTURES[culture].map(structureOf));
 
 /** Whether a structure index is one of the masts rather than a dwelling. */
 export function structureIsMast(structure: number): boolean {
@@ -146,26 +177,40 @@ export function dwellingFootprint(structure: number): readonly [number, number] 
 }
 
 /**
- * Which building stands at a slot: a hash of the slot, so having seen an izba at one
- * stop tells a player nothing about the next one.
+ * Which building stands at arclength `s`: a mast now and then (often in the powerline
+ * country, seldom on the moon), else most likely a house of the region's own people
+ * (`CULTURE_SHARE`), else any house at all. Each part is its own hash of the slot, so
+ * having seen an izba at one stop tells a player only that this is Russian country.
  */
-export function rollStructure(seed: number, domain: number, key: number): number {
-  return Math.min(STRUCTURE_COUNT - 1, Math.floor(hash01(seed, domain, key, 1) * STRUCTURE_COUNT));
+export function rollStructure(seed: number, domain: number, key: number, s: number): number {
+  const masts = Math.min(MAST_SHARE_MAX, MAST_SHARE * regionAt(s, regionScratch).masts);
+  const u = hash01(seed, domain, key, 1);
+  if (u < masts) return Math.min(MAST_IDS.length - 1, Math.floor((u / masts) * MAST_IDS.length));
+  if (hash01(seed, domain, key, 7) < CULTURE_SHARE) {
+    const own = CULTURE_STRUCTURES[cultureAt(s)];
+    return own[Math.min(own.length - 1, Math.floor(hash01(seed, domain, key, 8) * own.length))]!;
+  }
+  const v = (u - masts) / (1 - masts);
+  return MAST_IDS.length + Math.min(DWELLINGS.length - 1, Math.floor(v * DWELLINGS.length));
 }
 
 /** Structure indices of the dwellings people still live in: what a settlement is built of. */
 const LIVED_IN: readonly number[] = DWELLINGS.flatMap((definition, index) =>
   definition.abandoned ? [] : [MAST_IDS.length + index],
 );
+/** Each culture's lived-in houses: what its settlements are built of. */
+const CULTURE_LIVED_IN = byCulture((culture) => CULTURE_STRUCTURES[culture].filter((i) => LIVED_IN.includes(i)));
 
 /**
  * A settlement's one dwelling type: the slot's own roll, unless that is a mast or a ruin,
- * which nobody runs a post and a shop out of; then another draw among the lived-in ones.
+ * which nobody runs a post and a shop out of; then another draw among the lived-in
+ * houses of the region's people.
  */
-function rollSettlement(seed: number, slot: number): number {
-  const rolled = rollStructure(seed, POI_DOMAIN, slot);
+function rollSettlement(seed: number, slot: number, s: number): number {
+  const rolled = rollStructure(seed, POI_DOMAIN, slot, s);
   if (LIVED_IN.includes(rolled)) return rolled;
-  return LIVED_IN[Math.floor(hash01(seed, POI_DOMAIN, slot, 6) * LIVED_IN.length)]!;
+  const own = CULTURE_LIVED_IN[cultureAt(s)];
+  return own[Math.floor(hash01(seed, POI_DOMAIN, slot, 6) * own.length)]!;
 }
 
 /** One occupied roadside slot, rolled: everything about the stop except its lateral. */
@@ -191,7 +236,7 @@ export function roadsideSlot(seed: number, slot: number): RoadsideSlot | null {
   if (!(s <= ROAD_LENGTH)) return null;
   // A post slot is a settlement with its «ПОЧТА» machine; a gap slot is one house.
   const settlement = slot % 2 === 1;
-  const structure = settlement ? rollSettlement(seed, slot) : rollStructure(seed, POI_DOMAIN, slot);
+  const structure = settlement ? rollSettlement(seed, slot, s) : rollStructure(seed, POI_DOMAIN, slot, s);
   return {
     slot,
     index: ROADSIDE_INDEX_BASE + slot,

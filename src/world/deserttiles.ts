@@ -25,8 +25,10 @@ import {
   DESERT_TILE_VERTS as TILE_VERTS,
   desertTileDataTransfers,
   generateDesertTileData,
+  MAX_TILE_PROPS,
   type DesertTileData,
 } from './deserttiledata';
+import { newRegionMix, regionAt } from './regions';
 import type {
   DesertTileWorkerRequest,
   DesertTileWorkerResponse,
@@ -87,7 +89,8 @@ const ROAD_QUERY_HYSTERESIS = 200;
  */
 const REPLACEMENT_RANK = 1000;
 const PROP_TAG = 0x44535254;
-const MAX_TILE_PROPS = 5;
+/** Scratch for a tile's region; props are built synchronously, one tile at a time. */
+const tileRegion = newRegionMix();
 const TILE_PROP_ID_BASE = 1_000_000;
 const ROCK_COLLIDER_MIN = 0.55;
 /**
@@ -558,6 +561,7 @@ export class DesertTileStreamer {
       tz,
       data.heights,
       data.propSurfaces,
+      data.regionS,
       group,
     );
     freezeStaticSubtree(group);
@@ -599,18 +603,20 @@ export class DesertTileStreamer {
     tz: number,
     heights: Float32Array,
     propSurfaces: Uint8Array,
+    regionS: number,
     group: THREE.Group,
   ): { props: readonly DesertPropPlacement[]; meshes: readonly THREE.InstancedMesh[] } {
-    const requested = 2 + Math.floor(hash01(this.seed, PROP_TAG, tx, tz) * 4);
+    // The forms weighted by the region that chose the candidates (see generateDesertTileData).
+    const bias = regionAt(regionS, tileRegion).forms;
     const props: DesertPropPlacement[] = [];
-    for (let i = 0; i < requested; i++) {
+    for (let i = 0; i < MAX_TILE_PROPS; i++) {
       const surface = propSurfaces[i]!;
       if (surface === 0) continue;
 
       const localX = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 1) * 0.84) * DESERT_TILE_SIZE;
       const localZ = (0.08 + hash01(this.seed, PROP_TAG, tx, tz, i, 2) * 0.84) * DESERT_TILE_SIZE;
       const forms = desertPropForms(surface as SurfaceType);
-      const form = pickDesertForm(forms, hash01(this.seed, PROP_TAG, tx, tz, i, 3));
+      const form = pickDesertForm(forms, hash01(this.seed, PROP_TAG, tx, tz, i, 3), bias);
       const id = tilePropId(tx, tz, i);
       if (propPieces(form.id) && this.breakables?.isBroken(id)) continue;
 

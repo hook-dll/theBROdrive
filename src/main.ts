@@ -2967,6 +2967,40 @@ async function boot(): Promise<void> {
   loop.setRenderFps(
     presentationFpsFor(world.state.settings.frameRateLimit),
   );
+  // A lost WebGL context (a driver reset — Windows TDR, DXGI_ERROR_DEVICE_HUNG — or the
+  // browser reclaiming the GPU) leaves the canvas white while the simulation, the
+  // autopilot and the sound would carry on blind. Nothing GPU-side is rebuilt in place:
+  // the drive is stopped, saved and marked for resume, and a reload brings the player
+  // back to the car with a fresh context.
+  canvas.addEventListener('webglcontextlost', () => {
+    paused = true;
+    loop.stop();
+    audio.setPaused(true);
+    pads.stopRumble();
+    if (document.pointerLockElement !== null) document.exitPointerLock();
+    const saved = dying || story !== null || endingStarted
+      ? Promise.resolve()
+      : (async () => {
+          const state = stateForSave();
+          const slot = `slot-${state.seed}`;
+          await saves.save(slot, saveName(state), state);
+          markResumeTarget(slot);
+        })().catch((error: unknown) => console.error('save after the lost graphics context failed', error));
+    const notice = document.createElement('div');
+    notice.className = 'context-lost';
+    notice.style.cssText =
+      'position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;align-items:center;'
+      + 'justify-content:center;gap:16px;background:#111;color:#eee;font:16px sans-serif;text-align:center';
+    const text = document.createElement('div');
+    text.textContent = 'The graphics driver was reset. The drive is saved.';
+    const button = document.createElement('button');
+    button.textContent = 'Reload';
+    button.disabled = true;
+    button.addEventListener('click', () => window.location.reload());
+    notice.append(text, button);
+    document.body.appendChild(notice);
+    void saved.finally(() => { button.disabled = false; });
+  });
   // Dev: `__bro.loop.stop()` freezes the simulation where it stands, so a bench can
   // draw the very same frame again and again (`renderer.render()`); `start()` resumes.
   // `mirageSchedule` and `postAt(index)` say where the mirages and the post stops stand,

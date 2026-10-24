@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 
 import { hash01 } from '../core/rng';
+import { SurfaceType } from '../core/surfaces';
 import { desertPaletteAt } from './gradient';
+import { newRegionMix, regionAt } from './regions';
 import { ROAD_MAX_HALF_WIDTH, type Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import { CORRIDOR_OUTER, type Terrain } from './terrain';
@@ -22,12 +24,19 @@ const FULL_RELIEF_DISTANCE = 200;
 const PROP_TAG = 0x44535254;
 /** How far the drawn ground sits under the road's asphalt at its edge, metres. */
 const UNDER_ROAD_M = 0.1;
-const MAX_TILE_PROPS = 5;
+/**
+ * Most props one tile may stand, and so the stride of their ids (world/deserttiles.ts
+ * `tilePropId`). A tile asks for 2-5 at the ring's mean; a region's `flora` and `rocks`
+ * scale that, so a cactus forest's tiles ask for up to this many.
+ */
+export const MAX_TILE_PROPS = 12;
 /**
  * Clear ground kept between a tile prop and a mesa's footprint, metres: wider than the
  * largest prop's own radius, so nothing stands with its branches in the rock.
  */
 const MESA_PROP_CLEARANCE_M = 8;
+/** Scratch for a tile's region; tile builds run one at a time per thread. */
+const tileRegion = newRegionMix();
 
 /**
  * The non-rendering inputs to an absolute tile build. The worker creates equivalent
@@ -49,7 +58,9 @@ export interface DesertTileGenerationContext {
 /**
  * Transferable result of one tile build. `propSurfaces[i]` is zero when candidate `i`
  * was rejected, otherwise the SurfaceType selected by Terrain.openSurfaceAt(). The
- * renderer resolves it to its live Three form without repeating road/grid/noise work.
+ * renderer resolves it to its live Three form without repeating road/grid/noise work;
+ * `regionS` is the arclength whose region (world/regions.ts) picked the candidates, so
+ * the renderer weights their forms by the same region.
  */
 export interface DesertTileData {
   readonly heights: Float32Array;
@@ -62,6 +73,7 @@ export interface DesertTileData {
   /** How much of `indices` is drawn; less than its length when drawn coarse. */
   readonly indexCount: number;
   readonly propSurfaces: Uint8Array;
+  readonly regionS: number;
 }
 
 
@@ -360,7 +372,16 @@ export function generateDesertTileData(
 
   const propSurfaces = fit(into?.propSurfaces, MAX_TILE_PROPS, Uint8Array);
   propSurfaces.fill(0);
-  const requested = 2 + Math.floor(hash01(context.seed, PROP_TAG, tx, tz) * 4);
+  // The tile's region, at the road branch nearest its centre. It asks for more
+  // candidates where the region is fuller and keeps each by its own surface's share:
+  // a rock where `rocks` is high, a cactus where `flora` is.
+  const regionS = context.roadDistance.ownerAt(centreX, centreZ, DIST_LATTICE);
+  const region = regionAt(regionS, tileRegion);
+  const fullest = Math.max(region.flora, region.rocks);
+  const requested = Math.min(
+    MAX_TILE_PROPS,
+    Math.round((2 + Math.floor(hash01(context.seed, PROP_TAG, tx, tz) * 4)) * fullest),
+  );
   for (let i = 0; i < requested; i++) {
     const localX = (0.08 + hash01(context.seed, PROP_TAG, tx, tz, i, 1) * 0.84) * DESERT_TILE_SIZE;
     const localZ = (0.08 + hash01(context.seed, PROP_TAG, tx, tz, i, 2) * 0.84) * DESERT_TILE_SIZE;
@@ -372,10 +393,13 @@ export function generateDesertTileData(
     if (!farFromRoad && context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;
     // Nor inside a mesa (world/mesas.ts): it is solid rock there, collided and drawn.
     if (mesaFieldOf(context.road, context.terrain).blocks(worldX, worldZ, MESA_PROP_CLEARANCE_M)) continue;
-    propSurfaces[i] = context.terrain.openSurfaceAt(worldX, worldZ);
+    const surface = context.terrain.openSurfaceAt(worldX, worldZ);
+    const share = (surface === SurfaceType.Rock ? region.rocks : region.flora) / fullest;
+    if (hash01(context.seed, PROP_TAG, tx, tz, i, 12) >= share) continue;
+    propSurfaces[i] = surface;
   }
 
-  return { heights, positions, detailOffsets, normals, colors, indices, indexCount, propSurfaces };
+  return { heights, positions, detailOffsets, normals, colors, indices, indexCount, propSurfaces, regionS };
 }
 
 /** The ground as the tiles draw it at one point: see `tileGroundSampler`. */

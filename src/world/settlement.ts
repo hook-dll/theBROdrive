@@ -157,9 +157,23 @@ const BARRELS_ALONG_M = 14;
 const BARRELS_OUT_M = 1.4;
 const TRAILER_ALONG_M = 23;
 const TRAILER_OUT_M = 2.2;
-/** A lone house's barrel stand: clear sand between it and the end of the front wall, metres. */
-const LONE_BARRELS_GAP_M = 1.5;
+/**
+ * A lone house's barrel stand: clear sand between it and the end of the front wall,
+ * metres. More than the 1.5 m the placement bench keeps every house off a spot by, so
+ * a house whose built walls reach a few centimetres past its authored size still
+ * clears it.
+ */
+const LONE_BARRELS_GAP_M = 2.5;
 const LONE_BARRELS_OUT_M = 1.4;
+/**
+ * The signpost (world/signposts.ts) on every pad: along from the pad's start and out
+ * past its outer edge, to the board's centre, and the half length it is kept clear by.
+ */
+export const SIGNPOST_ALONG_M = 4;
+export const SIGNPOST_OUT_M = 1.0;
+const SIGNPOST_HALF_ALONG_M = 1.4;
+/** Clear ground kept between a lone house's barrels and the signpost, metres. */
+const BARRELS_SIGN_CLEAR_M = 1;
 
 /**
  * Half sizes (along the road, across it) each service is kept clear by, metres. The
@@ -268,9 +282,14 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
     };
     if (hash01(roll.variantSeed, DOMAIN, 1) < LONE_BARRELS_CHANCE) {
       // Past one end of the front wall, on the sand between the pad and the wall line.
+      // Towards the pad's start only if they clear the signpost standing there: a long
+      // house (the butterfly roof's 25 m) pushes them onto its board.
       const along = roadHalf(halfX, halfZ, HOUSE_WOBBLE).along;
-      const dir = hash01(roll.variantSeed, DOMAIN, 2) < 0.5 ? -1 : 1;
-      const s = roll.s + dir * (along + LONE_BARRELS_GAP_M + SERVICE_HALF.barrels[0]);
+      const reach = along + LONE_BARRELS_GAP_M + SERVICE_HALF.barrels[0];
+      const signClear =
+        PAD_HALF_LENGTH_M - SIGNPOST_ALONG_M - SIGNPOST_HALF_ALONG_M - BARRELS_SIGN_CLEAR_M;
+      const dir = hash01(roll.variantSeed, DOMAIN, 2) < 0.5 && reach + SERVICE_HALF.barrels[0] <= signClear ? -1 : 1;
+      const s = roll.s + dir * reach;
       barrels = spot(s, roll.side, padOuter + LONE_BARRELS_OUT_M, faceRoad(roll.side, 0));
     }
   }

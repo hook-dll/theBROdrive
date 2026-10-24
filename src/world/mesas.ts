@@ -5,6 +5,7 @@ import type { Road } from './road';
 import { RoadDistance } from './roaddistance';
 import { COARSE_SPACING } from './roadcurve';
 import type { Terrain } from './terrain';
+import { newRegionMix, regionAt } from './regions';
 
 /**
  * THE DESERT'S MESAS: where each one stands, what shape it is, and the ground it stands
@@ -31,8 +32,14 @@ import type { Terrain } from './terrain';
 
 /** Side of the world lattice one mesa may occupy, metres. */
 export const MESA_CELL_SIZE = 2200;
-/** Share of cells that hold a mesa at all. */
+/**
+ * Share of cells that hold a mesa at all, at the ring's mean. Each region scales it by
+ * its `mesas` (world/regions.ts), read at the arclength of the road nearest the cell:
+ * table country is crowded with them, the erg has almost none.
+ */
 const MESA_OCCUPANCY = 0.18;
+/** Even table country leaves most cells open: past this, mesas wall the road in. */
+const MESA_OCCUPANCY_MAX = 0.6;
 export const MESA_MAX_RADIUS = 800;
 const MESA_MIN_RADIUS = 220;
 const MESA_MIN_HEIGHT = 180;
@@ -157,11 +164,18 @@ export function cellKey(cellX: number, cellZ: number): number {
 
 /**
  * Attempt `attempt` of a cell, unchecked: the raw recipe, or null for an empty cell.
- * Exported for `tools/mesa-clearance.ts`, which measures the old placement (attempt 0,
- * no clearance) against the new.
+ * `occupancy` is the cell's region's share (see `MESA_OCCUPANCY`); the default is the
+ * ring's mean, which `tools/mesa-clearance.ts` reads to measure the old placement
+ * (attempt 0, no clearance) against the new.
  */
-export function mesaCandidate(seed: number, cellX: number, cellZ: number, attempt: number): MesaSite | null {
-  if (hashUnit3(seed ^ MESA_TAG, cellX, cellZ) >= MESA_OCCUPANCY) return null;
+export function mesaCandidate(
+  seed: number,
+  cellX: number,
+  cellZ: number,
+  attempt: number,
+  occupancy = MESA_OCCUPANCY,
+): MesaSite | null {
+  if (hashUnit3(seed ^ MESA_TAG, cellX, cellZ) >= occupancy) return null;
   const tagX = attempt === 0 ? MESA_TAG + 1 : MESA_TAG + 400 + attempt * 2;
   const tagZ = attempt === 0 ? MESA_TAG + 2 : MESA_TAG + 401 + attempt * 2;
   const x = (cellX + 0.18 + hashUnit3(seed ^ tagX, cellX, cellZ) * 0.64) * MESA_CELL_SIZE;
@@ -298,6 +312,7 @@ export class MesaField {
   private readonly distance: RoadDistance;
   private readonly near: number[] = [];
   private readonly point = { x: 0, y: 0, z: 0 };
+  private readonly region = newRegionMix();
   private readonly landformsSeen = new Set<Float64Array>();
 
   constructor(
@@ -313,8 +328,12 @@ export class MesaField {
     const hit = this.sites.get(key);
     if (hit !== undefined) return hit;
     let site: MesaSite | null = null;
+    // The region of the road nearest the cell's corner node: one global search per new
+    // cell, on its own lattice, the same answer in every thread.
+    const s = this.distance.ownerAt(cellX * MESA_CELL_SIZE, cellZ * MESA_CELL_SIZE, MESA_CELL_SIZE);
+    const occupancy = Math.min(MESA_OCCUPANCY_MAX, MESA_OCCUPANCY * regionAt(s, this.region).mesas);
     for (let attempt = 0; attempt < ATTEMPTS && site === null; attempt++) {
-      const candidate = mesaCandidate(this.road.seed, cellX, cellZ, attempt);
+      const candidate = mesaCandidate(this.road.seed, cellX, cellZ, attempt, occupancy);
       if (candidate === null) break;
       if (this.clear(candidate)) site = candidate;
     }

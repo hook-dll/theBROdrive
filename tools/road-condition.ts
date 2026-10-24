@@ -24,7 +24,8 @@
  * Nothing here is part of the game bundle.
  */
 
-import { desertPaletteAt, poleEraSegments, roadConditionAt, PALETTE_CYCLE_M } from '../src/world/gradient';
+import { desertPaletteAt, poleEraSegments, roadConditionAt } from '../src/world/gradient';
+import { PALETTE_CYCLE_M } from '../src/world/regions';
 import { poleSections } from '../src/world/props/poles';
 import type { RoadConditionBuffer } from '../src/world/gradient';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';

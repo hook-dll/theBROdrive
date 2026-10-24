@@ -32,6 +32,7 @@ import type { FixtureField } from './fixturefield';
 import { buildPost } from './post';
 import { buildBarrelStand } from './barrels';
 import { buildKeyBox } from './keybox';
+import { newRegionMix, regionAt } from './regions';
 
 /**
  * Points of interest: the buildings that give the drive a reason to continue.
@@ -60,8 +61,14 @@ import { buildKeyBox } from './keybox';
 export const DESERT_SPACING_M = GAMEPLAY_CONFIG.desertPoiSpacingMetres;
 /** Domain tag for the desert slots. */
 const DESERT_DOMAIN = 0x44534b31; // 'DSK1'
-/** Chance that one side of one desert slot has a building on it. */
+/**
+ * Chance that one side of one desert slot has a building on it, at the ring's mean;
+ * each region scales it by its `houses` (world/regions.ts).
+ */
 const DESERT_OCCUPANCY = 0.36;
+/** Even the most lived-in region leaves a side of a slot empty now and then. */
+const DESERT_OCCUPANCY_MAX = 0.85;
+const desertRegion = newRegionMix();
 /** Nearest a desert building's centre stands beyond the asphalt edge and its own half size. */
 const DESERT_NEAR_M = 70;
 /** How much further out it may stand; drawn squared, so most are within sight of the road. */
@@ -196,11 +203,12 @@ export function desertPoisBetween(
   for (let slot = firstSlot; slot <= lastSlot; slot++) {
     for (const side of [-1, 1] as const) {
       const key = slot * 2 + (side > 0 ? 1 : 0);
-      if (hash01(seed, DESERT_DOMAIN, key) >= DESERT_OCCUPANCY) continue;
       const s = (slot + 0.5 + (hash01(seed, DESERT_DOMAIN, key, 2) - 0.5) * 0.8) * spacing;
       if (s < fromS || s >= toS) continue;
       if (s < DESERT_END_CLEARANCE_M || s > ROAD_LENGTH - DESERT_END_CLEARANCE_M) continue;
-      const structure = rollStructure(seed, DESERT_DOMAIN, key);
+      const occupancy = Math.min(DESERT_OCCUPANCY_MAX, DESERT_OCCUPANCY * regionAt(s, desertRegion).houses);
+      if (hash01(seed, DESERT_DOMAIN, key) >= occupancy) continue;
+      const structure = rollStructure(seed, DESERT_DOMAIN, key, s);
       const half = halfStructure(structure);
       const out = hash01(seed, DESERT_DOMAIN, key, 3);
       const lateral = side * (halfWidthAt(seed, s) + DESERT_NEAR_M + half + out * out * DESERT_SPAN_M);

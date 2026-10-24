@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { maxAnisotropy } from '../render/texturequality';
-import type { Desert, DesertEmblem } from './gradient';
+import type { Desert, DesertEmblem } from './regions';
 
 /**
  * SIGN PLATES: a signpost board painted like a licence plate of its region.

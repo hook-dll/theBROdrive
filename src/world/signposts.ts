@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SurfaceType } from '../core/surfaces';
 import { freezeStaticSubtree, type ChunkContent, type ChunkContext, type ChunkProvider } from './chunks';
-import { desertAt } from './gradient';
+import { desertAt } from './regions';
 import { laybysBetween, type Layby } from './layby';
 import { SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
 import { box, C } from './poi/kit';
 import { addStatic } from './props/scatter';
 import { paintPlate, plateStyle, RING_GLYPH } from './signplates';
+import { SIGNPOST_ALONG_M, SIGNPOST_OUT_M } from './settlement';
 
 /**
  * SIGNPOSTS: every lay-by's board, naming the stop and the stops either way.
@@ -50,10 +51,6 @@ const POST_SIZE = 0.1;
 const POST_Z = -(BOARD_STANDOFF + BACKING_DEPTH + POST_GAP + POST_SIZE / 2);
 /** Posts' x either side of the board's centre, metres. */
 const POST_X = BOARD_W * 0.38;
-/** Past the pad's outer edge, metres: on the sand between the pad and the building. */
-const OUT_M = 1.0;
-/** Along the pad from its start, metres. */
-const ALONG_M = 4;
 /** Road searched either way for a neighbour, metres. */
 const NEIGHBOUR_REACH_M = 60_000;
 
@@ -102,8 +99,8 @@ export class SignpostProvider implements ChunkProvider {
     const point = { x: 0, y: 0, z: 0 };
 
     for (const l of laybys) {
-      const s = l.sPadStart + ALONG_M;
-      const lateral = l.side * (l.padOuter + OUT_M);
+      const s = l.sPadStart + SIGNPOST_ALONG_M;
+      const lateral = l.side * (l.padOuter + SIGNPOST_OUT_M);
       ctx.road.offsetPoint(s, lateral, point);
       const ground = ctx.terrain.heightAt(point.x, point.z, s);
       const heading = ctx.road.sampleAt(s).heading;

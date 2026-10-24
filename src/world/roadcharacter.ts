@@ -1,4 +1,5 @@
 import { hashUnit2, hashUnit3 } from '../core/rng';
+import { calibrateRoadWeights, REGION_ROAD_KINDS, roadWeightsAt, type RegionRoadKind } from './regions';
 
 /**
  * WHAT KIND OF ROAD THIS IS, and why it is a district rather than a noise field.
@@ -450,23 +451,41 @@ const OPENING_KINDS = [
   CHARACTERS.findIndex((c) => c.name === 'esses'),
 ];
 
+/**
+ * A district's kind, weighted by the region it opens in (world/regions.ts `roads`): the
+ * lava country climbs in switchbacks, the powerline country runs on highway, the sun's
+ * pan runs straight. The table is calibrated over the ring (`calibrateRoadWeights`), so
+ * every kind keeps its share of the whole road and only where it falls changes.
+ */
 function drawCharacter(seed: number, k: number, exclude: number): number {
   if (k <= 0) return 0;
   if (k === 1) {
     return OPENING_KINDS[Math.floor(hashUnit2(seed ^ DRAW_TAG, k) * OPENING_KINDS.length)]!;
   }
+  const weights = roadWeightsAt(districtStart(k, seed), REGION_ROAD_TABLE, drawWeights);
   let total = 0;
   for (let i = 0; i < CHARACTERS.length; i++) {
-    if (i !== exclude) total += CHARACTERS[i]!.weight;
+    if (i !== exclude) total += weights[KIND_SLOT[i]!]!;
   }
   let pick = hashUnit2(seed ^ DRAW_TAG, k) * total;
   for (let i = 0; i < CHARACTERS.length; i++) {
     if (i === exclude) continue;
-    pick -= CHARACTERS[i]!.weight;
+    pick -= weights[KIND_SLOT[i]!]!;
     if (pick <= 0) return i;
   }
   return exclude === 0 ? 1 : 0;
 }
+
+/** Each character's column in the regions' road table. */
+const KIND_SLOT = CHARACTERS.map((c) => {
+  const slot = REGION_ROAD_KINDS.indexOf(c.name as RegionRoadKind);
+  if (slot < 0) throw new Error(`Road character ${c.name} has no region weight`);
+  return slot;
+});
+const REGION_ROAD_TABLE = calibrateRoadWeights(
+  Object.fromEntries(CHARACTERS.map((c) => [c.name, c.weight])) as Record<RegionRoadKind, number>,
+);
+const drawWeights = new Float64Array(REGION_ROAD_KINDS.length);
 
 /**
  * The last character of block `b`, drawn WITHOUT knowing what came before the block.
