@@ -549,11 +549,12 @@ interface WheelVisual {
   slipAngleRad: number;
   /**
    * The geometric slip angle this step's patch velocity asks for, radians, and the
-   * rolling speed that winds the carcass toward it, m/s: read once a step, and
-   * relaxed toward per substep into `slipAngleRad`.
+   * share of the way to it the carcass winds in one substep — its rolling distance in
+   * the substep over the relaxation length: read once a step, and relaxed toward per
+   * substep into `slipAngleRad`.
    */
   geometricSlipRad: number;
-  slipRollSpeed: number;
+  slipRelaxBlend: number;
   /**
    * Lateral force capacity (N), the wheel-plane right vector and the contact's sideways
    * speed, plus the side-force curve as this tyre stands this step: its normalised side
@@ -1129,6 +1130,8 @@ export class Vehicle implements Rebasable {
   private playerDriven = false;
   /** Wheel-loop substeps per fixed step: `WHEEL_SUBSTEPS`, or the traffic's own count. */
   private wheelSubsteps = WHEEL_SUBSTEPS;
+  /** See `setTreadCastGate`. */
+  private treadCastGate = false;
   /** The driver aids' pedal scales, 1 when idle (`Settings.abs`, `Settings.tractionControl`). */
   private absScale = 1;
   private tcsScale = 1;
@@ -1983,6 +1986,7 @@ export class Vehicle implements Rebasable {
 
     const tyres = new TyreContacts(this.physics, this.chassisBody);
     this.tyres = tyres;
+    tyres.setTreadCastGate(this.treadCastGate);
 
     const frontDriveShare = 1 - this.model.rearDriveBias;
     const rearDriveShare = this.model.rearDriveBias;
@@ -2164,7 +2168,7 @@ export class Vehicle implements Rebasable {
         slideT: 0,
         slipAngleRad: 0,
         geometricSlipRad: 0,
-        slipRollSpeed: 0,
+        slipRelaxBlend: 0,
         locked: false,
         spinRadS: 0,
         drawnSpin: 0,
@@ -4258,6 +4262,9 @@ export class Vehicle implements Rebasable {
     // Grip leaves slowly and comes back quickly: see SLIDE_ONSET_TAU.
     const slideOnsetBlend = dt / (SLIDE_ONSET_TAU + dt);
     const slideRecoverBlend = dt / (SLIDE_RECOVER_TAU + dt);
+    // The wheel loop's substep, here because the slip relaxation below is sized on it.
+    const substeps = this.wheelSubsteps;
+    const h = dt / substeps;
 
     // Each wheel's own parked load (`w.staticLoadN`, set in `rebuild`) is the reference
     // both the μ(Fz) factor and the traction-control load gate are measured against.
@@ -4356,7 +4363,7 @@ export class Vehicle implements Rebasable {
       const adverseLeanDeg = (lean * Math.sign(latSpeed) * 180) / Math.PI;
       w.lateralCapacityN *= 1 - CAMBER_GRIP_LOSS_PER_DEG * Math.max(0, adverseLeanDeg);
       w.geometricSlipRad = Math.atan2(Math.abs(latSpeed), Math.max(Math.abs(fwdSpeed), SLIP_ANGLE_REF_MPS));
-      w.slipRollSpeed = Math.abs(fwdSpeed);
+      w.slipRelaxBlend = 1 - Math.exp(-(Math.abs(fwdSpeed) * h) / this.tyre.relaxationM);
       w.lateralRightX = this.wheelRightScratch.x;
       w.lateralRightY = this.wheelRightScratch.y;
       w.lateralRightZ = this.wheelRightScratch.z;
@@ -4409,8 +4416,6 @@ export class Vehicle implements Rebasable {
     }
 
     // THE SUBSTEPS: the driveline, then every wheel against the contact read above.
-    const substeps = this.wheelSubsteps;
-    const h = dt / substeps;
     const share = 1 / substeps;
     const frontShare = 1 - this.model.rearDriveBias;
     const rearShare = this.model.rearDriveBias;
@@ -4855,8 +4860,7 @@ export class Vehicle implements Rebasable {
     // Relaxation: the carcass follows the geometric angle over a rolling DISTANCE,
     // so the blend is per metre travelled and a parked wheel builds nothing. What is
     // handed on is the built angle in units of the side curve's peak (COMBINED SLIP).
-    w.slipAngleRad +=
-      (w.geometricSlipRad - w.slipAngleRad) * (1 - Math.exp(-(w.slipRollSpeed * h) / this.tyre.relaxationM));
+    w.slipAngleRad += (w.geometricSlipRad - w.slipAngleRad) * w.slipRelaxBlend;
     w.sideSlip = Math.tan(Math.min(w.slipAngleRad, 1.4)) / w.sidePeakTan;
     const sideSlip = w.inContact ? w.sideSlip : 0;
     // How fast the patch slides over the road, m/s, as the previous substep left the
@@ -5234,6 +5238,16 @@ export class Vehicle implements Rebasable {
    */
   setWheelSubsteps(substeps: number): void {
     this.wheelSubsteps = Math.max(1, Math.round(substeps));
+  }
+
+  /**
+   * Lets this car's wheels skip the tread cast where it cannot matter
+   * (vehicle/tyrecontact.ts, THE TREAD CAST CAN BE GATED). The traffic sets it every
+   * step for each of its driven cars; the player's car never has it.
+   */
+  setTreadCastGate(open: boolean): void {
+    this.treadCastGate = open;
+    this.tyres?.setTreadCastGate(open);
   }
 
   /**

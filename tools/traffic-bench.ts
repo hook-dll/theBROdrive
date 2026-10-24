@@ -105,7 +105,9 @@ function addRoadCollider(physics: PhysicsWorld, road: Road): void {
     indices[index++] = a + 3;
     indices[index++] = a + 1;
   }
-  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt);
+  // Registered as road deck (a wear, of 1: the profile share any unregistered collider
+  // reads), as the real road's slabs are, so distant cars gate their tread casts here.
+  physics.addStaticTrimesh(vertices, indices, SurfaceType.Asphalt, 1);
 }
 
 /**

@@ -29,6 +29,26 @@
 
 ### Changed
 
+- NIGHT GLITTER ON THE SAND IS AN EIGHTH AS BRIGHT (`world/terrainmesh.ts`
+  `GLITTER_PEAK` 0.8 to 0.1). Tuned by the owner by eye in the game: the same grains and
+  the same weather dimming, each glint fainter.
+- DISTANT TRAFFIC SKIPS THE TREAD CAST WHERE IT CANNOT MATTER (`vehicle/tyrecontact.ts`
+  THE TREAD CAST CAN BE GATED, `TyreContacts.setTreadCastGate`,
+  `Vehicle.setTreadCastGate`; `world/traffic.ts` `treadCastGate`, `TREAD_GATE_NEAR_M`
+  60, `TREAD_GATE_EDGE_M` 0.3; `SurfaceRegistry.isRoadDeck`). A driven traffic car more
+  than 60 m from the player, with its span 0.3 m inside the deck's edge, keeps the hub
+  ray's answer and skips the tyre's shape cast while the ray stays on the same road-deck
+  slab, its face turned under 1° and moved under 2 m since the last step, the wheel was
+  and is on the ground, and the last cast agreed with the ray to 0.1 mm; every wheel
+  still casts one step in eight (staggered). The player's car always casts. Measured in
+  the dev build at high density on seed 1967315180, hurried autopilot at km 3: the
+  traffic tick went from 1.92 ms (14.4 physical cars) and 2.69 ms (19.4) to 1.45 ms
+  (15.9) and 1.76 ms (17.1), 0.136 to 0.097 ms a physical car; 56-67% of traffic tread
+  casts skipped, `castShape` 93 to 41 ms/s. Shadow-run against the full answer on the
+  bench: worst 0.011 mm of travel and 0.5° of normal over 80 750 skipped contacts.
+  `Road` keeps each node's heading sine and cosine (`project`, `offsetPoint`, `sampleAt`
+  bit-identical, `project` 17% faster) and the slip-angle relaxation blend is taken once
+  a step rather than per wheel substep (bit-identical).
 - THE PLAYER'S CARS RUN THE WHEEL LOOP AT 480 HZ (`vehicle/vehicletuning.ts`
   `WHEEL_SUBSTEPS` 8, `TRAFFIC_WHEEL_SUBSTEPS` 4; `Vehicle.setWheelSubsteps`;
   `world/traffic.ts`). Wheels, carcasses and the driveline take eight substeps per 60 Hz

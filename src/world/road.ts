@@ -185,6 +185,13 @@ interface Block {
   readonly ys: Float64Array;
   readonly zs: Float64Array;
   readonly headings: Float64Array;
+  /**
+   * `Math.sin` and `Math.cos` of each heading, taken once at replay: the Hermite
+   * tangents every position read needs, which `project`'s descent asks for some twenty
+   * times a call. The same doubles the calls would return, so every answer is too.
+   */
+  readonly sins: Float64Array;
+  readonly coss: Float64Array;
 }
 
 export class Road {
@@ -336,6 +343,8 @@ export class Road {
         ys: new Float64Array(CHECKPOINT_NODES + 1),
         zs: new Float64Array(CHECKPOINT_NODES + 1),
         headings: new Float64Array(CHECKPOINT_NODES + 1),
+        sins: new Float64Array(CHECKPOINT_NODES + 1),
+        coss: new Float64Array(CHECKPOINT_NODES + 1),
       };
       this.blocks.push(victim);
     }
@@ -356,6 +365,10 @@ export class Road {
       victim.zs[k] = node.z;
       victim.headings[k] = this.headingField.at((first + k) * NODE_SPACING);
       victim.ys[k] = this.landscape.heightAt(node.x, node.z);
+    }
+    for (let k = 0; k <= CHECKPOINT_NODES; k++) {
+      victim.sins[k] = Math.sin(victim.headings[k]!);
+      victim.coss[k] = Math.cos(victim.headings[k]!);
     }
 
     victim.index = index;
@@ -426,18 +439,20 @@ export class Road {
     const b1 = -2 * t3 + 3 * t2;
     const m1 = t3 - t2;
 
+    const sins = block.sins;
+    const coss = block.coss;
     out.s = clamped;
     out.x =
       b0 * block.xs[k]! +
-      m0 * Math.sin(h0) * NODE_SPACING +
+      m0 * sins[k]! * NODE_SPACING +
       b1 * block.xs[k + 1]! +
-      m1 * Math.sin(h1) * NODE_SPACING;
+      m1 * sins[k + 1]! * NODE_SPACING;
     out.y = y0 + (y1 - y0) * t;
     out.z =
       b0 * block.zs[k]! +
-      m0 * Math.cos(h0) * NODE_SPACING +
+      m0 * coss[k]! * NODE_SPACING +
       b1 * block.zs[k + 1]! +
-      m1 * Math.cos(h1) * NODE_SPACING;
+      m1 * coss[k + 1]! * NODE_SPACING;
     out.heading = h0 + (h1 - h0) * t;
     // The grade the driver actually rides: the slope of the interpolated y, which
     // is linear across the segment. Differencing the nodes is therefore exact.
@@ -566,8 +581,8 @@ export class Road {
 
     const block = this.blockFor(i);
     const k = i - block.index * CHECKPOINT_NODES;
-    const h0 = block.headings[k]!;
-    const h1 = block.headings[k + 1]!;
+    const sins = block.sins;
+    const coss = block.coss;
 
     const t2 = t * t;
     const t3 = t2 * t;
@@ -577,14 +592,14 @@ export class Road {
     const m1 = t3 - t2;
     const sampleX =
       b0 * block.xs[k]! +
-      m0 * Math.sin(h0) * NODE_SPACING +
+      m0 * sins[k]! * NODE_SPACING +
       b1 * block.xs[k + 1]! +
-      m1 * Math.sin(h1) * NODE_SPACING;
+      m1 * sins[k + 1]! * NODE_SPACING;
     const sampleZ =
       b0 * block.zs[k]! +
-      m0 * Math.cos(h0) * NODE_SPACING +
+      m0 * coss[k]! * NODE_SPACING +
       b1 * block.zs[k + 1]! +
-      m1 * Math.cos(h1) * NODE_SPACING;
+      m1 * coss[k + 1]! * NODE_SPACING;
     return (sampleX - x) ** 2 + (sampleZ - z) ** 2;
   }
 

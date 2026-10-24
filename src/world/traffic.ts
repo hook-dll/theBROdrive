@@ -308,6 +308,21 @@ const TRAFFIC_CONTROL_HZ = 12;
  */
 const COORDINATION_INTERVAL_S = 0.1;
 /**
+ * A driven traffic car further than this from the player, metres, may skip its tread
+ * casts (vehicle/tyrecontact.ts, THE TREAD CAST CAN BE GATED). What skipping can cost
+ * is the disc a centimetre into a 14° hump for one step; at 60 m a pixel of a 1080-line
+ * screen at the default 85° is 10 cm, so the worst of it is a tenth of one, and the
+ * spring's answer to it a tenth of that. Inside it the player is close enough to touch
+ * the car within a second or two, and anything he can touch gets the full contact.
+ */
+const TREAD_GATE_NEAR_M = 60;
+/**
+ * ...and only with every wheel this far inside the deck's edge, metres, past the body's
+ * own span across the road: beyond the asphalt the shoulder is another collider, and a
+ * disc can meet its seam where the ray under the hub does not.
+ */
+const TREAD_GATE_EDGE_M = 0.3;
+/**
  * How often a car on rails re-reads the road ahead, seconds. Anything only a driver can
  * deal with wakes it: the lane it holds ending, a prop in it, the turning circle, or
  * any body in it that is not on rails too — a driven car in either direction, a wreck,
@@ -1021,6 +1036,9 @@ export class RoadTraffic {
   private playerDriving = false;
   private readonly spawnPoint = { x: 0, y: 0, z: 0 };
   private readonly position = { x: 0, y: 0, z: 0 };
+  /** The centreline at the player's arclength, this step, absolute; see `treadCastGate`. */
+  private readonly playerCentre = { x: 0, y: 0, z: 0 };
+  private readonly gatePosition = { x: 0, y: 0, z: 0 };
   private pedestrianActive = false;
   private pedestrianPrimed = false;
   private pedestrianX = 0;
@@ -2328,6 +2346,7 @@ export class RoadTraffic {
     this.playerStepTravel = Math.abs(advance) < 50 ? Math.abs(advance) : 0;
     this.playerDriving = this.sourceWorld.state.player.drivingCarId !== null;
     this.playerS = playerS;
+    this.road.offsetPoint(playerS, 0, this.playerCentre);
     this.playerStoppedFor = this.playerDriving && Math.abs(this.playerSpeed) < BYPASS_STILL_MPS ? this.playerStoppedFor + dt : 0;
     if (this.playerVehicle) {
       const heading = this.road.headingAt(playerS);
@@ -2513,6 +2532,7 @@ export class RoadTraffic {
         this.advanceRails(car, dt);
         continue;
       }
+      car.vehicle.setTreadCastGate(this.treadCastGate(car));
       if (car.settleFor > 0) {
         car.settleFor -= dt;
         car.vehicle.settle(dt);
@@ -2578,6 +2598,27 @@ export class RoadTraffic {
     car.spawnS = car.forwardS;
     car.autopilot.retarget(this.road);
     car.autopilot.setEngaged(true);
+  }
+
+  /**
+   * Whether a driven car may skip its tread casts this step (vehicle/tyrecontact.ts,
+   * THE TREAD CAST CAN BE GATED): further than `TREAD_GATE_NEAR_M` from the player and
+   * with its whole span `TREAD_GATE_EDGE_M` inside the deck's edge. The distance is
+   * from the centreline at his arclength, widened by his own lateral, so it never
+   * counts him further than he is; straight-line, so a hairpin's other leg is near.
+   */
+  private treadCastGate(car: TrafficCar): boolean {
+    if (
+      Math.abs(car.roadLateral) + car.roadHalfWidth >
+      this.road.halfWidthAt(car.forwardS) - TREAD_GATE_EDGE_M
+    ) {
+      return false;
+    }
+    const at = car.vehicle.absoluteTranslation(this.gatePosition);
+    const dx = at.x - this.playerCentre.x;
+    const dz = at.z - this.playerCentre.z;
+    const near = TREAD_GATE_NEAR_M + Math.abs(this.playerLateral);
+    return dx * dx + dz * dz > near * near;
   }
 
   /**

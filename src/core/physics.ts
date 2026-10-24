@@ -125,7 +125,8 @@ export class PhysicsWorld {
    * the surface here rather than at the call site is what guarantees every drivable
    * collider has a friction profile. `wear` (0 fresh .. 1 at MAX_WEAR) is the road
    * condition a road slab was built at, for its sub-collider profile
-   * (`subColliderShare`); anything else omits it.
+   * (`subColliderShare`), and marks the collider as road deck
+   * (`SurfaceRegistry.isRoadDeck`); anything else omits it.
    */
   addStaticTrimesh(
     vertices: Float32Array,

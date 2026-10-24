@@ -709,6 +709,15 @@ export class SurfaceRegistry {
     return this.wearByHandle.get(colliderHandle) ?? 1;
   }
 
+  /**
+   * Whether a collider is a slab of the road deck: exactly the colliders registered
+   * with a wear (roadmesh.ts, through `PhysicsWorld.addStaticTrimesh`). The gated
+   * tread cast (vehicle/tyrecontact.ts) trusts the hub's ray only on these.
+   */
+  isRoadDeck(colliderHandle: number): boolean {
+    return this.wearByHandle.has(colliderHandle);
+  }
+
   /** Driving characteristics of a collider's registered surface. */
   lookup(colliderHandle: number | null | undefined): SurfaceProps {
     return SURFACES[this.lookupType(colliderHandle)];

@@ -61,9 +61,32 @@
  *
  * Sensors are not ground. Everything else that is not this body is.
  *
+ * THE TREAD CAST CAN BE GATED (`setTreadCastGate`), for distant traffic only. On the
+ * road deck's interior, away from any other collider, the cast changes nothing the
+ * ray did not already answer: over 22 008 traffic contacts on the real road the
+ * ray's answer alone was bit-identical to the full one in 90%, the rest typically
+ * within 0.05 mm, and only 7 (0.03%) more than 1 mm off, 2 more than 1 cm. On a
+ * CONTINUOUS mesh the disc only parts from the face under the hub at an edge between
+ * faces, and an edge the hub has not yet reached puts the disc into the next face by
+ * at most `r (1 / cos φ - 1)` for a turn of φ between them — 0.05 mm at 1°, 1 cm
+ * only at a 14° hump, and then for the one step before the hub crosses it. So a
+ * gated wheel skips the cast only while all of this holds, and casts on the step any
+ * of it does not:
+ *
+ *   - the ray met a face (`toi > 0`, not too steep) of a road deck slab
+ *     (`SurfaceRegistry.isRoadDeck`), the same slab as last step, its normal within
+ *     `GATE_NORMAL_COS` of last step's and its point within `GATE_CONTINUITY_M` of it
+ *     (a rebase, a teleport or a wake from the rails is never continuous);
+ *   - the wheel was on the ground last step and the ray puts it on the ground now;
+ *   - the last cast agreed with the ray (`TREAD_AGREE_M`): a wheel bridging a hole or
+ *     climbing a hump keeps casting until it is past it;
+ *   - this wheel's refresh is not due: every `TREAD_REFRESH_TICKS` steps, staggered
+ *     across the wheels, it casts anyway.
+ *
  * Cost per wheel per step: one ray (0.6-1.1 µs in the bundled wasm, the ray Rapier's
- * controller cast), one shape cast (4-6 µs) and, when the cast meets something, one
- * ray against that collider alone. Nothing here allocates per step on a fixed ground.
+ * controller cast), one shape cast (4-6 µs on a bench's single trimesh, ~12 µs on the
+ * real road's) unless gated and, when the cast meets something, one ray against that
+ * collider alone. Nothing here allocates per step on a fixed ground.
  */
 
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -85,6 +108,26 @@ const MIN_CONTACT_DOT = 0.1;
 const FACE_AGREE_COS = Math.cos((3 * Math.PI) / 180);
 /** How far past the tyre's radius the read-back looks, metres: the cast's error, and more. */
 const FACE_PROBE_SLACK_M = 0.2;
+/**
+ * A gated wheel casts when the face under its hub turned by more than 1° since the
+ * last step: an edge that turns less puts the disc at most 0.05 mm off the face (see
+ * THE TREAD CAST CAN BE GATED).
+ */
+const GATE_NORMAL_COS = Math.cos((1 * Math.PI) / 180);
+/** ...or moved further than any car moves in a step (120 m/s at 60 Hz), metres. */
+const GATE_CONTINUITY_M = 2;
+/**
+ * The cast agreed with the ray when it shortened the travel by no more than this,
+ * metres: the 10% of full answers that are not bit-identical to the ray's differ by
+ * under 0.05 mm, the solve's own noise on a neighbouring face.
+ */
+const TREAD_AGREE_M = 1e-4;
+/**
+ * A gated wheel casts at least once in this many steps, whatever: 7.5 Hz at 60 Hz, so
+ * the full answer is never older than 133 ms (3.3 m at 90 km/h). The wheels' turns are
+ * staggered (`refreshPhase`) so a car's four casts never land on one step.
+ */
+const TREAD_REFRESH_TICKS = 8;
 
 /**
  * One wheel's contact and suspension. The configuration fields are the caller's to
@@ -131,6 +174,14 @@ interface ContactState extends TyreContact {
   /** The parking brake's rolling direction this step, world. */
   readonly forward: Vec3;
   holdImpulse: number;
+  /** This wheel's turn in the tread refresh, steps (TREAD_REFRESH_TICKS). */
+  readonly refreshPhase: number;
+  /** Last step's face under the hub, for the gate: its collider's handle (-1 none), normal and point. */
+  hubHandle: number;
+  readonly lastHubNormal: Vec3;
+  readonly lastHubPoint: Vec3;
+  /** The last tread cast left the ray's answer standing (TREAD_AGREE_M). */
+  treadAgreed: boolean;
 }
 
 /** The wheels of one rigid body. */
@@ -155,8 +206,9 @@ export class TyreContacts {
   /** What the tread cast met this step: its point and normal, read back. */
   private readonly treadPoint: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly treadNormal: Vec3 = { x: 0, y: 1, z: 0 };
-  /** The normal of the face under the hub this step, when the mount's ray found one. */
+  /** The face under the hub this step, when the mount's ray found one: its normal and the ray's point on it. */
   private readonly hubNormal: Vec3 = { x: 0, y: 1, z: 0 };
+  private readonly hubPoint: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly probeRay = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
   private faceHit: RAPIER.RayIntersection | null = null;
   private readonly impulse: Vec3 = { x: 0, y: 0, z: 0 };
@@ -167,11 +219,24 @@ export class TyreContacts {
    */
   private readonly invInertia = new Float64Array(6);
   private readonly groundInvInertia = new Float64Array(6);
+  /** Whether the tread cast may be skipped; see THE TREAD CAST CAN BE GATED. */
+  private treadGate = false;
+  /** `update` calls so far: the clock the tread refresh is staggered on. */
+  private step = 0;
 
   constructor(
     private readonly physics: PhysicsWorld,
     private readonly body: RAPIER.RigidBody,
   ) {}
+
+  /**
+   * Lets the wheels skip the tread cast where it cannot matter (THE TREAD CAST CAN BE
+   * GATED). Off by default, and off for the player's car; the traffic opens it for a
+   * car out of the player's sight on the road deck's interior, step by step.
+   */
+  setTreadCastGate(open: boolean): void {
+    this.treadGate = open;
+  }
 
   /** Adds a wheel; `widthM` is the tread's. Spring fields start at zero. */
   add(mountLocal: Readonly<Vec3>, restLengthM: number, radiusM: number, widthM: number): TyreContact {
@@ -199,6 +264,12 @@ export class TyreContacts {
       inv: 1,
       forward: { x: 0, y: 0, z: 1 },
       holdImpulse: 0,
+      // A quarter of the refresh apart, so a car's four casts land on four steps.
+      refreshPhase: (this.contacts.length * 2) % TREAD_REFRESH_TICKS,
+      hubHandle: -1,
+      lastHubNormal: { x: 0, y: 1, z: 0 },
+      lastHubPoint: { x: 0, y: 0, z: 0 },
+      treadAgreed: false,
     };
     this.contacts.push(contact);
     return contact;
@@ -216,6 +287,7 @@ export class TyreContacts {
     body.angvel(this.angvel);
     body.worldCom(this.com);
     rotate(this.axis, this.bodyRot, 0, -1, 0);
+    this.step++;
     for (const c of this.contacts) this.findGround(c);
 
     const impulse = this.impulse;
@@ -445,6 +517,7 @@ export class TyreContacts {
     );
     let length = Infinity;
     let hubFace = false;
+    let hubHandle = -1;
     if (rayHit) {
       this.rayHit = rayHit;
       const toi = rayHit.timeOfImpact;
@@ -463,6 +536,10 @@ export class TyreContacts {
         length = -c.radiusM;
       } else if (n.x * d.x + n.y * d.y + n.z * d.z < -MIN_CONTACT_DOT) {
         hubFace = true;
+        hubHandle = rayHit.collider.handle;
+        this.hubPoint.x = c.point.x;
+        this.hubPoint.y = c.point.y;
+        this.hubPoint.z = c.point.z;
         this.hubNormal.x = n.x;
         this.hubNormal.y = n.y;
         this.hubNormal.z = n.z;
@@ -475,6 +552,71 @@ export class TyreContacts {
       }
     }
 
+    // THE GATE: this step's face under the hub against last step's (THE TREAD CAST CAN
+    // BE GATED), which this step's then becomes for the next.
+    const hub = this.hubNormal;
+    const lastNormal = c.lastHubNormal;
+    const hubPoint = this.hubPoint;
+    const lastPoint = c.lastHubPoint;
+    const skipTread =
+      this.treadGate &&
+      hubFace &&
+      c.treadAgreed &&
+      c.inContact &&
+      length <= c.restLengthM &&
+      (this.step + c.refreshPhase) % TREAD_REFRESH_TICKS !== 0 &&
+      hubHandle === c.hubHandle &&
+      hub.x * lastNormal.x + hub.y * lastNormal.y + hub.z * lastNormal.z >= GATE_NORMAL_COS &&
+      (hubPoint.x - lastPoint.x) ** 2 + (hubPoint.y - lastPoint.y) ** 2 + (hubPoint.z - lastPoint.z) ** 2 <=
+        GATE_CONTINUITY_M * GATE_CONTINUITY_M &&
+      this.physics.surfaces.isRoadDeck(hubHandle);
+    c.hubHandle = hubHandle;
+    if (hubFace) {
+      lastNormal.x = hub.x;
+      lastNormal.y = hub.y;
+      lastNormal.z = hub.z;
+      lastPoint.x = hubPoint.x;
+      lastPoint.y = hubPoint.y;
+      lastPoint.z = hubPoint.z;
+    }
+    if (!skipTread) {
+      const hubLength = length;
+      length = this.castTread(c, mx, my, mz, shortest, length);
+      const n = c.normal;
+      c.treadAgreed =
+        hubFace && length >= hubLength - TREAD_AGREE_M && n.x * hub.x + n.y * hub.y + n.z * hub.z >= GATE_NORMAL_COS;
+    }
+
+    if (!(length <= c.restLengthM)) {
+      this.inTheAir(c, mx, my, mz);
+      return;
+    }
+
+    c.inContact = true;
+    c.lengthM = Math.min(longest, Math.max(shortest, length));
+    const n = c.normal;
+    const dot = n.x * d.x + n.y * d.y + n.z * d.z;
+    c.inv = dot >= -MIN_CONTACT_DOT ? 1 / MIN_CONTACT_DOT : -1 / dot;
+    // The strut's rate against the face under the hub, or against the contact's own
+    // face where the hub has none (see THE SPRING).
+    const f = hubFace ? this.hubNormal : n;
+    const faceDot = f.x * d.x + f.y * d.y + f.z * d.z;
+    if (faceDot >= -MIN_CONTACT_DOT) {
+      c.speedMps = 0;
+    } else {
+      const v = this.velocityAt(c.point, this.velocity);
+      c.speedMps = -(f.x * v.x + f.y * v.y + f.z * v.z) / faceDot;
+    }
+  }
+
+  /**
+   * The tread cast from the mount at (`mx`, `my`, `mz`), against the travel `length`
+   * the face under the hub gave: the earlier contact's travel, with the contact
+   * written into `c` where it is the cast's.
+   */
+  private castTread(c: ContactState, mx: number, my: number, mz: number, shortest: number, length: number): number {
+    const world = this.physics.world;
+    const d = this.axis;
     // THE TREAD: the disc swept from full bump to free length, for whatever it meets
     // before that face — a kerb's lip, a pothole's far edge, the next triangle over a
     // crest, the raised side of a seam between two colliders. A cast that starts inside
@@ -573,27 +715,7 @@ export class TyreContacts {
         c.normal.z = n.z;
       }
     }
-
-    if (!(length <= c.restLengthM)) {
-      this.inTheAir(c, mx, my, mz);
-      return;
-    }
-
-    c.inContact = true;
-    c.lengthM = Math.min(longest, Math.max(shortest, length));
-    const n = c.normal;
-    const dot = n.x * d.x + n.y * d.y + n.z * d.z;
-    c.inv = dot >= -MIN_CONTACT_DOT ? 1 / MIN_CONTACT_DOT : -1 / dot;
-    // The strut's rate against the face under the hub, or against the contact's own
-    // face where the hub has none (see THE SPRING).
-    const f = hubFace ? this.hubNormal : n;
-    const faceDot = f.x * d.x + f.y * d.y + f.z * d.z;
-    if (faceDot >= -MIN_CONTACT_DOT) {
-      c.speedMps = 0;
-    } else {
-      const v = this.velocityAt(c.point, this.velocity);
-      c.speedMps = -(f.x * v.x + f.y * v.y + f.z * v.z) / faceDot;
-    }
+    return length;
   }
 
   /**
