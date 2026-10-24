@@ -1249,12 +1249,17 @@ function buildContractCrateInto(b: MeshBuilder): void {
 
 /**
  * The stand-in for a thing without a model of its own yet (items/things.ts `size`): a
- * box wrapped in paper of its tag's colour — fragile pale blue, bulky green, ordinary
- * brown — tied with string, a label on its face. Flat materials only, like the parcel.
+ * box wrapped in paper of its tag's colour — a relic plum, a special thing gold, fragile
+ * pale blue, bulky green, ordinary brown — tied with string, a label on its face. Flat
+ * materials only, like the parcel.
  */
 function buildContractThingBoxInto(b: MeshBuilder, thing: ThingDef): void {
   const [x, y, z] = thing.size ?? [0.3, 0.2, 0.2];
-  const colour = hasTag(thing, 'fragile') ? 0xa9bfcc : hasTag(thing, 'bulky') ? 0x5d7a52 : 0x8f6847;
+  const colour = hasTag(thing, 'relic')
+    ? 0x7a3f6a
+    : hasTag(thing, 'special')
+      ? 0xc9a24a
+      : hasTag(thing, 'fragile') ? 0xa9bfcc : hasTag(thing, 'bulky') ? 0x5d7a52 : 0x8f6847;
   const paper = flat(colour, 0.92);
   const string = flat(0x3a281c, 0.96);
   const label = flat(0xd9c8a5, 0.9);

@@ -108,6 +108,26 @@
   says which: "a sticker envelope comes with it", "85%: no sticker (needs 90%)", "late:
   no sticker"; its band reads HAND IN · ON TIME / · LATE for an urgent one.
 - `__bro.thing(id, size?, urgent?)` can spawn an urgent thing.
+- UNIQUENESS (game-design2.md §12; `economy/economy.ts` `SPECIAL_CARD_STICKERS`,
+  `RELIC_STICKERS`, `uniquenessBonus`, `uniquenessBonusText`; `contracts/offers.ts`
+  `SPECIAL_SLOT`, `redrawOffer`; `items/things.ts` `specialThings`). The post's lay-by
+  car — the player's car within 20 m of the lay-by's haul place, the one he last drove
+  (`GameWorld.lastDrivenCarId`, session only) when it is there, else the nearest — opens
+  a fifth card from 3 stickers: a SPECIAL thing (gold band): grandpa's radio, stamp
+  album, mum's music box, old camera, chess set, model plane (11–14 р base, tags
+  `special` + fragile or ordinary, 1 or 2 cells). From 8 stickers the same slot may draw
+  a RELIC (plum band): grandpa's medals, family photo album, his first toy car (22–26 р,
+  fragile, 1 cell). The slot has its own seeded rounds (TAKE → next round), saved with
+  the stock; below 3 stickers it hides and keeps its round. Specials never race; they
+  may be urgent and count toward the three-job limit like any job.
+- STICKER PAY BONUS: +3% per sticker of the delivering car, at most +30%
+  (`contractPay(seed, item, stickers)`). The delivering car is the lay-by car at the
+  delivering post when the tray takes the thing; with none there, the car the player
+  last drove this session, wherever it stands. Offer cards print the pay with the
+  lay-by car's bonus and "+12% for 4 stickers"; the hand-in card prints the same line.
+- `__bro.stickers(n, carId?)`: the given (else driven, else last driven) car has exactly
+  `n` dev stickers. `__bro.stickerSheet` shares its placement, which now bounds the car
+  without the skinned body mesh (its bounds came out NaN, so every sticker landed at NaN).
 
 ### Fixed
 

@@ -19,8 +19,12 @@
 
 import type { ContractKind } from '../contracts/types';
 
-/** A thing's constant tags. Urgency is the post's, not the thing's. */
-export type ThingTag = 'ordinary' | 'bulky' | 'fragile';
+/**
+ * A thing's constant tags. Urgency is the post's, not the thing's. `special` and `relic`
+ * things are the boy's dearest (game-design2.md §12): only the fifth card offers them,
+ * relics only from `RELIC_STICKERS` (economy/economy.ts).
+ */
+export type ThingTag = 'ordinary' | 'bulky' | 'fragile' | 'special' | 'relic';
 
 export type ThingId =
   | 'pencils'
@@ -41,7 +45,16 @@ export type ThingId =
   | 'bed'
   | 'broken_toy_car'
   | 'toy_car'
-  | 'teddies';
+  | 'teddies'
+  | 'grandpa_radio'
+  | 'stamp_album'
+  | 'music_box'
+  | 'old_camera'
+  | 'chess_set'
+  | 'model_plane'
+  | 'grandpa_medals'
+  | 'photo_album'
+  | 'first_toy_car';
 
 export type ThingPlace = 'cells' | 'bench' | 'seats' | 'trailer' | 'tow' | 'transfer';
 
@@ -101,6 +114,16 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, payKopecks: 9 * RUB, place: 'transfer' },
   // Per teddy: a party is one teddy item each.
   { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, payKopecks: 3 * RUB, place: 'seats', look: 'teddy' },
+  // The fifth card's (§12): about twice an ordinary thing's pay, relics twice that again.
+  { id: 'grandpa_radio', name: "grandpa's radio", tags: ['fragile', 'special'], massKg: 6, payKopecks: 14 * RUB, place: 'cells', boot: TWO, size: [0.44, 0.26, 0.2] },
+  { id: 'stamp_album', name: 'stamp album', tags: ['ordinary', 'special'], massKg: 1.2, payKopecks: 11 * RUB, place: 'cells', boot: ONE, size: [0.32, 0.06, 0.24] },
+  { id: 'music_box', name: "mum's music box", tags: ['fragile', 'special'], massKg: 1, payKopecks: 13 * RUB, place: 'cells', boot: ONE, size: [0.2, 0.12, 0.14] },
+  { id: 'old_camera', name: 'old camera', tags: ['fragile', 'special'], massKg: 1.2, payKopecks: 13 * RUB, place: 'cells', boot: ONE, size: [0.16, 0.12, 0.1] },
+  { id: 'chess_set', name: 'chess set', tags: ['ordinary', 'special'], massKg: 2, payKopecks: 11 * RUB, place: 'cells', boot: ONE, size: [0.4, 0.08, 0.2] },
+  { id: 'model_plane', name: 'model plane', tags: ['fragile', 'special'], massKg: 0.8, payKopecks: 14 * RUB, place: 'cells', boot: TWO, size: [0.6, 0.14, 0.5] },
+  { id: 'grandpa_medals', name: "grandpa's medals", tags: ['fragile', 'relic'], massKg: 0.6, payKopecks: 24 * RUB, place: 'cells', boot: ONE, size: [0.26, 0.05, 0.2] },
+  { id: 'photo_album', name: 'family photo album', tags: ['fragile', 'relic'], massKg: 2, payKopecks: 22 * RUB, place: 'cells', boot: ONE, size: [0.34, 0.08, 0.28] },
+  { id: 'first_toy_car', name: 'his first toy car', tags: ['fragile', 'relic'], massKg: 0.4, payKopecks: 26 * RUB, place: 'cells', boot: ONE, size: [0.18, 0.08, 0.1] },
 ];
 
 const BY_ID = new Map<string, ThingDef>(THINGS.map((def) => [def.id, def]));
@@ -179,12 +202,15 @@ export function thingBootFootprint(def: ThingDef): BootFootprint | null {
 /**
  * The four cards of a post (§7.2), one per property: an ordinary thing, a fragile
  * thing, a bulky thing or a haul, the teddies. A bulky thing that is fragile too (the
- * TV, the aquarium) is a bulky card's.
+ * TV, the aquarium) is a bulky card's. The fifth card, `special`, offers the special
+ * things and relics, and only to a car with stickers (§12, contracts/offers.ts
+ * `SPECIAL_SLOT`).
  */
-export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'teddies';
+export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'teddies' | 'special';
 export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky', 'teddies'];
 
 export function thingCard(def: ThingDef): PostCard {
+  if (hasTag(def, 'special') || hasTag(def, 'relic')) return 'special';
   if (def.place === 'seats') return 'teddies';
   if (isHaulThing(def) || hasTag(def, 'bulky')) return 'bulky';
   if (hasTag(def, 'fragile')) return 'fragile';
@@ -196,9 +222,16 @@ const CARD_THINGS: Readonly<Record<PostCard, readonly ThingDef[]>> = {
   fragile: THINGS.filter((def) => thingCard(def) === 'fragile'),
   bulky: THINGS.filter((def) => thingCard(def) === 'bulky'),
   teddies: THINGS.filter((def) => thingCard(def) === 'teddies'),
+  special: THINGS.filter((def) => hasTag(def, 'special')),
 };
+const SPECIAL_AND_RELICS = THINGS.filter((def) => thingCard(def) === 'special');
 
 /** The things a card draws from, in catalogue order. */
 export function cardThings(card: PostCard): readonly ThingDef[] {
   return CARD_THINGS[card];
+}
+
+/** The fifth card's things: the special ones, and the relics too when `relics`. */
+export function specialThings(relics: boolean): readonly ThingDef[] {
+  return relics ? SPECIAL_AND_RELICS : CARD_THINGS.special;
 }

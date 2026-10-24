@@ -555,9 +555,17 @@ export class GameWorld {
   readonly state: WorldState;
   private readonly listeners = new Set<(delta: WorldDelta) => void>();
   private partCounter = 0;
+  /**
+   * The car the player last sat in at the wheel this session, or null: the car he
+   * arrived in, which a post pays the uniqueness bonus by when none stands on its
+   * lay-by (world/post.ts). Session memory, not saved: a reload starts from the car he
+   * sits in.
+   */
+  lastDrivenCarId: string | null;
 
   constructor(state: WorldState) {
     this.state = state;
+    this.lastDrivenCarId = state.player.drivingCarId;
     // Continue runtime ids past anything already in the save, or a reloaded game
     // hands out an id something is still holding. Counting collections is not
     // enough — the pack persists across a save and its items keep their `rt:`
@@ -660,6 +668,7 @@ export class GameWorld {
       case 'enter_car':
         s.player.drivingCarId = delta.carId;
         s.player.seat = delta.seat;
+        if (delta.seat === 'driver') this.lastDrivenCarId = delta.carId;
         break;
       case 'exit_car':
         s.player.drivingCarId = null;

@@ -682,27 +682,28 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     return offer.id;
   };
   /**
-   * Covers the driven (or given) car with one of every sticker in the catalog, for
-   * judging the designs and how they wear: rays from a lattice round the car find
-   * painted panel points (the same `stickerMaterialIndices` placement accepts), and the
-   * stickers go on the farthest-apart ones, upright. Writes CarState directly — a dev
-   * sheet, not a reward. `clear` removes them again.
+   * Sticks `count` stickers on car `id` (the catalog's kinds in turn), replacing what it
+   * had: rays from a lattice round the car find painted panel points (the same
+   * `stickerMaterialIndices` placement accepts), and the stickers go on the
+   * farthest-apart ones, upright. Writes CarState directly — a dev sheet, not a reward.
+   * The count it now has; 0 when the car is not standing in the world.
    */
-  /** The sticker atlas as a PNG data URL, for looking at every design at once. */
-  dev['stickerAtlasPng'] = (): string => (stickerAtlas().texture.image as HTMLCanvasElement).toDataURL('image/png');
-  dev['stickerSheet'] = (carId?: string, clear = false): number => {
-    const id = carId ?? ctx.world.state.player.drivingCarId;
+  const devCoverWithStickers = (id: string | null, count: number): number => {
     const car = id ? ctx.world.state.cars[id] : undefined;
     const vehicle = id ? ctx.vehicles.get(id) : undefined;
     if (!car || !vehicle) return 0;
     car.stickers.length = 0;
-    if (clear) {
+    if (count <= 0) {
       vehicle.refreshStickers();
       return 0;
     }
     const root = vehicle.root;
     root.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(root);
+    // Not `setFromObject(root)`: the skinned body draw mesh bounds to NaN there.
+    const box = new THREE.Box3();
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh && !(object instanceof THREE.SkinnedMesh)) box.expandByObject(object, false);
+    });
     const inv = root.matrixWorld.clone().invert();
     const ray = new THREE.Raycaster();
     ray.layers.enable(KIT_PICK_LAYER);
@@ -734,7 +735,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     }
     void centre;
     const picked: typeof found = [];
-    for (const def of STICKERS) {
+    for (let k = 0; k < count; k++) {
+      const def = STICKERS[k % STICKERS.length]!;
       let best: (typeof found)[number] | null = null;
       let bestD = -1;
       for (const f of found) {
@@ -748,7 +750,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       if (!best) break;
       picked.push(best);
       car.stickers.push({
-        id: `dev:${def.kind}`,
+        id: `dev:${def.kind}:${k}`,
         kind: def.kind,
         x: best.p.x,
         y: best.p.y,
@@ -762,6 +764,18 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     vehicle.refreshStickers();
     return car.stickers.length;
   };
+  /** The sticker atlas as a PNG data URL, for looking at every design at once. */
+  dev['stickerAtlasPng'] = (): string => (stickerAtlas().texture.image as HTMLCanvasElement).toDataURL('image/png');
+  /** `stickerSheet(carId?, clear?)`: one of every sticker in the catalog on the driven (or given) car, for judging the designs and how they wear; `clear` removes them. */
+  dev['stickerSheet'] = (carId?: string, clear = false): number =>
+    devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId, clear ? 0 : STICKERS.length);
+  /**
+   * `stickers(n, carId?)`: car `carId`, else the one driven or last driven, has exactly
+   * `n` stickers, for its uniqueness (game-design2.md §12: the post's fifth card from 3,
+   * relics from 8, +3% pay each up to +30%). Returns the count.
+   */
+  dev['stickers'] = (n: number, carId?: string): number =>
+    devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId ?? ctx.world.lastDrivenCarId, Math.max(0, Math.trunc(n)));
   dev['killPlayer'] = (): void => {
     if (!ctx.vitals.dead) {
       ctx.vitals.beginCollisionFrame('foot');

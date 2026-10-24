@@ -94,14 +94,15 @@ export function deliveryPay(baseKopecks: number, sourceKm: number, quality: numb
  * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
  * distance, with the thing's condition (contracts/runtime.ts) or a passenger party's ride
  * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
- * last) as the quality, and an urgent contract on time `URGENT_BONUS` more (late, the
+ * last) as the quality, × the uniqueness bonus of the delivering car with `stickers`
+ * (`uniquenessBonus`), and an urgent contract on time `URGENT_BONUS` more (late, the
  * plain pay).
  */
-export function contractPay(seed: number, item: ContractCargoItem): number {
+export function contractPay(seed: number, item: ContractCargoItem, stickers: number): number {
   const thing = contractThing(item);
   const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
   const quality = item.party ? passengerQuality(item) : item.progress.condition ?? 1;
-  const pay = deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1);
+  const pay = Math.round(deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1) * (1 + uniquenessBonus(stickers)));
   return item.urgentS !== undefined && !isLate(item) ? Math.round(pay * (1 + URGENT_BONUS)) : pay;
 }
 
@@ -212,4 +213,23 @@ export function carPrice(modelId: string): number {
 /** A car's uniqueness (game-design2.md §12): how many stickers it has earned. */
 export function carUniqueness(car: CarState): number {
   return car.stickers.length;
+}
+
+/** Stickers on the post's lay-by car that open its fifth card, the special things. */
+export const SPECIAL_CARD_STICKERS = 3;
+/** Stickers from which the fifth card may offer a relic too. */
+export const RELIC_STICKERS = 8;
+/** Pay bonus per sticker of the delivering car, and its cap: +3% each, +30% at most (10 stickers). */
+const STICKER_BONUS = 0.03;
+const STICKER_BONUS_CAP = 0.3;
+
+/** The share a car with `stickers` adds to a delivery's pay (`contractPay`). */
+export function uniquenessBonus(stickers: number): number {
+  return Math.min(STICKER_BONUS_CAP, STICKER_BONUS * Math.max(0, stickers));
+}
+
+/** The card line that explains `uniquenessBonus`, or null without stickers: "+12% for 4 stickers". */
+export function uniquenessBonusText(stickers: number): string | null {
+  if (stickers <= 0) return null;
+  return `+${Math.round(uniquenessBonus(stickers) * 100)}% for ${stickers} sticker${stickers === 1 ? '' : 's'}`;
 }

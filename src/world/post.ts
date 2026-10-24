@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
-import { nextOffer, offerDestinationIndex, postStock } from '../contracts/offers';
+import { nextOffer, offerDestinationIndex, POST_OFFER_COUNT, postStock, redrawOffer, SPECIAL_SLOT } from '../contracts/offers';
 import {
   ACTIVE_CONTRACT_LIMIT,
   activeContractIds,
@@ -17,7 +17,7 @@ import {
 } from '../contracts/registry';
 import { formatClock, isLate, urgentRemainingS, type ContractKind, type DeliveryEffect, type DeliveryProbe } from '../contracts/types';
 import { isContractCarId, postHaulPlace } from '../contracts/world';
-import { contractPay, formatMoney } from '../economy/economy';
+import { carUniqueness, contractPay, formatMoney, RELIC_STICKERS, SPECIAL_CARD_STICKERS, uniquenessBonusText } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import {
   contractIdOf,
@@ -28,7 +28,7 @@ import {
   type Item,
   type StickerEnvelopeItem,
 } from '../items/items';
-import { thingBootFootprint, thingCard, type PostCard, type ThingDef } from '../items/things';
+import { hasTag, thingBootFootprint, thingCard, type PostCard, type ThingDef } from '../items/things';
 import { carModel, hasCarModel, type CarModelDef } from '../vehicle/carmodels';
 import { bootHolds } from '../vehicle/trunk';
 import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
@@ -44,15 +44,23 @@ import { postId, postStop, type PostStop } from './poststops';
  * face of the post network (world/poststops.ts) and its offers (contracts/offers.ts).
  *
  * A card machine (world/cardmachine.ts): its four cards are the post's four offers, one
- * per property of a thing (§7.2) — ordinary, fragile, bulky or a haul, teddies. A card
- * prints the thing, where it goes and how far, the pay, its tags, a haul's or a race's
- * note, and says when the thing will not fit the car standing on the post's lay-by. The
- * crank turns through them for as long as the player likes; TAKE gives the one showing,
- * always, fitting or not: the car can be changed. Its thing falls into the tray (a
- * passenger party is one teddy each), and so do a haul's papers, its trailer or car
- * waiting on the lay-by (contracts/world.ts); the machine lets go of the player so he
+ * per property of a thing (§7.2) — ordinary, fragile, bulky or a haul, teddies — and a
+ * fifth, a SPECIAL thing (relics among them from `RELIC_STICKERS`), while the car on the
+ * lay-by has `SPECIAL_CARD_STICKERS` stickers or more (§12); hidden, its slot keeps its
+ * round. A card prints the thing, where it goes and how far, the pay, its tags, a haul's
+ * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
+ * that car. The crank turns through them for as long as the player likes; TAKE gives the
+ * one showing, always, fitting or not: the car can be changed. Its thing falls into the
+ * tray (a passenger party is one teddy each), and so do a haul's papers, its trailer or
+ * car waiting on the lay-by (contracts/world.ts); the machine lets go of the player so he
  * picks them up. The card it was on falls away and the slot's next offer is under it
  * (`nextOffer`): the machine never runs dry.
+ *
+ * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the lay-by's
+ * haul place: the one he last drove (`GameWorld.lastDrivenCarId`) when it is there, else
+ * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
+ * cards print. A delivery is paid by the same car's stickers, read when the tray takes
+ * it; with no car on the lay-by, by the car he last drove, wherever it stands.
  *
  * The TRAY takes things too, which its painted label says: clicked with a thing bound
  * here in hand, the machine draws it in, pays into the player's money and, for a
@@ -85,7 +93,10 @@ const CARD_BAND: Readonly<Record<PostCard, string>> = {
   fragile: '#3f6f8f',
   bulky: '#2f4f7a',
   teddies: '#a2602f',
+  special: '#8a6a1f',
 };
+/** A relic's band, on the special card. */
+const RELIC_BAND = '#6a2f5f';
 /** A race card's band, whatever its property. */
 const RACE_BAND = '#a2452f';
 /** The hand-in card's band: a delivery, a return to sender, a refusal. */
@@ -106,7 +117,7 @@ const HEAVY_KG = 20;
 /** What the card's band calls the offer: its property, a haul's kind, a race, an urgent clock. */
 function bandText(offer: ContractCargoItem, thing: ThingDef): string {
   const card = thingCard(thing);
-  const property = isHaul(offer) ? 'HAUL' : card === 'teddies' ? 'TEDDIES' : card.toUpperCase();
+  const property = isHaul(offer) ? 'HAUL' : hasTag(thing, 'relic') ? 'RELIC' : card.toUpperCase();
   const urgent = offer.urgentS === undefined ? '' : ` · URGENT ${formatClock(offer.urgentS)}`;
   if (offer.raceLegs) return urgent ? `${property} · RACE ${offer.raceLegs}${urgent}` : `${property} · RACE ${offer.raceLegs} STOP${offer.raceLegs > 1 ? 'S' : ''}`;
   return `${property}${urgent}`;
@@ -215,13 +226,16 @@ interface Posting {
 
 class PostMachine extends CardMachine {
   protected readonly title = 'POST';
-  /** The offer standing in each slot, and what an old save left inside. */
+  /** The offer standing in each slot (the four, then `SPECIAL_SLOT`), and what an old save left inside. */
   private readonly offers: ContractCargoItem[];
   private strays: Item[];
   /** The hand-in card, standing first among the cards while the machine is worked. */
   private handIn: HandInCard | null = null;
   /** The model of the car standing on the lay-by when the cards were last painted, or null. */
   private laybyModel: CarModelDef | null = null;
+  /** That car's id and stickers (`carUniqueness`): null and 0 with no car there. */
+  private laybyCarId: string | null = null;
+  private laybyStickers = 0;
   /** The player has `ACTIVE_CONTRACT_LIMIT` contracts out: TAKE refuses (`refreshLimit`). */
   private atLimit = false;
 
@@ -234,11 +248,21 @@ class PostMachine extends CardMachine {
     parts: CardMachineParts,
   ) {
     super(`post:${stop.index}`, parts);
-    const stock = postStock(world.state, world.seed, stop.index);
+    this.findLaybyCar((carId) => world.state.cars[carId] ?? null);
+    const stock = postStock(world.state, world.seed, stop.index, this.relics);
     this.offers = stock.offers.slice();
     this.strays = stock.strays.slice();
-    this.laybyModel = this.findLaybyModel((carId) => world.state.cars[carId] ?? null);
     this.start();
+  }
+
+  /** The lay-by car's stickers show the fifth card. */
+  private get specialShown(): boolean {
+    return this.laybyStickers >= SPECIAL_CARD_STICKERS;
+  }
+
+  /** The lay-by car's stickers let the fifth card offer relics. */
+  private get relics(): boolean {
+    return this.laybyStickers >= RELIC_STICKERS;
   }
 
   /** Writes the stock as it stands: the offer in each slot, nothing else. */
@@ -247,23 +271,60 @@ class PostMachine extends CardMachine {
   }
 
   /**
-   * The model of the car nearest the lay-by's haul place within `LAYBY_CAR_RANGE_M`
-   * (`position`: where a car stands, absolute), or null: what the cards say a thing
-   * will not fit. A haul's own car is not one to load, and a car for sale is nobody's.
+   * Finds the lay-by car (`position`: where a car stands, absolute): within
+   * `LAYBY_CAR_RANGE_M` of the lay-by's haul place, the car the player last drove, else
+   * the nearest; none, null. A haul's own car is not one to load, and a car for sale is
+   * nobody's. True when what the cards print of it (its model, its stickers) changed.
    */
-  private findLaybyModel(position: (carId: string) => { readonly x: number; readonly z: number } | null): CarModelDef | null {
-    let best: CarModelDef | null = null;
+  private findLaybyCar(position: (carId: string) => { readonly x: number; readonly z: number } | null): boolean {
+    let best: string | null = null;
     let bestD2 = LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M;
     for (const [carId, car] of Object.entries(this.world.state.cars)) {
       if (isContractCarId(carId) || car.lotPrice !== undefined || !hasCarModel(car.modelId)) continue;
       const at = position(carId);
       if (!at) continue;
       const d2 = (at.x - this.haulX) ** 2 + (at.z - this.haulZ) ** 2;
+      if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
+      if (carId === this.world.lastDrivenCarId) {
+        best = carId;
+        break;
+      }
       if (d2 > bestD2) continue;
       bestD2 = d2;
-      best = carModel(car.modelId);
+      best = carId;
     }
-    return best;
+    const car = best ? this.world.state.cars[best]! : null;
+    const model = car ? carModel(car.modelId) : null;
+    const stickers = car ? carUniqueness(car) : 0;
+    const changed = model !== this.laybyModel || stickers !== this.laybyStickers;
+    this.laybyCarId = best;
+    this.laybyModel = model;
+    this.laybyStickers = stickers;
+    return changed;
+  }
+
+  /**
+   * The stickers a delivery here is paid by: the lay-by car's, live; with none there,
+   * the car the player last drove, wherever it stands.
+   */
+  private deliveryStickers(ctx: FixtureContext): number {
+    this.refreshLayby(ctx);
+    if (this.laybyCarId) return this.laybyStickers;
+    const last = this.world.lastDrivenCarId;
+    const car = last ? this.world.state.cars[last] : undefined;
+    return car ? carUniqueness(car) : 0;
+  }
+
+  /**
+   * The lay-by car from the live bodies; on a change the special slot is drawn again
+   * for its relic tier (same round) and the cards repaint.
+   */
+  private refreshLayby(ctx: FixtureContext): void {
+    const probe = this.probe(ctx);
+    const relics = this.relics;
+    if (!this.findLaybyCar((carId) => probe.carPosition(carId))) return;
+    if (relics !== this.relics) this.offers[SPECIAL_SLOT] = redrawOffer(this.world.seed, this.offers[SPECIAL_SLOT]!, this.relics);
+    this.cardsChanged();
   }
 
   /** Cards before the offers: the hand-in card, while there is one. */
@@ -272,7 +333,7 @@ class PostMachine extends CardMachine {
   }
 
   protected cardCount(): number {
-    return this.lead + this.offers.length;
+    return this.lead + POST_OFFER_COUNT + (this.specialShown ? 1 : 0);
   }
 
   protected paintCard(g: CanvasRenderingContext2D, w: number, h: number, index: number): void {
@@ -289,14 +350,17 @@ class PostMachine extends CardMachine {
       });
       return;
     }
-    const offer = this.offers[index - this.lead];
+    const slot = index - this.lead;
+    const offer = slot === SPECIAL_SLOT && !this.specialShown ? undefined : this.offers[slot];
     if (!offer) return;
     const thing = contractThing(offer);
     const km = (postStop(this.world.seed, offerDestinationIndex(offer)).s - this.stop.s) / 1000;
     const lines = [
       `→ ${offer.destination ?? 'the next post'} · ${km.toFixed(1)} km`,
-      `${formatMoney(contractPay(this.world.seed, offer))} · ${tagText(offer, thing)}`,
+      `${formatMoney(contractPay(this.world.seed, offer, this.laybyStickers))} · ${tagText(offer, thing)}`,
     ];
+    const bonus = uniquenessBonusText(this.laybyStickers);
+    if (bonus) lines.push(bonus);
     // At the limit the card says so before any note: TAKE will refuse it.
     if (this.atLimit) lines.push('three jobs out: hand one in or return it');
     const haul = haulNote(thing);
@@ -304,7 +368,7 @@ class PostMachine extends CardMachine {
     if (offer.raceLegs) lines.push('three rivals race you to it');
     if (this.laybyModel && wontFit(thing, this.laybyModel)) lines.push(`won't fit your ${this.laybyModel.label}`);
     paintCardFace(g, w, h, {
-      band: offer.raceLegs ? RACE_BAND : CARD_BAND[thingCard(thing)],
+      band: offer.raceLegs ? RACE_BAND : hasTag(thing, 'relic') ? RELIC_BAND : CARD_BAND[thingCard(thing)],
       bandText: bandText(offer, thing),
       corner: `${index + 1}/${count}`,
       headline: offer.party ? `${thing.name} ×${offer.party.size}` : thing.name,
@@ -325,7 +389,7 @@ class PostMachine extends CardMachine {
     // TAKE on the hand-in card: it is the tray that takes cargo in.
     if (this.handIn && index === 0) return this.refuse();
     const slot = index - this.lead;
-    const offer = this.offers[slot];
+    const offer = slot === SPECIAL_SLOT && !this.specialShown ? undefined : this.offers[slot];
     if (!offer) return 'click';
     this.refreshLimit();
     if (this.atLimit) {
@@ -333,7 +397,7 @@ class PostMachine extends CardMachine {
       return this.refuse();
     }
     // The stock first, so the cargo never exists twice: the slot's next offer stands in.
-    this.offers[slot] = nextOffer(this.world.seed, offer);
+    this.offers[slot] = nextOffer(this.world.seed, offer, this.relics);
     this.saveStock();
     this.cardsChanged();
     // A haul's papers fall into the tray like any thing (`contractRelease`: a teddy party
@@ -351,12 +415,7 @@ class PostMachine extends CardMachine {
 
   protected override onFocused(ctx: FixtureContext): void {
     // The car on the lay-by now, from its live body: the cards repaint when it changed.
-    const probe = this.probe(ctx);
-    const model = this.findLaybyModel((carId) => probe.carPosition(carId));
-    if (model !== this.laybyModel) {
-      this.laybyModel = model;
-      this.cardsChanged();
-    }
+    this.refreshLayby(ctx);
     this.showHandIn(this.handInCard(ctx));
     this.refreshLimit();
     if (this.strays.length === 0) return;
@@ -394,7 +453,10 @@ class PostMachine extends CardMachine {
         const lines = [name];
         if (!completes) lines.push('paid with the last of the party');
         else {
-          lines.push(`pays ${formatMoney(contractPay(this.world.seed, item))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`);
+          const stickers = this.deliveryStickers(ctx);
+          lines.push(`pays ${formatMoney(contractPay(this.world.seed, item, stickers))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`);
+          const bonus = uniquenessBonusText(stickers);
+          if (bonus) lines.push(bonus);
           lines.push(stickerLine(item));
         }
         card = { mode: 'deliver', band: left === null ? 'HAND IN' : left < 0 ? 'HAND IN · LATE' : 'HAND IN · ON TIME', headline, lines, footer: 'the pay goes into your money' };
@@ -473,6 +535,8 @@ class PostMachine extends CardMachine {
     const { posting, refusal } = this.posting(ctx);
     if (!posting) return refusal ? 'refused' : null;
     const item = posting.item;
+    // Read before the kind's world change: a car handed over leaves the lay-by.
+    const stickers = this.deliveryStickers(ctx);
     const probe = this.probe(ctx);
     const effect = contractDeliveryEffect(item, probe);
     if (posting.mode === 'return') return this.takeBack(ctx, item, effect);
@@ -490,7 +554,7 @@ class PostMachine extends CardMachine {
       return 'drop';
     }
     const contractId = result.contractId;
-    const pay = contractPay(this.world.seed, item) + ctx.racePay(contractId);
+    const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(contractId);
     const sticker = earnsSticker(item);
     // The completed id and the ledger first; the kind's own world change (the trailer or
     // car taken in) after it, so a crash between the halves cannot pay twice.
