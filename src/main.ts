@@ -3071,6 +3071,28 @@ async function boot(): Promise<void> {
     settings: () => world.state.settings,
     frameReport,
     perfOverlay: perfOverlay ?? undefined,
+    traffic: import.meta.env.DEV
+      ? {
+          get cap() {
+            return traffic.cap;
+          },
+          get floor() {
+            return traffic.floor;
+          },
+          get target() {
+            return traffic.status.target;
+          },
+          get count() {
+            return traffic.status.count;
+          },
+          setCap: (value: number | null) => {
+            traffic.cap = value;
+          },
+          setFloor: (value: number | null) => {
+            traffic.floor = value;
+          },
+        }
+      : undefined,
     ink: import.meta.env.DEV
       ? {
           get enabled() {

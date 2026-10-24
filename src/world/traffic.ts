@@ -934,7 +934,7 @@ export interface TrafficStatus {
   readonly count: number;
   /**
    * Cars the stream is currently trying to hold: one rotation of the density, between
-   * `DENSITY_FLOOR` of `cap` and `cap` itself.
+   * `floor` of `cap` and `cap` itself.
    */
   readonly target: number;
   /**
@@ -3661,17 +3661,35 @@ export class RoadTraffic {
   private capOverride: number | null = null;
 
   /**
-   * Console override of the menu's traffic ceiling (`__bro.traffic.cap = 30`; `null`
-   * hands it back to the menu). Clamped to 0-48 so the far-car meshes (64 a model) keep
-   * room for the race rivals. Surplus cars drain behind the player as at any lowering;
-   * a raise fills at the normal spawn rate.
+   * Console and dev-menu override of the menu's traffic ceiling (`__bro.traffic.cap = 30`;
+   * `null` hands it back to the menu). Clamped to 0-64: the far-car meshes hold 64 a
+   * model and a car past that is drawn in full, so the ceiling is a cost, not a break.
+   * Surplus cars drain behind the player as at any lowering; a raise fills at the normal
+   * spawn rate.
    */
   get cap(): number {
     return this.trafficCap;
   }
 
   set cap(value: number | null) {
-    this.capOverride = value === null ? null : Math.min(48, Math.max(0, Math.round(value)));
+    this.capOverride = value === null ? null : Math.min(64, Math.max(0, Math.round(value)));
+  }
+
+  private floorOverride: number | null = null;
+
+  /**
+   * The quiet end of the density draw as a fraction of the cap: `DENSITY_FLOOR`, or the
+   * dev menu's override (`null` hands it back). A change re-rolls at once, so the knob
+   * is seen on the road now rather than at the next 36-72 s rotation.
+   */
+  get floor(): number {
+    return this.floorOverride ?? DENSITY_FLOOR;
+  }
+
+  set floor(value: number | null) {
+    this.floorOverride = value === null ? null : Math.min(1, Math.max(0, value));
+    this.redrawDesiredCount();
+    this.densityTimer = this.drawDensityInterval();
   }
 
   /** Re-roll at the established cadence against the present cap. */
@@ -3687,7 +3705,7 @@ export class RoadTraffic {
   }
 
   /**
-   * One rotation of the density: a uniform draw in `[DENSITY_FLOOR * cap, cap]`.
+   * One rotation of the density: a uniform draw in `[floor * cap, cap]` (see `floor`).
    *
    * The floor moves WITH the cap rather than being a fixed number of cars, so a
    * widening that doubles the road doubles the quiet end of the range too, and the
@@ -3696,7 +3714,7 @@ export class RoadTraffic {
   private drawDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
     if (cap === 1) return 1;
-    const floor = Math.max(1, Math.ceil(cap * DENSITY_FLOOR));
+    const floor = Math.max(1, Math.ceil(cap * this.floor));
     return floor + Math.floor(this.random() * (cap - floor + 1));
   }
 

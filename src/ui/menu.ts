@@ -793,6 +793,19 @@ export interface PauseHooks {
   /** The drawn outlines in the finishing pass (core/renderer.ts `ink`), for an A/B by eye. Dev only. */
   ink?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
+   * The traffic stream's two knobs (world/traffic.ts `cap`, `floor`): the ceiling in cars
+   * and the quiet end of the density draw as a share of it. `null` hands either back to
+   * the shipping value. Dev only, for tuning the levels by driving them.
+   */
+  traffic?: {
+    readonly cap: number;
+    readonly floor: number;
+    readonly target: number;
+    readonly count: number;
+    setCap(value: number | null): void;
+    setFloor(value: number | null): void;
+  };
+  /**
    * Record a fully fuelled car into the world.
    *
    * Optional, and absent in a production build. Cars are meant to be found in the
@@ -2854,6 +2867,62 @@ export class MainMenu {
             finish('resume');
           });
           devTools.push(row);
+        }
+        // Two sliders and a readout across the grid: the ceiling in cars and the share
+        // of it the density draw may fall to. The readout is the stream's own answer.
+        if (import.meta.env.DEV && hooks.traffic) {
+          const traffic = hooks.traffic;
+          const box = el('div', 'menu-dev-traffic');
+          const readout = text('', 'menu-dev-traffic-readout');
+          const paintReadout = (): void => {
+            readout.textContent = `Traffic: ${traffic.count} live, target ${traffic.target} of ${traffic.cap}`;
+          };
+          const knob = (
+            label: string,
+            min: number,
+            max: number,
+            get: () => number,
+            format: (value: number) => string,
+            set: (value: number) => void,
+          ): HTMLElement => {
+            const row = el('label', 'menu-dev-traffic-row');
+            const name = el('span', 'menu-dev-traffic-name');
+            const value = el('output', 'menu-chip');
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.className = 'menu-slider';
+            slider.min = String(min);
+            slider.max = String(max);
+            slider.step = '1';
+            const paint = (): void => {
+              slider.value = String(get());
+              value.textContent = format(get());
+              slider.style.setProperty('--fill', `${((get() - min) / (max - min)) * 100}%`);
+            };
+            slider.addEventListener('input', () => {
+              set(slider.valueAsNumber);
+              paint();
+              paintReadout();
+            });
+            name.textContent = label;
+            paint();
+            row.append(name, value, slider);
+            return row;
+          };
+          box.append(
+            knob('Cars', 2, 64, () => traffic.cap, String, (v) => traffic.setCap(v)),
+            knob(
+              'Low end',
+              0,
+              100,
+              () => Math.round(traffic.floor * 100),
+              (v) => `${v}%`,
+              (v) => traffic.setFloor(v / 100),
+            ),
+            readout,
+          );
+          paintReadout();
+          devTools.push(box);
         }
         if (import.meta.env.DEV && devTools.length > 0) {
           const dev = el('section', 'menu-dev');
