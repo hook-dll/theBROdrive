@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { CLEAN_CULL_GONE_PX } from '../../render/cleanstyle';
 
 /**
  * Shared instanced batches for chunk props.
@@ -47,11 +46,6 @@ export interface BatchKind {
   readonly receiveShadow?: boolean;
   readonly renderOrder?: number;
   readonly lod?: BatchLod;
-  /**
-   * A roadside prop: casts and receives as `InstanceBatches.propShadows` says, not by
-   * `castShadow`/`receiveShadow` (dev A/B against the desert tiles' props, which do both).
-   */
-  readonly propShadows?: boolean;
 }
 
 /**
@@ -66,13 +60,6 @@ export interface BatchLod {
   readonly far?: { readonly geometry: THREE.BufferGeometry; readonly distance: number };
   /** Past this every instance has faded to nothing in the vertex shader: the page is not drawn. */
   readonly hideBeyond: number;
-  /**
-   * The kind's largest instance, metres, as its material's Clean cull measures it
-   * (render/cleanstyle.ts `applyCleanCull`: the form size times the largest scale). In
-   * the Clean style a page is not drawn once even that would be under
-   * `CLEAN_CULL_GONE_PX`; the shader has already shrunk every instance in it to nothing.
-   */
-  readonly cleanSize?: number;
 }
 
 /** The chunk a slot is allocated for. `ChunkContext` satisfies this. */
@@ -144,28 +131,6 @@ export class InstanceBatches {
   private readonly pageOf = new Map<THREE.InstancedMesh, Page>();
   /** The pages of LOD kinds, the only ones `syncLod` walks. */
   private readonly lodPages: Page[] = [];
-  /** Whether `propShadows` kinds cast and receive; see `setPropShadows`. */
-  private propShadowsOn = false;
-
-  get propShadows(): boolean {
-    return this.propShadowsOn;
-  }
-
-  /**
-   * Dev A/B: roadside props cast and receive sun shadows as the desert tiles' do, or
-   * neither (as shipped). Their materials already have both variants and depth programs
-   * linked through the tiles, so no program is built mid-drive.
-   */
-  setPropShadows(on: boolean): void {
-    this.propShadowsOn = on;
-    for (const family of this.families.values()) {
-      if (!family.kind.propShadows) continue;
-      for (const page of family.pages) {
-        page.mesh.castShadow = on;
-        page.mesh.receiveShadow = on;
-      }
-    }
-  }
 
   constructor(private readonly origin: BatchOrigin) {}
 
@@ -233,16 +198,11 @@ export class InstanceBatches {
    * Sets every LOD page's geometry and visibility for a camera at (`x`, `z`), in the
    * render frame. Once per rendered frame, after the camera moved; it walks only the
    * LOD pages (a few dozen) and touches a page only when its range changes.
-   * `cleanPixelsPerMetre` (render/cleanstyle.ts) is 0 outside the Clean style. The
-   * ground distance it is divided by is never more than the eye distance the shader
-   * divides by, so a page hidden here holds nothing the shader would still draw.
    */
-  syncLod(x: number, z: number, cleanPixelsPerMetre: number): void {
+  syncLod(x: number, z: number): void {
     for (const page of this.lodPages) {
       const lod = page.family.kind.lod!;
-      const hideBeyond = cleanPixelsPerMetre > 0 && lod.cleanSize !== undefined
-        ? Math.min(lod.hideBeyond, (lod.cleanSize * cleanPixelsPerMetre) / CLEAN_CULL_GONE_PX)
-        : lod.hideBeyond;
+      const hideBeyond = lod.hideBeyond;
       const sphere = page.sphere;
       // Ground distance to the nearest point the page's instances can occupy.
       const d = sphere.isEmpty()
@@ -273,8 +233,8 @@ export class InstanceBatches {
     if (kind.geometry.boundingSphere === null) kind.geometry.computeBoundingSphere();
     const mesh = new THREE.InstancedMesh(kind.geometry, kind.material, BATCH_PAGE_SLOTS);
     mesh.count = 0;
-    mesh.castShadow = kind.propShadows ? this.propShadowsOn : (kind.castShadow ?? false);
-    mesh.receiveShadow = kind.propShadows ? this.propShadowsOn : (kind.receiveShadow ?? false);
+    mesh.castShadow = kind.castShadow ?? false;
+    mesh.receiveShadow = kind.receiveShadow ?? false;
     mesh.renderOrder = kind.renderOrder ?? 0;
     // Set by hand so three's culling never reads the zero matrices of unused slots.
     const sphere = new THREE.Sphere();

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { makeFlatMaterial } from '../../render/materials';
-import { applyCleanSurface } from '../../render/cleanstyle';
 
 export type Opening = readonly [start: number, end: number, bottom: number, top: number];
 type WallAxis = 'x' | 'z';
@@ -92,15 +91,12 @@ function surfaceMaterial(color: number, pattern: SurfacePattern): THREE.MeshStan
     texture.repeat.set(1, 1);
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
-    // A DataTexture builds no mipmaps by default; the filter above asks for them, and the
-    // Clean style reads the last one as the pattern's mean colour.
+    // A DataTexture builds no mipmaps by default; the filter above asks for them.
     texture.generateMipmaps = true;
     texture.needsUpdate = true;
     surfaceTextures.set(pattern, texture);
   }
-  // Clean reads the pattern's mean colour (render/cleanstyle.ts): a wall or floor in
-  // one quiet tone, its brick and board lines gone with the style.
-  const patterned = applyCleanSurface(makeFlatMaterial(color, pattern === 'metal' ? 0.74 : 0.92).clone());
+  const patterned = makeFlatMaterial(color, pattern === 'metal' ? 0.74 : 0.92).clone();
   patterned.map = texture;
   patterned.needsUpdate = true;
   surfaceMaterials.set(key, patterned);

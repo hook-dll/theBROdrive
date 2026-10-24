@@ -240,15 +240,6 @@ export class ChunkStreamer {
     this.scene.add(this.batches.root);
   }
 
-  /** Dev A/B: roadside props cast and receive sun shadows (`InstanceBatches.setPropShadows`). */
-  get propShadows(): boolean {
-    return this.batches.propShadows;
-  }
-
-  setPropShadows(on: boolean): void {
-    this.batches.setPropShadows(on);
-  }
-
   /**
    * Appends a provider. Live chunks fall back to CONSTRUCTING; their cursors stand
    * where they were, so the next jobs run exactly the new provider for each.
@@ -590,12 +581,9 @@ export class ChunkStreamer {
     this.batches.rebase();
   }
 
-  /**
-   * Range of the batch pages that have one, for the camera at (`x`, `z`) in the render
-   * frame; `cleanPixelsPerMetre` is render/cleanstyle.ts's, 0 outside the Clean style.
-   */
-  syncLod(x: number, z: number, cleanPixelsPerMetre: number): void {
-    this.batches.syncLod(x, z, cleanPixelsPerMetre);
+  /** Range of the batch pages that have one, for the camera at (`x`, `z`) in the render frame. */
+  syncLod(x: number, z: number): void {
+    this.batches.syncLod(x, z);
   }
 
   /** A build context in the CURRENT origin (see `ChunkContext.originX`). */

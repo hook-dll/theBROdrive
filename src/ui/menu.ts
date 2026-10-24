@@ -841,8 +841,8 @@ export interface PauseHooks {
   jumpToLake?: (index: number) => void;
   /** Adds 100 rubles to the player's money. Dev only, absent in a production build. */
   giveMoney?: () => void;
-  /** Dev A/B: roadside props' sun shadows on or off; returns the new state. Dev only. */
-  toggleRoadsidePropShadows?: () => boolean;
+  /** Puts the player and the driven car on the road at a kilometre. Dev only. */
+  jumpToKm?: (km: number) => void;
 }
 
 /** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
@@ -1729,29 +1729,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           changed();
         },
       })))]),
-      // Art direction, on every rung: uniforms only, so it changes in place mid-drive.
-      segmented('Style', [
-        {
-          label: 'Clean',
-          icon: 'gfx1',
-          hint: 'Calm and steady: flat asphalt, no specks of scatter, faceted shapes '
-            + 'in a few steps of light, crisp shadows near the car. Easier on tired eyes. Costs nothing.',
-          style: 'clean' as const,
-        },
-        {
-          label: 'Standard',
-          icon: 'gfx3',
-          hint: 'The game as tuned: textured asphalt, smooth shading and soft shadows.',
-          style: 'standard' as const,
-        },
-      ].map(({ style, ...option }) => ({
-        ...option,
-        active: () => settings.style === style,
-        pick: () => {
-          settings.style = style;
-          changed();
-        },
-      }))),
     );
   };
 
@@ -2605,7 +2582,6 @@ export class MainMenu {
         fxaa: base.fxaa,
         shadows: base.shadows,
         groundCover: base.groundCover,
-        style: base.style,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
         fieldOfView: base.fieldOfView,
@@ -2642,7 +2618,6 @@ export class MainMenu {
           fxaa: settings.fxaa,
           shadows: settings.shadows,
           groundCover: settings.groundCover,
-          style: settings.style,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
           fieldOfView: settings.fieldOfView,
@@ -2770,7 +2745,7 @@ export class MainMenu {
         // mistaken for the shipping menu. `import.meta.env.DEV` is tested first in
         // every branch so each folds to a constant false in a production build, and the
         // box, its label and every button go with it.
-        const devTools: HTMLButtonElement[] = [];
+        const devTools: HTMLElement[] = [];
         const devButton = (label: string, onClick: () => void): void => {
           const btn = button('menu-button', label);
           btn.addEventListener('click', onClick);
@@ -2854,11 +2829,31 @@ export class MainMenu {
             finish('resume');
           });
         }
-        if (import.meta.env.DEV && hooks.toggleRoadsidePropShadows) {
-          devButton('Roadside prop shadows', () => {
-            hooks.toggleRoadsidePropShadows?.();
+        // A kilometre of the player's choosing: a number field and its button, the
+        // grid's whole width. Enter in the field jumps too.
+        if (import.meta.env.DEV && hooks.jumpToKm) {
+          const row = el('form', 'menu-dev-jump');
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.min = '0';
+          input.step = 'any';
+          input.placeholder = 'km';
+          input.autocomplete = 'off';
+          input.className = 'menu-dev-jump-km';
+          const go = button('menu-button', 'Jump to km');
+          go.type = 'submit';
+          row.append(input, go);
+          row.addEventListener('submit', (ev) => {
+            ev.preventDefault();
+            const km = Number(input.value);
+            if (input.value.trim() === '' || !Number.isFinite(km) || km < 0) {
+              input.focus();
+              return;
+            }
+            hooks.jumpToKm?.(km);
             finish('resume');
           });
+          devTools.push(row);
         }
         if (import.meta.env.DEV && devTools.length > 0) {
           const dev = el('section', 'menu-dev');

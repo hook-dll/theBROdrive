@@ -29,9 +29,6 @@ import { ROAD_DETAIL_ENCODE, ROAD_DETAIL_REPEAT, ROAD_TILE_METRES } from './road
  * way across the verge beside it, and the verge is to stay dark gravel by the asphalt
  * (world/roadmesh.ts SHOULDER_SAND_*).
  *
- * The courses and tracks work in the Clean style (render/cleanstyle.ts): they are shapes
- * with edges, and Clean keeps shapes; only the chips' texture goes.
- *
  * ONE PROGRAM, keyed by a constant: no runtime variant. A geometry without the
  * attributes (lay-bys, the terminus pad, site aprons) reads `ROAD_LOOK_DEFAULTS` through
  * `material.defaultAttributeValues`: no course shade, no tracks.
@@ -119,7 +116,7 @@ const SURFACE_FRAGMENT = `
 		roadOuterOn * roadBand( roadLat - roadOuter, ${f(OIL_STRIP_HALF)}, roadLatAa ) );
 	float roadAged = smoothstep( 0.6, 0.9, roadCourse );
 	diffuseColor.rgb *= 1.0 + vRoadEdge.y * ( ${f(TRACK_POLISH)} * roadAged * roadPolish - ${f(TRACK_OIL)} * ( 0.5 + 0.5 * roadAged ) * roadOil );
-	if ( cleanStyle.z <= 0.0 ) {
+	{
 		vec3 roadChips = texture2D( roadDetail, vMapUv * ${f(ROAD_DETAIL_REPEAT)} ).rgb * ${f(ROAD_DETAIL_ENCODE)};
 		float roadBare = smoothstep( 0.07, 0.13, dot( sampledDiffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ) );
 		float roadNear = 1.0 - smoothstep( ${f(CHIP_FADE_FROM_M)}, ${f(CHIP_FADE_TO_M)}, length( vViewPosition ) );

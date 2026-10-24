@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import type { WebGLProgramParametersWithUniforms } from 'three';
 // Galleries use comic/materials without the game Renderer; install before any compile.
 import './lightshader';
-import { CLEAN_SMOOTH_NORMALS } from './cleanstyle';
 
 /**
  * Comic-book shading for the ground: banded light, strata contours, ink stipple.
@@ -302,9 +301,7 @@ const FRAGMENT_HOOK = /* glsl */ `
   vec2 stippleDx = dFdx( stippleUv );
   vec2 stippleDy = dFdy( stippleUv );
   float stippleStretch = comicStretch( stippleDx, stippleDy );
-  // The Clean style (render/cleanstyle.ts, cleanStyle.z) keeps the ground's colour and
-  // strata but not its ink dots: specks under a pixel or two crawl as the car moves.
-  float fade = cleanStyle.z > 0.0 ? 0.0 : 1.0 - smoothstep( uStippleRange * 0.35, uStippleRange, viewDist );
+  float fade = 1.0 - smoothstep( uStippleRange * 0.35, uStippleRange, viewDist );
   if ( fade > 0.001 && stippleStretch < ${STIPPLE_MAX_STRETCH.toFixed(4)} ) {
     float dots = ${comicStippleCall(COMIC_STIPPLE_KEEP)} * fade;
     // Dots gather on flatter ground, where a pen would use them; slopes get the
@@ -362,14 +359,14 @@ export function applyComicShading(
 }
 
 /**
- * Applies slope-correct spotlight response without the comic surface treatment. The
- * road, its bed and markings: ground that keeps its own normals in the Clean style.
+ * Applies slope-correct spotlight response without the comic surface treatment: the
+ * road, its bed and markings.
  */
 export function applyGroundSpotlightNormals(
   material: THREE.MeshStandardMaterial,
 ): THREE.MeshStandardMaterial {
   material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = CLEAN_SMOOTH_NORMALS + patchGroundSpotNormal(shader.fragmentShader);
+    shader.fragmentShader = patchGroundSpotNormal(shader.fragmentShader);
   };
   material.customProgramCacheKey = () => GROUND_SPOT_PROGRAM_KEY;
   return material;

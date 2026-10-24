@@ -4,7 +4,7 @@ import '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import { retroActive, retroPixelRatio } from '../render/retro';
-import { setCleanFrameHeight, setCleanStyle } from '../render/cleanstyle';
+import { setSceneFrameHeight } from '../render/sceneframe';
 import { DEFAULT_EYE_HEIGHT_M, HAZE_FRAGMENT, HAZE_VERTEX } from '../render/hazeshader';
 import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import {
@@ -17,7 +17,6 @@ import {
   type GraphicsQuality,
   type FrameScale,
   type RetroLines,
-  type VisualStyle,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -1242,7 +1241,7 @@ export class Renderer {
       width / Math.max(1, canvas.width),
       height / Math.max(1, canvas.height),
     );
-    setCleanFrameHeight(height);
+    setSceneFrameHeight(height);
   }
 
   // --- Resolution and GPU timing ---
@@ -1521,15 +1520,6 @@ export class Renderer {
   private applyFxaa(): void {
     const on = this.fxaa && this.quality !== 'retro' && this.supersample < SUPERSAMPLE_WITHOUT_FXAA;
     this.hazeMaterial.uniforms.uFxaa.value = on ? 1 : 0;
-  }
-
-  /**
-   * `Settings.style`. Clean is uniforms only (render/cleanstyle.ts): the lit chunks'
-   * switches and the small-scatter cull, so nothing recompiles and no target changes.
-   */
-  setStyle(style: VisualStyle): void {
-    const clean = style === 'clean';
-    setCleanStyle(clean);
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */

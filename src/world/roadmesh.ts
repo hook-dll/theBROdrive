@@ -6,7 +6,6 @@ import { ROAD_TILE_METRES, roadTextures } from '../render/roadtexture';
 import { applyGroundSpotlightNormals } from '../render/comic';
 import { applyCloudShadow } from '../render/cloudshadow';
 import { applyGroundLight } from '../render/groundlight';
-import { applyCleanSurface } from '../render/cleanstyle';
 import {
   applyRoadLook,
   setRoadDetailMap,
@@ -519,9 +518,8 @@ interface ShoulderBuild {
 // no glint, no wet sheen, no headlamp streaks (owner, 2026-10-16: asphalt in the desert
 // is matt, and a road dries in minutes after rain). The per-pixel look (render/
 // roadlook.ts: courses, wheel tracks, chips) works on the albedo after the
-// vertex colour. The surface's Clean branch (render/cleanstyle.ts) goes outermost on
-// the ribbon: it only changes how its two maps are read.
-const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloudShadow(
+// vertex colour.
+const roadMaterial = applyRoadLook(applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(
     new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -529,7 +527,7 @@ const roadMaterial = applyCleanSurface(applyRoadLook(applyGroundLight(applyCloud
       metalness: 0,
     }),
   ),
-))));
+)));
 /** Dark, weathered aggregate exposed only where the sand falls below the mat edge. */
 const roadBedMaterial = applyGroundLight(applyCloudShadow(
   applyGroundSpotlightNormals(

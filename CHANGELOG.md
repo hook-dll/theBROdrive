@@ -67,17 +67,25 @@
   whatever the setting: the supersample smooths the edges and FXAA only softened the
   distance. Measured on the M2 Pro in that window, Medium, GPU median, alternating runs:
   Screen 7.3-7.5 ms, x1.5 11.4-12.8, x2 14.4-14.7; no program linked by any change.
-- DEV: ROADSIDE PROP SHADOWS A/B (pause menu "Roadside prop shadows";
-  `InstanceBatches.setPropShadows`, `BatchKind.propShadows`, `ChunkStreamer.setPropShadows`).
-  The scatter's rocks and cacti along the road neither cast nor receive sun shadows
-  (only a contact disc under them), while the same forms in the desert tiles do both.
-  The switch gives the roadside ones the tiles' behaviour, or takes it away again, for
-  the session; ground cover is not touched. No program is built by it (95 before and
-  after: the tiles already linked both variants); on at km 30 it added 54 draws a frame,
-  all in the shadow passes.
+- DEV: JUMP TO ANY KILOMETRE from the pause menu (a number field and "Jump to km",
+  Enter works; `PauseHooks.jumpToKm`, `DevTools.jumpTo`, the same hold-until-streamed
+  jump as `__bro.jumpTo`).
 
 ### Changed
 
+- ROADSIDE ROCKS AND CACTI CAST AND RECEIVE SUN SHADOWS, as the desert tiles' props do
+  (`props/scatter.ts` sets `castShadow`/`receiveShadow`; ground cover still does
+  neither). It was a dev A/B; the switch and `InstanceBatches.setPropShadows`,
+  `BatchKind.propShadows`, `ChunkStreamer.setPropShadows` are gone. Measured with the
+  switch on at km 30: +54 draws a frame, all in the shadow passes, no new program.
+- THE CLEAN STYLE IS GONE: always Standard. Removed the setting (`Settings.style`,
+  `VisualStyle`, `Renderer.setStyle`, the Advanced row; a saved `style` is ignored) and
+  everything it switched: `render/cleanstyle.ts` (`applyCleanSurface`,
+  `applyCleanCull`, `CLEAN_SMOOTH_NORMALS`, `cleanPixelsPerMetre`), the faceted normals
+  and banded light in `lightshader.ts`, the clouds' banded sun, the comic stipple's and
+  the road chips' Clean branches, and the batches' Clean page cull (`BatchLod.cleanSize`,
+  `syncLod`'s third argument). The scene frame height the pole wires read moved to
+  `render/sceneframe.ts`. Smoke: the game draws with no shader or console error.
 - NIGHT GLITTER ON THE SAND IS AN EIGHTH AS BRIGHT (`world/terrainmesh.ts`
   `GLITTER_PEAK` 0.8 to 0.1). Tuned by the owner by eye in the game: the same grains and
   the same weather dimming, each glint fainter.

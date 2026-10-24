@@ -17,7 +17,7 @@
  */
 
 import { retroActive } from '../../render/retro';
-import { sceneFrameHeight } from '../../render/cleanstyle';
+import { sceneFrameHeight } from '../../render/sceneframe';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -774,8 +774,8 @@ let _wireMaterial: THREE.MeshStandardMaterial | null = null;
  * THE FADE IS ALPHA BLENDING, so the material is transparent. The alternatives were
  * worse. Alpha to coverage needs a multisampled target and the scene target is not
  * (core/renderer.ts, "NOT MULTISAMPLED"). A dithered discard is a pattern that crawls
- * as the wire moves across the pixel grid, the very thing being fixed and the thing
- * the Clean style exists to remove. Mixing the colour toward the fog instead is right
+ * as the wire moves across the pixel grid, the very thing being fixed. Mixing the
+ * colour toward the fog instead is right
  * only against the horizon sky, and a wire seen from the chase camera crosses sand too,
  * where it would draw a pale line. Up close the coverage is exactly 1 and the wire
  * looks as it did; it is only drawn in the transparent pass instead of the opaque one.

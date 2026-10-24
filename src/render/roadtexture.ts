@@ -543,8 +543,7 @@ function drawPatches(ctx: CanvasRenderingContext2D): void {
  * (`ROAD_DETAIL_ENCODE`), so minification averages it to 1 and the far road keeps the
  * macro tile's and the vertex colours' value untouched: mip-safe by construction, not
  * by tuning. The road shader (render/roadlook.ts) samples it once, at
- * `ROAD_DETAIL_REPEAT` times the macro UV, and leaves it out in the Clean style, where
- * the surface is the vertex colour.
+ * `ROAD_DETAIL_REPEAT` times the macro UV.
  *
  * The same lessons as the macro tile: gradient noise, iso-contoured, never stamped
  * shapes. A chip is where the 4 px octave (roughened by the 2 px one) stands well proud,
@@ -653,8 +652,7 @@ function meanLuminance(data: Uint8ClampedArray): number {
 const ROAD_TEXTURE_CONTRAST = 1.5;
 /**
  * 0.78, down from 0.85 (owner, 2026-10-16): the road is the subject and has to stand
- * off the pale sand and shoulder by its value as well as its texture, in the Clean style
- * too, where the texture is only its coarse mips.
+ * off the pale sand and shoulder by its value as well as its texture.
  */
 const ROAD_DISPLAY_SCALE = 0.78;
 

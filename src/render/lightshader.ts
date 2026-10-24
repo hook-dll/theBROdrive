@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { cleanStyle } from './cleanstyle';
 
 /**
  * Keep every light slot and its program variant, but skip exactly black uniforms.
@@ -170,9 +169,9 @@ function installStableShadowFilter(): void {
  * roof to the sand). Nine taps on the fragments within the box only; outside it the
  * wide map's four as before. Fixed to the map like the cross, so edges do not crawl.
  *
- * Both styles read it so. The Clean style once took ONE compare here for a crisp
- * silhouette; the owner read its 1.6 cm steps as a hard, stair-stepped car shadow
- * (2026-10-16), and a soft edge is as still from frame to frame as a crisp one.
+ * A single hardware compare here gave a crisp silhouette; the owner read its 1.6 cm
+ * steps as a hard, stair-stepped car shadow (2026-10-16), and a soft edge is as still
+ * from frame to frame as a crisp one.
  *
  * The chunks change for every program alike, before any compiles: no variant. The
  * `&& receiveShadow )` test stays verbatim for the kit body's gate (render/materials.ts
@@ -264,90 +263,9 @@ function installScreenAuthoredUnlit(): void {
   }
 }
 
-/**
- * The Clean style's faces and light (render/cleanstyle.ts, `cleanStyle.x`), for every
- * lit program at once.
- *
- *  - FACES. The lighting normal becomes the triangle's own, from the derivatives of the
- *    view position (three's `flatShading` arithmetic). `flatShading` itself is a
- *    program key, so toggling it would relink every lit material mid-drive; this is a
- *    branch in the chunk all of them already compiled. It fades back to the smooth
- *    normal from `CLEAN_FACET_FULL_M` to `CLEAN_FACET_GONE_M`: out there triangles
- *    shrink toward a pixel, and a face normal per pixel-sized triangle is glitter.
- *    Ground that sets `CLEAN_SMOOTH_NORMALS` keeps its own (see that define).
- *  - LIGHT. Every directional and spot light's Lambert term is stepped into four bands
- *    at their centres, so the mean light is kept and only its gradient is posterised,
- *    with a short ramp at each step so an edge across a curved face is not a stair of
- *    pixels. Below the first step it stays continuous, so a low sun fades off a surface
- *    instead of dropping a band at dusk, and a headlamp's grazing pool on a flat road
- *    (cos under 0.25 past a few metres) keeps its smooth falloff. Applied as a factor on
- *    the light's colour before `RE_Direct`, which multiplies the colour by the same
- *    Lambert term: the product is the band. Headlamps were left smooth once while the
- *    sun was banded, so a lit car or post read in two styles at once. The ground's
- *    slope-normal spot call (render/comic.ts) is banded on the shading normal, which is
- *    its own normal on flat ground.
- *
- * `cleanStyle` reaches the built-in lit materials through their ShaderLib uniforms
- * and ShaderMaterials through `UniformsLib.lights`; the value is the shared plain
- * object, so no material is touched to switch it.
- */
-const CLEAN_FACET_FULL_M = 250;
-const CLEAN_FACET_GONE_M = 600;
-
-function installCleanStyle(): void {
-  const uniform = 'uniform vec3 cleanStyle;';
-  if (THREE.ShaderChunk.lights_pars_begin.includes(uniform)) return;
-  (THREE.UniformsLib.lights as Record<string, THREE.IUniform>).cleanStyle = { value: cleanStyle };
-  for (const shader of Object.values(THREE.ShaderLib)) {
-    if ('directionalLights' in shader.uniforms) shader.uniforms.cleanStyle = { value: cleanStyle };
-  }
-  THREE.ShaderChunk.lights_pars_begin += `
-${uniform}
-float cleanLightBand( float dotNL ) {
-	if ( cleanStyle.x <= 0.0 || dotNL <= 0.0 ) return 1.0;
-	float t = dotNL * 4.0;
-	float i = floor( t );
-	float stepped = min( ( i + 0.5 + smoothstep( 0.85, 1.0, t - i ) ) * 0.25, 0.875 );
-	return mix( dotNL, stepped, smoothstep( 0.0, 0.25, dotNL ) ) / dotNL;
-}
-`;
-  const lights = THREE.ShaderChunk.lights_fragment_begin;
-  const normalLine = 'vec3 geometryNormal = normal;';
-  const directCall =
-    'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
-  const band = 'directLight.color *= cleanLightBand( dot( geometryNormal, directLight.direction ) );\n\t\t';
-  const spotLoop = lights.indexOf('i < NUM_SPOT_LIGHTS;');
-  const spotCall = spotLoop >= 0 ? lights.indexOf(directCall, spotLoop) : -1;
-  const dirLoop = lights.indexOf('i < NUM_DIR_LIGHTS;');
-  const dirCall = dirLoop >= 0 ? lights.indexOf(directCall, dirLoop) : -1;
-  if (!lights.includes(normalLine) || spotCall < 0 || dirCall < 0 || spotCall > dirCall) {
-    throw new Error('Three lights_fragment_begin layout changed');
-  }
-  THREE.ShaderChunk.lights_fragment_begin = (
-    lights.slice(0, spotCall)
-    + band
-    + lights.slice(spotCall, dirCall)
-    + band
-    + lights.slice(dirCall)
-  ).replace(
-    normalLine,
-    `${normalLine}
-#ifndef CLEAN_SMOOTH_NORMALS
-if ( cleanStyle.x > 0.0 ) {
-	vec3 cleanFacet = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
-	float cleanFacetNear = 1.0 - smoothstep( ${CLEAN_FACET_FULL_M.toFixed(1)}, ${CLEAN_FACET_GONE_M.toFixed(1)}, length( vViewPosition ) );
-	vec3 cleanNormal = mix( geometryNormal, cleanFacet, cleanFacetNear );
-	// A smooth normal opposite its own face (a silhouette) would mix to zero.
-	geometryNormal = dot( cleanNormal, cleanNormal ) > 1e-8 ? normalize( cleanNormal ) : cleanFacet;
-}
-#endif`,
-  );
-}
-
 installPointLightZeroGuard();
 installSpotLightDormantGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
 installSunShadowCascade();
-installCleanStyle();
 installScreenAuthoredUnlit();

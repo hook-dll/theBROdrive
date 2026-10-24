@@ -553,10 +553,12 @@ export class ScatterProvider implements ChunkProvider {
       }
       list.push(pl);
     }
-    // Rocks and cacti only: the ground cover's tufts are not among the tiles' props.
+    // Rocks and cacti cast and receive the sun's shadows as the desert tiles' props do;
+    // the ground cover's tufts do neither.
     const coverForms = new Set(cover.map((pl) => pl.form));
     for (const [form, list] of byForm) {
-      const kind = { geometry: form.geometry, material: form.material, lod: form.lod, propShadows: !coverForms.has(form) };
+      const shadows = !coverForms.has(form);
+      const kind = { geometry: form.geometry, material: form.material, lod: form.lod, castShadow: shadows, receiveShadow: shadows };
       for (let i = 0; i < list.length; i++) {
         const pl = list[i]!;
         _dummy.position.set(pl.x - ox, pl.y, pl.z - oz);

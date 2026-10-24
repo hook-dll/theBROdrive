@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import type { GraphicsQuality } from '../game/settings';
 import { weather } from '../world/weather';
 import { airDusk, airFog, airSky, airSun } from './airfog';
-import { cleanStyle } from './cleanstyle';
 import {
   BLOB_FLOATS,
   CLOUD_CEILING_M,
@@ -224,7 +223,6 @@ uniform vec3 airFog;
 uniform vec3 airSky;
 uniform vec3 airSun;
 uniform vec3 airDusk;
-uniform vec3 cleanStyle;
 varying vec4 vColor;
 
 void main() {
@@ -247,12 +245,6 @@ void main() {
 	// 1 with the sun on the horizon, 0 from 20 degrees up.
 	float lowSun = 1.0 - smoothstep( 0.05, 0.35, uSunDir.y );
 	float lambert = max( dot( n, uSunDir ), 0.0 );
-	if ( cleanStyle.x > 0.0 && lambert > 0.0 ) {
-		// The Clean style's banded sun (render/lightshader.ts, cleanLightBand).
-		float t = lambert * 4.0;
-		float i = floor( t );
-		lambert = min( ( i + 0.5 + smoothstep( 0.85, 1.0, t - i ) ) * 0.25, 0.875 );
-	}
 	// Height within the cloud: the top sees the sky, the base the ground.
 	float hc = clamp( p0.y / max( cloudHead.w * aCloud.w, 40.0 ), 0.0, 1.0 );
 	// A low sun reaches a cloud's lower half through more air and past its neighbours.
@@ -642,7 +634,6 @@ export class CloudLayer {
         airSky: { value: airSky },
         airSun: { value: airSun },
         airDusk: { value: airDusk },
-        cleanStyle: { value: cleanStyle },
       },
       // Over the dome, the sun, the stars by alpha (the night fade); kept in the opaque pass
       // so it draws before the land.

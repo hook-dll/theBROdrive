@@ -8,7 +8,6 @@
  */
 
 import { applyGroundFade } from '../../render/groundfade';
-import { applyCleanCull } from '../../render/cleanstyle';
 import { lightGeometryActive } from '../../render/retro';
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -60,12 +59,8 @@ const ROCK = 0x815f42;
  */
 const matProp = applyGroundFade(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
 
-// The barrel cactus and the scrub, about 0.7 m: the scatter's other small forms, culled
-// with the ground cover in the Clean style (their cull size is baked into this program).
-const matScrub = applyCleanCull(
-  applyGroundFade(new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 })),
-  0.7,
-);
+// The barrel cactus and the scrub, about 0.7 m: the scatter's other small forms.
+const matScrub = applyGroundFade(new THREE.MeshStandardMaterial({ color: 0xab8a55, roughness: 1.0, metalness: 0 }));
 
 /**
  * Paints a part one colour as `material.color = hex` would: the hex decoded from sRGB,
@@ -104,12 +99,6 @@ const cactus = (geometry: THREE.BufferGeometry): THREE.BufferGeometry => paintAs
  */
 const COVER_FADE_FULL_M = DESERT_TILE_FADE_FULL - 70;
 const COVER_FADE_GONE_M = DESERT_TILE_FADE_FULL - 10;
-/**
- * The ground cover's size at scale 1 for the Clean style's cull (render/cleanstyle.ts):
- * the tallest of its forms, the bush, at 0.6 m. A tuft under a few pixels is the
- * speck that twinkles as the frame slides over it.
- */
-const COVER_CLEAN_SIZE_M = 0.6;
 const matCover = (() => {
   const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
   material.onBeforeCompile = (shader) => {
@@ -125,7 +114,7 @@ const matCover = (() => {
     );
   };
   material.customProgramCacheKey = () => 'ground-cover-fade-v1';
-  return applyCleanCull(applyGroundFade(material), COVER_CLEAN_SIZE_M);
+  return applyGroundFade(material);
 })();
 
 // ===========================================================================
@@ -735,9 +724,7 @@ let _groundCoverForms: PropForm[] | null = null;
  */
 export function groundCoverForms(): PropForm[] {
   if (!_groundCoverForms) {
-    // `cleanSize`: the cull's form size at the largest scale any cover form takes (1.5).
-    const cleanSize = COVER_CLEAN_SIZE_M * 1.5;
-    const fade: BatchLod = { hideBeyond: COVER_FADE_GONE_M, cleanSize };
+    const fade: BatchLod = { hideBeyond: COVER_FADE_GONE_M };
     const tuft = (id: string, geometry: THREE.BufferGeometry, weight: number): PropForm => ({
       id, geometry, material: matCover, baseRadius: 0.3, height: 0.5, collider: 'none', sink: 0.05,
       rotate3d: false, minScale: 0.7, maxScale: 1.5, weight, lod: fade,
@@ -746,7 +733,7 @@ export function groundCoverForms(): PropForm[] {
     const light = lightGeometryActive();
     const bushLod: BatchLod = light
       ? fade
-      : { hideBeyond: COVER_FADE_GONE_M, cleanSize, far: { geometry: buildBush(0x7f03, 'far'), distance: COVER_BUSH_FAR_M } };
+      : { hideBeyond: COVER_FADE_GONE_M, far: { geometry: buildBush(0x7f03, 'far'), distance: COVER_BUSH_FAR_M } };
     _groundCoverForms = [
       tuft('tuft-straw', buildGrassTuft(0x7f01, 11, 0xa88d58, 0xd6c28d), 1),
       tuft('tuft-grey', buildGrassTuft(0x7f02, 8, 0x8f8467, 0xbdb392), 0.7),
