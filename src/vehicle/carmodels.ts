@@ -24,7 +24,7 @@ import { variant } from '../parts/registry';
 import modelFits from './model-fits.json';
 import { KIT_GLASS_MATERIAL, KIT_LIGHTS, KIT_WHEEL_NODES } from '../carkit/names';
 
-import { TRUNK_CELL_COUNT } from './trunk';
+import type { TrunkGrid } from './trunk';
 const MODEL_FITS = modelFits as unknown as Record<string, CarModelFit>;
 function modelFit(id: string): CarModelFit {
   const fit = MODEL_FITS[id];
@@ -1049,8 +1049,10 @@ export interface CarModelDef {
   readonly aero: AeroSpec;
   /** Authored lenses whose per-instance materials mirror the vehicle's live controls. */
   readonly lights?: VehicleLightsDef;
-  /** Every car body carries the shared 4x2 trunk. */
-  readonly storageCells: number;
+  /** The boot grid (game-design2.md §13.6): rectangular, `columns` across by `rows` up. */
+  readonly trunkGrid: TrunkGrid;
+  /** Ride comfort, 1 (Oka, UAZ) to 5 (Vectra): see `comfortFactor`. */
+  readonly comfort: CarComfort;
 }
 
 /** Shared defaults; every entry below states only what makes it itself. */
@@ -1062,7 +1064,8 @@ type Entry = Omit<
   | 'scale'
   | 'suspension'
   | 'lights'
-  | 'storageCells'
+  | 'trunkGrid'
+  | 'comfort'
   | 'handlingProfile'
 > & {
   /** Model file name within the pack directory named by `dir`. */
@@ -1073,8 +1076,6 @@ type Entry = Omit<
   readonly suspension?: SuspensionTuning;
   readonly handlingProfile?: HandlingProfile;
   readonly lights?: VehicleLightsDef;
-  /** Legacy authored hint; the catalogue normalizer now gives every body eight cells. */
-  readonly storageCells?: number;
 };
 
 /**
@@ -1270,7 +1271,6 @@ interface SovietSpec {
   readonly suspension: SuspensionTuning;
   /** The factory tyre (see `TyreSpec`). */
   readonly tyre: TyreSpec;
-  readonly storageCells?: number;
 }
 
 
@@ -1493,7 +1493,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 1.07,
     aero: AERO_ZHIGULI_ESTATE,
     suspension: SUSP_ZHIGULI_ESTATE,
-    storageCells: 5,
   },
   {
     // VAZ-2103: 1.452 litre, 71 hp, twin headlights, a tachometer and the 4.10 axle
@@ -1545,7 +1544,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 1.07,
     aero: AERO_ZHIGULI_ESTATE,
     suspension: SUSP_ZHIGULI_ESTATE,
-    storageCells: 5,
   },
   {
     // VAZ-2105: square lights, the belt-cam 1.3, 47 kW, the close-ratio box on a
@@ -1604,7 +1602,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 0.9,
     aero: AERO_ZHIGULI,
     suspension: SUSP_LADA_RALLY,
-    storageCells: 1,
   },
   {
     // VAZ-2106: 1.569 litre, 75 hp, and the 3.90 axle. 152 km/h, and the strongest
@@ -1684,7 +1681,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 0.88,
     aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
-    storageCells: 2,
   },
   {
     // VAZ-2109: the five-door Samara. Same running gear, 20 kg and a longer roof.
@@ -1710,7 +1706,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 0.88,
     aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
-    storageCells: 3,
   },
   {
     // VAZ-21099: the Samara with a boot grafted on, the 1.5, and the manual's 3.9-
@@ -1768,7 +1763,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 1.3,
     aero: AERO_NIVA,
     suspension: SUSP_NIVA,
-    storageCells: 4,
   },
   {
     // PASSPORT: 0-100 25 s, 132 km/h; 40 m from 80 km/h at gross mass, the family's
@@ -1792,7 +1786,6 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     dragArea: 1.3,
     aero: AERO_NIVA,
     suspension: SUSP_NIVA,
-    storageCells: 6,
   },
 ];
 
@@ -1914,7 +1907,6 @@ const SOVIET_CARS: readonly Entry[] = SOVIET_SPECS.map((spec) => ({
   wheelNodes: sovietWheelNodes(spec.file),
   wheelSetPool: sharedSovietWheelPool(spec.file),
   bodyClass: 'car',
-  storageCells: spec.storageCells,
   mass: spec.mass,
   engineId: spec.engineId,
   gearboxId: spec.gearboxId,
@@ -2000,7 +1992,6 @@ const SAAS_SPECS: readonly Entry[] = [
     dragArea: 0.88,
     aero: AERO_SAMARA_HATCH,
     suspension: SUSP_SAMARA,
-    storageCells: 3,
     paintStyle: 'solid-paint',
     glassMaterial: 'car_glass',
     wheelNodes: {
@@ -2762,6 +2753,62 @@ function kitEntry([id, source, kit, label, gear]: KitCarRow): Entry {
   };
 }
 
+/** Ride comfort, 1 hardest to 5 softest (game-design2.md §13.6). */
+export type CarComfort = 1 | 2 | 3 | 4 | 5;
+
+const COMFORT_FACTORS: Readonly<Record<CarComfort, number>> = { 1: 1, 2: 0.85, 3: 0.7, 4: 0.55, 5: 0.45 };
+
+/** How much of the road's knocks reach the cargo: 1.0 at comfort 1 down to 0.45 at 5. */
+export function comfortFactor(comfort: CarComfort): number {
+  return COMFORT_FACTORS[comfort];
+}
+
+const G2x2: TrunkGrid = { columns: 2, rows: 2 };
+const G3x2: TrunkGrid = { columns: 3, rows: 2 };
+const G4x2: TrunkGrid = { columns: 4, rows: 2 };
+const G5x2: TrunkGrid = { columns: 5, rows: 2 };
+const G4x3: TrunkGrid = { columns: 4, rows: 3 };
+const G4x4: TrunkGrid = { columns: 4, rows: 4 };
+
+interface CarCapacity {
+  readonly trunkGrid: TrunkGrid;
+  readonly comfort: CarComfort;
+}
+
+/**
+ * Each kit body's boot grid and comfort, game-design2.md §13.6. A pack body, in no list
+ * the game draws from, takes `DEFAULT_CAPACITY`.
+ */
+const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
+  kit_vaz1111: { trunkGrid: G2x2, comfort: 1 },
+  kit_vaz2121: { trunkGrid: G2x2, comfort: 1 },
+  kit_uaz469: { trunkGrid: G4x2, comfort: 1 },
+  kit_uaz2206: { trunkGrid: G4x4, comfort: 1 },
+  kit_vaz2101: { trunkGrid: G3x2, comfort: 2 },
+  kit_vaz2105: { trunkGrid: G3x2, comfort: 2 },
+  kit_vaz2102: { trunkGrid: G4x3, comfort: 2 },
+  kit_vaz2104: { trunkGrid: G4x3, comfort: 2 },
+  kit_vaz2131: { trunkGrid: G5x2, comfort: 2 },
+  kit_vaz2108: { trunkGrid: G3x2, comfort: 2 },
+  kit_vaz2109: { trunkGrid: G3x2, comfort: 2 },
+  kit_vaz2103: { trunkGrid: G3x2, comfort: 3 },
+  kit_vaz2106: { trunkGrid: G3x2, comfort: 3 },
+  kit_vaz2107: { trunkGrid: G3x2, comfort: 3 },
+  kit_vaz21099: { trunkGrid: G4x2, comfort: 3 },
+  kit_vaz2115: { trunkGrid: G4x2, comfort: 3 },
+  kit_azlk2141: { trunkGrid: G4x2, comfort: 3 },
+  kit_nexia: { trunkGrid: G3x2, comfort: 3 },
+  kit_vaz2112: { trunkGrid: G3x2, comfort: 4 },
+  kit_vaz2110: { trunkGrid: G4x2, comfort: 4 },
+  kit_vaz2111: { trunkGrid: G5x2, comfort: 4 },
+  kit_gaz24: { trunkGrid: G4x2, comfort: 4 },
+  kit_gaz31029: { trunkGrid: G4x2, comfort: 4 },
+  kit_astraf: { trunkGrid: G3x2, comfort: 4 },
+  kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
+  kit_espero: { trunkGrid: G4x2, comfort: 5 },
+};
+const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };
+
 function catalogueDef(e: Entry): CarModelDef {
   return {
     id: e.id,
@@ -2804,7 +2851,7 @@ function catalogueDef(e: Entry): CarModelDef {
     dragArea: e.dragArea,
     aero: e.aero,
     lights: e.lights,
-    storageCells: TRUNK_CELL_COUNT,
+    ...(KIT_CAPACITY[e.id] ?? DEFAULT_CAPACITY),
   };
 }
 

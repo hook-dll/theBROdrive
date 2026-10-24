@@ -13,7 +13,7 @@
  * `kmIndex`, about ×3 at most. Car prices do not.
  */
 
-import type { GameWorld } from '../game/state';
+import type { CarState, GameWorld } from '../game/state';
 import type { ContractKind } from '../contracts/types';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
 import type { ContractCargoItem, Item } from '../items/items';
@@ -220,19 +220,10 @@ export function carPrice(modelId: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// Contract slots
+// Uniqueness
 // ---------------------------------------------------------------------------
 
-/** Estates carry two contracts at once, the van three; everything else one. */
-const CONTRACT_SLOTS: Readonly<Record<string, number>> = {
-  kit_vaz2102: 2,
-  kit_vaz2104: 2,
-  kit_vaz2111: 2,
-  kit_vaz2131: 2,
-  kit_uaz2206: 3,
-};
-
-/** How many contracts one car of this model may carry, boot and cabin together; a teddy party is one. */
-export function contractSlotsFor(modelId: string): number {
-  return CONTRACT_SLOTS[modelId] ?? 1;
+/** A car's uniqueness (game-design2.md §12): how many stickers it has earned. */
+export function carUniqueness(car: CarState): number {
+  return car.stickers.length;
 }

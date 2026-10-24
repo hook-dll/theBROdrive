@@ -8,6 +8,7 @@
  */
 
 import { carModel } from '../vehicle/carmodels';
+import { trunkCellCount } from '../vehicle/trunk';
 import { oilCapacity, variant } from '../parts/registry';
 import type { Item } from '../items/items';
 import type { CarState, GameWorld } from './state';
@@ -58,7 +59,7 @@ export function createServiceableCarState(
     waterLitres: bonnetWaterCapacity(bonnet),
     oilLitres: engine ? oilCapacity(engine) : 0,
     engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
+    storage: new Array<Item | null>(trunkCellCount(def.trunkGrid)).fill(null),
     bonnet,
     cabin: emptyCabin(),
     odometer: 0,

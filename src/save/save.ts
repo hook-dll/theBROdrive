@@ -35,10 +35,13 @@ import {
   BONNET_SLOT_COUNT,
 } from '../vehicle/bonnet';
 import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
-import { TRUNK_CELL_COUNT } from '../vehicle/trunk';
+import { trunkCellCount } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
+
+/** A post's saved stock (contracts/offers.ts `postStock`): fixed, no car's boot. */
+const POST_STOCK_CELL_COUNT = 8;
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -555,7 +558,7 @@ export function migrateState(raw: unknown): WorldState {
   for (const [id, value] of Object.entries(courierStorageRaw)) {
     // A post's stock (contracts/offers.ts `postStock`); a courier-era boot of eight
     // cells reads the same way, its leftovers handed back through the post's tray.
-    courierStorage[id] = migrateStorage(value, TRUNK_CELL_COUNT, `post "${id}" stock`);
+    courierStorage[id] = migrateStorage(value, POST_STOCK_CELL_COUNT, `post "${id}" stock`);
   }
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
@@ -836,7 +839,7 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // existed. Those cars load with EMPTY reservoirs on purpose rather than full:
   // arriving at a mysteriously dry engine is a smaller surprise than the game
   // silently gifting fluids it never tracked, and the first can fixes it.
-  const storageCells = hasCarModel(modelId) ? carModel(modelId).storageCells : 0;
+  const storageCells = hasCarModel(modelId) ? trunkCellCount(carModel(modelId).trunkGrid) : 0;
   const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
   const def = carModel(modelId);
   const savedBonnet = migrateBonnetLayout(raw.bonnet, version);

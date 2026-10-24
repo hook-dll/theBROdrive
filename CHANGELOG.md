@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- EVERY CAR HAS ITS OWN BOOT AND COMFORT (game-design2.md §13.6; `vehicle/carmodels.ts`
+  `CarModelDef.trunkGrid` / `comfort`, `comfortFactor`, `CarComfort`; `vehicle/trunk.ts`
+  `TrunkGrid`, `trunkCellCount`, `TRUNK_MAX_CELL_COUNT`, `StorageGridShape.trunkGrid`;
+  `Vehicle.storageShape`). The shared 4×2 boot is gone: the Oka and the Niva carry 2×2,
+  the classics, Samaras, Nexia, 2112 and Astra 3×2, the 469, 21099/2115/2110, the
+  Moskvich, the Volgas and the Vectra/Espero 4×2, the 2131 and the 2111 5×2, the
+  2102/2104 estates 4×3 and the UAZ-2206 4×4. Grids are rectangular only, so the table's
+  7-cell boots became 8. A tall grid shrinks its cells to stay between the sill and the
+  roof line. Laying out, aiming, drawing and saving follow the model's grid; a post's
+  stock keeps its own fixed eight cells. Comfort 1–5 is on every model and
+  `comfortFactor` maps it to 1.0/0.85/0.7/0.55/0.45; nothing reads it yet.
+- `economy/economy.ts` `carUniqueness(car)`: a car's uniqueness, its sticker count.
+
+### Removed
+
+- Per-car contract slots (`CONTRACT_SLOTS`, `contractSlotsFor`, the interaction's
+  `contractSlotsRefusal`, `items.ts` `contractsAmong`): any car takes any number of
+  contracts until the global limit arrives.
+
 ## 0.24.0 — 2026-10-24
 
 Desert regions with their own land and people, a lighter frame (kit scenery in one draw per finish, 94 -> 86 shader programs, a program budget checked by every dev build), F as the one interaction key and the cabin view on boarding, a 480 Hz wheel loop for the player's cars, resolution as a multiple of the screen, roadside rocks and cacti in shadow, a frame cap locked to the refresh, the boot's `isReady` crash fixed, and heat haze and the Clean style removed.

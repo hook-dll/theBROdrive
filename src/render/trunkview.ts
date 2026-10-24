@@ -5,7 +5,7 @@ import type { Vehicle } from '../vehicle/vehicle';
 import {
   storageCellBox,
   storageCellCount,
-  TRUNK_CELL_COUNT,
+  TRUNK_MAX_CELL_COUNT,
   type StorageGridShape,
   type TrunkViewState,
 } from '../vehicle/trunk';
@@ -42,7 +42,7 @@ const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
 
 /**
- * World-space storage cells with real item meshes and no labels: the trunk's 4x2 plane
+ * World-space storage cells with real item meshes and no labels: the trunk's grid plane
  * behind the car, or the bonnet's cells lying in the engine bay at their parts' places.
  */
 export class TrunkView {
@@ -84,12 +84,12 @@ export class TrunkView {
   private layoutShape: StorageGridShape | null = null;
   private layoutSide: TrunkViewState['side'] | null = null;
   /** Which panels the last layout placed: a bonnet has fewer cells than the trunk. */
-  private readonly laidOut: boolean[] = new Array<boolean>(TRUNK_CELL_COUNT).fill(false);
+  private readonly laidOut: boolean[] = new Array<boolean>(TRUNK_MAX_CELL_COUNT).fill(false);
 
   constructor(private readonly scene: THREE.Scene) {
     this.root.name = 'vehicle-storage-grid';
     this.root.visible = false;
-    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+    for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
       const panel = new THREE.Mesh(this.panelGeometry, this.panelMaterial);
       panel.renderOrder = 4;
       const border = new THREE.LineLoop(this.borderGeometry, this.borderMaterial);
@@ -119,7 +119,7 @@ export class TrunkView {
       return;
     }
 
-    const shape: StorageGridShape = vehicle.modelMeasure;
+    const shape: StorageGridShape = vehicle.storageShape;
     vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
 
     this.root.visible = true;
@@ -132,7 +132,7 @@ export class TrunkView {
       this.itemSignature = '';
     }
 
-    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+    for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
       const visible = this.laidOut[cell]! && cell < view.cells.length;
       this.panels[cell]!.visible = visible;
       this.borders[cell]!.visible = visible;
@@ -166,8 +166,8 @@ export class TrunkView {
    * on its floor and the outline round its top.
    */
   private layout(shape: StorageGridShape, side: TrunkViewState['side']): void {
-    const count = storageCellCount(side);
-    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+    const count = storageCellCount(shape, side);
+    for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
       const placed = cell < count && storageCellBox(cell, shape, side, this.cellPosition, this.cellSize);
       this.laidOut[cell] = placed;
       if (!placed) continue;
@@ -197,7 +197,7 @@ export class TrunkView {
   private rebuildItems(view: TrunkViewState, shape: StorageGridShape): void {
     this.clearItems();
     const bonnet = view.side === 'bonnet';
-    for (let cell = 0; cell < TRUNK_CELL_COUNT; cell++) {
+    for (let cell = 0; cell < view.cells.length; cell++) {
       const item = view.cells[cell];
       if (!item) continue;
       if (!storageCellBox(cell, shape, view.side, this.cellPosition, this.cellSize)) continue;

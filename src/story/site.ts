@@ -18,6 +18,7 @@ import { laybyNear, laybyParkLateral, type Layby } from '../world/layby';
 import { roadsideStop } from '../world/settlement';
 import { CAMERA_FRAME_LIMIT, type Item } from '../items/items';
 import { carModel, modelEngine } from '../vehicle/carmodels';
+import { trunkCellCount } from '../vehicle/trunk';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { oilCapacity } from '../parts/registry';
@@ -146,7 +147,7 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
     waterLitres,
     oilLitres,
     engineTempC: COLD_SOAK_C,
-    storage: new Array<Item | null>(def.storageCells).fill(null),
+    storage: new Array<Item | null>(trunkCellCount(def.trunkGrid)).fill(null),
     bonnet,
     cabin: emptyCabin(),
     odometer: 0,

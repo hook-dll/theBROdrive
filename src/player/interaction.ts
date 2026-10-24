@@ -3,11 +3,9 @@ import type { PhysicsWorld } from '../core/physics';
 
 import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
 import type { DeliveryProbe } from '../contracts/types';
-import { contractSlotsFor } from '../economy/economy';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
-  ContractCargoItem,
   Inventory,
   Item,
   PartItem,
@@ -17,7 +15,7 @@ import type {
   StickerEnvelopeItem,
   ToolItem,
 } from '../items/items';
-import { contractIdOf, contractsAmong, drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { CABIN_PLACES, cabinIndex, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
@@ -1118,26 +1116,6 @@ export class Interaction {
   }
 
   /**
-   * Why this car takes no more contracts, or null. How many it carries at once, in the
-   * boot and the cabin together, is the body's (economy/economy.ts `contractSlotsFor`):
-   * one in a saloon, two in an estate, three in the van. Contracts, not items: a party
-   * of teddy passengers is one, so `held`'s own contract already aboard takes no slot.
-   */
-  private contractSlotsRefusal(carId: string, held: ContractCargoItem): string | null {
-    const car = this.world.state.cars[carId];
-    if (!car) return null;
-    const slots = contractSlotsFor(car.modelId);
-    const own = contractIdOf(held);
-    if (car.storage.some((cell) => cell?.type === 'contract_cargo' && contractIdOf(cell) === own)) return null;
-    if (car.cabin.some((place) => place?.type === 'contract_cargo' && contractIdOf(place) === own)) return null;
-    const aboard = contractsAmong(car.storage) + contractsAmong(car.cabin);
-    if (aboard < slots) return null;
-    return slots === 1
-      ? 'one contract is already aboard — this car carries one'
-      : `${aboard} contracts already aboard — this car carries ${slots}`;
-  }
-
-  /**
    * Absolute X/Z of a trailer: the live body while it is materialised (a towed one
    * always is), the saved pose while it is dormant. State alone is up to two seconds
    * stale for a moving trailer, which is why the live body wins when there is one.
@@ -1266,7 +1244,7 @@ export class Interaction {
   ): boolean {
     const vehicle = this.carLookup.vehicle(target.id);
     if (!vehicle) return false;
-    const shape: StorageGridShape = vehicle.modelMeasure;
+    const shape: StorageGridShape = vehicle.storageShape;
     vehicle.chassis.rotation(this.trunkQuaternion);
     const t = vehicle.chassis.translation(this.tScratch);
     out.set(t.x + this.origin.x, t.y, t.z + this.origin.z);
@@ -1525,7 +1503,7 @@ export class Interaction {
         if (lidOpen(rig, side) === false) continue;
         const door = rig && cabinLidOpen(rig, side) ? this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) : Infinity;
         const reach = BOOT_RANGE + (door < Infinity ? door : 0);
-        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.modelMeasure, side, reach)) {
+        if (this.pickStorage(eyeX, eyeY, eyeZ, dx, dy, dz, t, this.qScratch, vehicle.storageShape, side, reach)) {
           inCompartment = true;
           keep(this.trunkPickedDistance, {
             kind: 'storage',
@@ -2270,10 +2248,6 @@ export class Interaction {
         const tooLong = bootRefusal(held);
         if (tooLong) return tooLong;
       }
-      if (held?.type === 'contract_cargo') {
-        const full = this.contractSlotsRefusal(t.id, held);
-        if (full) return full;
-      }
       if (held) return `[F] stow ${itemLabel(held)}`;
       return null;
     }
@@ -2688,12 +2662,6 @@ export class Interaction {
         this.sound = 'refused';
         return;
       }
-      if (held?.type === 'contract_cargo' && cells[t.cell]?.type !== 'contract_cargo') {
-        if (this.contractSlotsRefusal(t.id, held)) {
-          this.sound = 'refused';
-          return;
-        }
-      }
       const result = operateTrunkCell(cells, t.cell, held, this.inventory);
       if (result.action === 'refused') {
         this.sound = 'refused';
@@ -2864,10 +2832,6 @@ export class Interaction {
     }
     const held = this.inventory.held;
     if (held && this.cabinRefusal() !== null && seat !== 'driver') {
-      if (held.type === 'contract_cargo') {
-        const full = this.contractSlotsRefusal(car.id, held);
-        if (full) return { kind: 'refuse', why: full };
-      }
       const lay = layPlace(cabin, resolved.vehicle.cabinRooms, seat, cabinItemBounds(held), isPassenger(held));
       if ('refusal' in lay) return { kind: 'refuse', why: lay.refusal };
       return { kind: 'lay', place: cabinIndex(lay.place), item: held };

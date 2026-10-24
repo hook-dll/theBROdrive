@@ -57,6 +57,7 @@ import {
   engineFailureReason,
   stockBonnetVariants,
 } from './bonnet';
+import type { StorageGridShape } from './trunk';
 import { AIR_FILTER_DUE_CLOG, airFilterBreath, airFilterWear } from './airfilter';
 import {
   EngineCoolingSystem,
@@ -953,6 +954,8 @@ export class Vehicle implements Rebasable {
   /** The side-force curve: the car's own tyre's, or its profile's. */
   private readonly tyre: TyreCurve;
   private readonly measure: CarModelMeasure;
+  /** The boot and bonnet grids' layout: the measured body and the model's boot grid. */
+  readonly storageShape: StorageGridShape;
   /** The chassis box's half extents (x across, y up, z along the body), metres. */
   get bodyHalfExtents(): readonly [number, number, number] {
     return this.measure.halfExtents;
@@ -1433,6 +1436,11 @@ export class Vehicle implements Rebasable {
     this.handling = HANDLING_PROFILES[this.model.handlingProfile];
     this.tyre = tyreCurve(this.model.tyre, this.handling);
     this.measure = carModelMeasure(carState.modelId);
+    this.storageShape = {
+      halfExtents: this.measure.halfExtents,
+      bonnetCells: this.measure.bonnetCells,
+      trunkGrid: this.model.trunkGrid,
+    };
     this.axleGeometry = this.measureAxles();
     this.loadAnchors = this.measureLoadAnchors();
     this.lamps = new VehicleLamps({

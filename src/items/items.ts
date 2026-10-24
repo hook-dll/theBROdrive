@@ -273,23 +273,9 @@ export interface CargoParty {
   readonly size: number;
 }
 
-/**
- * The contract an item belongs to: its party's id for a passenger, its own id otherwise.
- * A party of three teddies is ONE contract in a car's contract slots.
- */
+/** The contract an item belongs to: its party's id for a passenger, its own id otherwise. */
 export function contractIdOf(item: ContractCargoItem): string {
   return item.party?.id ?? item.id;
-}
-
-/** Distinct contracts among `items` (a passenger party counts once), `except` one contract id. */
-export function contractsAmong(items: Iterable<Item | null | undefined>, except: string | null = null): number {
-  const seen: string[] = [];
-  for (const item of items) {
-    if (item?.type !== 'contract_cargo') continue;
-    const id = contractIdOf(item);
-    if (id !== except && !seen.includes(id)) seen.push(id);
-  }
-  return seen.length;
 }
 
 /** Signed physical reward, consumed only when its sticker is confirmed on a car. */

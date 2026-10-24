@@ -4,6 +4,7 @@ import type { CarState } from '../game/state';
 import { carPrice, formatMoney, RUB } from '../economy/economy';
 import { oilCapacity, variant } from '../parts/registry';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
+import { trunkCellCount } from '../vehicle/trunk';
 import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import type { ChunkContext } from './chunks';
@@ -90,7 +91,7 @@ export function makeLotCar(
     waterLitres: bonnetWaterCapacity(bonnet) * (0.6 + roll(10) * 0.3),
     oilLitres: engine ? oilCapacity(engine) : 0,
     engineTempC: COLD_SOAK_C,
-    storage: new Array(def.storageCells).fill(null),
+    storage: new Array(trunkCellCount(def.trunkGrid)).fill(null),
     bonnet,
     cabin: emptyCabin(),
     odometer: Math.floor(roll(4) * 180_000),

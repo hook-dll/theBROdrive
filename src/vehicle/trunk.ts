@@ -2,10 +2,17 @@ import type * as THREE from 'three';
 import type { Item } from '../items/items';
 import { BONNET_SLOT_COUNT } from './bonnet';
 
-/** Every car and static roadside vehicle uses the same visible four-by-two trunk layout. */
-export const TRUNK_COLUMNS = 4;
-export const TRUNK_ROWS = 2;
-export const TRUNK_CELL_COUNT = TRUNK_COLUMNS * TRUNK_ROWS;
+/**
+ * A body's boot grid: `columns` across the car, `rows` up, as the player sees it from
+ * behind (vehicle/carmodels.ts `CarModelDef.trunkGrid`, game-design2.md §13.6).
+ */
+export interface TrunkGrid {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+/** The largest boot any body has (the UAZ-2206's 4×4): the renderer's panel pool. */
+export const TRUNK_MAX_CELL_COUNT = 16;
 export const TRUNK_CELL_HEIGHT = 0.26;
 export const TRUNK_GRID_DEPTH = 0.06;
 
@@ -13,6 +20,14 @@ const TRUNK_GRID_MAX_WIDTH = 1.6;
 const TRUNK_GRID_BODY_FRACTION = 1.65;
 /** Raised from bumper height to just below an on-foot player's eye line. */
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
+/** The grid's top edge stays this far down the body's half height: below the roof. */
+const STORAGE_GRID_TOP_Y_FRACTION = 0.8;
+/** The grid's bottom edge stays this far below the centre, at most: above the sill. */
+const STORAGE_GRID_BOTTOM_Y_FRACTION = -0.35;
+
+export function trunkCellCount(grid: TrunkGrid): number {
+  return grid.columns * grid.rows;
+}
 
 export type StorageSide = 'trunk' | 'bonnet';
 
@@ -39,6 +54,8 @@ export interface StorageGridShape {
   readonly halfExtents: readonly [number, number, number];
   /** In `BONNET_SLOT_KINDS` order. */
   readonly bonnetCells?: readonly StorageCellRect[];
+  /** The body's boot grid. */
+  readonly trunkGrid: TrunkGrid;
 }
 
 /** Fixed-step trunk view handed from world interaction to the renderer: one car's grid. */
@@ -74,8 +91,8 @@ function trunkGridWidth(halfWidth: number): number {
   return Math.min(TRUNK_GRID_MAX_WIDTH, halfWidth * TRUNK_GRID_BODY_FRACTION);
 }
 
-export function storageCellCount(side: StorageSide): number {
-  return side === 'bonnet' ? BONNET_SLOT_COUNT : TRUNK_CELL_COUNT;
+export function storageCellCount(shape: StorageGridShape, side: StorageSide): number {
+  return side === 'bonnet' ? BONNET_SLOT_COUNT : trunkCellCount(shape.trunkGrid);
 }
 
 /** Axis-aligned chassis-local box: min and max corners. */
@@ -108,17 +125,24 @@ function cellBounds(cell: number, shape: StorageGridShape, side: StorageSide, ou
     out.maxZ = rect.z + rect.depth * 0.5;
     return true;
   }
-  if (cell < 0 || cell >= TRUNK_CELL_COUNT) return false;
+  const { columns, rows } = shape.trunkGrid;
+  if (cell < 0 || cell >= columns * rows) return false;
   const half = shape.halfExtents;
-  const cellWidth = trunkGridWidth(half[0]) / TRUNK_COLUMNS;
-  const column = cell % TRUNK_COLUMNS;
-  const row = Math.floor(cell / TRUNK_COLUMNS);
-  const x = -(column - (TRUNK_COLUMNS - 1) * 0.5) * cellWidth;
-  const y = half[1] * STORAGE_GRID_CENTRE_Y_FRACTION + ((TRUNK_ROWS - 1) * 0.5 - row) * TRUNK_CELL_HEIGHT;
+  const cellWidth = trunkGridWidth(half[0]) / columns;
+  // Tall grids shrink their cells to stay between the sill and the roof line.
+  const top = half[1] * STORAGE_GRID_TOP_Y_FRACTION;
+  const bottom = half[1] * STORAGE_GRID_BOTTOM_Y_FRACTION;
+  const cellHeight = Math.min(TRUNK_CELL_HEIGHT, (top - bottom) / rows);
+  const gridHalf = rows * cellHeight * 0.5;
+  const centreY = Math.min(Math.max(half[1] * STORAGE_GRID_CENTRE_Y_FRACTION, bottom + gridHalf), top - gridHalf);
+  const column = cell % columns;
+  const row = Math.floor(cell / columns);
+  const x = -(column - (columns - 1) * 0.5) * cellWidth;
+  const y = centreY + ((rows - 1) * 0.5 - row) * cellHeight;
   out.minX = x - cellWidth * 0.5;
   out.maxX = x + cellWidth * 0.5;
-  out.minY = y - TRUNK_CELL_HEIGHT * 0.5;
-  out.maxY = y + TRUNK_CELL_HEIGHT * 0.5;
+  out.minY = y - cellHeight * 0.5;
+  out.maxY = y + cellHeight * 0.5;
   out.minZ = out.maxZ = -half[2] - TRUNK_GRID_DEPTH;
   return true;
 }
@@ -145,7 +169,7 @@ const _bounds: Bounds = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 }
 function gridBounds(shape: StorageGridShape, side: StorageSide, out: Bounds): boolean {
   out.minX = out.minY = out.minZ = Infinity;
   out.maxX = out.maxY = out.maxZ = -Infinity;
-  const count = storageCellCount(side);
+  const count = storageCellCount(shape, side);
   let any = false;
   for (let cell = 0; cell < count; cell++) {
     if (!cellBounds(cell, shape, side, _cell)) continue;
@@ -210,7 +234,7 @@ export function intersectStorageGrid(
 ): boolean {
   let best = Infinity;
   let bestCell = -1;
-  const count = storageCellCount(side);
+  const count = storageCellCount(shape, side);
   for (let cell = 0; cell < count; cell++) {
     if (!cellBounds(cell, shape, side, _cell)) continue;
     const distance = rayBox(eye, direction, _cell);
