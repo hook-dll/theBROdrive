@@ -124,11 +124,12 @@ function wontFit(thing: ThingDef, model: CarModelDef): boolean {
   return footprint !== null && !bootHolds(model.trunkGrid, footprint);
 }
 
-/** What the hand-in card calls the thing to put in the tray. */
+/** What the hand-in card calls the thing to put in the tray, with its article: none before a possessive ("dad's tool box"). */
 function cargoNoun(item: ContractCargoItem): string {
-  if (item.party) return 'TEDDY';
-  if (isHaul(item)) return 'PAPERS';
-  return contractThing(item).name.toUpperCase();
+  if (item.party) return 'THE TEDDY';
+  if (isHaul(item)) return 'THE PAPERS';
+  const name = contractThing(item).name;
+  return (name.includes("'s ") ? name : `the ${name}`).toUpperCase();
 }
 
 /**
@@ -325,7 +326,7 @@ class PostMachine extends CardMachine {
   /** The hand-in card for what the player brought, or null when he brought nothing for here. */
   private handInCard(ctx: FixtureContext): HandInCard | null {
     const { posting, refusal } = this.posting(ctx);
-    if (posting) {
+    if (posting && !refusal) {
       const item = posting.item;
       const completes = contractPosting(item, this.world.state.completedContractIds).completes;
       const lines = [
@@ -333,7 +334,7 @@ class PostMachine extends CardMachine {
         completes ? `pays ${formatMoney(contractPay(this.world.seed, item))}` : 'paid with the last of the party',
       ];
       const headline = posting.from === null && ctx.held?.id === item.id
-        ? `PUT THE ${cargoNoun(item)} IN THE TRAY`
+        ? `PUT ${cargoNoun(item)} IN THE TRAY`
         : 'CLICK THE TRAY TO HAND IT IN';
       return { key: `ok:${item.id}:${headline}:${lines.join('|')}`, ok: true, headline, lines };
     }

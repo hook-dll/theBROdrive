@@ -47,7 +47,17 @@
 - Placeholder meshes: a box of the thing's size in its tag's colour; carpet, teddy, lamp
   and tool box (crate) keep their meshes; haul papers are the parcel.
 - Dev: `__bro.thing(id, size?)` drops a catalogue contract from the nearest post
-  (replaces `__bro.teddies`). `tools/trunk-grid.ts` checks footprints and save/load.
+  (replaces `__bro.teddies`); its contract id is a runtime `rt:` id, so a reloaded save
+  resumes past it instead of handing the next spawn the same id. `tools/trunk-grid.ts`
+  checks footprints and save/load.
+
+### Fixed
+
+- A post showed the green HAND IN card ("PUT THE CARPET IN THE TRAY") for a thing it
+  would refuse, its own cargo among them; the card now says THE TRAY WILL NOT TAKE IT
+  with the reason, as the tray already did (`world/post.ts` `handInCard`).
+- Wording: "PUT DAD'S TOOL BOX IN THE TRAY" (no "THE" before a possessive name), and
+  "[F] lay carpet … across the rear bench" instead of "on the seat".
 
 ### Removed
 

@@ -662,7 +662,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const { before, after } = postBracket(seed, ctx.world.state.player.s);
     const playerS = ctx.world.state.player.s;
     const source = before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
-    const offer = makeContract(seed, `dev:thing:${ctx.world.runtimePartId()}`, source, id, Date.now() >>> 0);
+    // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
+    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0);
     if (offer.party && size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
     const eye = ctx.camera.eyePosition;
     const dir = ctx.camera.eyeDirection;

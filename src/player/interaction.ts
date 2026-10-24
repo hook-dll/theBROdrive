@@ -2326,8 +2326,11 @@ export class Interaction {
           const item = car?.cabin[action.place];
           return item ? `[F] take ${itemLabel(item)}` : null;
         }
-        case 'lay':
-          return isPassenger(action.item) ? `[F] seat ${itemLabel(action.item)}` : `[F] lay ${itemLabel(action.item)} on the seat`;
+        case 'lay': {
+          if (isPassenger(action.item)) return `[F] seat ${itemLabel(action.item)}`;
+          const where = cabinRule(action.item) === 'bench' ? 'across the rear bench' : 'on the seat';
+          return `[F] lay ${itemLabel(action.item)} ${where}`;
+        }
         case 'sit':
           return this.cabinRefusal();
       }
