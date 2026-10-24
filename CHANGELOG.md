@@ -14,7 +14,7 @@
   7-cell boots became 8. A tall grid shrinks its cells to stay between the sill and the
   roof line. Laying out, aiming, drawing and saving follow the model's grid; a post's
   stock keeps its own fixed eight cells. Comfort 1–5 is on every model and
-  `comfortFactor` maps it to 1.0/0.85/0.7/0.55/0.45; nothing reads it yet.
+  `comfortFactor` maps it to 1.0/0.85/0.7/0.55/0.45.
 - `economy/economy.ts` `carUniqueness(car)`: a car's uniqueness, its sticker count.
 - THE BOY'S THINGS (game-design2.md §7.2–7.3; `items/things.ts` `THINGS`, `ThingDef`,
   `thingCard`, `thingKind`, `thingBootFootprint`). A contract is now one catalogue thing
@@ -50,6 +50,34 @@
   (replaces `__bro.teddies`); its contract id is a runtime `rt:` id, so a reloaded save
   resumes past it instead of handing the next spawn the same id. `tools/trunk-grid.ts`
   checks footprints and save/load.
+- CONDITION AND BREAKAGE (game-design2.md §11.1–§11.2; `contracts/runtime.ts`
+  `carBorneWear`, `wearThing`; `items/things.ts` `thingWears`, `thingWearShare`). Every
+  thing has a condition from 100% down. Three things wear it: knocks to the car it rides
+  in, a drop to the ground from a hand or a boot, and the harsh driving (above 2.5 m/s²)
+  of the car the player drives (`RideMeter.takeExcess`). Wear that comes through a car is
+  × its `comfortFactor`.
+  - A 5 m/s shunt costs a fragile thing 29% in a comfort-1 car, 20% at comfort 3 and 13%
+    at comfort 5. An ordinary or bulky thing takes 0.22 of a fragile thing's wear: 4% at
+    comfort 3. A five-second 0.5 g stop costs a fragile thing 5% at comfort 1, and a drop
+    costs it 12%.
+  - A calm 5 km autopilot drive in the comfort-1 Oka left the globe at 97%.
+  - Teddies have no condition: their ride (`passengerQuality`, floor 40%) is now also
+    softened by the carrying car's comfort, and a harsh moment counts as that factor of
+    one. Haul papers have no condition yet.
+  - Pay is base × km index × condition, so every thing's condition now counts, not only a
+    fragile thing's.
+  - The label shows "· 87%" when the condition is below 100%.
+- BROKEN THINGS. Below 30% a thing breaks (`ContractProgress.broken`, saved;
+  `isBrokenThing`):
+  - its contract closes at that moment, and every post refuses it with "THE TRAY WILL NOT
+    TAKE IT · the old TV set is broken: no post will sign for it";
+  - a race for it is lost;
+  - it no longer wears, no longer counts towards the delivery hint or the G-force widget,
+    and is labelled "broken old TV set";
+  - it stays a normal item that can be carried, stowed and dropped;
+  - its stand-in mesh is darkened, and box looks get a black zig-zag crack across the
+    front and the top. The hand, boot, cabin and ground views redraw a thing the moment it
+    breaks.
 
 ### Fixed
 

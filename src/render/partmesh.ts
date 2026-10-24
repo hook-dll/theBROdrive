@@ -25,7 +25,7 @@ import type {
   ToolKind,
   WeaponKind,
 } from '../items/items';
-import { contractThing, spongeSpent } from '../items/items';
+import { contractThing, isBrokenThing, spongeSpent } from '../items/items';
 import { hasTag, isHaulThing, type ThingDef } from '../items/things';
 import { makeConditionMaterial, makeFlatMaterial } from './materials';
 import { applyComicShading } from './comic';
@@ -168,8 +168,8 @@ function buildGroup(instructions: readonly Instruction[]): THREE.Group {
   return group;
 }
 
-/** Bounding-box half-extents of a set of instructions, honouring their transforms. */
-function halfExtentsOf(instructions: readonly Instruction[]): { x: number; y: number; z: number } {
+/** Bounding box of a set of instructions, honouring their transforms. */
+function boundsOf(instructions: readonly Instruction[]): THREE.Box3 {
   const total = new THREE.Box3();
   const tmp = new THREE.Box3();
   const euler = new THREE.Euler();
@@ -189,9 +189,12 @@ function halfExtentsOf(instructions: readonly Instruction[]): { x: number; y: nu
     tmp.applyMatrix4(matrix);
     total.union(tmp);
   }
+  return total;
+}
 
-  const size = new THREE.Vector3();
-  total.getSize(size);
+/** Bounding-box half-extents of a set of instructions, honouring their transforms. */
+function halfExtentsOf(instructions: readonly Instruction[]): { x: number; y: number; z: number } {
+  const size = boundsOf(instructions).getSize(new THREE.Vector3());
   return { x: size.x / 2, y: size.y / 2, z: size.z / 2 };
 }
 
@@ -1307,6 +1310,67 @@ function buildContractLampInto(b: MeshBuilder): void {
   b.sphere('contract_lamp_finial', 0.016, 10, 8, brass, [0, 0.205, 0]);
 }
 
+/** The blueprint key and builder a thing is drawn with: a haul's papers, its own model, or its stand-in box. */
+function contractThingLook(thing: ThingDef): readonly [string, (b: MeshBuilder) => void] {
+  if (isHaulThing(thing)) return ['contract_parcel', buildContractParcelInto];
+  switch (thing.look) {
+    case 'carpet':
+      return ['contract_carpet', buildContractCarpetInto];
+    case 'teddy':
+      return ['contract_teddy', buildContractTeddyInto];
+    case 'lamp':
+      return ['contract_lamp', buildContractLampInto];
+    case 'crate':
+      return ['contract_crate', buildContractCrateInto];
+    case undefined:
+      return [`contract_thing_${thing.id}`, (b) => buildContractThingBoxInto(b, thing)];
+  }
+}
+
+/** A broken thing's colours are this share of the whole thing's: soot and dust. */
+const BROKEN_SHADE = 0.6;
+
+function brokenColour(colour: number): number {
+  const r = Math.round(((colour >> 16) & 0xff) * BROKEN_SHADE);
+  const g = Math.round(((colour >> 8) & 0xff) * BROKEN_SHADE);
+  const b = Math.round((colour & 0xff) * BROKEN_SHADE);
+  return (r << 16) | (g << 8) | b;
+}
+
+/** Slope of each leg of a crack's zig-zag, radians. */
+const CRACK_SLOPE = 0.6;
+
+/**
+ * The stand-in for a broken thing (contracts/runtime.ts, below 30%) until each thing has
+ * a broken model of its own: the whole thing darkened and, on a box (`faces`: the stand-in
+ * and the crate fill their bounds), a black crack zig-zagging across its front and its
+ * top. The crack's legs are sized to the face, so it fits wherever the whole one did.
+ */
+function breakInto(b: MeshBuilder, faces: boolean): void {
+  const box = boundsOf(b.instructions);
+  for (let i = 0; i < b.instructions.length; i++) {
+    const ins = b.instructions[i]!;
+    b.instructions[i] = { ...ins, material: { ...ins.material, color: brokenColour(ins.material.color), roughness: 0.97 } };
+  }
+  if (!faces) return;
+  const crack = flat(0x0b0908, 0.98);
+  const size = box.getSize(new THREE.Vector3());
+  const c = box.getCenter(new THREE.Vector3());
+  const width = 0.01;
+  // Across the front (+z) and along the top (+y), each a run of unit boxes stretched into legs.
+  for (const onTop of [false, true]) {
+    const leg = Math.min(size.x, onTop ? size.z : size.y) * 0.4;
+    const run = leg * Math.cos(CRACK_SLOPE);
+    const legs = Math.max(2, Math.min(8, Math.floor((size.x * 0.7) / run)));
+    for (let i = 0; i < legs; i++) {
+      const x = c.x + run * (i + 0.5 - legs / 2);
+      const slope = i % 2 === 0 ? CRACK_SLOPE : -CRACK_SLOPE;
+      if (onTop) b.box('contract_crack', 1, 1, 1, crack, [x, box.max.y + 0.002, c.z], [0, slope, 0], [leg, 0.004, width]);
+      else b.box('contract_crack', 1, 1, 1, crack, [x, c.y, box.max.z + 0.002], [0, 0, slope], [leg, width, 0.004]);
+    }
+  }
+}
+
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -1506,19 +1570,12 @@ export function createItemMesh(item: Item): THREE.Object3D {
       // A haul is carried as its papers; a thing with a model of its own is drawn with
       // it; every other thing is a box of its size in its tag's colour.
       const thing = contractThing(item);
-      if (isHaulThing(thing)) return buildGroup(itemBlueprint('contract_parcel', buildContractParcelInto).instructions);
-      switch (thing.look) {
-        case 'carpet':
-          return buildGroup(itemBlueprint('contract_carpet', buildContractCarpetInto).instructions);
-        case 'teddy':
-          return buildGroup(itemBlueprint('contract_teddy', buildContractTeddyInto).instructions);
-        case 'lamp':
-          return buildGroup(itemBlueprint('contract_lamp', buildContractLampInto).instructions);
-        case 'crate':
-          return buildGroup(itemBlueprint('contract_crate', buildContractCrateInto).instructions);
-        case undefined:
-          return buildGroup(itemBlueprint(`contract_thing_${thing.id}`, (b) => buildContractThingBoxInto(b, thing)).instructions);
-      }
+      const [key, build] = contractThingLook(thing);
+      if (!isBrokenThing(item)) return buildGroup(itemBlueprint(key, build).instructions);
+      return buildGroup(itemBlueprint(`${key}_broken`, (b) => {
+        build(b);
+        breakInto(b, thing.look === undefined || thing.look === 'crate');
+      }).instructions);
     }
     case 'sticker_envelope':
       return buildGroup(itemBlueprint('sticker_envelope', buildStickerEnvelopeInto).instructions);

@@ -5,7 +5,7 @@
  * runtime call.
  */
 
-import { contractKindOf, type ContractCargoItem } from '../items/items';
+import { contractKindOf, contractThing, isBrokenThing, type ContractCargoItem } from '../items/items';
 import type { StickerKind } from '../items/stickercatalog';
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
@@ -79,10 +79,10 @@ export function isContractKind(value: unknown): value is ContractKind {
 }
 
 /**
- * Why this post may not accept the cargo, or null. The base rule — a post
- * never signs cargo from itself or one further down the road — applies to every
- * kind; a kind adds its own on top (a trailer load needs its trailer in the yard, a
- * car to hand over needs it parked empty).
+ * Why this post may not accept the cargo, or null. A broken thing's contract is closed
+ * and no post signs for it. The base rule — a post never signs cargo from itself or one
+ * further down the road — applies to every kind; a kind adds its own on top (a trailer
+ * load needs its trailer in the yard, a car to hand over needs it parked empty).
  *
  * `probe` is the world at the accepting post, built by the post machine and
  * handed to the prompt and the commit alike.
@@ -91,6 +91,7 @@ export function contractAcceptRefusal(
   item: ContractCargoItem,
   probe: DeliveryProbe,
 ): string | null {
+  if (isBrokenThing(item)) return `the ${contractThing(item).name} is broken: no post will sign for it`;
   if (probe.targetPostIndex <= item.sourceCourierIndex) {
     return 'this post cannot sign for its own things';
   }

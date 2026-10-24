@@ -238,9 +238,14 @@ export class RivalRace {
 
   /**
    * Called for every live cargo item BEFORE the contract runtime marks it started,
-   * so `!started` away from the post is exactly the moment it was first taken.
+   * so `!started` away from the post is exactly the moment it was first taken. The raced
+   * thing broken closes its contract, and with it the race.
    */
   observe(item: ContractCargoItem, place: ContractPlace, playerS: number): void {
+    if (this.race !== null && this.race.itemId === contractIdOf(item) && item.progress?.broken) {
+      this.end(`race lost — the ${contractThing(item).name} broke`);
+      return;
+    }
     if (this.race !== null || place === 'post' || item.progress?.started) return;
     if (item.raceLegs === undefined) return;
     this.start(item, playerS);

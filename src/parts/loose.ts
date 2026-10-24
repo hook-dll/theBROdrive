@@ -6,7 +6,8 @@ import type { GameWorld } from '../game/state';
 import type { PartInstance } from './registry';
 import { variant } from './registry';
 import type { Item } from '../items/items';
-import { itemMass } from '../items/items';
+import { contractThing, isBrokenThing, itemMass } from '../items/items';
+import { thingWears } from '../items/things';
 import {
   createItemMesh,
   createPartMesh,
@@ -31,9 +32,15 @@ import type { Shoveable } from '../player/player';
 interface LooseEntry {
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
-  readonly mesh: THREE.Object3D;
+  /** Swapped once when a thing lying here breaks (`watchBreak`). */
+  mesh: THREE.Object3D;
   readonly football?: FootballMotion;
   readonly pocketWatch?: THREE.Object3D;
+  /**
+   * A contract thing drawn whole: it can still break where it lies (a drop's wear lands
+   * after it is laid down, contracts/runtime.ts), and is then drawn broken.
+   */
+  watchBreak: boolean;
 }
 
 const FOOTBALL_SAMPLE_STRIDE = 7;
@@ -411,7 +418,8 @@ export class LoosePartField {
   /** Copies body transforms and updates environment-sensitive item visuals. */
   syncVisuals(timeOfDay: number, dayFactor: number): void {
     for (const entry of this.parts.values()) this.syncEntry(entry);
-    for (const entry of this.items.values()) {
+    for (const [id, entry] of this.items) {
+      if (entry.watchBreak) this.drawBroken(id, entry);
       this.syncEntry(entry);
       if (entry.pocketWatch) setPocketWatchState(entry.pocketWatch, timeOfDay, dayFactor);
     }
@@ -512,7 +520,7 @@ export class LoosePartField {
     setPartCondition(mesh, part);
     mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
-    this.parts.set(part.id, { body, collider, mesh });
+    this.parts.set(part.id, { body, collider, mesh, watchBreak: false });
     this.colliderToPartId.set(collider.handle, part.id);
     // Settled junk costs nothing: spawn asleep. Contact wakes it via normal Rapier
     // integration (a car, a brush, a foot).
@@ -562,10 +570,25 @@ export class LoosePartField {
     mesh.position.set(rx, y, rz);
     this.scene.add(mesh);
     const pocketWatch = item.type === 'pocket_watch' ? mesh : undefined;
+    const watchBreak = item.type === 'contract_cargo' && thingWears(contractThing(item)) && !isBrokenThing(item);
     const entry: LooseEntry = football
-      ? { body, collider, mesh, football, pocketWatch }
-      : { body, collider, mesh, pocketWatch };
+      ? { body, collider, mesh, football, pocketWatch, watchBreak }
+      : { body, collider, mesh, pocketWatch, watchBreak };
     this.items.set(item.id, entry);
     this.colliderToItemId.set(collider.handle, item.id);
+  }
+
+  /** The thing lying as `entry` broke since it was drawn: draw it broken where it lies. */
+  private drawBroken(id: string, entry: LooseEntry): void {
+    const item = this.world.state.looseItems[id]?.item;
+    if (item === undefined || !isBrokenThing(item)) return;
+    entry.watchBreak = false;
+    const mesh = createItemMesh(item);
+    mesh.position.copy(entry.mesh.position);
+    mesh.quaternion.copy(entry.mesh.quaternion);
+    this.scene.remove(entry.mesh);
+    disposeItemMeshResources(entry.mesh);
+    this.scene.add(mesh);
+    entry.mesh = mesh;
   }
 }

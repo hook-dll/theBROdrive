@@ -1,5 +1,5 @@
 import type { CarState } from '../game/state';
-import { contractThing, type Item } from '../items/items';
+import { contractThing, isBrokenThing, type Item } from '../items/items';
 import { hasTag } from '../items/things';
 
 /**
@@ -17,18 +17,25 @@ import { hasTag } from '../items/things';
  * - `harshMoments` / `sinceHarsh`: harsh moments since the meter was made, and seconds
  *   since the last one began (Infinity before the first).
  *
- * Accounting, for contracts (teddy passengers, fragile cargo pay). Keys are the caller's
- * own, e.g. a passenger party's id:
- * - `track(key, comfort?, harsh?)`: starts accounting under `key`, from the ride already
- *   had (full comfort, no harsh moment by default; no-op if tracked);
+ * Accounting, for contracts (teddy passengers). Keys are the caller's own, e.g. a
+ * passenger party's id:
+ * - `track(key, comfort?, harsh?, scale?)`: starts accounting under `key`, from the ride
+ *   already had (full comfort, no harsh moment by default; no-op if tracked). `scale` is
+ *   how much of the ride reaches it: the carrying car's comfort factor
+ *   (vehicle/carmodels.ts `comfortFactor`), which scales its comfort drain and counts each
+ *   harsh moment as that fraction of one;
  * - `comfort(key)`: 0..1, how the ride felt since `track`; 1 for an untracked key;
- * - `harsh(key)`: harsh moments since `track`; 0 for an untracked key;
+ * - `harsh(key)`: harsh moments since `track`, scaled; 0 for an untracked key;
  * - `tracking(key)`: whether `key` is tracked;
  * - `forget(key)`: stops accounting and drops the record.
  * A tracked key accumulates only on steps the composition root reports as the player
  * driving (`step`); on foot, as a passenger or in the title room nothing is added.
  * Runtime-only: a caller that must survive a reload keeps the reading on its own saved
  * state and seeds `track` with it (contracts/kinds/teddyPassengers.ts).
+ *
+ * For the things a contract carries (contracts/runtime.ts) `takeExcess()` hands over the
+ * harshness driven since it was last asked, in (m/s² above easy) · seconds, and starts
+ * a fresh count; the car it was driven in is the one the player drives now.
  *
  * The thresholds are the old trip record's: under `RIDE_EASY_MPS2` (pulling away, a
  * firm stop at a junction, a brisk bend) costs nothing; comfort drains with the excess
@@ -54,6 +61,7 @@ const ACCEL_CLAMP_MPS2 = 20;
 interface RideRecord {
   comfortLoss: number;
   harsh: number;
+  readonly scale: number;
 }
 
 export class RideMeter {
@@ -67,6 +75,8 @@ export class RideMeter {
   private lastVx = 0;
   private lastVz = 0;
   private readonly records = new Map<string, RideRecord>();
+  /** (m/s² above easy) · s since the last `takeExcess`. */
+  private excess = 0;
 
   /**
    * One fixed step of the car the player drives: its horizontal world velocity, m/s, and
@@ -88,7 +98,9 @@ export class RideMeter {
       this.longitudinal += (along - this.longitudinal) * k;
       this.lateral += (across - this.lateral) * k;
       this.magnitude = Math.hypot(this.longitudinal, this.lateral);
-      const loss = Math.max(0, this.magnitude - RIDE_EASY_MPS2) * dt * COMFORT_PER_EXCESS;
+      const excess = Math.max(0, this.magnitude - RIDE_EASY_MPS2) * dt;
+      this.excess += excess;
+      const loss = excess * COMFORT_PER_EXCESS;
       let began = false;
       if (!this.harshNow && this.magnitude > RIDE_HARSH_MPS2) {
         this.harshNow = true;
@@ -100,8 +112,8 @@ export class RideMeter {
       }
       if (loss > 0 || began) {
         for (const record of this.records.values()) {
-          record.comfortLoss += loss;
-          if (began) record.harsh++;
+          record.comfortLoss += loss * record.scale;
+          if (began) record.harsh += record.scale;
         }
       }
     }
@@ -122,8 +134,15 @@ export class RideMeter {
     this.magnitude = 0;
   }
 
-  track(key: string, comfort = 1, harsh = 0): void {
-    if (!this.records.has(key)) this.records.set(key, { comfortLoss: 1 - comfort, harsh });
+  track(key: string, comfort = 1, harsh = 0, scale = 1): void {
+    if (!this.records.has(key)) this.records.set(key, { comfortLoss: 1 - comfort, harsh, scale });
+  }
+
+  /** The harshness driven since the last call, (m/s² above easy) · s; the count starts afresh. */
+  takeExcess(): number {
+    const excess = this.excess;
+    this.excess = 0;
+    return excess;
   }
 
   tracking(key: string): boolean {
@@ -146,10 +165,10 @@ export class RideMeter {
 
 /**
  * Whether a thing minds how it is driven: the HUD shows the G-force widget while the
- * driven car carries one. A fragile contract thing or a teddy passenger.
+ * driven car carries one. A fragile contract thing (not yet broken) or a teddy passenger.
  */
 export function rideSensitive(item: Item | null | undefined): boolean {
-  if (item?.type !== 'contract_cargo') return false;
+  if (item?.type !== 'contract_cargo' || isBrokenThing(item)) return false;
   return item.thing === 'teddies' || hasTag(contractThing(item), 'fragile');
 }
 

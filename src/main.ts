@@ -28,6 +28,7 @@ import {
 import { warmPoiStructures } from './world/poistructures';
 import {
   Inventory,
+  isBrokenThing,
   type CameraItem,
   type ContractCargoItem,
 } from './items/items';
@@ -1541,11 +1542,12 @@ async function boot(): Promise<void> {
   };
   const playerImpacts = createPlayerImpacts({ physics, player, vitals, vehicles, traffic });
 
-  // Contract walk: keeps each contract's world objects, the race and the delivery
-  // target in step with where its cargo is. Nothing on the way is scored.
-  const contracts = new ContractRuntime(world);
   /** The ride of the car he drives (trip/ride.ts), and the velocity it is fed, reused. */
   const ride = new RideMeter();
+  // Contract walk: keeps each contract's world objects, the race and the delivery
+  // target in step with where its cargo is, and wears each thing by the knocks, drops
+  // and the ride it takes.
+  const contracts = new ContractRuntime(world, ride);
   let rideCarId: string | null = null;
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
@@ -1566,6 +1568,7 @@ async function boot(): Promise<void> {
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
     ensureContractWorldObjects(contractWorldDeps, item, place);
+    if (isBrokenThing(item)) return;
     if (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
       deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
     }

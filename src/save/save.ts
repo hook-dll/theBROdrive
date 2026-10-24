@@ -1047,9 +1047,10 @@ function legacyCoinKopecks(
 }
 
 /**
- * Rebuilds a contract's saved progress: `started`, a fragile radio's `condition` and a
- * passenger's ride (`comfort`, `harsh`) when it has them. Older saves also carry heat,
- * violated and status fields from when deliveries were scored; they are dropped.
+ * Rebuilds a contract's saved progress: `started`, a thing's `condition` and `broken`,
+ * and a passenger's ride (`comfort`, `harsh`, harsh moments scaled by the car's comfort)
+ * when it has them. Older saves also carry heat, violated and status fields from when
+ * deliveries were scored; they are dropped.
  */
 function sanitizeContractProgress(raw: unknown): ContractProgress {
   const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
@@ -1057,11 +1058,12 @@ function sanitizeContractProgress(raw: unknown): ContractProgress {
   if (typeof obj.condition === 'number' && Number.isFinite(obj.condition)) {
     progress.condition = Math.min(1, Math.max(0, obj.condition));
   }
+  if (obj.broken === true) progress.broken = true;
   if (typeof obj.comfort === 'number' && Number.isFinite(obj.comfort)) {
     progress.comfort = Math.min(1, Math.max(0, obj.comfort));
   }
   if (typeof obj.harsh === 'number' && Number.isFinite(obj.harsh) && obj.harsh > 0) {
-    progress.harsh = Math.trunc(obj.harsh);
+    progress.harsh = obj.harsh;
   }
   return progress;
 }

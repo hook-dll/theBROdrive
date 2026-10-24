@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from './partmesh';
 import { setPartCondition } from './materials';
+import { isBrokenThing } from '../items/items';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
   bootFootprint,
@@ -152,7 +153,7 @@ export class TrunkView {
     const itemSignature = view.cells.map((item) =>
       item?.type === 'part'
         ? `${item.id}:${item.part.destroyed ? 1 : 0}:${item.part.dirt}:${item.part.rust}`
-        : item?.id ?? '',
+        : `${item?.id ?? ''}${isBrokenThing(item) ? ':broken' : ''}`,
     ).join('|');
     if (itemSignature !== this.itemSignature) {
       this.itemSignature = itemSignature;

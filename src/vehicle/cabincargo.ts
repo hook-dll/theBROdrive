@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Item } from '../items/items';
+import { isBrokenThing, type Item } from '../items/items';
 import { createItemMesh, disposeItemMeshResources } from '../render/partmesh';
 import { setPartCondition } from '../render/materials';
 import { KIT_PLACE_NODE } from '../carkit/interior';
@@ -36,7 +36,7 @@ function lookKey(item: Item): string {
     case 'quarry':
       return `quarry:${item.mass}`;
     case 'contract_cargo':
-      return `cargo:${item.thing}`;
+      return `cargo:${item.thing}${isBrokenThing(item) ? ':broken' : ''}`;
     default:
       return item.type;
   }
@@ -64,6 +64,8 @@ interface Shown {
   readonly item: Item;
   readonly mesh: THREE.Object3D;
   readonly place: number;
+  /** Drawn broken (items/items.ts `isBrokenThing`): a thing that breaks on its seat is drawn afresh. */
+  readonly broken: boolean;
 }
 
 export class CabinCargoView {
@@ -100,7 +102,9 @@ export class CabinCargoView {
   /** Each frame the car is drawn near: what lies where, against what is drawn. */
   sync(cabin: readonly (Item | null)[]): void {
     for (let place = 0; place < this.shown.length; place++) {
-      if ((this.shown[place]?.item ?? null) !== (cabin[place] ?? null)) {
+      const shown = this.shown[place];
+      const item = cabin[place] ?? null;
+      if ((shown?.item ?? null) !== item || (shown !== null && shown.broken !== isBrokenThing(item))) {
         this.relay(cabin);
         return;
       }
@@ -132,8 +136,12 @@ export class CabinCargoView {
       if (!item) continue;
       const holder = this.holders[place];
       const room = this.rooms[place];
-      const old = pool.get(item);
+      let old = pool.get(item);
       pool.delete(item);
+      if (old && old.broken !== isBrokenThing(item)) {
+        this.release(old);
+        old = undefined;
+      }
       if (!holder || !room) {
         if (old) this.release(old);
         continue;
@@ -154,7 +162,7 @@ export class CabinCargoView {
       const rest = restPose(item, room);
       mesh.position.copy(rest.position);
       mesh.quaternion.copy(rest.quaternion);
-      next[place] = { item, mesh, place };
+      next[place] = { item, mesh, place, broken: isBrokenThing(item) };
     }
     for (const shown of pool.values()) this.release(shown);
     this.shown = next;

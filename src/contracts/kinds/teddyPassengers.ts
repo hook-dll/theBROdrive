@@ -12,8 +12,9 @@
  * rear bench (vehicle/cabin.ts `layPlace`) — never in the boot, under the bonnet, on the
  * floor or in the driver's seat. Nothing makes them fall off a seat: hard driving costs
  * the ride, never their place. While the party rides in the car the player drives, the
- * ride meter accounts it under the party's id (`trackPassengerRide`) and the comfort and
- * harsh moments are kept on each teddy, so a reload mid-trip keeps the ride so far.
+ * ride meter accounts it under the party's id (`trackPassengerRide`), softened by that
+ * car's comfort (§11.2, `comfortFactor`), and the comfort and harsh moments are kept on
+ * each teddy, so a reload mid-trip keeps the ride so far.
  *
  * Delivery is one teddy at a time through the destination post's slot
  * (registry.ts `contractPosting`): the last one in completes the party and pays
@@ -24,6 +25,7 @@ import { hash01 } from '../../core/rng';
 import type { CarState } from '../../game/state';
 import type { CargoParty, ContractCargoItem, Item } from '../../items/items';
 import type { RideMeter } from '../../trip/ride';
+import { carModel, comfortFactor } from '../../vehicle/carmodels';
 import { defaultProgress, type ContractKindDef } from '../types';
 
 /** The party-size draw, from the offer's own seed. */
@@ -64,9 +66,9 @@ const aboard = new Set<string>();
 /**
  * One fixed step while the player drives `car`, after `ride.step`: every party with a
  * teddy on its seats is accounted under its id, starting from the ride already saved
- * on it, and the ride so far is written back onto each of its teddies aboard. A party
- * that left this car (handed in, taken out, or the player drives another) stops being
- * accounted; what it rode is kept on its teddies.
+ * on it and scaled by the car's comfort factor, and the ride so far is written back onto
+ * each of its teddies aboard. A party that left this car (handed in, taken out, or the
+ * player drives another) stops being accounted; what it rode is kept on its teddies.
  */
 export function trackPassengerRide(ride: RideMeter, car: CarState): void {
   aboard.clear();
@@ -76,7 +78,8 @@ export function trackPassengerRide(ride: RideMeter, car: CarState): void {
     if (!aboard.has(key)) {
       aboard.add(key);
       if (!tracked.has(key)) {
-        ride.track(key, item.progress.comfort ?? 1, item.progress.harsh ?? 0);
+        const scale = comfortFactor(carModel(car.modelId).comfort);
+        ride.track(key, item.progress.comfort ?? 1, item.progress.harsh ?? 0, scale);
         tracked.add(key);
       }
     }

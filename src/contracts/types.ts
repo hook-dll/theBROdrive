@@ -9,11 +9,12 @@
  * of them share: the kind ids, the progress record that is saved ON the item, and the
  * delivery-time world view the kinds read.
  *
- * NOTHING IS SCORED ON THE WAY but a fragile thing's condition: knocks to the car it
- * rides in and drops to the ground wear it down, and the delivery pays that share of
- * its pay (economy/economy.ts `deliveryPay`). The other thing remembered on the item
- * is whether it has left its source post (`progress.started`), which the rival race
- * reads.
+ * NOTHING IS SCORED ON THE WAY but a thing's condition: knocks to the car it rides in,
+ * drops to the ground and harsh driving wear it down (contracts/runtime.ts), and the
+ * delivery pays that share of its pay (economy/economy.ts `deliveryPay`). Below
+ * `BROKEN_BELOW` it is broken: the contract is closed and the thing stays a souvenir. The
+ * other thing remembered on the item is whether it has left its source post
+ * (`progress.started`), which the rival race reads.
  */
 
 import type { CarState, WorldDelta } from '../game/state';
@@ -44,18 +45,29 @@ export interface ContractProgress {
   /** Set the first time the cargo leaves its source post. */
   started: boolean;
   /**
-   * A fragile thing's condition, 1 (as signed out) down to 0; the delivery's quality.
-   * Absent on every other thing and on a fragile one not yet knocked.
+   * A thing's condition, 1 (as signed out) down to 0; the delivery's quality. Absent on
+   * a thing not yet worn, and always on teddies (their quality is the ride) and haul
+   * papers (no condition this far).
    */
   condition?: number;
   /**
+   * Set once, the moment the condition fell below `BROKEN_BELOW`: the contract is closed
+   * there and then. No post signs for it; the thing stays the player's, a broken souvenir
+   * (`isBrokenThing`), and no longer wears.
+   */
+  broken?: true;
+  /**
    * A passenger's ride so far (trip/ride.ts): comfort 1 (calm) down to 0, and the harsh
-   * moments counted, while its party rode in the car the player drove. Written by
-   * `trackPassengerRide` (kinds/teddyPassengers.ts); absent before the first drive.
+   * moments counted (each scaled by the carrying car's comfort factor), while its party
+   * rode in the car the player drove. Written by `trackPassengerRide`
+   * (kinds/teddyPassengers.ts); absent before the first drive.
    */
   comfort?: number;
   harsh?: number;
 }
+
+/** Below this condition a thing is broken (game-design2.md §11.1). */
+export const BROKEN_BELOW = 0.3;
 
 /** A fresh, unstarted contract. */
 export function defaultProgress(): ContractProgress {

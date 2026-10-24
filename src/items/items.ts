@@ -278,6 +278,15 @@ export function isHaul(item: ContractCargoItem): boolean {
   return isHaulThing(contractThing(item));
 }
 
+/**
+ * A broken thing (contracts/types.ts `ContractProgress.broken`): its contract is closed,
+ * no post signs for it, and it is only a souvenir now — still carried, laid and dropped
+ * like any item, but no longer a live contract.
+ */
+export function isBrokenThing(item: Item | null | undefined): boolean {
+  return item?.type === 'contract_cargo' && item.progress?.broken === true;
+}
+
 /** Signed physical reward, consumed only when its sticker is confirmed on a car. */
 export interface StickerEnvelopeItem {
   readonly type: 'sticker_envelope';
@@ -384,10 +393,11 @@ export function itemLabel(item: Item): string {
     case 'pocket_watch':
       return 'pocket watch';
     case 'contract_cargo': {
-      // A knocked fragile thing says how much of its pay it still carries.
       const thing = contractThing(item);
-      const condition = item.progress?.condition;
-      const worn = condition !== undefined && condition < 1 ? ` · ${Math.round(condition * 100)}%` : '';
+      if (isBrokenThing(item)) return `broken ${thing.name}`;
+      // A worn thing says how much of its pay it still carries.
+      const percent = Math.round((item.progress?.condition ?? 1) * 100);
+      const worn = percent < 100 ? ` · ${percent}%` : '';
       const to = item.destination ? ` → ${item.destination}` : '';
       const race = item.raceLegs ? ' · race' : '';
       const name = item.party ? `teddy passenger · party of ${item.party.size}` : isHaulThing(thing) ? `${thing.name} papers` : thing.name;

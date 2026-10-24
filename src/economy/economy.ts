@@ -16,7 +16,6 @@
 import type { CarState, GameWorld } from '../game/state';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
 import { contractThing, type ContractCargoItem, type Item } from '../items/items';
-import { hasTag } from '../items/things';
 import { variant, type PartKind } from '../parts/registry';
 import { postStop } from '../world/poststops';
 
@@ -79,8 +78,8 @@ const EXTRA_PASSENGER_SHARE = 0.5;
  * Kopecks one delivery pays: the thing's base pay at home (items/things.ts
  * `payKopecks`; a nine-kilometre hop burns about half a litre in the Oka, 20 kopecks of
  * petrol, so a three-ruble thing leaves most of it towards oil, filters and the next car)
- * × the SOURCE post stop's km index × the delivery's quality (0..1; a fragile thing's
- * condition, a passenger party's ride, 1 for every other thing), and for a party of
+ * × the SOURCE post stop's km index × the delivery's quality (0..1; a thing's condition,
+ * a passenger party's ride, 1 for a haul), and for a party of
  * `passengers` teddies half the base again for each past the first. Never below one
  * kopeck: a delivered contract always pays something.
  */
@@ -92,16 +91,14 @@ export function deliveryPay(baseKopecks: number, sourceKm: number, quality: numb
 
 /**
  * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
- * distance, with a fragile thing's condition or a passenger party's ride
+ * distance, with the thing's condition (contracts/runtime.ts) or a passenger party's ride
  * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
  * last) as the quality.
  */
 export function contractPay(seed: number, item: ContractCargoItem): number {
   const thing = contractThing(item);
   const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
-  const quality = item.party
-    ? passengerQuality(item)
-    : hasTag(thing, 'fragile') ? item.progress.condition ?? 1 : 1;
+  const quality = item.party ? passengerQuality(item) : item.progress.condition ?? 1;
   return deliveryPay(thing.payKopecks, sourceKm, quality, item.party?.size ?? 1);
 }
 

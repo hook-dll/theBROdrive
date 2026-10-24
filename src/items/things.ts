@@ -124,6 +124,27 @@ export function isHaulThing(def: ThingDef): boolean {
   return def.place === 'trailer' || def.place === 'tow' || def.place === 'transfer';
 }
 
+/**
+ * Whether the thing has a condition (game-design2.md §11.1). Teddies do not: what they
+ * feel is their ride (contracts/kinds/teddyPassengers.ts `passengerQuality`). Nor does a
+ * haul this far: its papers ride in the hand, and the load is not scored.
+ */
+export function thingWears(def: ThingDef): boolean {
+  return def.place !== 'seats' && !isHaulThing(def);
+}
+
+/**
+ * The share of a fragile thing's wear any other thing takes: it wears 4–5× slower, so
+ * the ride and a drop barely mark it and only a crash shows (a 5 m/s shunt, 4% in a
+ * comfort-3 car).
+ */
+const ORDINARY_WEAR_SHARE = 0.22;
+
+/** How much of a fragile thing's wear this thing takes (contracts/runtime.ts). */
+export function thingWearShare(def: ThingDef): number {
+  return hasTag(def, 'fragile') ? 1 : ORDINARY_WEAR_SHARE;
+}
+
 /** The contract machinery the thing rides on (contracts/registry.ts). */
 export function thingKind(def: ThingDef): ContractKind {
   switch (def.place) {

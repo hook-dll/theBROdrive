@@ -20,7 +20,7 @@ import {
   setPocketWatchState,
 } from './partmesh';
 import { setPartCondition } from './materials';
-import { itemMass } from '../items/items';
+import { isBrokenThing, itemMass } from '../items/items';
 import type { Item } from '../items/items';
 import type { CameraMode } from './cameras';
 
@@ -130,6 +130,8 @@ export class HeldItemView {
   private mesh: THREE.Object3D | null = null;
   private heldType: Item['type'] | null = null;
   private heldId: string | null = null;
+  /** The held thing was drawn broken (items/items.ts `isBrokenThing`): it breaks in hand. */
+  private heldBroken = false;
 
   private time = 0;
   private bobPhase = 0;
@@ -200,7 +202,7 @@ export class HeldItemView {
       item !== null &&
       !gumAnimating &&
       !medicineAnimating &&
-      (item.type !== this.heldType || item.id !== this.heldId)
+      (item.type !== this.heldType || item.id !== this.heldId || isBrokenThing(item) !== this.heldBroken)
     ) {
       this.rebuild(item);
       this.resetMotion();
@@ -444,6 +446,7 @@ export class HeldItemView {
     this.mesh = mesh;
     this.heldType = item.type;
     this.heldId = item.id;
+    this.heldBroken = isBrokenThing(item);
   }
 
   private clearMesh(): void {
