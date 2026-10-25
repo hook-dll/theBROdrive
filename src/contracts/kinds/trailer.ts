@@ -1,37 +1,19 @@
 /**
- * A trailer load (game-design2.md §7.3): a wardrobe, a piano, a sofa or a bed, too big
- * for any boot. The papers and the loaded trailer they belong to must arrive together.
+ * A trailer load (game-design2.md §7.3, §7.8): a wardrobe, a piano, a sofa or a bed on a
+ * KMZ trailer, too big for any boot.
  *
- * The post's lever handing over the papers is the pickup: the loaded trailer is
- * spawned on that post's lay-by the first time the papers leave the machine
- * (`contracts/world.ts`), named after the offer seed, and from then on it is an
- * ordinary trailer — hitch it, tow it, drop it. The bed is the long load: longer than
- * the trailer's bed, it overhangs both ends with a collider of its own. The target post
- * only signs when the trailer stands within `DELIVERY_RANGE_M` of its lay-by, and the
- * delivery consumes it.
+ * The loaded trailer waits in the source post's bay before its card is taken
+ * (contracts/world.ts `spawnHaulLoad`), named after the offer seed; TAKE binds it and
+ * from then on it is an ordinary trailer — hitch it, tow it, drop it. The bed is the long
+ * load: longer than the trailer's bed, it overhangs both ends with a collider of its own.
+ * It is handed in by reversing it into the destination post's bay (contracts/haulbays.ts),
+ * which uncouples it and keeps it; a trailer has no rule of its own on top of the bay's.
  *
- * How it got there is not judged yet: a hit or tipped trailer still counts.
+ * How it got there is not judged: a hit or tipped trailer still counts.
  */
 
-import { contractTrailerId } from '../world';
 import type { ContractKindDef } from '../types';
-
-/** The parked trailer counts as delivered inside this radius of the post's lay-by, m. */
-const DELIVERY_RANGE_M = 25;
 
 export const trailerKind: ContractKindDef = {
   kind: 'trailer',
-  acceptRefusal: (item, probe) => {
-    const at = probe.trailerPosition(contractTrailerId(item));
-    if (!at) return 'its trailer is not here';
-    const dx = probe.postX - at.x;
-    const dz = probe.postZ - at.z;
-    if (dx * dx + dz * dz > DELIVERY_RANGE_M * DELIVERY_RANGE_M) {
-      return `bring its trailer onto the post's lay-by, within ${DELIVERY_RANGE_M} m`;
-    }
-    return null;
-  },
-  onDelivered: (item) => ({
-    deltas: [{ t: 'trailer_remove', trailerId: contractTrailerId(item) }],
-  }),
 };

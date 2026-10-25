@@ -3,7 +3,7 @@ import { variant } from '../parts/registry';
 import { stickerDef, type StickerKind } from './stickercatalog';
 import { carPaintSwatch } from '../vehicle/carpaint';
 import { formatClock, urgentRemainingS, type ContractKind, type ContractProgress } from '../contracts/types';
-import { isHaulThing, thingDef, thingItemMass, thingKind, type ThingDef, type ThingId } from './things';
+import { isHaulThing, thingDef, thingKind, type ThingDef, type ThingId } from './things';
 
 /**
  * Everything the player can hold, carry or use.
@@ -214,7 +214,8 @@ export type { StickerKind } from './stickercatalog';
 /**
  * A contract: one of the boy's things (items/things.ts) sent from a post. Its source
  * index is the complete delivery contract; its thing decides the name, the tags, the
- * mass, where it rides and the pay.
+ * mass, where it rides and the pay. A thing's is an item in the world; a haul's is only a
+ * post's offer and, once taken, the card kept in `WorldState.hauls` (its load is the job).
  */
 export interface ContractCargoItem {
   readonly type: 'contract_cargo';
@@ -274,7 +275,7 @@ export function contractKindOf(item: ContractCargoItem): ContractKind {
   return thingKind(contractThing(item));
 }
 
-/** A haul's papers: the thing is a trailer load, a towed car or a car to drive over. */
+/** A haul offer: the thing is a trailer load, a towed car or a car to drive over (§7.8). */
 export function isHaul(item: ContractCargoItem): boolean {
   return isHaulThing(contractThing(item));
 }
@@ -402,7 +403,7 @@ export function itemLabel(item: Item): string {
       const race = item.raceLegs ? ' · race' : '';
       const left = urgentRemainingS(item);
       const clock = left === null ? '' : ` · ${formatClock(left)}`;
-      const name = item.party ? `teddy passenger · party of ${item.party.size}` : isHaulThing(thing) ? `${thing.name} papers` : thing.name;
+      const name = item.party ? `teddy passenger · party of ${item.party.size}` : thing.name;
       return `${name}${to}${race}${clock}${worn}`;
     }
     case 'sticker_envelope':
@@ -455,7 +456,7 @@ export function itemMass(item: Item): number {
     case 'pocket_watch':
       return 0.12;
     case 'contract_cargo':
-      return thingItemMass(contractThing(item));
+      return contractThing(item).massKg;
     case 'sticker_envelope':
       return 0.08;
   }

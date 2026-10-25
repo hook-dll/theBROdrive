@@ -14,6 +14,7 @@ import type { BirdFlock } from '../agents/birds';
 import { STICKERS } from '../items/stickercatalog';
 import { makeContract } from '../contracts/offers';
 import { contractRelease } from '../contracts/registry';
+import { haulLoadId, spawnHaulLoad } from '../contracts/world';
 import { isThingId, THINGS } from '../items/things';
 import { uprightStickerRoll } from '../render/stickers';
 import { stickerAtlas } from '../render/stickerart';
@@ -24,7 +25,7 @@ import type { PhysicsWorld } from '../core/physics';
 import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
-import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type Item } from '../items/items';
+import { CAMERA_FRAME_LIMIT, Inventory, isHaul, itemLabel, type Item } from '../items/items';
 import { credit, formatMoney } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
@@ -649,10 +650,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * `thing(id, size?, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
    * 'tv_set', 'carpet', 'piano', 'teddies') signed out at the post nearest the player
    * and bound for the next, dropped in front of him as the post machine's tray would
-   * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted), a
-   * haul as its papers, whose trailer or car then appears in that post's haul bay
-   * (contracts/world.ts); `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes it
-   * a race to the post that many on, started when it is picked up. Returns the contract id.
+   * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted). A
+   * haul is taken there and then: its load stood in that post's haul bay (whatever stands
+   * there already) and bound to it, as TAKE does (contracts/world.ts). `urgent` gives it
+   * the urgent clock; `raceLegs` (1 or 2) makes it a race to the post that many on,
+   * started when it is picked up (a haul's, at once). Returns the contract id.
    */
   dev['thing'] = (id: string, size?: number, urgent = false, raceLegs?: 1 | 2): string => {
     if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
@@ -663,6 +665,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
     const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, raceLegs, urgent);
     if (offer.party && size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
+    if (isHaul(offer)) {
+      spawnHaulLoad({ world: ctx.world, road: ctx.road, terrain: ctx.terrain }, offer);
+      ctx.world.apply({ t: 'haul_take', haul: { contract: offer, loadId: haulLoadId(offer) } });
+      ctx.hud.setToast(`took the ${offer.thing} haul at post ${source}: its load is in the bay`);
+      return offer.id;
+    }
     const eye = ctx.camera.eyePosition;
     const dir = ctx.camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;

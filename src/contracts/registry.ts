@@ -1,18 +1,18 @@
 /**
  * The contract kind registry. One entry per kind, from its own module under
  * `kinds/`; adding a kind means importing its definition here and nowhere else. The
- * helper functions are what the post machine (world/post.ts), the interaction prompts and the
- * runtime call.
+ * helper functions are what the post machine (world/post.ts), the haul bays
+ * (contracts/haulbays.ts), the interaction prompts and the runtime call.
  */
 
 import type { WorldState } from '../game/state';
-import { contractIdOf, contractKindOf, contractThing, isBrokenThing, isHaul, type ContractCargoItem, type Item } from '../items/items';
+import { contractIdOf, contractKindOf, contractThing, isBrokenThing, type ContractCargoItem, type Item } from '../items/items';
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
 import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
 import { trailerKind } from './kinds/trailer';
-import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
+import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryProbe } from './types';
 
 /** At most this many contracts are active at once, anywhere (game-design2.md §7.4). */
 export const ACTIVE_CONTRACT_LIMIT = 3;
@@ -31,21 +31,20 @@ export function isContractClosed(item: ContractCargoItem, completedIds: readonly
 }
 
 /**
- * THE definition of an active contract: a contract item out of a post's stock — in the
- * hands or the pack, in any car's boot or cabin, or lying loose — that is not closed
- * (`isContractClosed`). A haul is its papers, wherever they are; a teddy party is one
- * contract however many of its teddies are out. Returns the active contracts' ids
- * (`contractIdOf`), all of them and the hauls among them: their sizes are what
- * `ACTIVE_CONTRACT_LIMIT` and `ACTIVE_HAUL_LIMIT` cap.
+ * THE definition of an active contract (game-design2.md §7.4): a thing's contract item out
+ * of a post's stock — in the hands or the pack, in any car's boot or cabin, or lying
+ * loose — that is not closed (`isContractClosed`), and every haul taken and not yet
+ * handed in or returned (`WorldState.hauls`: a haul has no item, its load is the
+ * contract). A teddy party is one contract however many of its teddies are out. Returns
+ * the active contracts' ids (`contractIdOf`), all of them and the hauls among them: their
+ * sizes are what `ACTIVE_CONTRACT_LIMIT` and `ACTIVE_HAUL_LIMIT` cap.
  */
 export function activeContracts(state: WorldState): { all: Set<string>; hauls: Set<string> } {
   const all = new Set<string>();
   const hauls = new Set<string>();
   const consider = (item: Item | null | undefined): void => {
     if (item?.type !== 'contract_cargo' || isContractClosed(item, state.completedContractIds)) return;
-    const id = contractIdOf(item);
-    all.add(id);
-    if (isHaul(item)) hauls.add(id);
+    all.add(contractIdOf(item));
   };
   state.player.carried.forEach(consider);
   for (const car of Object.values(state.cars)) {
@@ -53,6 +52,10 @@ export function activeContracts(state: WorldState): { all: Set<string>; hauls: S
     car.cabin.forEach(consider);
   }
   for (const loose of Object.values(state.looseItems)) consider(loose.item);
+  for (const id of Object.keys(state.hauls)) {
+    all.add(id);
+    hauls.add(id);
+  }
   return { all, hauls };
 }
 
@@ -121,10 +124,31 @@ export function isContractKind(value: unknown): value is ContractKind {
 }
 
 /**
- * Why this post may not accept the cargo, or null. A broken thing's contract is closed
- * and no post signs for it. The base rule — a post never signs cargo from itself or one
- * further down the road — applies to every kind; a kind adds its own on top (a trailer
- * load needs its trailer in the yard, a car to hand over needs it parked empty).
+ * Why post `postIndex` is not the cargo's destination, or null when it is: a post never
+ * signs for cargo from itself or one further down the road, and a race is signed for only
+ * from its finish on. The one rule of where a thing or a haul is handed in; anywhere
+ * else it goes back as a return to sender.
+ */
+export function contractDestinationRefusal(item: ContractCargoItem, postIndex: number): string | null {
+  if (postIndex <= item.sourceCourierIndex) return 'this post cannot sign for its own things';
+  // A two-stop race is signed from its finish on: handing it in at the first stop
+  // would end a two-ruble race at the distance of a one-ruble one.
+  if (item.raceLegs !== undefined && postIndex < item.sourceCourierIndex + item.raceLegs) {
+    return 'this one races on to the next post';
+  }
+  return null;
+}
+
+/** The kind's own reason the contract may not be handed in now (`ContractKindDef.acceptRefusal`), or null. */
+export function contractKindRefusal(item: ContractCargoItem, probe: DeliveryProbe): string | null {
+  return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
+}
+
+/**
+ * Why this post's tray may not sign for the thing as a delivery, or null. A broken
+ * thing's contract is closed and no post signs for it; otherwise the destination rule
+ * (`contractDestinationRefusal`) and the kind's own. A thing it will not sign for any
+ * tray takes back as a return to sender, with no pay.
  *
  * `probe` is the world at the accepting post, built by the post machine and
  * handed to the prompt and the commit alike.
@@ -134,42 +158,5 @@ export function contractAcceptRefusal(
   probe: DeliveryProbe,
 ): string | null {
   if (isBrokenThing(item)) return `the ${contractThing(item).name} is broken: no post will sign for it`;
-  if (probe.targetPostIndex <= item.sourceCourierIndex) {
-    return 'this post cannot sign for its own things';
-  }
-  // A two-stop race is signed from its finish on: handing it in at the first stop
-  // would end a two-ruble race at the distance of a one-ruble one.
-  if (item.raceLegs !== undefined && probe.targetPostIndex < item.sourceCourierIndex + item.raceLegs) {
-    return 'this one races on to the next post';
-  }
-  return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
-}
-
-/**
- * Why this post's tray may not take `item` back as a RETURN TO SENDER, or null. Asked
- * only when the post will not sign for it as a delivery (`contractAcceptRefusal`): a
- * valid delivery always wins. A return pays nothing; it closes the
- * contract and frees its place under `ACTIVE_CONTRACT_LIMIT`. Any post takes a thing back
- * from the hand, and a closed one (`isContractClosed`: broken, or the leftover teddy of
- * a returned party) to be rid of it. A haul goes back as a delivery does: its papers in
- * hand and its load on this post's lay-by by its kind's own rule (a trailer on the pad,
- * a car parked there empty), and the load is taken in with them.
- */
-export function contractReturnRefusal(
-  item: ContractCargoItem,
-  probe: DeliveryProbe,
-  completedIds: readonly string[],
-): string | null {
-  if (isContractClosed(item, completedIds)) return null;
-  return contractKindDef(item).acceptRefusal?.(item, probe) ?? null;
-}
-
-/**
- * The world change a delivery also performs: consuming the trailer, the car or the
- * part the contract is about. The interaction code applies this AFTER the
- * `courier_storage` delta that writes the completed id, so a crash
- * between the two halves leaves the cargo delivered and cannot pay twice.
- */
-export function contractDeliveryEffect(item: ContractCargoItem, probe: DeliveryProbe): DeliveryEffect | null {
-  return contractKindDef(item).onDelivered?.(item, probe) ?? null;
+  return contractDestinationRefusal(item, probe.targetPostIndex) ?? contractKindRefusal(item, probe);
 }

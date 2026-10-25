@@ -12,7 +12,7 @@
  * - `seats`: passengers on the passenger seats (the teddies, contracts/kinds/teddyPassengers.ts);
  * - `trailer`, `tow`, `transfer`: a haul (contracts/world.ts) — the load on a contract
  *   trailer, a broken toy car pulled to the repair on the bar, a toy car driven to a
- *   friend. What is carried is its papers, one boot cell.
+ *   friend. No item stands for it: the trailer or the car is the job (§7.8).
  *
  * Ids are saved on items: never rename one.
  */
@@ -136,7 +136,7 @@ export function hasTag(def: ThingDef, tag: ThingTag): boolean {
   return def.tags.includes(tag);
 }
 
-/** A haul: a trailer, a towed car or a driven car, handed in by its papers. */
+/** A haul: a trailer, a towed car or a driven car, handed in by reversing it into a post's bay. */
 export function isHaulThing(def: ThingDef): boolean {
   return def.place === 'trailer' || def.place === 'tow' || def.place === 'transfer';
 }
@@ -144,7 +144,7 @@ export function isHaulThing(def: ThingDef): boolean {
 /**
  * Whether the thing has a condition (game-design2.md §11.1). Teddies do not: what they
  * feel is their ride (contracts/kinds/teddyPassengers.ts `passengerQuality`). Nor does a
- * haul this far: its papers ride in the hand, and the load is not scored.
+ * haul this far: the load is not scored.
  */
 export function thingWears(def: ThingDef): boolean {
   return def.place !== 'seats' && !isHaulThing(def);
@@ -179,18 +179,9 @@ export function thingKind(def: ThingDef): ContractKind {
   }
 }
 
-/** Haul papers in the hand, kg. */
-const PAPERS_KG = 0.1;
-
-/** What one item of the thing weighs in the hand, the boot or on a seat: a haul's papers. */
-export function thingItemMass(def: ThingDef): number {
-  return isHaulThing(def) ? PAPERS_KG : def.massKg;
-}
-
 /** The boot cells the thing's item takes, or null when it never rides in a boot. */
 export function thingBootFootprint(def: ThingDef): BootFootprint | null {
-  if (def.place === 'cells') return def.boot ?? ONE;
-  return isHaulThing(def) ? ONE : null;
+  return def.place === 'cells' ? def.boot ?? ONE : null;
 }
 
 /**

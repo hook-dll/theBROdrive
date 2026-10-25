@@ -97,7 +97,6 @@ const BRASS = flat(0xb08d3c, 0.45);
 const CHROME = flat(0xbfc2c4, 0.3);
 const BLACK = flat(0x161514, 0.5);
 const PAPER = flat(0xe9e0cb, 0.86);
-const STRING = flat(0x3a281c, 0.96);
 const CRACK = flat(0x0b0908, 0.98);
 const STRAP = flat(0xc9781c, 0.8);
 
@@ -132,14 +131,6 @@ function crack(b: MeshBuilder, front: boolean, top: boolean): void {
 // ---------------------------------------------------------------------------
 
 type Model = (b: MeshBuilder, broken: boolean) => void;
-
-/** A parcel tied with string: what a haul's papers come in. */
-function papers(b: MeshBuilder): void {
-  box(b, flat(0x8f6847, 0.92), [0.32, 0.2, 0.17], [0, 0.1, 0]);
-  box(b, STRING, [0.018, 0.205, 0.176], [0, 0.1, 0]);
-  box(b, STRING, [0.325, 0.018, 0.176], [0, 0.1, 0]);
-  box(b, flat(0xd9c8a5, 0.9), [0.15, 0.075, 0.006], [0.045, 0.125, 0.088]);
-}
 
 const PENCIL_COLOURS = [0xb3262a, 0xd9762a, 0xe0c03a, 0x3f8a3a, 0x2f5fa8, 0x6a3a8a, 0x2a2624, 0x7a4a26];
 
@@ -835,8 +826,12 @@ function teddy(b: MeshBuilder): void {
   box(b, flat(0xb3262a, 0.8), [0.06, 0.03, 0.02], [0, 0.105, 0.075]);
 }
 
-/** Every thing's model in the hand, the boot, the cabin and on the ground; a haul is its papers. */
-const MODELS: Readonly<Record<ThingId, Model>> = {
+/**
+ * Every thing's model in the hand, the boot, the cabin and on the ground. A haul is no
+ * item and has none here: its load is drawn on its trailer (`createTrailerLoadMesh`) or is
+ * a car.
+ */
+const MODELS: Readonly<Partial<Record<ThingId, Model>>> = {
   pencils,
   globe,
   cushions,
@@ -849,12 +844,6 @@ const MODELS: Readonly<Record<ThingId, Model>> = {
   carpet,
   tv_set: tvSet,
   aquarium,
-  wardrobe: papers,
-  piano: papers,
-  sofa: papers,
-  bed: papers,
-  broken_toy_car: papers,
-  toy_car: papers,
   teddies: teddy,
   grandpa_radio: grandpaRadio,
   stamp_album: stampAlbum,
@@ -884,7 +873,9 @@ export function thingModelKey(thing: ThingDef, broken: boolean): string {
 
 /** Builds the thing's model, whole or broken, centred on its bounds. */
 export function buildThingInto(b: MeshBuilder, thing: ThingDef, broken: boolean): void {
-  MODELS[thing.id](b, broken);
+  const model = MODELS[thing.id];
+  if (!model) throw new Error(`buildThingInto: "${thing.id}" is a haul, never an item`);
+  model(b, broken);
   const centre = boundsOf(b.instructions).getCenter(new THREE.Vector3());
   for (let i = 0; i < b.instructions.length; i++) {
     const ins = b.instructions[i]!;

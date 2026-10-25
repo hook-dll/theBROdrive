@@ -1267,8 +1267,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'pocket_watch':
       return createPocketWatchMesh();
     case 'contract_cargo': {
-      // A haul is carried as its papers; every other thing is drawn with its own model,
-      // whole or broken (render/thingmesh.ts).
+      // Every thing is drawn with its own model, whole or broken (render/thingmesh.ts);
+      // a haul is never an item.
       const thing = contractThing(item);
       const broken = isBrokenThing(item);
       return buildGroup(itemBlueprint(thingModelKey(thing, broken), (b) => buildThingInto(b, thing, broken)).instructions);

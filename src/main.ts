@@ -50,7 +50,8 @@ import { Interaction } from './player/interaction';
 import { MachineFocus } from './player/machinefocus';
 import { ContractRuntime } from './contracts/runtime';
 import { isContractClosed } from './contracts/registry';
-import { ensureContractWorldObjects, type ContractWorldDeps } from './contracts/world';
+import { type ContractWorldDeps } from './contracts/world';
+import { HaulBays } from './contracts/haulbays';
 import { urgentRemainingS, type ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
 import { IMMOVABLE, Player } from './player/player';
@@ -1347,6 +1348,10 @@ async function boot(): Promise<void> {
       race.playerDelivered(delta.completedContractId);
     } else if (delta.t === 'courier_storage' && delta.completedContractId) {
       race.playerReturned(delta.completedContractId);
+    } else if (delta.t === 'haul_close') {
+      // A haul's load accepted in a bay (contracts/haulbays.ts): delivered, or returned.
+      if (delta.deliveredKind) race.playerDelivered(delta.contractId);
+      else race.playerReturned(delta.contractId);
     } else if (delta.t === 'sticker_place') {
       hud.setToast('stuck on');
     } else if (delta.t === 'settings') {
@@ -1608,39 +1613,78 @@ async function boot(): Promise<void> {
 
   /** The ride of the car he drives (trip/ride.ts), and the velocity it is fed, reused. */
   const ride = new RideMeter();
-  // Contract walk: keeps each contract's world objects, the race and the delivery
-  // target in step with where its cargo is, and wears each thing by the knocks, drops
-  // and the ride it takes.
+  // Contract walk: keeps the race and the delivery target in step with where each
+  // contract is, and wears each thing by the knocks, drops and the ride it takes.
   const contracts = new ContractRuntime(world, ride, (carId) => vehicles.get(carId)?.impactTotal ?? null);
   let rideCarId: string | null = null;
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
   /**
-   * The world objects the live contracts are about — a loaded trailer spawned on its
-   * source post's lay-by, or the car of a transfer or a tow. Idempotent, and called from
-   * the tick for every cargo item, so a save that predates a kind heals on the next tick.
+   * The haul bays at work (contracts/haulbays.ts): a haul's load stood in its source bay
+   * while its card waits, and accepted when it is reversed into another. "Out of view" is
+   * out of the camera's frustum as last rendered.
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain };
+  const haulFrustum = new THREE.Frustum();
+  const haulViewMatrix = new THREE.Matrix4();
+  const haulSphere = new THREE.Sphere();
+  const haulBays = new HaulBays(contractWorldDeps, {
+    livePose: (id, out) => {
+      const body = vehicles.get(id)?.chassis ?? trailerField.get(id)?.rigidBody;
+      if (!body) return false;
+      const t = body.translation();
+      const q = body.rotation();
+      const v = body.linvel();
+      out.x = t.x + origin.x;
+      out.y = t.y;
+      out.z = t.z + origin.z;
+      out.yaw = Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y));
+      out.vx = v.x;
+      out.vz = v.z;
+      return true;
+    },
+    postLive: (index) => fixtures.get(`post:${index}`) !== null,
+    uncouple: (id) => {
+      // Recorded drops, the live joint first where there is one.
+      const trailer = trailerField.get(id);
+      if (trailer) trailer.unhitch();
+      else if (world.state.trailers[id]?.hitchedTo) world.apply({ t: 'trailer_hitch', trailerId: id, carId: null });
+      trailerField.hitchedTo(id)?.unhitch();
+      if (world.state.cars[id]?.towedBy) carTowField.unhitch(id);
+      for (const car of Object.values(world.state.cars)) {
+        if (car.towedBy === id) carTowField.unhitch(car.id);
+      }
+    },
+    inView: (x, y, z, radius) => {
+      const cam = renderer.camera;
+      haulViewMatrix.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      haulFrustum.setFromProjectionMatrix(haulViewMatrix);
+      haulSphere.center.set(x - origin.x, y, z - origin.z);
+      haulSphere.radius = radius;
+      return haulFrustum.intersectsSphere(haulSphere);
+    },
+    racePay: (contractId) => race.winPay(contractId),
+    toast: (text) => hud.setToast(text),
+  });
 
   /**
-   * The lowest post index any cargo the player has on them (in hand or in the car
-   * being driven) may be handed in at, gathered during one contracts tick and read by
-   * the next one's HUD line; Infinity with nothing aboard.
+   * The lowest post index any contract the player has on them (in hand, in the car being
+   * driven, or a haul taken) may be handed in at, gathered during one contracts tick and
+   * read by the next one's HUD line; Infinity with nothing aboard.
    */
   let deliveryMinIndexNext = Infinity;
   let deliveryMinIndex = Infinity;
   /**
-   * Seconds left on the most pressing urgent contract aboard (in hand or in the car being
-   * driven), gathered like `deliveryMinIndex`; null with none aboard. Shown on the bead
-   * line's label.
+   * Seconds left on the most pressing urgent contract aboard (in hand, in the car being
+   * driven, or a haul), gathered like `deliveryMinIndex`; null with none aboard. Shown on
+   * the bead line's label.
    */
   let urgentLeftNext: number | null = null;
   let urgentLeft: number | null = null;
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
     race.observe(item, place, activeS);
-    ensureContractWorldObjects(contractWorldDeps, item, place);
     if (isContractClosed(item, world.state.completedContractIds)) return;
-    if (place === 'hand' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
+    if (place === 'hand' || place === 'haul' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
       deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
       const left = urgentRemainingS(item);
       if (left !== null) urgentLeftNext = urgentLeftNext === null ? left : Math.min(urgentLeftNext, left);
@@ -1924,6 +1968,10 @@ async function boot(): Promise<void> {
     deliveryMinIndex = deliveryMinIndexNext;
     urgentLeft = urgentLeftNext;
     frameProfiler?.end('contracts');
+    {
+      const anchor = activeWorldAnchor();
+      haulBays.tick(dt, anchor.x, anchor.z, activeS);
+    }
 
     // Recover only after Rapier has produced the escaped pose, before the
     // interpolation latches can preserve that pose for another frame.

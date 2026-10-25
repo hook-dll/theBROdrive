@@ -3,6 +3,7 @@ import type { PhysicsWorld } from '../core/physics';
 
 import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
 import type { DeliveryProbe } from '../contracts/types';
+import { haulLoadLock } from '../contracts/world';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
 import type {
@@ -16,6 +17,7 @@ import type {
   ToolItem,
 } from '../items/items';
 import { contractThing, drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
+import { thingDef } from '../items/things';
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { CABIN_PLACES, cabinIndex, cabinRule, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
@@ -1236,6 +1238,9 @@ export class Interaction {
       return atJoin(aRear, bFront) ? { towerId: first, towedId: second, hitch: false } : null;
     }
     if (towerOfFirst !== null || towerOfSecond !== null) return null;
+    // A haul's load that is not the player's to take (waiting for its card, or handed in)
+    // takes no bar; the car itself says why when it is looked at.
+    if (haulLoadLock(this.world.state, first) !== null || haulLoadLock(this.world.state, second) !== null) return null;
     const qa = a.chassis.rotation();
     const qb = b.chassis.rotation();
     const aligned =
@@ -1542,7 +1547,7 @@ export class Interaction {
     let vehicleDist = Infinity;
     let kitHit = false;
     let kitDoor: KitDoor | null = null;
-    let forSale = false;
+    let locked = false;
     const tv = this.targetVehicle();
     if (tv) {
       vehicle = tv.vehicle;
@@ -1559,10 +1564,12 @@ export class Interaction {
       // eye ray goes in through the door's opening, as the arm does.
       const rig = vehicle.kit;
       // A car still for sale stays locked: no door, lid, flap or compartment answers
-      // until its key is bought (world/keybox.ts); only its body is aimed, for the price.
-      forSale = this.world.state.cars[carId]?.lotPrice !== undefined;
+      // until its key is bought (world/keybox.ts); and so does a haul's car that is not
+      // the player's to take (contracts/world.ts `haulLoadLock`). Only its body is aimed,
+      // for the price or the reason.
+      locked = this.world.state.cars[carId]?.lotPrice !== undefined || haulLoadLock(this.world.state, carId) !== null;
       let inCompartment = false;
-      for (const side of forSale ? [] : ['trunk', 'bonnet'] as const) {
+      for (const side of locked ? [] : ['trunk', 'bonnet'] as const) {
         if (lidOpen(rig, side) === false) continue;
         const door = rig && cabinLidOpen(rig, side) ? this.kitOpenDoorDistance(rig, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) : Infinity;
         const reach = BOOT_RANGE + (door < Infinity ? door : 0);
@@ -1596,12 +1603,12 @@ export class Interaction {
       // inside VEHICLE_RANGE, and the ray itself stops there (`aimKit`).
       if (rig && vehicleDist <= VEHICLE_RANGE) {
         kitHit = this.aimKit(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz, VEHICLE_RANGE, false);
-        kitDoor = forSale ? null : this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
+        kitDoor = locked ? null : this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
       }
 
       // The fuel flap is a target of its own while it is open (its level is read there)
       // and, shut, while a can is in hand; it wins over the body it is cut into.
-      if (rig && !forSale && (this.inventory.held?.type === 'fluid_can' || rig.get('flap') > LID_OPEN)) {
+      if (rig && !locked && (this.inventory.held?.type === 'fluid_can' || rig.get('flap') > LID_OPEN)) {
         const distance = this.fillerDistance(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz);
         const current = target as Target;
         const body = current.kind === 'none' || current.kind === 'car-entry' || current.kind === 'car-body';
@@ -1623,7 +1630,7 @@ export class Interaction {
     let kitSeat: PlayerSeat | null = null;
     let kitPlace = -1;
     const rig = vehicle?.kit ?? null;
-    if (kitHit && rig && vehicle && !forSale) {
+    if (kitHit && rig && vehicle && !locked) {
       const aim = this.kitAimed;
       const t = target as Target;
       const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body' || t.kind === 'filler'
@@ -1645,7 +1652,7 @@ export class Interaction {
     // (the dash, the tunnel, the far door, the far window): the seat that door serves. A
     // shut door met before the opening, a cabin part in the aim (`KIT_DOOR_REACH_PART`)
     // and anything of the world nearer than the car keep the press.
-    if (kitSeat === null && rig && vehicle && !forSale && vehicleDist <= VEHICLE_RANGE) {
+    if (kitSeat === null && rig && vehicle && !locked && vehicleDist <= VEHICLE_RANGE) {
       const t = target as Target;
       const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body';
       const part = kitPart?.control.id ?? null;
@@ -2228,13 +2235,8 @@ export class Interaction {
     if (t.kind === 'aircraft') return '[F] board the plane';
 
     if (t.kind === 'world-fixture') return this.worldFixtures.get(t.id)?.prompt(this.fixtureContext) ?? null;
-    const lot = this.lotCarAimed(resolved);
-    if (lot) {
-      const paid = lot.lotPaid ?? 0;
-      const owing = paid > 0 ? ` · ${formatMoney(paid)} paid` : '';
-      return `${carModel(lot.modelId).label} for sale — ${formatMoney(lot.lotPrice ?? 0)}${owing} · pay at the key box`;
-    }
-
+    const locked = this.lockedCarAimed(resolved);
+    if (locked) return locked;
 
     if (t.kind === 'loose-part') {
       const part = this.world.state.looseParts[t.partId]?.part;
@@ -2331,6 +2333,11 @@ export class Interaction {
     if (t.kind === 'trailer') {
       const trailer = this.trailers.get(t.trailerId);
       if (!trailer) return null;
+      const lock = haulLoadLock(this.world.state, t.trailerId);
+      if (lock) {
+        const thing = this.world.state.trailers[t.trailerId]?.loadThing;
+        return `${thing ? `${thingDef(thing).name} on a trailer` : 'trailer'} — ${lock}`;
+      }
       const load = trailer.cargoKg > 0 ? ` — ${Math.round(trailer.cargoKg)} kg aboard` : ' — empty';
       if (trailer.hitchedTo !== null) return `[F] unhitch trailer${load}`;
       if (!resolved.carId || !resolved.vehicle || resolved.vehicleDist > HITCH_CAR_RANGE) {
@@ -2338,6 +2345,8 @@ export class Interaction {
       }
       const already = this.trailers.hitchedTo(resolved.carId);
       if (already && already.id !== t.trailerId) return 'that car is already towing';
+      const carLock = haulLoadLock(this.world.state, resolved.carId);
+      if (carLock) return `${carModel(this.world.state.cars[resolved.carId]!.modelId).label} — ${carLock}`;
       return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
     }
 
@@ -2763,6 +2772,11 @@ export class Interaction {
     if (t.kind === 'trailer') {
       const trailer = this.trailers.get(t.trailerId);
       if (!trailer) return;
+      // A haul's trailer that is not the player's to take only refuses (`promptFor` says why).
+      if (haulLoadLock(this.world.state, t.trailerId) !== null) {
+        this.sound = 'refused';
+        return;
+      }
       if (trailer.hitchedTo !== null) {
         trailer.unhitch();
         this.sound = 'drop';
@@ -2771,7 +2785,7 @@ export class Interaction {
       // One trailer per car: a second coupling on the same rear axle would put two
       // joints on one anchor and the solver would fight itself.
       if (!resolved.carId || !resolved.vehicle || resolved.vehicleDist > HITCH_CAR_RANGE) return;
-      if (this.trailers.hitchedTo(resolved.carId)) return;
+      if (this.trailers.hitchedTo(resolved.carId) || haulLoadLock(this.world.state, resolved.carId) !== null) return;
       trailer.hitchTo(resolved.vehicle, resolved.carId);
       this.sound = 'mount';
       return;
@@ -2883,24 +2897,34 @@ export class Interaction {
   }
 
   /**
-   * The car on a lot the player is looking at, or null: the nearest car, still priced
-   * (`lotPrice`), within reach, and in the aim (its body, or a kit car's render mesh).
+   * What a locked car the player is looking at says, or null: the nearest car within
+   * reach and in the aim (its body, or a kit car's render mesh), still priced on a lot
+   * (`lotPrice`: paid for at its key box), or a haul's load that is not his to take
+   * (contracts/world.ts `haulLoadLock`).
    */
-  private lotCarAimed(resolved: Resolved): CarState | null {
+  private lockedCarAimed(resolved: Resolved): string | null {
     if (!resolved.carId || resolved.vehicleDist > VEHICLE_RANGE) return null;
-    const car = this.world.state.cars[resolved.carId];
-    if (car?.lotPrice === undefined) return null;
     const t = resolved.target;
-    const aimed = t.kind === 'car-entry' || t.kind === 'car-body' || (t.kind === 'none' && resolved.kitHit);
-    return aimed ? car : null;
+    if (!(t.kind === 'car-entry' || t.kind === 'car-body' || (t.kind === 'none' && resolved.kitHit))) return null;
+    const car = this.world.state.cars[resolved.carId];
+    if (!car) return null;
+    const label = carModel(car.modelId).label;
+    if (car.lotPrice !== undefined) {
+      const paid = car.lotPaid ?? 0;
+      const owing = paid > 0 ? ` · ${formatMoney(paid)} paid` : '';
+      return `${label} for sale — ${formatMoney(car.lotPrice)}${owing} · pay at the key box`;
+    }
+    const lock = haulLoadLock(this.world.state, resolved.carId);
+    return lock ? `${label} — ${lock}` : null;
   }
 
   /** F at a car on foot: gets in, or takes or lays a thing on a kit car's seat. True once seated. */
   private tryEnter(resolved: Resolved): boolean {
     if (!resolved.vehicle || !resolved.carId) return false;
     // A car on a lot is not the player's until he takes its key from the key box beside
-    // it (world/keybox.ts): F at the car itself only refuses.
-    if (this.lotCarAimed(resolved)) {
+    // it (world/keybox.ts), nor a haul's car before its card is taken or once it is handed
+    // in: F at the car itself only refuses.
+    if (this.lockedCarAimed(resolved)) {
       this.sound = 'refused';
       return false;
     }
@@ -2940,7 +2964,11 @@ export class Interaction {
       target.carId !== resolved.carId ||
       resolved.vehicleDist >= VEHICLE_RANGE
     ) return false;
-    if (this.cabinRefusal() !== null || this.world.state.cars[resolved.carId]?.lotPrice !== undefined) {
+    if (
+      this.cabinRefusal() !== null
+      || this.world.state.cars[resolved.carId]?.lotPrice !== undefined
+      || haulLoadLock(this.world.state, resolved.carId) !== null
+    ) {
       this.sound = 'refused';
       return false;
     }

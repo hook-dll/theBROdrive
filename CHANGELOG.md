@@ -77,8 +77,8 @@
   fits. A refusal says why ("no room for the old TV set: it takes 2×2 cells", "… won't
   fit the VAZ-1111 Oka's boot"). Ordinary items stay one cell.
 - Cabin rule (`vehicle/cabin.ts` `cabinRule`, `CabinRule`): the carpet lies only across
-  the whole rear bench, cushions and haul papers on any seat they fit, teddies on
-  passenger seats, every other thing only in a boot.
+  the whole rear bench, cushions on any seat they fit, teddies on passenger seats, every
+  other thing only in a boot.
 - THE POST'S FOUR CARDS by property: ordinary, fragile, bulky-or-haul, teddies. A card
   prints the thing, destination, km, pay, tags (and mass from 20 kg), a haul's note, a
   race note and "won't fit your <model>" when the car on the lay-by has too small a boot
@@ -102,7 +102,7 @@
   rolled carpet, a valve TV on legs, an aquarium with water, sand, weed and two goldfish,
   the teddy; grandpa's radio, the stamp album, mum's music box with its dancer, a
   rangefinder camera, a shut chess board, a model plane, the medals in a glazed case, the
-  photo album and his first tin car. A haul's papers are the parcel. Each model is
+  photo album and his first tin car. Each model is
   centred on its bounds, so a loose thing's collider, the boot's span and the hand fit it.
 - Each thing breaks its own way: snapped pencils and rods, a globe off its axis, a split
   cushion, the lamp knocked over with its shade off, toppled cups and shards, a record in
@@ -136,7 +136,7 @@
   - A calm 5 km autopilot drive in the comfort-1 Oka left the globe at 97%.
   - Teddies have no condition: their ride (`passengerQuality`, floor 40%) is now also
     softened by the carrying car's comfort, and a harsh moment counts as that factor of
-    one. Haul papers have no condition yet.
+    one. A haul's load has no condition yet.
   - Pay is base × km index × condition, so every thing's condition now counts, not only a
     fragile thing's.
   - The label shows "· 87%" when the condition is below 100%.
@@ -155,19 +155,20 @@
 - THREE JOBS AT ONCE, ONE HAUL (game-design2.md §7.4; `contracts/registry.ts`
   `activeContracts`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`, `ACTIVE_HAUL_LIMIT`). An
   active contract is a contract item out of a post's stock — in the hands or the pack, any
-  car's boot or cabin, or lying loose — that is neither broken nor completed/returned; a
-  teddy party is one, a haul is its papers. With three out, TAKE refuses with "three jobs
+  car's boot or cabin, or lying loose — that is neither broken nor completed/returned, and
+  every haul taken (`WorldState.hauls`); a teddy party is one. With three out, TAKE
+  refuses with "three jobs
   already out — hand one in or return it" and every offer card says so. With a haul
   (trailer, towing, car transfer) out, TAKE of a second haul refuses with "one haul
   already out — hand it in or return it first" and every haul card says "one haul out:
   hand it in or return it".
-- RETURN TO SENDER (`contracts/registry.ts` `contractReturnRefusal`; `world/post.ts`
+- RETURN TO SENDER (`contracts/registry.ts` `contractDestinationRefusal`; `world/post.ts`
   `takeBack`). Any post's tray takes back a thing in hand that it will not sign for as a
   delivery: no pay, the contract is closed (recorded in
   `completedContractIds` without a kind, so the delivery ledger does not count it) and
   frees its place. The hand-in card reads RETURN — NO PAY. A valid delivery always wins.
-  A haul goes back as it is delivered: papers in hand and its trailer or car on that
-  post's lay-by by its kind's rule, and the load is taken in. Returning one teddy closes
+  A haul goes back as it is delivered, by reversing its load into a bay (see HAULS WAIT IN
+  THE BAY). Returning one teddy closes
   its party; the other teddies become leftovers any tray takes. Returning the raced thing
   calls the race off at once ("race off — the … went back to the sender",
   `RivalRace.playerReturned`): no win, the rivals leave the race as for a broken thing.
@@ -269,6 +270,50 @@
   replaces `postHaulPlace`: a haul's trailer (drawbar out, its length centred) or car
   (nose out, centred) is left in the source post's bay, and the post reads its lay-by
   car and measures deliveries from the bay's middle.
+- HAULS WAIT IN THE BAY AND ARE HANDED IN BY REVERSING INTO ONE (game-design2.md §7.8;
+  `contracts/haulbays.ts` `HaulBays`, `bayFit`, `loadFootprint`; `contracts/world.ts`
+  `spawnHaulLoad`, `haulLoadId`, `haulLoadLock`; `WorldState.hauls`, `handedInLoads`;
+  deltas `haul_take`, `haul_close`). There are no haul papers any more.
+  - While a post's bulky card shows a haul and its bay is empty, the load stands in the
+    bay nose out, as if reversed in: the loaded trailer, the engineless car to tow or the
+    car to drive over, all from the offer. It appears once the post's chunk is solid and
+    the player is within 400 m, never in plain view closer than 200 m. An untaken load the
+    player has left 900 m behind goes, and comes back the same. After TAKE, the next
+    haul's load appears only once the bay is empty again.
+  - Until its card is taken the load is locked: no hitch, no tow bar, no door, boot,
+    bonnet, flap or seat, and nothing hitched to it. Its prompt reads "… — waits for its
+    job — take the card at the post".
+  - TAKE on a haul gives nothing. It binds the contract to its load (`haul_take`,
+    autosaved) and the lock lifts. With no load in the bay (the bay is taken) TAKE refuses:
+    "the bay is taken — its load comes when the bay is clear". A taken haul counts against
+    the limits by its state, not by an item. Its urgent clock runs from TAKE and a trailer
+    race starts at once.
+  - Hand-in: the load is accepted in a bay when it is the haul's own trailer or car, its
+    whole footprint (a trailer from tailboard or overhanging bed to the ball, a car's
+    measured body) is inside the 3.2 × 6.6 m floor, it is within 20° of nose out, it
+    stood under 0.5 km/h for 2 s, and its tail entered the bay reversing (its motion
+    along its own heading was backwards when the tail crossed in). A car to drive over
+    also needs the player out of it, and a car's boot and seats empty. Otherwise a toast
+    says why once it has stood a second: "back it in", "doesn't fit — straighten up",
+    "not all the way in — back it further", "step out to hand it over", "empty its boot
+    before handing it over", and "not this job's trailer" / "not this job's car" for a
+    trailer or towed car behind the player's car that is not the haul's load.
+  - Accepted: the trailer comes off the ball or the tow bar off, the contract closes
+    (`haul_close`, autosaved) and the load stays in the bay locked for good ("handed in —
+    it stays with the post"), until the player is 150 m away and it is out of the camera's
+    view; then it is removed from state and scene. The bay is then simply taken.
+  - Delivery or return. The reverse-in is a DELIVERY at a post that may sign for the haul:
+    any post past its source, a race's from its finish on (`contractDestinationRefusal`,
+    the same rule as the tray's). It pays `contractPay` (urgent bonus, the stickers of the
+    car pulling it, else of the player's car nearest the bay) plus the race win, straight
+    into the money. The same reverse-in at ANY other post's bay, the source's included,
+    is a RETURN TO SENDER: no pay, the contract closed. The destination always wins.
+  - A trailer haul's rivals still hand in virtually; the player's hand-in is the bay's
+    acceptance (`RivalRace.playerDelivered` / `playerReturned` on `haul_close`).
+  - `__bro.thing('piano')` (any haul) stands its load in the nearest post's bay and takes
+    it there and then.
+  - Saves keep `hauls` and `handedInLoads`, dropping one whose load is gone; haul papers
+    in an old save are dropped (old saves are not supported).
 - BUYING A CAR BOXES THE OLD ONE (`world/keybox.ts`): taking the key puts the car the
   player had (the last driven, else his car nearest the lot) into the toy box at once,
   unless it holds contract cargo or is coupled; then it waits where it stands as his car
@@ -298,8 +343,8 @@
 - The toy box's lay-by check took a trailer as 1.0 m half-wide; it uses the KMZ's
   `TRAILER_HALF_WIDTH` (0.81 m, half the track plus half a tread).
 - A post showed the green HAND IN card ("PUT THE CARPET IN THE TRAY") for a thing it
-  would refuse, its own cargo among them; the card now says THE TRAY WILL NOT TAKE IT
-  with the reason, as the tray already did (`world/post.ts` `handInCard`).
+  would refuse, its own cargo among them; the card now says what the tray will do with
+  it, as the tray already did (`world/post.ts` `handInCard`).
 - A fully scratched car stopped passing knocks to its cargo: the wear read the paint's
   scratch level, which saturates at 1. It now reads `Vehicle.impactTotal`, a runtime
   running sum of every collision's shell damage that neither saturates nor is sponged
@@ -332,6 +377,13 @@
   guarded by its own id), and `PoiProvider`'s trailer field.
 - `layby.ts` `laybyHaulLateral`, `contracts/world.ts` `postHaulPlace` and the contract
   car's stagger along the pad.
+- HAUL PAPERS: the papers item, its parcel model, its label and mass, its boot cell and
+  seat, handing a haul in by its papers at the tray (empty hands, the pack, any boot) and
+  returning it by its papers. With them went `contractReturnRefusal`,
+  `contractDeliveryEffect`, `DeliveryEffect`, `ContractKindDef.onDelivered`,
+  `ensureContractWorldObjects` (a load spawned on its papers' first pickup),
+  `contractTrailerId`/`contractCarId` (now `haulLoadId`), `thingItemMass` and the
+  trailer's and cars' 20–25 m delivery range from the bay's middle.
 
 ## 0.24.0 — 2026-10-24
 

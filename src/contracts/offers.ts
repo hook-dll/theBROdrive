@@ -55,6 +55,8 @@ const URGENT_KMH = 45;
 const URGENT_SLACK_S = 120;
 /** Offers a post holds by property: one per card. */
 export const POST_OFFER_COUNT = POST_CARDS.length;
+/** The bulky card's slot: its offer may be a haul, whose load waits in the bay (§7.8). */
+export const HAUL_SLOT = POST_CARDS.indexOf('bulky');
 /** The fifth slot, after the four: the special thing (§12). */
 export const SPECIAL_SLOT = POST_OFFER_COUNT;
 /** Slots a post's stock keeps a round for: the four and the special one. */

@@ -20,8 +20,8 @@ import type { PlayerSeat } from '../game/state';
  * the front passenger's or a half of the bench — upright and facing forward (`SIT_ON`).
  *
  * The boy's things (items/things.ts) keep to where they ride (`cabinRule`): the carpet
- * only across the whole rear bench, the cushions and a haul's papers on any seat they
- * fit like anything else, and every other thing only in a boot.
+ * only across the whole rear bench, the cushions on any seat they fit like anything
+ * else, and every other thing only in a boot.
  *
  * Pure: no three.js. The view is vehicle/cabincargo.ts.
  */
@@ -156,8 +156,8 @@ export type CabinRule = 'lay' | 'passenger' | 'bench';
 /**
  * How `item` may lie in the cabin, or null for a thing that rides only in a boot
  * (game-design2.md §7.3): a teddy is a passenger, the carpet goes across the bench, the
- * cushions and a haul's papers lie on a seat like any other thing, and the rest of the
- * boy's things keep to the boot.
+ * cushions lie on a seat like any other item, and the rest of the boy's things keep to
+ * the boot. A haul is no item (§7.8).
  */
 export function cabinRule(item: Item): CabinRule | null {
   if (item.type !== 'contract_cargo') return 'lay';

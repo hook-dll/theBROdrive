@@ -1,13 +1,14 @@
 /**
  * The physical contract system's shared shapes.
  *
- * A contract is not a journal entry: it is a `contract_cargo` item that exists in
- * one physical place (a post's stock, a hand, a car boot, the ground). What it is, is
- * its THING (items/things.ts): one of the boy's things, whose place decides the
- * machinery it rides on — its `ContractKind`, whose behaviour lives in its own module
- * under `kinds/` behind `ContractKindDef` (registry.ts). This file holds only what all
- * of them share: the kind ids, the progress record that is saved ON the item, and the
- * delivery-time world view the kinds read.
+ * A contract is not a journal entry: a thing's is a `contract_cargo` item that exists in
+ * one physical place (a post's stock, a hand, a car boot, the ground), and a haul's is its
+ * load, a trailer or a car, with the card it was taken on kept in `WorldState.hauls`
+ * (game-design2.md §7.8). What it is, is its THING (items/things.ts): one of the boy's
+ * things, whose place decides the machinery it rides on — its `ContractKind`, whose
+ * behaviour lives in its own module under `kinds/` behind `ContractKindDef`
+ * (registry.ts). This file holds only what all of them share: the kind ids, the progress
+ * record that is saved ON the item, and the hand-in world view the kinds read.
  *
  * NOTHING IS SCORED ON THE WAY but a thing's condition: knocks to the car it rides in,
  * drops to the ground and harsh driving wear it down (contracts/runtime.ts), and the
@@ -17,7 +18,7 @@
  * (`progress.started`), which the rival race reads.
  */
 
-import type { CarState, WorldDelta } from '../game/state';
+import type { CarState } from '../game/state';
 import type { ContractCargoItem } from '../items/items';
 
 /**
@@ -36,8 +37,11 @@ export const CONTRACT_KIND_IDS: Record<ContractKind, true> = {
   teddy_passengers: true,
 };
 
-/** Where a contract cargo item currently is: `post` is an offer still in a post's stock. */
-export type ContractPlace = 'post' | 'hand' | 'car' | 'loose';
+/**
+ * Where a contract is now: `post` is an offer still in a post's stock, `haul` a haul taken
+ * and not yet handed in (`WorldState.hauls`), the rest where a thing's item lies.
+ */
+export type ContractPlace = 'post' | 'hand' | 'car' | 'loose' | 'haul';
 
 /** What a contract remembers, saved on the item. */
 export interface ContractProgress {
@@ -45,8 +49,8 @@ export interface ContractProgress {
   started: boolean;
   /**
    * A thing's condition, 1 (as signed out) down to 0; the delivery's quality. Absent on
-   * a thing not yet worn, and always on teddies (their quality is the ride) and haul
-   * papers (no condition this far).
+   * a thing not yet worn, and always on teddies (their quality is the ride) and hauls
+   * (the load is not scored).
    */
   condition?: number;
   /**
@@ -104,10 +108,10 @@ export function defaultProgress(): ContractProgress {
 }
 
 /**
- * A read-only look at the physical world at the post that would accept the
- * cargo, built by the delivery code and handed to BOTH the prompt and the commit.
- * That is what keeps a prompt honest: the sentence the player reads while aiming is
- * produced by the same function F will run.
+ * A read-only look at the physical world where a contract is handed in, built by the
+ * hand-in code and handed to BOTH the prompt and the commit. That is what keeps a
+ * prompt honest: the sentence the player reads is produced by the same function the
+ * hand-in will run.
  *
  * Every getter is a live read. A trailer or car that is materialised answers from
  * its physics body; a dormant one answers from its saved pose, so a contract object
@@ -116,7 +120,7 @@ export function defaultProgress(): ContractProgress {
 export interface DeliveryProbe {
   /** Index of the post being delivered to. */
   readonly targetPostIndex: number;
-  /** Absolute middle of that post's haul bay (world/haulbay.ts `postHaulBay`), where a haul is left. */
+  /** Absolute middle of that post's haul bay (world/haulbay.ts `postHaulBay`). */
   readonly postX: number;
   readonly postZ: number;
   /** The car the player sits in (any seat), or null on foot. */
@@ -133,31 +137,16 @@ export interface DeliveryProbe {
   readonly car: (carId: string) => CarState | null;
 }
 
-/**
- * The world changes a kind makes on a successful delivery, applied by the
- * interaction code in the same transaction as `courier_storage` (which writes the
- * completed id FIRST, so a crash between the two halves cannot
- * pay twice).
- */
-export interface DeliveryEffect {
-  /** Structural world changes: `trailer_remove`, `car_remove`. */
-  readonly deltas?: readonly WorldDelta[];
-}
-
-/** The registry entry for one kind: how it is delivered and rewarded. */
+/** The registry entry for one kind: how it is handed in. */
 export interface ContractKindDef {
   readonly kind: ContractKind;
   /**
-   * Why this post may not accept the cargo, or null. Called after the base rule
-   * (a post never signs cargo from itself or further down the road).
+   * The kind's own reason the contract may not be handed in now, or null. A thing's is
+   * asked at the post's tray after the base rule (a post never signs for cargo from
+   * itself or further down the road); a haul's when its load stands right in a bay
+   * (contracts/haulbays.ts), before the bay decides delivery or return.
    */
   readonly acceptRefusal?: (item: ContractCargoItem, probe: DeliveryProbe) => string | null;
-  /**
-   * The world change this delivery also performs: consuming the trailer, car or
-   * part the contract is about. Applied only after the post accepted the cargo,
-   * in the same transaction as the completed id.
-   */
-  readonly onDelivered?: (item: ContractCargoItem, probe: DeliveryProbe) => DeliveryEffect | null;
   /**
    * Finishes a freshly generated offer of this kind: a passenger contract's `party`.
    * Called last by `generateContractOffer`.

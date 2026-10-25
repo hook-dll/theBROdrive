@@ -1,27 +1,23 @@
 /**
- * The world objects a haul is about: the loaded trailer of a trailer load, and the car
- * of a car to tow or to drive over.
+ * The world objects a haul is about (game-design2.md §7.8): the loaded trailer of a
+ * trailer load, and the car of a car to tow or to drive over.
  *
- * A contract names its object after the offer (`generatedSeed`), so the same trailer
- * or car is the same object across a session, a save and a reload, with nothing
- * extra stored: `contract-trailer:<seed>` and `contract-car:<seed>` are in world
- * state like any other trailer or car.
+ * A haul names its load after the offer (`generatedSeed`), so the same trailer or car is
+ * the same object across a session, a save and a reload, with nothing extra stored:
+ * `contract-trailer:<seed>` and `contract-car:<seed>` are in world state like any other
+ * trailer or car.
  *
- * SPAWNED ONCE, ON THE FIRST PICKUP. The object appears in the SOURCE post's haul bay
- * (world/haulbay.ts) the first time the cargo leaves that post's stock (its lever hands
- * over the papers), nose out as if reversed in, which is the moment the contract becomes
- * physical. The guard is plain existence — an id already in state
- * is never spawned again — so dropping and re-picking the cargo, stowing it in
- * another boot, or reloading a save cannot duplicate the object, and after delivery
- * the cargo is gone and there is nothing left to drive a respawn.
- *
- * `ContractRuntime.tick` calls this for every live cargo item
- * (`ContractTickInput.onContractItem`), so it also heals a save written before the
- * kind existed: the next tick spawns what the contract was missing.
+ * THE LOAD WAITS IN THE SOURCE BAY. While a post's bulky card shows a haul and its bay
+ * is empty, the load stands in the bay (world/haulbay.ts) nose out, as if reversed in
+ * (`spawnHaulLoad`, called by contracts/haulbays.ts as the post streams in). Its LOCK is
+ * derived from state alone (`haulLoadLock`): a haul load no taken haul is bound to
+ * (`WorldState.hauls`) waits for its card and cannot be hitched, towed, opened or sat in;
+ * TAKE binds it and the lock lifts; handed in (`WorldState.handedInLoads`) it is locked
+ * for good, until it is cleared away.
  */
 
 import { pick } from '../core/rng';
-import type { CarState, GameWorld, TrailerLoad, TrailerState } from '../game/state';
+import type { CarState, GameWorld, HaulState, TrailerLoad, TrailerState, WorldState } from '../game/state';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
@@ -30,7 +26,6 @@ import { contractKindOf, contractThing, type ContractCargoItem } from '../items/
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { postHaulBay, type HaulBay } from '../world/haulbay';
-import type { ContractPlace } from './types';
 
 /** 'CTC1': the car model. */
 const CAR_MODEL_DOMAIN = 0x43544331;
@@ -44,6 +39,11 @@ const CAR_MODEL_DOMAIN = 0x43544331;
  */
 const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
+/** What a waiting load says to a hand put on it (player/interaction.ts). */
+const WAITING_TEXT = 'waits for its job — take the card at the post';
+/** What a handed-in load says. */
+const HANDED_IN_TEXT = 'handed in — it stays with the post';
+
 export interface ContractWorldDeps {
   readonly world: GameWorld;
   readonly road: Road;
@@ -53,19 +53,39 @@ export interface ContractWorldDeps {
 const CONTRACT_TRAILER_PREFIX = 'contract-trailer:';
 const CONTRACT_CAR_PREFIX = 'contract-car:';
 
-/** The trailer a trailer load is about. */
-export function contractTrailerId(item: ContractCargoItem): string {
-  return `${CONTRACT_TRAILER_PREFIX}${item.generatedSeed.toString(36)}`;
+/** The trailer or the car a haul offer is about. */
+export function haulLoadId(item: ContractCargoItem): string {
+  const prefix = contractKindOf(item) === 'trailer' ? CONTRACT_TRAILER_PREFIX : CONTRACT_CAR_PREFIX;
+  return `${prefix}${item.generatedSeed.toString(36)}`;
 }
 
-/** The car a tow or a transfer is about. */
-export function contractCarId(item: ContractCargoItem): string {
-  return `${CONTRACT_CAR_PREFIX}${item.generatedSeed.toString(36)}`;
-}
-
-/** A car that is itself a haul (a car to tow or to drive over), not one of the player's. */
+/** A car that is itself a haul's load (a car to tow or to drive over), not one of the player's. */
 export function isContractCarId(carId: string): boolean {
   return carId.startsWith(CONTRACT_CAR_PREFIX);
+}
+
+/** A trailer or a car that is a haul's load. */
+export function isHaulLoadId(id: string): boolean {
+  return id.startsWith(CONTRACT_TRAILER_PREFIX) || id.startsWith(CONTRACT_CAR_PREFIX);
+}
+
+/** The taken haul bound to load `loadId`, or null. */
+export function boundHaul(state: WorldState, loadId: string): HaulState | null {
+  for (const haul of Object.values(state.hauls)) {
+    if (haul.loadId === loadId) return haul;
+  }
+  return null;
+}
+
+/**
+ * Why the player may not hitch, tow, open or sit in `id`, or null when he may: a haul's
+ * load that no taken haul is bound to waits for its card, and one handed in stays with
+ * its post. Anything that is not a haul's load is never locked here.
+ */
+export function haulLoadLock(state: WorldState, id: string): string | null {
+  if (!isHaulLoadId(id)) return null;
+  if (state.handedInLoads[id] !== undefined) return HANDED_IN_TEXT;
+  return boundHaul(state, id) ? null : WAITING_TEXT;
 }
 
 /**
@@ -78,20 +98,13 @@ export function isContractCarId(carId: string): boolean {
 const BED_LOAD: TrailerLoad = { halfExtents: [0.8, 0.28, 1.6] };
 
 /**
- * Spawns a contract's own world object the first time the cargo leaves its source
- * post. Idempotent: an id already in state, or an offer still in the post's stock,
- * returns at once.
+ * Stands the load of haul offer `item` in its source post's bay, nose out, as if
+ * reversed in. Idempotent: a load already in state is left where it is. The caller has
+ * seen the bay empty and its chunk solid.
  */
-export function ensureContractWorldObjects(
-  deps: ContractWorldDeps,
-  item: ContractCargoItem,
-  place: ContractPlace,
-): void {
-  if (place === 'post') return;
-  const kind = contractKindOf(item);
-  if (kind !== 'trailer' && kind !== 'car_transfer' && kind !== 'towing') return;
+export function spawnHaulLoad(deps: ContractWorldDeps, item: ContractCargoItem): void {
   const bay = postHaulBay(deps.world.seed, deps.road, item.sourceCourierIndex);
-  if (kind === 'trailer') spawnContractTrailer(deps, item, bay);
+  if (contractKindOf(item) === 'trailer') spawnContractTrailer(deps, item, bay);
   else spawnContractCar(deps, item, bay);
 }
 
@@ -100,7 +113,7 @@ function spawnContractTrailer(
   item: ContractCargoItem,
   bay: HaulBay,
 ): void {
-  const id = contractTrailerId(item);
+  const id = haulLoadId(item);
   if (deps.world.state.trailers[id]) return;
   // Drawbar out of the opening, the trailer's length from its tail to the ball centred
   // in the bay: a car backs up to the ball from the pad.
@@ -138,7 +151,7 @@ function spawnContractCar(
   item: ContractCargoItem,
   bay: HaulBay,
 ): void {
-  const id = contractCarId(item);
+  const id = haulLoadId(item);
   if (deps.world.state.cars[id]) return;
   const def = pick(CAR_MODELS, item.generatedSeed, CAR_MODEL_DOMAIN);
   const measure = carModelMeasure(def.id);
@@ -164,7 +177,7 @@ function spawnContractCar(
     car.qw = plane.qw;
   }
   // The broken toy car leaves for the repair with NO ENGINE: it cannot idle, it cannot
-  // be driven, and the papers commission a tow rather than a drive. Removing the part
+  // be driven, and the card commissions a tow rather than a drive. Removing the part
   // rather than destroying it is the honest state — there is nothing in the engine bay
   // to fail, and the car's own mass drops by the engine's.
   if (contractKindOf(item) === 'towing') car.bonnet[0] = null;

@@ -1,7 +1,8 @@
 /**
  * The per-tick walk over live contracts. It visits the places a contract cargo
- * can be, marks the cargo started once it has left its source post, and hands
- * each item to the composition root (world objects, race, delivery target).
+ * can be and the hauls taken (`WorldState.hauls`, place `haul`), marks each started once
+ * it has left its source post, runs the urgent clocks and hands each contract to the
+ * composition root (race, delivery target).
  *
  * Nothing is scored on the way but a thing's condition (game-design2.md §11.1): the
  * knocks the car it rides in takes, the harsh driving of the car the player drives
@@ -20,10 +21,9 @@ import { carModel, comfortFactor, type CarComfort } from '../vehicle/carmodels';
 import { BROKEN_BELOW, defaultProgress, type ContractPlace } from './types';
 
 /**
- * Called for every live cargo item, once per tick, with where it is and which car
- * carries it. The composition root uses it to keep the contract's own world objects
- * (a loaded trailer, a car to be transferred) spawned exactly once: the callback only
- * fires for cargo that exists, so a delivered one cannot be re-created.
+ * Called for every live contract, once per tick, with where it is and which car carries
+ * it: a thing's item, or a taken haul's card (place `haul`, no car). The composition root
+ * starts a race from it and gathers the HUD's delivery target.
  */
 export type ContractItemVisitor = (item: ContractCargoItem, place: ContractPlace, carId: string | null) => void;
 
@@ -137,6 +137,8 @@ export class ContractRuntime {
         if (isCargo(item)) this.visit(item, 'post', null, 0, onContractItem);
       }
     }
+    // The hauls taken: the card is the contract, the load is in the world.
+    for (const haul of Object.values(state.hauls)) this.visit(haul.contract, 'haul', null, 0, onContractItem);
   }
 
   /** `carBorneWear` of the knocks `car` took since the last tick and the ride driven in it. */
@@ -160,8 +162,8 @@ export class ContractRuntime {
     carWear: number,
     onContractItem: ContractItemVisitor,
   ): void {
-    // The kind's own world object (a contract trailer or car) is ensured before
-    // anything else reads the item.
+    // The race reads the item before it is marked started: unstarted away from the post
+    // is the moment it was taken.
     onContractItem(item, place, carId);
     // A hand-made or very old item may lack the record; the runtime owns it.
     if (!item.progress) item.progress = defaultProgress();

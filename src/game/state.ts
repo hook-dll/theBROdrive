@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import type { FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
+import type { ContractCargoItem, FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
 import type { ThingId } from '../items/things';
 import type { PartInstance } from '../parts/registry';
 import type { ContractKind } from '../contracts/types';
@@ -279,6 +279,18 @@ export interface TrailerLoad {
   readonly halfExtents: readonly [number, number, number];
 }
 
+/**
+ * A haul taken at a post (game-design2.md §7.8, contracts/haulbays.ts): its card's
+ * contract as TAKE left it, bound to the trailer or car it is about. No item stands for
+ * it: the load is the contract.
+ */
+export interface HaulState {
+  /** The card as taken: its thing, source, destination, race and urgent clock; the runtime ticks its progress. */
+  readonly contract: ContractCargoItem;
+  /** The trailer (`contract-trailer:…`) or the car (`contract-car:…`) it is about. */
+  readonly loadId: string;
+}
+
 
 /**
  * Layout version of the saved state, for the migrations its shape alone cannot tell
@@ -360,6 +372,14 @@ export interface WorldState {
    * the completed id (`courier_storage`).
    */
   deliveriesByKind: Partial<Record<ContractKind, number>>;
+  /** The hauls taken and not yet handed in or returned, by contract id (world/post.ts TAKE). */
+  hauls: Record<string, HaulState>;
+  /**
+   * The loads handed in or returned in a post's bay (contracts/haulbays.ts), by load id:
+   * that post's index. Locked for good, each stands there until the player has gone and
+   * it is out of sight; its `car_remove` or `trailer_remove` clears the entry.
+   */
+  handedInLoads: Record<string, number>;
   /**
    * Vending machine slots already sold, by machine id (world/vending.ts). A machine's
    * stock is a pure function of the seed and where it stands; this is what it has
@@ -409,6 +429,14 @@ export type WorldDelta =
       /** The completed contract's kind, counted into `deliveriesByKind`. */
       completedContractKind?: ContractKind;
     }
+  /** A haul card taken at a post (world/post.ts): the contract is active, bound to its load. */
+  | { t: 'haul_take'; haul: HaulState }
+  /**
+   * A haul's load accepted in post `postIndex`'s bay (contracts/haulbays.ts): the contract
+   * closes, counted into `deliveriesByKind` under `deliveredKind` when it was delivered
+   * (null: returned to the sender), and the load stays there locked.
+   */
+  | { t: 'haul_close'; contractId: string; postIndex: number; deliveredKind: ContractKind | null }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_remove'; trailerId: string }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
@@ -488,6 +516,8 @@ export function newWorldState(seed: number): WorldState {
     courierStorage: {},
     completedContractIds: [],
     deliveriesByKind: {},
+    hauls: {},
+    handedInLoads: {},
     trailers: {},
     looseParts: {},
     looseItems: {},
@@ -596,8 +626,10 @@ export class GameWorld {
       }
     }
     for (const trailer of Object.values(state.trailers)) bump(trailer.id);
-    // A dev contract (app/devtools.ts `thing`) handed in or returned lives on only as its
-    // id here; reused, the new contract would read as already closed.
+    // A dev contract (app/devtools.ts `thing`) taken as a haul lives on only as its key
+    // here, and one handed in or returned only as its id; reused, the new contract would
+    // read as already taken or closed.
+    for (const id of Object.keys(state.hauls)) bump(id);
     for (const id of state.completedContractIds) bump(id);
     this.partCounter = highest;
   }
@@ -651,6 +683,7 @@ export class GameWorld {
       case 'car_remove':
         delete s.cars[delta.carId];
         if (s.player.lastDrivenCarId === delta.carId) s.player.lastDrivenCarId = null;
+        delete s.handedInLoads[delta.carId];
         break;
       case 'car_box': {
         // Only the player's own car, and not the one he sits in: the box takes it as it
@@ -811,9 +844,10 @@ export class GameWorld {
         s.trailers[delta.trailer.id] = delta.trailer;
         break;
       case 'trailer_remove':
-        // A contract trailer that was handed over. Streaming reconciles from state,
-        // so the runtime body is dropped by the composition root's own listener.
+        // A handed-in load cleared away (contracts/haulbays.ts). Streaming reconciles from
+        // state, so the runtime body is dropped by the composition root's own listener.
         delete s.trailers[delta.trailerId];
+        delete s.handedInLoads[delta.trailerId];
         break;
       case 'trailer_transform': {
         const trailer = s.trailers[delta.trailerId];
@@ -924,6 +958,21 @@ export class GameWorld {
           }
         }
         break;
+      case 'haul_take':
+        if (s.completedContractIds.includes(delta.haul.contract.id)) break;
+        s.hauls[delta.haul.contract.id] = delta.haul;
+        break;
+      case 'haul_close': {
+        const haul = s.hauls[delta.contractId];
+        if (!haul) break;
+        delete s.hauls[delta.contractId];
+        if (!s.completedContractIds.includes(delta.contractId)) s.completedContractIds.push(delta.contractId);
+        if (delta.deliveredKind) {
+          s.deliveriesByKind[delta.deliveredKind] = (s.deliveriesByKind[delta.deliveredKind] ?? 0) + 1;
+        }
+        s.handedInLoads[haul.loadId] = delta.postIndex;
+        break;
+      }
       case 'sticker_place': {
         const car = s.cars[delta.carId];
         const envelope = s.player.carried.findIndex(

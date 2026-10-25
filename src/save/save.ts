@@ -3,6 +3,7 @@ import { parseCalendarEpoch } from '../game/calendar';
 import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
+  HaulState,
   HeadlightMode,
   PlayerState,
   StickerState,
@@ -17,12 +18,13 @@ import { hasVariant, type PartInstance } from '../parts/registry';
 import { carPrice } from '../economy/economy';
 import {
   CAMERA_FRAME_LIMIT,
+  isHaul,
   SPONGE_CAPACITY_MAX,
   SPONGE_CAPACITY_MIN,
   type ContractCargoItem,
   type Item,
 } from '../items/items';
-import { isThingId } from '../items/things';
+import { isHaulThing, isThingId, thingDef } from '../items/things';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
 import type { ContractKind, ContractProgress } from '../contracts/types';
@@ -176,6 +178,9 @@ export function installVehicleAutosave(
       // A car into or out of the toy box (world/toybox.ts).
       case 'car_box':
       case 'car_unbox':
+      // A haul card taken at a post, or its load handed in (contracts/haulbays.ts).
+      case 'haul_take':
+      case 'haul_close':
         if (world.state.player.drivingCarId) return;
         break;
       default:
@@ -617,12 +622,54 @@ export function migrateState(raw: unknown): WorldState {
     courierStorage,
     completedContractIds,
     deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind),
+    hauls: migrateHauls(obj.hauls, cars, trailers),
+    handedInLoads: migrateHandedInLoads(obj.handedInLoads, cars, trailers),
     trailers,
     looseParts,
     looseItems,
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
   };
+}
+
+/**
+ * The hauls taken (game-design2.md §7.8), each its card and the load it is bound to. One
+ * whose card does not read as a haul, or whose load is no longer in the world, is
+ * dropped: there is nothing left to hand in.
+ */
+function migrateHauls(
+  raw: unknown,
+  cars: Readonly<Record<string, CarState>>,
+  trailers: Readonly<Record<string, TrailerState>>,
+): Record<string, HaulState> {
+  const out: Record<string, HaulState> = {};
+  for (const [id, value] of Object.entries(recordField(raw, 'hauls'))) {
+    const obj = asRecord(value, `haul "${id}"`);
+    let contract: Item;
+    try {
+      contract = migrateItem(obj.contract, `haul "${id}"`);
+    } catch {
+      continue;
+    }
+    const loadId = obj.loadId;
+    if (contract.type !== 'contract_cargo' || contract.id !== id || !isHaul(contract)) continue;
+    if (typeof loadId !== 'string' || (!cars[loadId] && !trailers[loadId])) continue;
+    out[id] = { contract, loadId };
+  }
+  return out;
+}
+
+/** The loads handed in, by load id: the post whose bay each stands in. One no longer in the world is dropped. */
+function migrateHandedInLoads(
+  raw: unknown,
+  cars: Readonly<Record<string, CarState>>,
+  trailers: Readonly<Record<string, TrailerState>>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [id, index] of Object.entries(recordField(raw, 'handedInLoads'))) {
+    if (typeof index === 'number' && Number.isInteger(index) && index >= 0 && (cars[id] || trailers[id])) out[id] = index;
+  }
+  return out;
 }
 
 /**
@@ -814,7 +861,7 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // arriving at a mysteriously dry engine is a smaller surprise than the game
   // silently gifting fluids it never tracked, and the first can fixes it.
   const storageCells = hasCarModel(modelId) ? trunkCellCount(carModel(modelId).trunkGrid) : 0;
-  const storage = migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`);
+  const storage = withoutHaulPapers(migrateStorage(raw.storage, storageCells, `car "${raw.id}" boot`));
   // Each thing at its anchor, fitting its cells (vehicle/trunk.ts); a misfit is dropped.
   if (hasCarModel(modelId)) normalizeBoot(storage, carModel(modelId).trunkGrid);
   const def = carModel(modelId);
@@ -857,7 +904,7 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
     storage,
     bonnet,
     // Absent on saves written before things could lie in the cabin: an empty one.
-    cabin: migrateStorage(raw.cabin, CABIN_PLACE_COUNT, `car "${raw.id}" cabin`),
+    cabin: withoutHaulPapers(migrateStorage(raw.cabin, CABIN_PLACE_COUNT, `car "${raw.id}" cabin`)),
     // Absent on every save written before the body had a condition. A car loaded
     // from one of those arrives clean rather than randomly weathered: the player
     // parked it, the game just was not looking.
@@ -971,7 +1018,8 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
  * The wrench never had an action of its own and was taken out of the loot. Diesel
  * went with every diesel engine: its cans, and any part that is no longer in the
  * catalogue (the fuel tanks too, now the body's own), are dropped. So is the postcard
- * from home (and the folded `letter` it replaced): the prototype's start item.
+ * from home (and the folded `letter` it replaced): the prototype's start item. And a
+ * haul's papers: a haul is its load now (game-design2.md §7.8), handed in in a post's bay.
  */
 function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
@@ -979,6 +1027,7 @@ function isRemovedLegacyItem(raw: unknown): boolean {
   // The coin item went with the purse: its value is counted into the balance first
   // (`legacyCoinRubles`).
   if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter' || obj.type === 'coin') return true;
+  if (obj.type === 'contract_cargo' && isThingId(obj.thing) && isHaulThing(thingDef(obj.thing))) return true;
   if (obj.type === 'tool' && obj.tool === 'wrench') return true;
   if ((obj.type === 'fluid_can' && obj.fluid === 'diesel') || (obj.type === 'fuel_can' && obj.fuel === 'diesel')) {
     return true;
@@ -988,6 +1037,11 @@ function isRemovedLegacyItem(raw: unknown): boolean {
     return typeof variantId === 'string' && !hasVariant(LEGACY_VARIANT_IDS[variantId] ?? variantId);
   }
   return false;
+}
+
+/** A boot's or a cabin's cells with any haul's papers taken out (`isRemovedLegacyItem`). */
+function withoutHaulPapers(cells: (Item | null)[]): (Item | null)[] {
+  return cells.map((item) => (item?.type === 'contract_cargo' && isHaul(item) ? null : item));
 }
 
 /** A coin of the coin days in today's rubles: it was a ruble of the kopeck days. */
