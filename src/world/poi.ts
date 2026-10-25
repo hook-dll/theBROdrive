@@ -17,7 +17,7 @@ import {
 } from '../render/carmodel';
 import { carPrice } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
-import { buildHaulBay, postHaulBay } from './haulbay';
+import { buildParkingRow, postParkingSlots, type ParkingSlot } from './haulbay';
 import { setReflectorEmission } from './props/delineators';
 import { postStop } from './poststops';
 import { fitGround } from './footprint';
@@ -29,7 +29,7 @@ import type { Terrain } from './terrain';
 import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
 import { roadsideSlot, roadsideSlotOfIndex, roadsideSlotsBetween, rollStructure, slotPost } from './poislots';
-import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout, type SettlementSpot } from './settlement';
+import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout } from './settlement';
 import type { FixtureField } from './fixturefield';
 import { buildPost } from './post';
 import { buildToyBox } from './toybox';
@@ -43,7 +43,7 @@ import { newRegionMix, regionAt } from './regions';
  *
  * Two populations, one model. ROADSIDE stops stand on the roadside slots (world/
  * poislots.ts), which follow the post network: a settlement of houses on both sides with
- * its service strip at every post stop, sometimes one house in a long gap between two
+ * its service band at every post stop, sometimes one house in a long gap between two
  * (world/settlement.ts lays both out). DESERT ones stand on a lattice of their own,
  * one per side, anywhere from 70 m to the better part of a kilometre out and facing
  * wherever they were left facing: a house you only find by leaving the asphalt.
@@ -536,22 +536,24 @@ export function standingHouses(
   return standing;
 }
 
-/** The car for sale's price board stands this far off its road-side flank, metres. */
-const LOT_BOARD_OUT_M = 0.9;
+/** The car for sale's price board stands this far past its slot's far side line, metres. */
+const LOT_BOARD_OUT_M = 0.6;
 /** The key box's post stands this far beside the price board's, along the board, metres. */
 const KEY_BOX_BESIDE_M = 0.65;
 
 /**
- * A settlement's car for sale, at its `lot` spot, with its price board on the road-side
- * flank (world/carlot.ts). The car is a real car in world state from the moment its chunk
- * enters the physics band, carrying its price until it is bought; out there, distant
- * scenery shows it as an upright static model.
+ * A settlement's car for sale, nose out in the third slot of its parking row
+ * (world/haulbay.ts), with its price board just past the row's end, beside the car's
+ * flank (world/carlot.ts). `next`: which way along the slot's local X the row runs. The
+ * car is a real car in world state from the moment its chunk enters the physics band,
+ * carrying its price until it is bought; out there, distant scenery shows it as an
+ * upright static model.
  */
 function buildLot(
   ctx: ChunkContext,
   poi: Poi,
-  lot: SettlementSpot,
-  side: 1 | -1,
+  slot: ParkingSlot,
+  next: number,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
@@ -566,21 +568,22 @@ function buildLot(
   const measure = carModelMeasure(def.id);
   const half = measure.halfExtents;
   const carId = ctx.world.generatedPartId('lot-car', poi.index, 0);
-  const pose = spotPose(ctx.road, lot);
-  const groundY = ctx.terrain.heightAt(pose.x, pose.z, lot.s);
+  const pose = { x: slot.x, z: slot.z, yaw: slot.yaw };
+  const groundY = ctx.terrain.heightAt(pose.x, pose.z, slot.s);
 
   // The price board, facing the road, and the key box on its post beside it, the same
   // way round (world/keybox.ts); only while the car is still for sale.
   const priceBoard = (price: number): void => {
-    const at = ctx.road.offsetPoint(lot.s, lot.lateral - side * (half[0] + LOT_BOARD_OUT_M));
-    const y = ctx.terrain.heightAt(at.x, at.z, lot.s);
-    const road = ctx.road.offsetPoint(lot.s, 0);
+    const out = next * (slot.halfWidth + LOT_BOARD_OUT_M);
+    const at = { x: slot.x + Math.cos(slot.yaw) * out, z: slot.z - Math.sin(slot.yaw) * out };
+    const y = ctx.terrain.heightAt(at.x, at.z, slot.s);
+    const road = ctx.road.offsetPoint(slot.s, 0);
     const face = Math.atan2(road.x - at.x, road.z - at.z);
     buildLotSign(ctx, group, carId, def, at.x, y, at.z, face, market, registeredMarket);
     const boxX = at.x + Math.cos(face) * KEY_BOX_BESIDE_M;
     const boxZ = at.z - Math.sin(face) * KEY_BOX_BESIDE_M;
     buildKeyBox(
-      ctx, carId, price, boxX, ctx.terrain.heightAt(boxX, boxZ, lot.s), boxZ, face,
+      ctx, carId, price, boxX, ctx.terrain.heightAt(boxX, boxZ, slot.s), boxZ, face,
       group, bodies, colliders, fixtures, registeredFixtures, market,
     );
   };
@@ -600,7 +603,7 @@ function buildLot(
     });
     return;
   }
-  const plane = fitGround(ctx.terrain, pose.x, pose.z, pose.yaw, half[0], half[2], lot.s);
+  const plane = fitGround(ctx.terrain, pose.x, pose.z, pose.yaw, half[0], half[2], slot.s);
   const matrix = poseMatrix(
     pose.x,
     plane.centreY + half[1] - 0.02,
@@ -638,10 +641,9 @@ function buildLot(
  * One stop. Out in the desert: its building, facing wherever it was left facing. At the
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
  * sides, its «ПОЧТА» machine (world/post.ts), toy box (world/toybox.ts), teddy shelter
- * (world/shelter.ts) and haul bay (world/haulbay.ts), the shop's machine, the car for
- * sale with its key box, the pumps
- * (world/pumps.ts). True when it built reflectors (a haul bay's, the pumps'), which
- * follow the night.
+ * (world/shelter.ts) and parking row (world/haulbay.ts) with the car for sale and its key
+ * box in the third slot, the shop's machine, the pumps (world/pumps.ts). True when it
+ * built reflectors (the pumps'), which follow the night.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -669,16 +671,25 @@ function buildPoi(
     const pose = spotPose(ctx.road, house);
     seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
   }
-  let bay = false;
   if (layout.post) {
     const stop = postStop(ctx.world.seed, slotPost(roadsideSlotOfIndex(poi.index)));
     const pose = spotPose(ctx.road, layout.post);
     buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
     if (layout.toybox) buildToyBox(ctx, stop, layout.toybox, group, bodies, colliders, fixtures, registeredFixtures, disposers);
     if (layout.shelter) buildShelter(ctx, stop, layout.shelter, group, bodies, colliders, fixtures, registeredFixtures, disposers);
-    if (layout.bay) {
-      buildHaulBay(ctx, postHaulBay(ctx.world.seed, ctx.road, stop.index), group, bodies, colliders);
-      bay = true;
+    if (layout.parking) {
+      const slots = postParkingSlots(ctx.world.seed, ctx.road, stop.index);
+      buildParkingRow(ctx, slots, group);
+      if (layout.forSale) {
+        const sale = slots[2]!;
+        const middle = slots[1]!;
+        // Past the row's end: away from the middle slot along the sale slot's local X.
+        const next = Math.sign((sale.x - middle.x) * Math.cos(sale.yaw) - (sale.z - middle.z) * Math.sin(sale.yaw));
+        buildLot(
+          ctx, poi, sale, next, group, bodies, colliders, deferredVisuals,
+          market, registeredMarket, fixtures, registeredFixtures,
+        );
+      }
     }
   }
   if (layout.shop) {
@@ -689,13 +700,7 @@ function buildPoi(
     const pose = spotPose(ctx.road, layout.pumps);
     buildPumpStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
-  if (layout.lot) {
-    buildLot(
-      ctx, poi, layout.lot, layout.side, group, bodies, colliders, deferredVisuals,
-      market, registeredMarket, fixtures, registeredFixtures,
-    );
-  }
-  return bay || layout.pumps !== null;
+  return layout.pumps !== null;
 }
 
 /**
@@ -734,9 +739,9 @@ export class PoiProvider implements ChunkProvider {
     /** Ids of the world fixtures this chunk registered; forgotten with it. */
     const registeredFixtures: string[] = [];
 
-    let bays = false;
+    let reflectors = false;
     for (const poi of [...pois, ...desert]) {
-      const bay = buildPoi(
+      const built = buildPoi(
         ctx,
         poi,
         this.roadDistance,
@@ -750,7 +755,7 @@ export class PoiProvider implements ChunkProvider {
         registeredFixtures,
         deferredVisuals,
       );
-      bays ||= bay;
+      reflectors ||= built;
     }
 
     return {
@@ -764,8 +769,8 @@ export class PoiProvider implements ChunkProvider {
         this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();
       },
-      // The haul bays' and the pumps' reflector chips share the delineators' material.
-      ...(bays ? { setLamps: setReflectorEmission } : {}),
+      // The pumps' reflector chips share the delineators' material.
+      ...(reflectors ? { setLamps: setReflectorEmission } : {}),
     };
   }
 }

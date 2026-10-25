@@ -47,7 +47,7 @@ import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
 import { Trailer, TRAILER_BALL_Z, TRAILER_MODEL_FIT } from '../src/vehicle/trailer';
-import type { ThingId } from '../src/items/things';
+import { thingDef, type ThingId } from '../src/items/things';
 import { SurfaceType } from '../src/core/surfaces';
 import type { TyreContacts } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
@@ -127,9 +127,12 @@ async function makeRig(cargoKg: number | null, placement: Placement): Promise<Sw
       id: 'bench:trailer', hitchedTo: null, cargoKg: 0, cargoZ: PLACEMENTS[placement],
       x: 0, y: 1, z: START_Z - 6, qx: 0, qy: 0, qz: 0, qw: 1,
     };
-    if (THING !== undefined) ts.loadThing = THING;
-    // The long load rides as its own collider too, as contracts/world.ts spawns it.
-    if (THING === 'bed') ts.load = { halfExtents: [0.8, 0.28, 1.6] };
+    if (THING !== undefined) {
+      ts.loadThing = THING;
+      // The long load rides as its own collider too, as contracts/world.ts spawns it.
+      const shape = thingDef(THING).trailerLoad;
+      if (shape) ts.load = { halfExtents: shape };
+    }
     world.state.trailers[ts.id] = ts;
     trailer = new Trailer(physics, world, ts, scene, origin);
     trailer.setCargo(cargoKg);

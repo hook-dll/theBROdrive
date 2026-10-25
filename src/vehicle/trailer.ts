@@ -3,7 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { SURFACES, SurfaceType, sinkageShare } from '../core/surfaces';
-import type { GameWorld, TrailerState } from '../game/state';
+import type { GameWorld, TrailerLoad, TrailerState } from '../game/state';
 import type { Vehicle, WheelSprayState } from './vehicle';
 import {
   brushPeakTan,
@@ -262,6 +262,18 @@ export const TRAILER_SPAWN_HEIGHT = BED_HALF[1] + WHEEL_RADIUS;
 export const TRAILER_HALF_LENGTH = BED_HALF[2];
 
 /**
+ * The trailer's tail, metres along it from the box's middle (negative, behind it): the
+ * tailboard, or the end of a long load (`TrailerState.load`) out over the back. A load
+ * longer than the box stands against the headboard (`Trailer.cargoZ`), so all of what
+ * it has beyond the box's inside length is behind it. Every other payload is inside
+ * the box, so a trailer without a long load ends at its tailboard.
+ */
+export function trailerTailZ(load: TrailerLoad | undefined): number {
+  const halfZ = load ? load.halfExtents[2] : 0;
+  return -Math.max(BOX_HALF_Z, 2 * halfZ - BOX_INNER_HALF_Z);
+}
+
+/**
  * The prop stand under the drawbar, and why a trailer needs one.
  *
  * The drawbar's own mass hangs out ahead of the axle with nothing under it, so the
@@ -419,10 +431,18 @@ export class Trailer implements Rebasable {
    * load's collider, or the crate. Its centre of mass and its inertia are this box's.
    */
   private readonly payloadHalf: readonly [number, number, number];
-  /** Height of the payload's foot in the trailer's frame: the deck, or the sides' tops. */
-  private readonly payloadFootY: number;
-  /** How far the payload may sit fore or aft of the box's middle and stay inside it, m. */
-  private readonly cargoZLimit: number;
+  /**
+   * The drawn thing's bounds' centre in its own frame, x and z, m: the mesh is set back
+   * by it so the bounds, not the thing's origin, stand where the payload's box does.
+   */
+  private readonly thingOffset: readonly [number, number];
+  /**
+   * How far forward of the box's middle the payload's centre may sit, m, and how far
+   * back. Front face to the headboard at most, rear face to the tailboard; a payload
+   * longer than the box has the two the same, its front face against the headboard.
+   */
+  private readonly cargoZMax: number;
+  private readonly cargoZMin: number;
   private readonly body: RAPIER.RigidBody;
   private readonly tyres: TyreContacts;
   private readonly root = new THREE.Group();
@@ -487,9 +507,33 @@ export class Trailer implements Rebasable {
       .setCanSleep(false);
     this.body = physics.world.createRigidBody(desc);
 
+    // THE PAYLOAD'S BOX: a long load's collider, the drawn thing's own bounds (its
+    // geometry and materials are the shared item caches, so nothing of it is disposed
+    // here), or the crate. Every load stands on the deck between the sides, and slides
+    // fore and aft only as far as the box holds it (`cargoZ`). One longer than the box
+    // goes in against the headboard and out over the back, with the tailboard off
+    // (`trailerTailZ`).
+    this.thingMesh = state.loadThing === undefined ? null : createTrailerLoadMesh(state.loadThing);
+    const load = state.load;
+    let thingOffset: readonly [number, number] = [0, 0];
+    if (this.thingMesh) {
+      const bounds = new THREE.Box3().setFromObject(this.thingMesh);
+      const centre = bounds.getCenter(this.vScratch);
+      thingOffset = [centre.x, centre.z];
+      const size = bounds.getSize(this.vScratch);
+      this.payloadHalf = load ? load.halfExtents : [size.x / 2, size.y / 2, size.z / 2];
+    } else {
+      this.payloadHalf = load ? load.halfExtents : CRATE_HALF;
+    }
+    this.thingOffset = thingOffset;
+    this.cargoZMax = BOX_INNER_HALF_Z - this.payloadHalf[2];
+    this.cargoZMin = Math.min(this.cargoZMax, -this.cargoZMax);
+    const tailboard = this.payloadHalf[2] <= BOX_INNER_HALF_Z;
+
     // Collider floor raised to the wheel mounts, so the bed does not catch on the
-    // ground before the suspension has any travel, up to the deck; and the box's four
-    // sides on it, so a car or a rock meets the walls it can see.
+    // ground before the suspension has any travel, up to the deck; and the box's
+    // sides on it, so a car or a rock meets the walls it can see: all four, or three
+    // with the tailboard off.
     const colliderHalfY = (BED_HALF[1] - MOUNT_Y) / 2;
     physics.world.createCollider(
       RAPIER.ColliderDesc.cuboid(BED_HALF[0], colliderHalfY, BED_HALF[2])
@@ -507,7 +551,7 @@ export class Trailer implements Rebasable {
       [WALL_THICKNESS / 2, BOX_HALF_Z, sideX, 0],
       [WALL_THICKNESS / 2, BOX_HALF_Z, -sideX, 0],
       [BOX_HALF_X, WALL_THICKNESS / 2, 0, endZ],
-      [BOX_HALF_X, WALL_THICKNESS / 2, 0, -endZ],
+      ...(tailboard ? [[BOX_HALF_X, WALL_THICKNESS / 2, 0, -endZ] as const] : []),
     ] as const) {
       physics.world.createCollider(
         RAPIER.ColliderDesc.cuboid(hx, wallHalfY, hz)
@@ -587,7 +631,7 @@ export class Trailer implements Rebasable {
     // geometry and materials are shared with every other trailer in the world, so
     // they are never disposed here — only the procedural crate and prop stand below
     // own geometry of their own.
-    const model = createTrailerModel();
+    const model = createTrailerModel(tailboard);
     this.root.add(model.body);
 
     // The physical box ends where the box ends, while the action the player aims at
@@ -612,44 +656,26 @@ export class Trailer implements Rebasable {
     this.root.add(model.leftWheel);
     this.wheelMeshes.push(model.rightWheel, model.leftWheel);
 
-    // THE PAYLOAD'S BOX: a long load's collider, the drawn thing's own bounds (its
-    // geometry and materials are the shared item caches, so nothing of it is disposed
-    // here), or the crate. A load wider than the inside of the box rides on the tops
-    // of its sides, as a bed frame does on a KMZ; anything else stands on the deck.
-    // It may slide fore and aft only as far as the box holds it.
-    this.thingMesh = state.loadThing === undefined ? null : createTrailerLoadMesh(state.loadThing);
-    const load = state.load;
-    if (load) {
-      this.payloadHalf = load.halfExtents;
-    } else if (this.thingMesh) {
-      const size = new THREE.Box3().setFromObject(this.thingMesh).getSize(this.vScratch);
-      this.payloadHalf = [size.x / 2, size.y / 2, size.z / 2];
-    } else {
-      this.payloadHalf = CRATE_HALF;
-    }
-    this.payloadFootY = this.payloadHalf[0] > BOX_INNER_HALF_X ? BED_HALF[1] + WALL_HEIGHT : BED_HALF[1];
-    this.cargoZLimit = Math.max(0, BOX_INNER_HALF_Z - this.payloadHalf[2]);
-
     const crateGeo = new THREE.BoxGeometry(CRATE_HALF[0] * 2, CRATE_HALF[1] * 2, CRATE_HALF[2] * 2);
     this.disposables.push(crateGeo);
     this.crate = new THREE.Mesh(crateGeo, matCrate);
-    this.crate.position.set(0, this.payloadFootY + CRATE_HALF[1], this.cargoZ);
+    this.crate.position.set(0, BED_HALF[1] + CRATE_HALF[1], this.cargoZ);
     this.crate.castShadow = true;
     this.root.add(this.crate);
 
     if (this.thingMesh) {
-      this.thingMesh.position.set(0, this.payloadFootY, this.cargoZ);
+      this.thingMesh.position.set(-this.thingOffset[0], BED_HALF[1], this.cargoZ - this.thingOffset[1]);
       this.root.add(this.thingMesh);
     }
 
-    // A long load (contracts/world.ts), a box overhanging both ends of the bed: a real
+    // A long load (contracts/world.ts), a box out over the back of the box: a real
     // collider rather than decoration, so the overhang can take a traffic car or a rock.
     // Its mass is the bed's `cargoKg` like any load; the thing above shows it.
     if (load) {
       const [lx, ly, lz] = load.halfExtents;
       physics.world.createCollider(
         RAPIER.ColliderDesc.cuboid(lx, ly, lz)
-          .setTranslation(0, this.payloadFootY + ly, this.cargoZ)
+          .setTranslation(0, BED_HALF[1] + ly, this.cargoZ)
           .setDensity(0)
           .setFriction(0.6)
           .setRestitution(0.02),
@@ -704,10 +730,16 @@ export class Trailer implements Rebasable {
 
   /**
    * Where the payload's centre of mass sits, metres forward of the box's middle
-   * (`TrailerState.cargoZ`), held to what keeps the payload inside the box.
+   * (`TrailerState.cargoZ`), held to what keeps the payload inside the box: its front
+   * face no further than the headboard, its rear face no further than the tailboard.
+   *
+   * A payload longer than the box has no choice: it stands against the headboard and
+   * out over the back, with the tailboard off. It used to stay centred, through both
+   * end boards at once: "move the load so only the back board has to go, and keep the
+   * front and the side boards" (owner, 2026-10-25).
    */
   get cargoZ(): number {
-    return Math.min(this.cargoZLimit, Math.max(-this.cargoZLimit, this.state.cargoZ ?? 0));
+    return Math.min(this.cargoZMax, Math.max(this.cargoZMin, this.state.cargoZ ?? 0));
   }
 
   /**
@@ -1440,7 +1472,7 @@ export class Trailer implements Rebasable {
         (TARE_DRAWBAR_KG / 3) * drawbarHalf ** 2,
         0,
       ],
-      [cargo, this.payloadFootY + py, this.cargoZ, (cargo / 3) * (py * py + pz * pz), (cargo / 3) * (px * px + pz * pz), (cargo / 3) * (px * px + py * py)],
+      [cargo, BED_HALF[1] + py, this.cargoZ, (cargo / 3) * (py * py + pz * pz), (cargo / 3) * (px * px + pz * pz), (cargo / 3) * (px * px + py * py)],
     ];
     let comY = 0;
     let comZ = 0;
@@ -1515,7 +1547,7 @@ export class TrailerField {
    */
   private mountWarmup(): void {
     if (this.warmup.children.length > 0) return;
-    const model = createTrailerModel();
+    const model = createTrailerModel(true);
     for (const mesh of [model.body, model.leftWheel, model.rightWheel]) {
       mesh.castShadow = false;
       mesh.receiveShadow = false;

@@ -131,7 +131,7 @@ export const matReflector = new THREE.MeshStandardMaterial({
 let reflectorEmissiveIntensity = -1;
 
 /**
- * Shared with every run in the world and the haul bays' chips (world/haulbay.ts), so
+ * Shared with every run in the world and the pumps' chips (world/pumps.ts), so
  * this is one material write per frame whichever of them asks.
  */
 export function setReflectorEmission(on: number): void {

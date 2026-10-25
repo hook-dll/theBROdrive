@@ -4,6 +4,45 @@
 
 ### Changed
 
+- THE HAUL PEN IS GONE: A PARKING ROW ON THE LAY-BY (`world/haulbay.ts`,
+  `world/settlement.ts`, `contracts/haulbays.ts`, `contracts/world.ts`, `world/poi.ts`).
+  The walled pen on the sand past the lay-by's edge looked like no part of the place
+  (owner, 2026-10-25). A settlement's lay-by is 3.5 m wider (12 m of asphalt from the
+  road edge), and its service band along the outer edge carries all of the post's
+  furniture on the asphalt, backs 0.4 m in from the edge: shelter −9.8, POST −5.6, toy
+  box −2.7, shop +21.5, pumps +26 (was −9, −4.8, −1.9, +13, +19 on the sand). Between the
+  toy box and the shop, +1…+18, a herringbone row of three slots painted in white, each
+  3.5 x 6.6 m at 45° to the road and leaning with the lay-by's traffic, numbered at the
+  opening: a car drives past, reverses in and leaves nose first the way it was going.
+  Slot 1 is where a haul's load waits (`postParkingSlot(…, 'pickup')`), slot 2 where
+  hauls are handed in and returned (`'handIn'`; the reverse-in, footprint, still and
+  nose-out checks are unchanged, against 3.5 m instead of 3.2 m of width), slot 3 holds
+  the settlement's car for sale nose out, its price board and key box past the row's far
+  side line (it stood parallel at −16 on the sand); without one it stays marked and
+  empty. The lay-by car of the post and the shelter is measured from slot 2. Bays are
+  derived, never saved: a save's waiting load in the old pen is left where it stood and
+  cleared once the player is 900 m off, the next one appears in slot 1; an unsold car for
+  sale an old save already made stays where it stood, its board and key box now at the
+  row. The service strip's sand (`SERVICE_DEPTH_M`), the pen's walls and reflectors,
+  `layout.bay` and `layout.lot` are removed; the start's finds lie on the stop's side
+  away from the row.
+- TRAILER LOADS STAY INSIDE THE BOARDS, AND THE WHEEL NUTS TURN (`vehicle/trailer.ts`,
+  `render/trailermodel.ts`, `render/thingmesh.ts`). The owner's screenshot had the
+  wardrobe through both the headboard and the tailboard: every payload longer than the
+  1.85 m box stayed centred. Now a payload slides only as far as its front face reaches the
+  headboard and its rear face the tailboard; one longer than the box stands against the
+  headboard and out over the back, and that trailer is drawn without its tailboard (a
+  second merged body, `bodyOpen`: the sheet, its frame and its two bolts) and has no rear
+  wall collider. The wardrobe (1.79 m) and the sofa (1.78 m) now fit with the tailboard up;
+  the bed is a 2.0 x 1.14 m one-and-a-half bed on the deck, 12 cm out past the tailboard,
+  instead of a 3.2 x 1.6 m double across the tops of the sides (stood against the
+  headboard, that would have put the trailer on its tail). Its collider shape is the
+  catalogue's (`ThingDef.trailerLoad`), also re-taken for a bed in an old save. A
+  trailer's outline in the bays is the tailboard or the load past it to the ball
+  (`trailerTailZ`). Static tongue loads (`tongueLoadN`): wardrobe 14 kg, sofa 14, piano
+  32, bed 9. The lug bolts (`Bolt.004.L`) and the ring under them, filed with the frame
+  in the GLB, are baked into the wheel geometry, so they spin and ride the spring with
+  the tyre.
 - THE TRAILER IS A KMZ-8284 (`vehicle/trailer.ts`, `render/trailermodel.ts`). The GLB is
   a KMZ-8284 at true size in centimetres; it used to be scaled 1.275x round 0.32 m wheels
   to fill a 2.8 x 1.8 m physics bed on a 1.9 m track, 320 kg empty and 700 kg payload,
@@ -317,13 +356,18 @@
   `contracts/shelters.ts` `shelterBench`, `teddySeating`; `contracts/offers.ts`
   `shelterParty`; `WorldState.shelterRounds`; delta `teddy_seat`). It replaces the post's
   teddy card.
-  - At every settlement's reserved spot (−9 m, 3.8 × 2 m): a concrete floor, a bench of
-    three slats on iron legs with a two-slat back, blue plaster walls at the back and both
-    sides with red bands on their front edges, a tin roof falling to the back, open to the
-    pad, all kit materials merged; solid in the physics band.
-  - A timetable over the bench: where the party goes, the km, how many wait (or "nobody
-    waiting"), the pay per teddy with the lay-by car's sticker bonus, and RACE n STOPS or
-    URGENT m:ss. Repainted when the bench, the round or the lay-by car's stickers change.
+  - At every settlement's reserved spot (−9 m, a 3.5 × 1.3 m canopy): a bench under a
+    lean-to tin canopy, open all round. Two steel posts in concrete footings behind the
+    bench carry it all: an arm and strut out under the seat (three slats), the two-slat
+    back on their fronts, and at the top a rafter under the canopy, which falls to the
+    back (its underside 2.38 m up at the front edge, 2.22 m behind). It was a three-walled
+    box on a slab ("make it light: only a bench and a skewed roof over it", owner,
+    2026-10-25). Kit materials merged; solid in the physics band (posts, seat, back,
+    canopy).
+  - A timetable on the post at the waiting end, over the back: where the party goes, the
+    km, how many wait (or "nobody waiting"), the pay per teddy with the lay-by car's
+    sticker bonus, and RACE n STOPS or URGENT m:ss. Repainted when the bench, the round or
+    the lay-by car's stickers change.
   - The waiting party is round `WorldState.shelterRounds[post]` of the post's shelter,
     drawn from the seed like the cards: 1–3 teddies, the next post or a race's finish,
     urgent at the cards' share; the drive's first party is plain. The teddies sit on the

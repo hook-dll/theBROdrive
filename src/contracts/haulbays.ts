@@ -1,40 +1,43 @@
 /**
  * THE HAUL BAYS AT WORK (game-design2.md §7.8): a haul's load waits in its source post's
- * bay before its card is taken, and is handed in by reversing it into another post's.
+ * PICK-UP slot (the first of its lay-by's parking row, world/haulbay.ts) before its card
+ * is taken, and is handed in by reversing it into another post's HAND-IN slot (the
+ * second). Both are the "bays" below; the third slot is the car for sale's.
  *
  * WAITING. While a post's bulky card (`HAUL_SLOT`) shows a haul, its machine is streamed in
- * (the chunk is solid), the player is within `SPAWN_M` and the bay is empty (`bayOccupied`:
- * no car, trailer or player on its floor), the load is stood in the bay as if reversed in
- * (contracts/world.ts `spawnHaulLoad`), from the offer alone. A waiting load the player has
- * left `WAITING_CLEAR_M` behind is taken out of the world again, and comes back the same
- * when he returns. A taken card's next haul appears only once the bay is empty again.
+ * (the chunk is solid), the player is within `SPAWN_M` and the pick-up slot is empty
+ * (`bayOccupied`: no car, trailer or player on it), the load is stood in it as if
+ * reversed in (contracts/world.ts `spawnHaulLoad`), from the offer alone. A waiting load
+ * the player has left `WAITING_CLEAR_M` behind is taken out of the world again, and comes
+ * back the same when he returns. A taken card's next haul appears only once the pick-up
+ * slot is empty again.
  *
  * THE HAND-IN, every tick for each taken haul's load while it is live:
- *  - it stands at a bay: its footprint (`loadFootprint`) within `NEAR_M` of the bay's floor;
- *  - it ENTERED REVERSING: the moment its tail crossed into the bay, it was moving tail
- *    first (its motion along its own heading negative). A tail that leaves the bay forgets
- *    it; a load first seen with its tail already inside (the source bay it waited in, a
- *    reload) has no entry and is neither accepted nor told off;
- *  - all of its footprint is inside the bay's floor and its heading is within
+ *  - it stands at a hand-in slot: its footprint (`loadFootprint`) within `NEAR_M` of it;
+ *  - it ENTERED REVERSING: the moment its tail crossed into the slot, it was moving tail
+ *    first (its motion along its own heading negative). A tail that leaves the slot
+ *    forgets it; a load first seen with its tail already inside (a reload) has no entry
+ *    and is neither accepted nor told off;
+ *  - all of its footprint is inside the slot's lines and its heading is within
  *    `BAY_YAW_TOLERANCE` of nose out (`bayFit`);
  *  - its kind has no objection (contracts/kinds: step out of a car to hand it over, empty
  *    its boot and seats);
  *  - it has stood still (under `STILL_KMH`) for `ACCEPT_STILL_S`.
  * Then it is uncoupled (the trailer off the ball, the tow bar off), the contract closes
- * (`haul_close`) and the load stays in the bay locked for good (contracts/world.ts
+ * (`haul_close`) and the load stays in the slot locked for good (contracts/world.ts
  * `haulLoadLock`), until the player is `CLEAR_M` away and it is out of view: then it goes.
  *
  * DESTINATION OR RETURN. The same reverse-in at a post that may sign for the haul
  * (`contractDestinationRefusal`: any post past its source, a race's from its finish on)
  * is a DELIVERY and pays `contractPay` (urgent bonus, the pulling car's stickers) plus a
  * race win; at ANY other post, its source included, it is a RETURN TO SENDER: no pay, the
- * contract closed. A post's bay is the one or the other, never both: the destination
- * always wins.
+ * contract closed. A post's hand-in slot is the one or the other, never both: the
+ * destination always wins.
  *
- * While the load stands still at a bay and is not accepted, the reason is told once in a
- * toast (again after `RETELL_S`): back it in, straighten up, all the way in, step out,
- * empty it — and "not this job's trailer" for a trailer or towed car behind the player's
- * car that is not the load of the haul he has out.
+ * While the load stands still at a hand-in slot and is not accepted, the reason is told
+ * once in a toast (again after `RETELL_S`): back it in, straighten up, all the way in,
+ * step out, empty it — and "not this job's trailer" for a trailer or towed car behind the
+ * player's car that is not the load of the haul he has out.
  */
 
 import { carUniqueness, contractPay, credit, formatMoney } from '../economy/economy';
@@ -42,8 +45,8 @@ import type { GameWorld, WorldState } from '../game/state';
 import { contractKindOf, contractThing, isHaul } from '../items/items';
 import { carModelMeasure } from '../render/carmodel';
 import { hasCarModel } from '../vehicle/carmodels';
-import { TRAILER_BALL_Z, TRAILER_HALF_LENGTH, TRAILER_HALF_WIDTH } from '../vehicle/trailer';
-import { postHaulBay, type HaulBay } from '../world/haulbay';
+import { TRAILER_BALL_Z, TRAILER_HALF_WIDTH, trailerTailZ } from '../vehicle/trailer';
+import { postParkingSlots, type ParkingSlot } from '../world/haulbay';
 import { LAYBY_CAR_RANGE_M } from '../world/post';
 import { postStopsBetween } from '../world/poststops';
 import { HAUL_SLOT, postStock } from './offers';
@@ -108,7 +111,7 @@ export interface Footprint {
   readonly half: number;
 }
 
-/** Where a bay is, for the geometry below: `HaulBay` is one. */
+/** Where a bay is, for the geometry below: a `ParkingSlot` is one. */
 export interface BayRect {
   readonly x: number;
   readonly z: number;
@@ -214,13 +217,9 @@ export function footprintTouchesBay(bay: BayRect, pose: LoadPose, foot: Footprin
 export function loadFootprint(state: WorldState, id: string): Footprint | null {
   const trailer = state.trailers[id];
   if (trailer) {
-    // A load longer than the box stays centred on it (`Trailer.cargoZ`).
-    const load = trailer.load?.halfExtents;
-    return {
-      front: TRAILER_BALL_Z,
-      rear: -Math.max(TRAILER_HALF_LENGTH, load ? load[2] : 0),
-      half: Math.max(TRAILER_HALF_WIDTH, load ? load[0] : 0),
-    };
+    // A load longer than the box stands against the headboard, out over the back
+    // (`Trailer.cargoZ`); every load is narrower than the box, the mudguards the widest.
+    return { front: TRAILER_BALL_Z, rear: trailerTailZ(trailer.load), half: TRAILER_HALF_WIDTH };
   }
   const car = state.cars[id];
   if (!car || !hasCarModel(car.modelId)) return null;
@@ -265,8 +264,14 @@ interface Watch {
 
 type MutableProbe = { -readonly [K in keyof DeliveryProbe]: DeliveryProbe[K] };
 
+/** A post's two haul slots (world/haulbay.ts `postParkingSlots`): its loads wait in the one, are handed in in the other. */
+interface PostBays {
+  readonly pickup: ParkingSlot;
+  readonly handIn: ParkingSlot;
+}
+
 export class HaulBays {
-  private readonly bays = new Map<number, HaulBay>();
+  private readonly bays = new Map<number, PostBays>();
   private readonly watches = new Map<string, Watch>();
   private scanIn = 0;
   private tickNo = 0;
@@ -323,13 +328,15 @@ export class HaulBays {
     }
   }
 
-  /** The bays of the posts within `BAY_REACH_M` of arclength `s`. */
+  /** The haul slots of the posts within `BAY_REACH_M` of arclength `s`. */
   private refreshBays(s: number): void {
     const near = postStopsBetween(this.world.seed, s - BAY_REACH_M, s + BAY_REACH_M);
     const keep = new Set<number>();
     for (const stop of near) {
       keep.add(stop.index);
-      if (!this.bays.has(stop.index)) this.bays.set(stop.index, postHaulBay(this.world.seed, this.deps.road, stop.index));
+      if (this.bays.has(stop.index)) continue;
+      const [pickup, handIn] = postParkingSlots(this.world.seed, this.deps.road, stop.index);
+      this.bays.set(stop.index, { pickup: pickup!, handIn: handIn! });
     }
     for (const index of this.bays.keys()) {
       if (!keep.has(index)) this.bays.delete(index);
@@ -350,8 +357,8 @@ export class HaulBays {
     return true;
   }
 
-  /** Anything standing on `bay`'s floor: a car, a trailer, or the player at (`x`, `z`). */
-  private bayOccupied(bay: HaulBay, x: number, z: number): boolean {
+  /** Anything standing in `bay`: a car, a trailer, or the player at (`x`, `z`). */
+  private bayOccupied(bay: ParkingSlot, x: number, z: number): boolean {
     toBay(bay, x, z, scratch);
     if (Math.abs(scratch.x) < bay.halfWidth + 1 && Math.abs(scratch.z) < bay.halfDepth + 1) return true;
     for (const id of [...Object.keys(this.state.cars), ...Object.keys(this.state.trailers)]) {
@@ -362,10 +369,10 @@ export class HaulBays {
     return false;
   }
 
-  /** Stands each streamed-in post's waiting haul in its empty bay; see the header. */
+  /** Stands each streamed-in post's waiting haul in its empty pick-up slot; see the header. */
   private spawnWaiting(x: number, z: number): void {
     const state = this.state;
-    for (const [index, bay] of this.bays) {
+    for (const [index, { pickup: bay }] of this.bays) {
       const d = Math.hypot(bay.x - x, bay.z - z);
       if (d > SPAWN_M || !this.host.postLive(index)) continue;
       // Nothing appears where it is seen up close: it waits for a look away.
@@ -398,10 +405,10 @@ export class HaulBays {
     }
   }
 
-  /** The post whose bay a footprint at `pose` is at (within `NEAR_M`), or -1. */
+  /** The post whose hand-in slot a footprint at `pose` is at (within `NEAR_M`), or -1. */
   private bayAt(pose: LoadPose, foot: Footprint): number {
-    for (const [index, bay] of this.bays) {
-      if (footprintTouchesBay(bay, pose, foot, NEAR_M)) return index;
+    for (const [index, { handIn }] of this.bays) {
+      if (footprintTouchesBay(handIn, pose, foot, NEAR_M)) return index;
     }
     return -1;
   }
@@ -427,7 +434,7 @@ export class HaulBays {
       watch.told = null;
     }
     if (index >= 0) {
-      const bay = this.bays.get(index)!;
+      const bay = this.bays.get(index)!.handIn;
       const s = Math.sin(pose.yaw);
       const c = Math.cos(pose.yaw);
       toBay(bay, pose.x + s * foot.rear, pose.z + c * foot.rear, scratch);
@@ -461,9 +468,9 @@ export class HaulBays {
     if (!foot) return;
     const watch = this.follow(dt, loadId, foot);
     if (!watch) return;
-    // Its entry not seen (the source bay it waited in, a reload): nothing to judge.
+    // Its entry not seen (a reload): nothing to judge.
     if (watch.reversed === null) return;
-    const bay = this.bays.get(watch.bay)!;
+    const bay = this.bays.get(watch.bay)!.handIn;
     const haul = this.state.hauls[contractId]!;
     const fit = bayFit(bay, this.pose, foot);
     let why: string | null;
@@ -500,8 +507,8 @@ export class HaulBays {
     }
   }
 
-  /** The hand-in view at post `index`'s bay, for the kinds' own rules. */
-  private probeAt(index: number, bay: HaulBay): DeliveryProbe {
+  /** The hand-in view at post `index`'s hand-in slot, for the kinds' own rules. */
+  private probeAt(index: number, bay: ParkingSlot): DeliveryProbe {
     const probe = this.probe;
     probe.targetPostIndex = index;
     probe.postX = bay.x;
@@ -515,7 +522,7 @@ export class HaulBays {
    * ball, its tow bar), else the player's own car standing nearest the bay within
    * `LAYBY_CAR_RANGE_M` (a car driven over came without one), else none.
    */
-  private deliveryStickers(loadId: string, bay: HaulBay): number {
+  private deliveryStickers(loadId: string, bay: ParkingSlot): number {
     const state = this.state;
     const pullerId = state.trailers[loadId]?.hitchedTo ?? state.cars[loadId]?.towedBy ?? null;
     const puller = pullerId ? state.cars[pullerId] : undefined;
@@ -533,7 +540,7 @@ export class HaulBays {
   }
 
   /** Accepts the load of `contractId` in post `index`'s `bay`: delivered, or returned to its sender. */
-  private accept(contractId: string, index: number, bay: HaulBay): void {
+  private accept(contractId: string, index: number, bay: ParkingSlot): void {
     const haul = this.state.hauls[contractId]!;
     const contract = haul.contract;
     const delivered = contractDestinationRefusal(contract, index) === null;

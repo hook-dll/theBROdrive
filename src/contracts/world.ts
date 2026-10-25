@@ -7,9 +7,10 @@
  * `contract-trailer:<seed>` and `contract-car:<seed>` are in world state like any other
  * trailer or car.
  *
- * THE LOAD WAITS IN THE SOURCE BAY. While a post's bulky card shows a haul and its bay
- * is empty, the load stands in the bay (world/haulbay.ts) nose out, as if reversed in
- * (`spawnHaulLoad`, called by contracts/haulbays.ts as the post streams in). Its LOCK is
+ * THE LOAD WAITS IN THE SOURCE PICK-UP SLOT. While a post's bulky card shows a haul and
+ * the first slot of its parking row (world/haulbay.ts) is empty, the load stands in it
+ * nose out, as if reversed in (`spawnHaulLoad`, called by contracts/haulbays.ts as the
+ * post streams in). Its LOCK is
  * derived from state alone (`haulLoadLock`): a haul load no taken haul is bound to
  * (`WorldState.hauls`) waits for its card and cannot be hitched, towed, opened or sat in;
  * TAKE binds it and the lock lifts; handed in (`WorldState.handedInLoads`) it is locked
@@ -17,15 +18,15 @@
  */
 
 import { pick } from '../core/rng';
-import type { CarState, GameWorld, HaulState, TrailerLoad, TrailerState, WorldState } from '../game/state';
+import type { CarState, GameWorld, HaulState, TrailerState, WorldState } from '../game/state';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
-import { TRAILER_BALL_Z, TRAILER_HALF_LENGTH, TRAILER_SPAWN_HEIGHT } from '../vehicle/trailer';
+import { TRAILER_BALL_Z, TRAILER_SPAWN_HEIGHT, trailerTailZ } from '../vehicle/trailer';
 import { contractKindOf, contractThing, type ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
-import { postHaulBay, type HaulBay } from '../world/haulbay';
+import { postParkingSlot, type ParkingSlot } from '../world/haulbay';
 
 /** 'CTC1': the car model. */
 const CAR_MODEL_DOMAIN = 0x43544331;
@@ -89,21 +90,12 @@ export function haulLoadLock(state: WorldState, id: string): string | null {
 }
 
 /**
- * The long load (game-design2.md §7.3): the bed with its frame and boards, 3.2 m long and
- * 1.6 m wide against the KMZ's 1.9 x 1.26 m box, so it lies across the tops of the sides
- * (vehicle/trailer.ts), overhangs both ends and is what the traffic and the rocks get to
- * hit. Centred on the box, its front end clears the ball by half a metre for the drawbar
- * to swing under. Every other load stands on the deck.
- */
-const BED_LOAD: TrailerLoad = { halfExtents: [0.8, 0.28, 1.6] };
-
-/**
- * Stands the load of haul offer `item` in its source post's bay, nose out, as if
- * reversed in. Idempotent: a load already in state is left where it is. The caller has
- * seen the bay empty and its chunk solid.
+ * Stands the load of haul offer `item` in its source post's pick-up slot, nose out, as
+ * if reversed in. Idempotent: a load already in state is left where it is. The caller
+ * has seen the slot empty and its chunk solid.
  */
 export function spawnHaulLoad(deps: ContractWorldDeps, item: ContractCargoItem): void {
-  const bay = postHaulBay(deps.world.seed, deps.road, item.sourceCourierIndex);
+  const bay = postParkingSlot(deps.world.seed, deps.road, item.sourceCourierIndex, 'pickup');
   if (contractKindOf(item) === 'trailer') spawnContractTrailer(deps, item, bay);
   else spawnContractCar(deps, item, bay);
 }
@@ -111,13 +103,19 @@ export function spawnHaulLoad(deps: ContractWorldDeps, item: ContractCargoItem):
 function spawnContractTrailer(
   deps: ContractWorldDeps,
   item: ContractCargoItem,
-  bay: HaulBay,
+  bay: ParkingSlot,
 ): void {
   const id = haulLoadId(item);
   if (deps.world.state.trailers[id]) return;
-  // Drawbar out of the opening, the trailer's length from its tail to the ball centred
-  // in the bay: a car backs up to the ball from the pad.
-  const back = (TRAILER_BALL_Z - TRAILER_HALF_LENGTH) / 2;
+  // The long load (game-design2.md §7.3, the bed): its shape is the catalogue's, a real
+  // collider out over the back of the box (vehicle/trailer.ts). Every other load stands
+  // inside the box.
+  const shape = contractThing(item).trailerLoad;
+  const load = shape ? { halfExtents: shape } : undefined;
+  // Drawbar out of the opening, the trailer's length from its tail (the tailboard, or
+  // the long load past it) to the ball centred in the slot: a car backs up to the ball
+  // from the pad.
+  const back = (TRAILER_BALL_Z + trailerTailZ(load)) / 2;
   const yaw = bay.yaw;
   const x = bay.x - Math.sin(yaw) * back;
   const z = bay.z - Math.cos(yaw) * back;
@@ -131,7 +129,9 @@ function spawnContractTrailer(
     // is further than any box holds a thing, so the trailer stands it as far forward
     // as its box lets it (`Trailer.cargoZ`). That ahead-of-the-axle placement is what
     // puts a towable share of the weight on the ball of a KMZ, whose axle sits under
-    // the middle of its box; a thing as long as the box simply stays in the middle.
+    // the middle of its box. A thing longer than the box stands against the headboard
+    // whatever it asks, out over the back: the 2 m bed's centre is then 7.5 cm behind
+    // the box's middle, and the drawbar's own weight still leaves 9 kg on the ball.
     cargoZ: 1,
     x,
     // Set down on its own suspension; see TRAILER_SETTLE_CLEARANCE_M.
@@ -142,20 +142,20 @@ function spawnContractTrailer(
     qz: 0,
     qw: Math.cos(yaw / 2),
   };
-  if (item.thing === 'bed') trailer.load = BED_LOAD;
+  if (load) trailer.load = load;
   deps.world.apply({ t: 'trailer_add', trailer });
 }
 
 function spawnContractCar(
   deps: ContractWorldDeps,
   item: ContractCargoItem,
-  bay: HaulBay,
+  bay: ParkingSlot,
 ): void {
   const id = haulLoadId(item);
   if (deps.world.state.cars[id]) return;
   const def = pick(CAR_MODELS, item.generatedSeed, CAR_MODEL_DOMAIN);
   const measure = carModelMeasure(def.id);
-  // In the middle of the bay, nose out: the longest car has 0.86 m either end.
+  // In the middle of the slot, nose out: the longest car has 0.86 m either end.
   const { x, z, yaw } = bay;
   const plane = poseOnGround(measure.wheels, x, z, yaw, (gx, gz) => deps.terrain.heightAt(gx, gz));
   const groundY = plane ? plane.groundY : deps.terrain.heightAt(x, z, bay.s);

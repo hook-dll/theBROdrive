@@ -275,7 +275,7 @@ export interface TrailerState {
  * it takes the one mass path every trailer already uses.
  */
 export interface TrailerLoad {
-  /** Half-extents of the load box, m. Longer than the bed, so it overhangs. */
+  /** Half-extents of the load box, m. Longer than the box, so it stands against the headboard and out over the back. */
   readonly halfExtents: readonly [number, number, number];
 }
 

@@ -6,7 +6,6 @@ import {
   LAYBY_TAPER_M,
   roadHalf,
   roadsideStop,
-  SERVICE_DEPTH_M,
   SETTLEMENT_HALF_LENGTH_M,
 } from './settlement';
 
@@ -35,9 +34,9 @@ import {
  * Masts get no lay-by: nobody pulls in at a relay mast. Every other roadside stop has
  * one, so it is attached to the stop rather than spawned on its own: loot, saves and
  * `Poi.index` are untouched by it. Its numbers are the stop's plan (world/settlement.ts):
- * a lone house's pad runs across its front; a settlement's is longer and always full
- * width, the service strip (post, parking, shop) along its outer edge and the houses on
- * this side at both ends of it.
+ * a lone house's pad runs across its front; a settlement's is longer, always full
+ * width and wider by its service band, where the post's furniture and the parking row
+ * stand on the asphalt along its outer edge, the houses on this side at both ends of it.
  */
 export interface Layby {
   /** `Poi.index` of the stop it serves. */
@@ -63,6 +62,12 @@ export interface Layby {
   readonly padInner: number;
   /** `u` of the pad's building-side edge. */
   readonly padOuter: number;
+  /**
+   * `u` where a settlement's service band starts (world/settlement.ts): the post's
+   * furniture stands between it and `padOuter`, the parking row's slots reach in across
+   * it toward the parking line. A lone house's pad has none: `padOuter`.
+   */
+  readonly serviceInner: number;
   /** `u` of the farthest wall on this side: the flattened site reaches past it. */
   readonly siteOuter: number;
   /** Half the along-road extent of the buildings on this side, about `s`. */
@@ -128,6 +133,7 @@ function laybyAtSlot(seed: number, slot: number): Layby | null {
           sExit: pad.sExit,
           padInner: pad.padInner,
           padOuter: pad.padOuter,
+          serviceInner: pad.serviceInner,
           siteOuter: pad.siteOuter,
           siteHalfAlong: pad.siteHalfAlong,
           surface: roadConditionAt(seed, stop.roll.s).surface,
@@ -206,7 +212,7 @@ export function onLaybyPad(l: Layby, s: number, lateral: number, halfWidth: numb
  * Whether a point is on any lay-by's asphalt or inside any roadside stop's building, or
  * within `margin` metres of either: the keep-clear verge furniture, scatter and ground
  * cover test before standing in it. A settlement's houses stand on both sides of the
- * road, so the far side is tested too.
+ * road, so the far side is tested too; its services stand on the pad, which covers them.
  */
 export function laybyKeepsClear(
   seed: number,
@@ -227,11 +233,6 @@ export function laybyKeepsClear(
   if (!l || lateral * l.side <= 0) return false;
   if (s < l.sEntry - margin || s > l.sExit + margin) return false;
   const u = lateral * l.side;
-  // A settlement's service strip: the sand past the pad where the post, the shop and
-  // the rest stand.
-  if (stop.layout.settlement && s >= l.sPadStart - margin && s <= l.sPadEnd + margin) {
-    if (u <= l.padOuter + SERVICE_DEPTH_M + margin) return true;
-  }
   const clamped = Math.min(l.sExit, Math.max(l.sEntry, s));
   return u <= laybyOuterAt(l, clamped, halfWidth) + margin;
 }

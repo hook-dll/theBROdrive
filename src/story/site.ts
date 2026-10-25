@@ -216,10 +216,11 @@ export function spawnStartingItems(
 
   for (let slot = 0; slot < chosen.length; slot++) {
     // Clear of the car along the pad (an item inside its hull is an item nobody can
-    // see) and short of the places traffic parks in (world/traffic.ts).
-    const side = hash01(world.seed, STORY_TAG, 0x200 + slot) < 0.5 ? -1 : 1;
-    const along = side * (3.4 + hash01(world.seed, STORY_TAG, 0x210 + slot) * 5);
-    const u = parkU + 1.4 + hash01(world.seed, STORY_TAG, 0x220 + slot) * Math.max(0, layby.padOuter - parkU - 1.9);
+    // see), short of the places traffic parks in (world/traffic.ts), on the side of the
+    // car away from the parking row, and short of the service band the post's furniture
+    // stands on (world/settlement.ts).
+    const along = -(3.4 + hash01(world.seed, STORY_TAG, 0x210 + slot) * 5);
+    const u = parkU + 1.4 + hash01(world.seed, STORY_TAG, 0x220 + slot) * Math.max(0, layby.serviceInner - parkU - 1.9);
     const point = road.offsetPoint(layby.s + along, layby.side * u);
     loose.spawnItem(
       homeItem(world, slot, chosen[slot]!),

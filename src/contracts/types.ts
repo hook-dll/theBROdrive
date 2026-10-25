@@ -120,7 +120,7 @@ export function defaultProgress(): ContractProgress {
 export interface DeliveryProbe {
   /** Index of the post being delivered to. */
   readonly targetPostIndex: number;
-  /** Absolute middle of that post's haul bay (world/haulbay.ts `postHaulBay`). */
+  /** Absolute middle of that post's hand-in slot (world/haulbay.ts `postParkingSlot`). */
   readonly postX: number;
   readonly postZ: number;
   /** The car the player sits in (any seat), or null on foot. */

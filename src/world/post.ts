@@ -31,7 +31,7 @@ import type { FixtureContext, FixtureField } from './fixturefield';
 import { paintSign, SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
 import { postId, postStop, type PostStop } from './poststops';
-import { postHaulBay } from './haulbay';
+import { postParkingSlot } from './haulbay';
 
 /**
  * THE POST MACHINE (game-design2.md §7): where contracts are taken and handed in, by
@@ -47,14 +47,15 @@ import { postHaulBay } from './haulbay';
  * that car. The crank turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing falls into the
  * tray and the machine lets go of the player so he
- * picks it up. A HAUL gives nothing (§7.8): its load already waits in the post's haul bay
- * (contracts/haulbays.ts), and TAKE binds the contract to it (`haul_take`), which lifts
- * its lock; with no load in the bay (the bay is taken) TAKE refuses. The card it was on
- * falls away and the slot's next offer is under it (`nextOffer`): the machine never runs
- * dry.
+ * picks it up. A HAUL gives nothing (§7.8): its load already waits in the first slot of
+ * the post's parking row (world/haulbay.ts, contracts/haulbays.ts), and TAKE binds the
+ * contract to it (`haul_take`), which lifts its lock; with no load in the slot (the slot
+ * is taken) TAKE refuses. The card it was on falls away and the slot's next offer is
+ * under it (`nextOffer`): the machine never runs dry.
  *
  * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the post's
- * haul bay: the one he last drove (`PlayerState.lastDrivenCarId`) when it is there, else
+ * hand-in slot, the middle of its parking row: the one he last drove
+ * (`PlayerState.lastDrivenCarId`) when it is there, else
  * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
  * cards print. A delivery is paid by the same car's stickers, read when the tray takes
  * it; with no car on the lay-by, by the car he last drove, wherever it stands.
@@ -64,7 +65,7 @@ import { postHaulBay } from './haulbay';
  * envelope, stickers are only bought). A thing this post will not sign for goes back as a
  * RETURN TO SENDER: no pay, the job closed. Worked with a thing in hand, the window shows
  * the HAND-IN card first: what to put in the tray, what it pays, that it is a return, or
- * why the tray will not take it. A haul is handed in by its load, in the bay
+ * why the tray will not take it. A haul is handed in by its load, in the second slot
  * (contracts/haulbays.ts), never at the tray.
  *
  * TAKE refuses while the player already has `ACTIVE_CONTRACT_LIMIT` jobs out, and a haul
@@ -102,11 +103,11 @@ const HAND_IN_BAND: Readonly<Record<HandInCard['mode'], string>> = {
 const LIMIT_TEXT = 'three jobs already out — hand one in or return it';
 /** What the machine says when TAKE of a haul is refused: one haul at a time. */
 const HAUL_LIMIT_TEXT = 'one haul already out — hand it in or return it first';
-/** What the machine says when TAKE of a haul finds no load in the bay. */
-const BAY_TAKEN_TEXT = 'the bay is taken — its load comes when the bay is clear';
+/** What the machine says when TAKE of a haul finds no load in the pick-up slot. */
+const BAY_TAKEN_TEXT = 'slot 1 is taken — its load comes when the slot is clear';
 registerCardMachineSigns(POST_LOOK);
 
-/** A car counts as standing on the post's lay-by inside this radius of its haul bay, m. */
+/** A car counts as standing on the post's lay-by inside this radius of its hand-in slot, m. */
 export const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
@@ -131,11 +132,11 @@ function tagText(offer: ContractCargoItem, thing: ThingDef): string {
 function haulNote(thing: ThingDef): string | null {
   switch (thing.place) {
     case 'trailer':
-      return 'on a trailer in the bay · back it into theirs';
+      return 'on a trailer in slot 1 · back it into their slot 2';
     case 'tow':
-      return 'in the bay, on the tow bar · back it into theirs';
+      return 'in slot 1, on the tow bar · back it into their slot 2';
     case 'transfer':
-      return 'in the bay, drive it · back it into theirs';
+      return 'in slot 1, drive it · back it into their slot 2';
     default:
       return null;
   }
@@ -145,11 +146,11 @@ function haulNote(thing: ThingDef): string | null {
 function haulTakenText(thing: ThingDef): string {
   switch (thing.place) {
     case 'trailer':
-      return `the ${thing.name} is yours — hitch its trailer in the bay`;
+      return `the ${thing.name} is yours — hitch its trailer in slot 1`;
     case 'tow':
-      return `the ${thing.name} is yours — put it on your tow bar in the bay`;
+      return `the ${thing.name} is yours — put it on your tow bar in slot 1`;
     default:
-      return `the ${thing.name} is yours — drive it out of the bay`;
+      return `the ${thing.name} is yours — drive it out of slot 1`;
   }
 }
 
@@ -184,7 +185,7 @@ interface HandInCard {
 }
 
 /**
- * The LAY-BY CAR of the post whose haul bay's middle is (`haulX`, `haulZ`), ABSOLUTE: the
+ * The LAY-BY CAR of the post whose hand-in slot's middle is (`haulX`, `haulZ`), ABSOLUTE: the
  * player's car standing within `LAYBY_CAR_RANGE_M` of it, the one he last drove when it
  * is there, else the nearest; none, null. A haul's own car is not one to load, and a car
  * for sale is nobody's. `position`: where a car stands, absolute.
@@ -222,7 +223,7 @@ export function deliveryStickers(state: WorldState, laybyCar: string | null): nu
 }
 
 /**
- * Builds stop `stop`'s machine at ABSOLUTE (`x`, `z`) on the sand, its front turned by
+ * Builds stop `stop`'s machine at ABSOLUTE (`x`, `z`) on the lay-by, its front turned by
  * `yaw` (front local -Z: the settlement spot's convention). In the physics band it is
  * solid and registers its fixture (id pushed to `registered`, for the chunk to forget);
  * beyond it, it is only seen. `disposers` gets the card materials.
@@ -254,8 +255,8 @@ export function buildPost(
   plate.rotation.y = Math.PI;
   parts.root.add(plate);
 
-  const bay = postHaulBay(ctx.world.seed, ctx.road, stop.index);
-  const machine = new PostMachine(ctx.world, stop, bay.x, bay.z, parts);
+  const slot = postParkingSlot(ctx.world.seed, ctx.road, stop.index, 'handIn');
+  const machine = new PostMachine(ctx.world, stop, slot.x, slot.z, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
@@ -285,7 +286,7 @@ class PostMachine extends CardMachine {
   constructor(
     private readonly world: GameWorld,
     private readonly stop: PostStop,
-    /** ABSOLUTE metres of the middle of the post's haul bay, where hauls are left and handed in. */
+    /** ABSOLUTE metres of the middle of the post's hand-in slot: the lay-by car and the deliveries measure from it. */
     private readonly haulX: number,
     private readonly haulZ: number,
     parts: CardMachineParts,
@@ -439,7 +440,7 @@ class PostMachine extends CardMachine {
       this.cardsChanged();
       this.refreshLimit();
       ctx.toast(haulTakenText(contractThing(offer)));
-      // Let go of, so he sees the bay.
+      // Let go of, so he sees the slot.
       ctx.stepBack();
       return 'mount';
     }

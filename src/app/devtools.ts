@@ -540,9 +540,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const spot = poi ? settlementLayout(ctx.world.seed, poi)[machine] : null;
     if (!spot) return false;
     const pose = spotPose(ctx.road, spot);
-    // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world. The shelter
-    // is a metre deep: stand clear of its front.
-    const away = machine === 'shelter' ? 2.6 : 1.7;
+    // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world. The shelter's
+    // spot is its canopy's centre, the bench's front 0.07 m ahead of it and the canopy's
+    // edge 0.65 m: stand 1.83 m off the bench, under the sky.
+    const away = machine === 'shelter' ? 1.9 : 1.7;
     const stand = { x: pose.x - Math.sin(pose.yaw) * away, z: pose.z - Math.cos(pose.yaw) * away, yaw: pose.yaw };
     jumpHold = { s: stop.s, frames: 0, stand };
     placeAtJump(stop.s, stand);
@@ -675,9 +676,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * `thing(id, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts,
    * e.g. 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound
    * for the next, dropped in front of him as the post machine's tray would release it. A
-   * haul is taken there and then: its load stood in that post's haul bay (whatever stands
-   * there already) and bound to it, as TAKE does (contracts/world.ts). `urgent` gives it
-   * the urgent clock; `raceLegs` (1 or 2) makes it a race to the post that many on,
+   * haul is taken there and then: its load stood in that post's pick-up slot, the first
+   * of its parking row (whatever stands there already), and bound to it, as TAKE does
+   * (contracts/world.ts). `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes
+   * it a race to the post that many on,
    * started when it is picked up (a haul's, at once). The teddies wait in a shelter: see
    * `teddies`. Returns the contract id.
    */

@@ -79,6 +79,12 @@ export interface ThingDef {
   readonly boot?: BootFootprint;
   /** A `cells` thing that may lie on a seat instead (the cushions). */
   readonly seat?: true;
+  /**
+   * Half-extents of a `trailer` thing longer than the trailer's box, m: its collider
+   * out over the back (`TrailerState.load`, vehicle/trailer.ts). The drawn thing
+   * (render/thingmesh.ts) is this size.
+   */
+  readonly trailerLoad?: readonly [number, number, number];
 }
 
 const ONE: BootFootprint = { columns: 1, rows: 1 };
@@ -102,8 +108,9 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'wardrobe', name: 'wardrobe', tags: ['bulky'], massKg: 110, pay: 90, place: 'trailer' },
   { id: 'piano', name: 'piano', tags: ['bulky'], massKg: 230, pay: 110, place: 'trailer' },
   { id: 'sofa', name: 'sofa', tags: ['bulky'], massKg: 70, pay: 90, place: 'trailer' },
-  // The long load: longer than the trailer's bed, it overhangs both ends (contracts/world.ts).
-  { id: 'bed', name: 'bed', tags: ['bulky'], massKg: 90, pay: 100, place: 'trailer' },
+  // The long load: longer than the trailer's box, it goes in against the headboard and
+  // out over the back with the tailboard off (vehicle/trailer.ts, contracts/world.ts).
+  { id: 'bed', name: 'bed', tags: ['bulky'], massKg: 90, pay: 100, place: 'trailer', trailerLoad: [0.57, 0.28, 1.0] },
   { id: 'broken_toy_car', name: 'broken toy car', tags: [], massKg: 0, pay: 90, place: 'tow' },
   { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, pay: 90, place: 'transfer' },
   // Per teddy: a party is one teddy item each.

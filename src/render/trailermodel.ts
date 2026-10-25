@@ -31,6 +31,20 @@
  * box where the physics box is. The merged wheel pair is split into two wheels so
  * each rides its own suspension; the unsprung axle beam is dropped for the same
  * reason.
+ *
+ * THE WHEEL NUTS GO ROUND WITH THE WHEEL. The export draws each wheel's four lug bolts
+ * (`Bolt.004.L`, on a 98 mm circle) and the ring under them (`rama.008.L`) as frame
+ * parts, so merged into the body they stood still while the tyre spun and stayed at
+ * the settled height while the wheel rode its spring: "the bolts don't turn with the
+ * wheel" (owner, 2026-10-25). They are split by side like the tyre pair and baked into
+ * the wheel geometry, round the tyre's own centre.
+ *
+ * THE TAILBOARD IS ITS OWN PART. A load longer than the box goes in against the
+ * headboard and out over the back with the tailboard off (vehicle/trailer.ts,
+ * `TRAILER_TAILBOARD_PARTS`): "shift the load so only the back board has to go, keep
+ * the front and the sides" (owner, 2026-10-25). The board's sheet, its frame and the
+ * two bolts on it are left out of a second body, `bodyOpen`; the hinges and the latch
+ * hooks stay on the box, as they do on a KMZ whose board has been lifted off.
  */
 
 import * as THREE from 'three';
@@ -51,8 +65,9 @@ export interface TrailerFit {
 
 /** A fresh trailer visual: one merged body plus the two wheels, ready to pose. */
 export interface TrailerModelInstance {
+  /** The box, drawbar and running gear: with its tailboard, or without it for a long load. */
   readonly body: THREE.Mesh;
-  /** The wheel that sits at +X (left), axle along X, centred on its own origin. */
+  /** The wheel that sits at +X (left), axle along X, centred on its own origin; lug bolts included. */
   readonly leftWheel: THREE.Mesh;
   /** The wheel that sits at -X (right); already mirrored about X. */
   readonly rightWheel: THREE.Mesh;
@@ -60,10 +75,21 @@ export interface TrailerModelInstance {
 
 interface Template {
   readonly body: THREE.BufferGeometry;
-  /** One centred wheel geometry (axle along X, radius = fit.wheelRadius). */
+  /** The body with the tailboard's parts left out. */
+  readonly bodyOpen: THREE.BufferGeometry;
+  /** One centred wheel geometry (axle along X, radius = fit.wheelRadius), its lug bolts on it. */
   readonly wheel: THREE.BufferGeometry;
   readonly material: THREE.Material;
 }
+
+/**
+ * The wheel's own parts the export files with the frame: the lug bolts and the ring
+ * under them. Matched on the mesh's parent node (see the wheel assembly below), whose
+ * name the loader has stripped of its dots (`Bolt.004.L` arrives as `Bolt004L`).
+ */
+const WHEEL_PARTS = /^(bolt\.?004|rama\.?008)\.?l$/i;
+/** The tailboard's parts: its sheet, its frame and the two bolts on its face. */
+const TAILBOARD_PARTS = /^(sheet\.?002|rama\.?007|bolt\.?013|bolt\.?014)\.?l$/i;
 
 let gltf: GLTFLoader | null = null;
 let template: Template | null = null;
@@ -75,19 +101,6 @@ const MODEL_SCALE = 0.01;
 function discDiameter(mesh: THREE.Mesh, box: THREE.Box3): number {
   box.setFromObject(mesh);
   return Math.max(box.max.x - box.min.x, box.max.y - box.min.y);
-}
-
-/** Translates a geometry so its bounding-box centre sits at the origin. */
-function centreOnSelf(geometry: THREE.BufferGeometry): void {
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox;
-  if (!box) return;
-  geometry.translate(
-    -(box.min.x + box.max.x) / 2,
-    -(box.min.y + box.max.y) / 2,
-    -(box.min.z + box.max.z) / 2,
-  );
-  geometry.computeBoundingBox();
 }
 
 /**
@@ -191,27 +204,60 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
   // Split the merged pair, keep the left half as the shared wheel geometry and
   // mirror it for the right at draw time. `local Y < 0` lands on game +X (left).
   // Turned, the axle is game X: the tread keeps the drawn width, the radius is the
-  // physics wheel's.
+  // physics wheel's. The lug bolts and their ring are split the same way and go
+  // through the same scale round the same centre, the tyre's, so they sit on the
+  // wheel's face and turn with it.
   const wheelScale = fit.wheelRadius / wheelRadiusScene;
-  const { left, right } = splitTyrePair(tyreMesh.geometry);
-  left.applyMatrix4(tyreMesh.matrixWorld);
-  left.applyMatrix4(new THREE.Matrix4().makeScale(MODEL_SCALE, wheelScale, wheelScale).multiply(turn));
-  centreOnSelf(left);
-  right.dispose();
-
-  // --- Body ---------------------------------------------------------------
-  // Everything except the wheel assembly, drawbar and coupler included, baked to
-  // scene space and merged into one geometry (all 57 meshes share the one material).
-  const bodyGeometries: THREE.BufferGeometry[] = [];
+  const wheelMatrix = new THREE.Matrix4().makeScale(MODEL_SCALE, wheelScale, wheelScale).multiply(turn);
+  const wheelParts: THREE.Mesh[] = [];
+  const tailboardParts: THREE.Mesh[] = [];
   scene.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
-    if (child === tyreMesh || child === axleMesh) return;
-    child.geometry.applyMatrix4(child.matrixWorld);
-    bodyGeometries.push(child.geometry);
+    const part = child.parent?.name ?? '';
+    if (WHEEL_PARTS.test(part)) wheelParts.push(child);
+    else if (TAILBOARD_PARTS.test(part)) tailboardParts.push(child);
   });
-  const body = mergeGeometries(bodyGeometries);
-  if (!body) throw new Error('Trailer model: body merge failed (incompatible attributes)');
+  if (wheelParts.length !== 2 || tailboardParts.length !== 4) {
+    throw new Error(
+      `Trailer model: expected the 2 wheel-nut parts and the 4 tailboard parts, ` +
+        `found ${wheelParts.length} and ${tailboardParts.length}`,
+    );
+  }
+  const wheelHalves: THREE.BufferGeometry[] = [];
+  for (const mesh of [tyreMesh, ...wheelParts]) {
+    const { left, right } = splitTyrePair(mesh.geometry);
+    right.dispose();
+    left.applyMatrix4(mesh.matrixWorld);
+    left.applyMatrix4(wheelMatrix);
+    wheelHalves.push(left);
+  }
+  const tyreCentre = new THREE.Vector3();
+  wheelHalves[0].computeBoundingBox();
+  wheelHalves[0].boundingBox!.getCenter(tyreCentre);
+  for (const half of wheelHalves) half.translate(-tyreCentre.x, -tyreCentre.y, -tyreCentre.z);
+  const wheel = mergeGeometries(wheelHalves);
+  if (!wheel) throw new Error('Trailer model: wheel merge failed (incompatible attributes)');
+  for (const half of wheelHalves) half.dispose();
+  wheel.computeBoundingBox();
+
+  // --- Body ---------------------------------------------------------------
+  // Everything except the wheel assembly and the wheel's nuts, drawbar and coupler
+  // included, baked to scene space and merged into one geometry (every mesh shares the
+  // one material): once with the tailboard and once without it.
+  const closedGeometries: THREE.BufferGeometry[] = [];
+  const openGeometries: THREE.BufferGeometry[] = [];
+  scene.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    if (child === tyreMesh || child === axleMesh || wheelParts.includes(child)) return;
+    child.geometry.applyMatrix4(child.matrixWorld);
+    closedGeometries.push(child.geometry);
+    if (!tailboardParts.includes(child)) openGeometries.push(child.geometry);
+  });
+  const body = mergeGeometries(closedGeometries);
+  const bodyOpen = mergeGeometries(openGeometries);
+  if (!body || !bodyOpen) throw new Error('Trailer model: body merge failed (incompatible attributes)');
   body.applyMatrix4(fitMatrix);
+  bodyOpen.applyMatrix4(fitMatrix);
 
   // The GLB ships three PBR maps (base colour, normal, occlusion+metal-roughness),
   // but this renderer flat-shades with base colour only — comic banding and an ink
@@ -255,15 +301,18 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
     child.geometry.dispose();
   });
 
-  template = { body, wheel: left, material };
+  template = { body, bodyOpen, wheel, material };
 }
 
-/** A fresh trailer visual, sharing geometry and material with every other trailer. */
-export function createTrailerModel(): TrailerModelInstance {
+/**
+ * A fresh trailer visual, sharing geometry and material with every other trailer:
+ * with its tailboard, or with it off for a load that overhangs the back.
+ */
+export function createTrailerModel(tailboard: boolean): TrailerModelInstance {
   const t = template;
   if (!t) throw new Error('Trailer model was not preloaded');
 
-  const body = new THREE.Mesh(t.body, t.material);
+  const body = new THREE.Mesh(tailboard ? t.body : t.bodyOpen, t.material);
   body.castShadow = true;
   body.receiveShadow = true;
 

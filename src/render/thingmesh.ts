@@ -896,21 +896,25 @@ function straps(b: MeshBuilder, width: number, height: number, zs: readonly numb
   }
 }
 
-/** A wardrobe lying on its back, doors up, cornice to the front, strapped down. */
+/**
+ * A wardrobe lying on its back, doors up, cornice to the front, strapped down: 1.79 m
+ * over the cornice, inside the KMZ's 1.85 m box with its tailboard up. At 1.99 m it
+ * stood through both end boards.
+ */
 function wardrobe(b: MeshBuilder): void {
   const wood = flat(0x7b5130, 0.7);
   const door = flat(0x8a5c36, 0.7);
   const panel = flat(0x9a6a40, 0.7);
-  box(b, wood, [0.95, 0.55, 1.9], [0, 0.275, 0]);
-  box(b, flat(0x5e3b22, 0.7), [1.0, 0.6, 0.06], [0, 0.3, 0.96]);
-  box(b, flat(0x5e3b22, 0.7), [0.97, 0.57, 0.05], [0, 0.285, -0.96]);
+  box(b, wood, [0.95, 0.55, 1.72], [0, 0.275, 0]);
+  box(b, flat(0x5e3b22, 0.7), [1.0, 0.6, 0.06], [0, 0.3, 0.87]);
+  box(b, flat(0x5e3b22, 0.7), [0.97, 0.57, 0.05], [0, 0.285, -0.865]);
   for (const x of [-0.24, 0.24]) {
-    box(b, door, [0.46, 0.02, 1.7], [x, 0.56, 0]);
-    box(b, x < 0 ? flat(0xb8c4c8, 0.1) : panel, [0.34, 0.01, 0.6], [x, 0.575, 0.42]);
-    box(b, panel, [0.34, 0.01, 0.6], [x, 0.575, -0.42]);
+    box(b, door, [0.46, 0.02, 1.54], [x, 0.56, 0]);
+    box(b, x < 0 ? flat(0xb8c4c8, 0.1) : panel, [0.34, 0.01, 0.55], [x, 0.575, 0.38]);
+    box(b, panel, [0.34, 0.01, 0.55], [x, 0.575, -0.38]);
     cyl(b, BRASS, 0.012, 0.03, [x * 0.12, 0.585, 0], ZERO, 8);
   }
-  straps(b, 0.95, 0.58, [-0.55, 0.55]);
+  straps(b, 0.95, 0.58, [-0.5, 0.5]);
 }
 
 /**
@@ -932,29 +936,39 @@ function piano(b: MeshBuilder): void {
   }
 }
 
-/** A three-seat sofa along the bed, back to the left, olive upholstery on short legs. */
+/**
+ * A three-seat sofa along the bed, back to the left, olive upholstery on short legs:
+ * 1.78 m over the arms, inside the box (it was 1.9 m, through both end boards).
+ */
 function sofa(b: MeshBuilder): void {
   const cloth = flat(0x6b7d52, 0.95);
   const seat = flat(0x5c6f4a, 0.95);
-  soft(b, cloth, [0.85, 0.25, 1.9], 0.05, [0, 0.195, 0]);
-  for (const z of [-0.62, 0, 0.62]) soft(b, seat, [0.62, 0.16, 0.6], 0.06, [0.08, 0.38, z]);
-  soft(b, cloth, [0.22, 0.45, 1.9], 0.07, [-0.315, 0.525, 0]);
-  for (const z of [-0.87, 0.87]) soft(b, cloth, [0.85, 0.38, 0.16], 0.06, [0, 0.45, z]);
+  soft(b, cloth, [0.85, 0.25, 1.78], 0.05, [0, 0.195, 0]);
+  for (const z of [-0.56, 0, 0.56]) soft(b, seat, [0.62, 0.16, 0.54], 0.06, [0.08, 0.38, z]);
+  soft(b, cloth, [0.22, 0.45, 1.78], 0.07, [-0.315, 0.525, 0]);
+  for (const z of [-0.81, 0.81]) soft(b, cloth, [0.85, 0.38, 0.16], 0.06, [0, 0.45, z]);
   for (const x of [-0.37, 0.37]) {
-    for (const z of [-0.88, 0.88]) cyl(b, flat(0x3a2a1c, 0.6), 0.025, 0.07, [x, 0.035, z], ZERO, 8);
+    for (const z of [-0.82, 0.82]) cyl(b, flat(0x3a2a1c, 0.6), 0.025, 0.07, [x, 0.035, z], ZERO, 8);
   }
 }
 
-/** The long load: a bed with its head- and footboard, a ticking mattress and two pillows. */
+/**
+ * The long load: a one-and-a-half bed, 2.0 x 1.14 m over its head- and footboard, a
+ * ticking mattress and two pillows. Narrower than the box's inside, so it stands on the
+ * deck between the sides; longer than it, so it goes in with its headboard to the
+ * trailer's and out over the back with the tailboard off (vehicle/trailer.ts). It used
+ * to be a 3.2 x 1.6 m double lying across the tops of the sides, centred, through both
+ * end boards.
+ */
 function bed(b: MeshBuilder): void {
   const wood = flat(0x6b4528, 0.6);
-  for (const x of [-0.775, 0.775]) box(b, wood, [0.05, 0.2, 3.0], [x, 0.2, 0]);
-  box(b, wood, [1.6, 0.56, 0.06], [0, 0.28, 1.57]);
-  box(b, wood, [1.6, 0.36, 0.06], [0, 0.18, -1.57]);
-  box(b, flat(0xd9cfb8, 0.95), [1.5, 0.18, 2.98], [0, 0.29, 0]);
-  for (let i = 0; i < 6; i++) box(b, flat(0x7d93a8, 0.95), [0.03, 0.004, 2.96], [-0.6 + i * 0.24, 0.382, 0]);
-  for (const x of [-0.35, 0.35]) soft(b, flat(0xeeeae0, 0.95), [0.6, 0.1, 0.35], 0.04, [x, 0.43, 1.3]);
-  straps(b, 1.5, 0.38, [-0.8, 0.4]);
+  for (const x of [-0.545, 0.545]) box(b, wood, [0.05, 0.2, 1.9], [x, 0.2, 0]);
+  box(b, wood, [1.14, 0.56, 0.06], [0, 0.28, 0.97]);
+  box(b, wood, [1.14, 0.36, 0.06], [0, 0.18, -0.97]);
+  box(b, flat(0xd9cfb8, 0.95), [1.04, 0.18, 1.88], [0, 0.29, 0]);
+  for (let i = 0; i < 5; i++) box(b, flat(0x7d93a8, 0.95), [0.03, 0.004, 1.86], [-0.4 + i * 0.2, 0.382, 0]);
+  for (const x of [-0.25, 0.25]) soft(b, flat(0xeeeae0, 0.95), [0.44, 0.1, 0.35], 0.04, [x, 0.43, 0.7]);
+  straps(b, 1.04, 0.38, [-0.5, 0.3]);
 }
 
 const TRAILER_LOADS: Partial<Readonly<Record<ThingId, (b: MeshBuilder) => void>>> = { wardrobe, piano, sofa, bed };

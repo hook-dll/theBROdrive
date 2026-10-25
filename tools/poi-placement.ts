@@ -38,7 +38,7 @@ import {
   type GroundRect,
 } from '../src/world/poi';
 import { MarketField } from '../src/world/market';
-import { MAST_IDS, roadsideSlotOfIndex, roadsideSlotsBetween } from '../src/world/poislots';
+import { MAST_IDS, roadsideSlotOfIndex, roadsideSlotsBetween, slotPost } from '../src/world/poislots';
 import { postS, START_POST_S } from '../src/world/poststops';
 import { laybyNear, laybyOuterAt } from '../src/world/layby';
 import {
@@ -48,6 +48,7 @@ import {
   structureHalfExtents,
   type SettlementSpot,
 } from '../src/world/settlement';
+import { postParkingSlots } from '../src/world/haulbay';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
   POI_STRUCTURES,
@@ -222,7 +223,7 @@ const MAX_VERGE_M = 22;
       name: structureDef(house.structure).id,
       rect: houseRect(seedRoad, house),
     }));
-    for (const name of ['post', 'shop', 'toybox', 'pumps', 'lot', 'shelter', 'bay'] as const) {
+    for (const name of ['post', 'shop', 'toybox', 'pumps', 'shelter'] as const) {
       const at = stop.layout[name];
       if (!at) continue;
       const pose = spotPose(seedRoad, at);
@@ -230,6 +231,10 @@ const MAX_VERGE_M = 22;
       const [along, across] = SERVICE_HALF[name];
       blocks.push({ name, rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across } });
     }
+    // The parking row's slots: a waiting load or a car for sale stands in them.
+    postParkingSlots(seed, seedRoad, 0).forEach((slot, k) => {
+      blocks.push({ name: `parking slot ${k + 1}`, rect: { x: slot.x, z: slot.z, yaw: slot.yaw, halfX: slot.halfWidth, halfZ: slot.halfDepth } });
+    });
     const clearOf = (what: string, x: number, z: number, margin: number): void => {
       for (const block of blocks) {
         check(!inRect(block.rect, x, z, margin), `${where}: the ${what} stands in the ${block.name}`);
@@ -530,11 +535,12 @@ const MAX_VERGE_M = 22;
 // --- 7. settlements: nothing stands in anything -------------------------------
 //
 // Every courier/post stop is a settlement (world/settlement.ts): houses of one type on
-// both sides of the road and a service strip along one long lay-by. The layout is pure
+// both sides of the road and a service band along one long lay-by. The layout is pure
 // and spaced in the road frame; what is checked here is the world it builds, with the
 // houses that actually stand (`standingHouses`): over seeds 1-20 and the first 300 km,
 // no house in another house, on any pass of the road, on the lay-by's asphalt or on a
-// service spot, and no service on the asphalt or in another service.
+// service spot; every service and parking slot ON the lay-by's asphalt, none in another
+// (the slots touch each other); the signpost on the sand past it.
 //
 // The houses' measured sizes are written down (world/dwellings/bounds.ts) so the layout
 // can stay pure; that table must contain what the built house measures.
@@ -567,6 +573,7 @@ const MAX_VERGE_M = 22;
   const HOUSE_LAYBY_M = 1.5;
   const HOUSE_SPOT_M = 1.5;
   const SPOT_SPOT_M = 1;
+  /** A service's outline keeps this far inside the lay-by's asphalt edge; the signpost this far outside it. */
   const SPOT_ASPHALT_M = 0.3;
 
   /** Points round a rectangle's outline, a half metre apart, corners included. */
@@ -613,6 +620,8 @@ const MAX_VERGE_M = 22;
   let nearestLayby = Infinity;
   let nearestHouse = Infinity;
   let nearestSpot = Infinity;
+  /** The least asphalt between any service or slot and the lay-by's outer edge. */
+  let nearestEdge = Infinity;
   const firstFailures = failures.length;
   for (let seed = 1; seed <= SEEDS; seed++) {
     const seedRoad = new Road(seed);
@@ -638,10 +647,10 @@ const MAX_VERGE_M = 22;
         if (sides.size < 2) oneSided++;
       }
 
-      // The services as rectangles: facing the road their X runs along it; a car or
-      // a trailer parked along the road has its X across it.
-      const spots: { name: string; rect: GroundRect; s: number }[] = [];
-      const addSpot = (name: string, at: SettlementSpot | null, along: number, across: number): void => {
+      // The services as rectangles: facing the road their X runs along it. All but the
+      // signpost stand on the pad (`onPad`); the parking row's slots touch one another.
+      const spots: { name: string; rect: GroundRect; s: number; onPad: boolean; slot: boolean }[] = [];
+      const addSpot = (name: string, at: SettlementSpot | null, along: number, across: number, onPad = true): void => {
         if (!at) return;
         const pose = spotPose(seedRoad, at);
         const alongRoad = Math.abs(Math.sin(at.yaw)) < 0.5;
@@ -649,14 +658,27 @@ const MAX_VERGE_M = 22;
           name,
           s: at.s,
           rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across },
+          onPad,
+          slot: false,
         });
       };
-      for (const name of ['post', 'shop', 'toybox', 'pumps', 'lot', 'shelter', 'bay'] as const) {
+      for (const name of ['post', 'shop', 'toybox', 'pumps', 'shelter'] as const) {
         addSpot(name, layout[name], SERVICE_HALF[name][0], SERVICE_HALF[name][1]);
+      }
+      if (layout.parking) {
+        postParkingSlots(seed, seedRoad, slotPost(slot)).forEach((bay, k) => {
+          spots.push({
+            name: `parking slot ${k + 1}`,
+            s: bay.s,
+            rect: { x: bay.x, z: bay.z, yaw: bay.yaw, halfX: bay.halfWidth, halfZ: bay.halfDepth },
+            onPad: true,
+            slot: true,
+          });
+        });
       }
       if (own) {
         // The signpost (world/signposts.ts): two posts and a 2.6 m board at the pad's start.
-        addSpot('signpost', { s: own.sPadStart + 4, lateral: own.side * (own.padOuter + 1), yaw: 0.5 * Math.PI * own.side }, 1.4, 0.2);
+        addSpot('signpost', { s: own.sPadStart + 4, lateral: own.side * (own.padOuter + 1), yaw: 0.5 * Math.PI * own.side }, 1.4, 0.2, false);
       }
 
       const rects = standing.map((house) => houseRect(seedRoad, house));
@@ -696,6 +718,7 @@ const MAX_VERGE_M = 22;
       for (let i = 0; i < spots.length; i++) {
         const spot = spots[i]!;
         for (let j = i + 1; j < spots.length; j++) {
+          if (spot.slot && spots[j]!.slot) continue;
           const gap = rectGap(spot.rect, spots[j]!.rect);
           nearestSpot = Math.min(nearestSpot, gap);
           check(gap >= SPOT_SPOT_M, `${where}: the ${spot.name} and the ${spots[j]!.name} are ${gap.toFixed(2)} m apart`);
@@ -703,11 +726,18 @@ const MAX_VERGE_M = 22;
         if (!own) continue;
         for (const p of outline(spot.rect)) {
           const at = seedRoad.project(p.x, p.z, spot.s);
+          const u = at.lateral * own.side;
           const outer = laybyOuterAt(own, at.s, seedRoad.halfWidthAt(at.s));
-          check(
-            at.lateral * own.side >= outer + SPOT_ASPHALT_M,
-            `${where}: the ${spot.name} stands on the lay-by's asphalt`,
-          );
+          if (spot.onPad) {
+            const margin = outer - u;
+            nearestEdge = Math.min(nearestEdge, margin);
+            check(
+              u >= own.padInner && margin >= SPOT_ASPHALT_M,
+              `${where}: the ${spot.name} is off the lay-by's asphalt (${margin.toFixed(2)} m inside its edge)`,
+            );
+          } else {
+            check(u >= outer + SPOT_ASPHALT_M, `${where}: the ${spot.name} stands on the lay-by's asphalt`);
+          }
         }
       }
     }
@@ -720,7 +750,8 @@ const MAX_VERGE_M = 22;
   );
   console.log(
     `  nearest: house-asphalt ${nearestRoad.toFixed(2)} m, house-lay-by ${nearestLayby.toFixed(2)} m, ` +
-      `house-house ${nearestHouse.toFixed(2)} m, spot-spot ${nearestSpot.toFixed(2)} m; ` +
+      `house-house ${nearestHouse.toFixed(2)} m, spot-spot ${nearestSpot.toFixed(2)} m, ` +
+      `spot-asphalt edge ${nearestEdge.toFixed(2)} m inside; ` +
       `${failures.length - firstFailures} overlaps`,
   );
 }

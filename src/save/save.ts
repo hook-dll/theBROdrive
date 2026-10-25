@@ -734,7 +734,14 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   }
   const load = migrateTrailerLoad(raw.load);
   if (load !== null) trailer.load = load;
-  if (isThingId(raw.loadThing)) trailer.loadThing = raw.loadThing;
+  if (isThingId(raw.loadThing)) {
+    trailer.loadThing = raw.loadThing;
+    // A contract thing's long load is the catalogue's shape, not the save's: a bed
+    // saved before 2026-10-25 was a 3.2 x 1.6 m box across the tops of the sides, which
+    // stood against the headboard now would put the trailer on its tail.
+    const shape = thingDef(raw.loadThing).trailerLoad;
+    if (shape) trailer.load = { halfExtents: shape };
+  }
   return trailer;
 }
 

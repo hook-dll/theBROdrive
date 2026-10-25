@@ -13,7 +13,7 @@ import { contractIdOf, type ContractCargoItem } from '../items/items';
 import { createItemMesh, disposeItemMeshResources } from '../render/partmesh';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureField, type WorldFixture } from './fixturefield';
-import { postHaulBay } from './haulbay';
+import { postParkingSlot } from './haulbay';
 import { paintSign, repaintSign, SIGN_PLANE } from './market';
 import { box, C, mergeKitStatics } from './poi/kit';
 import { deliveryStickers, laybyCarId } from './post';
@@ -23,11 +23,16 @@ import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
 
 /**
  * THE TEDDY SHELTER (game-design2.md §6.3, §10): on every settlement's service strip at
- * its reserved spot (`SettlementLayout.shelter`), a bench under a tin roof with three
- * walls — the back and the two sides — against the wind and the rain, open to the pad.
- * Above the bench hangs the timetable: where the party waiting goes and how far, how many
- * wait, what each pays (the lay-by car's sticker bonus in it, as the post's cards print
- * it), and the urgent clock or the race.
+ * its reserved spot (`SettlementLayout.shelter`), a bench under a lean-to tin canopy, open
+ * all round. Two steel posts at the back carry everything: each has an arm out under the
+ * seat with a strut beneath it, and at its top a rafter under the canopy, which falls to
+ * the back so the rain runs off behind the bench and not onto the pad. No walls, no floor
+ * slab: only the posts' concrete footings. It was a three-walled box (2026-10-24), and
+ * "the stop is a massive box now — make it light: only a bench and a skewed roof over
+ * it, two metal posts carrying both" (owner, 2026-10-25).
+ * On the post at the waiting party's end hangs the timetable: where the party waiting
+ * goes and how far, how many wait, what each pays (the lay-by car's sticker bonus in it,
+ * as the post's cards print it), and the urgent clock or the race.
  *
  * The party's teddies sit on the bench (the teddy item's own model); who is still there
  * is read from the world (contracts/shelters.ts `shelterBench`), so a teddy taken here or
@@ -39,28 +44,45 @@ import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
  * Shared kit materials, merged; only the timetable has its own painted board.
  */
 
-// The shelter, local metres: the floor's top centre at the origin, the open front to -Z.
+// The shelter, local metres: the origin on the ground over the footprint's highest
+// corner, at the canopy's centre; the open front (where one sits facing) to -Z.
+/** The canopy's half width and half depth: the spot's footprint. */
 const HALF_W = SERVICE_HALF.shelter[0];
 const HALF_D = SERVICE_HALF.shelter[1];
-const WALL_T = 0.08;
-const WALL_H = 2.15;
-const ROOF_T = 0.08;
-const SLAB_T = 0.12;
-/** The bench: seat height and depth, its front edge, its length. */
+const ROOF_T = 0.05;
+/** The canopy's centre height (its underside's middle) and its fall to the back, rad. */
+const ROOF_Y = 2.3;
+const ROOF_PITCH = 0.12;
+/** The rafters under the canopy, one on each post: their height and width. */
+const RAFTER_H = 0.1;
+const RAFTER_W = 0.06;
+const RAFTER_Y = ROOF_Y - ROOF_T / 2 - RAFTER_H / 2;
+/** The two posts: their x either side, their z behind the bench, their square section. */
+const POST_X = 1.3;
+const POST_Z = 0.42;
+const POST_W = 0.08;
+/** A post's top: where its rafter's middle line passes over it. */
+const POST_TOP = RAFTER_Y - Math.tan(ROOF_PITCH) * POST_Z;
+/** The bench: seat height and depth, its middle (just in front of the posts), its length. */
 const SEAT_Y = 0.45;
 const SEAT_D = 0.42;
-const SEAT_Z = HALF_D - WALL_T - SEAT_D / 2 - 0.04;
+const SEAT_Z = POST_Z - POST_W / 2 - 0.03 - SEAT_D / 2;
 const BENCH_HALF_L = 1.6;
+/** The backrest's two slats, bolted to the posts' fronts: their heights and their z. */
+const BACK_SLATS = [0.66, 0.84] as const;
+const BACK_Z = POST_Z - POST_W / 2 - 0.015;
 /** Places along the bench, viewer's left to right: the waiting party's first, the arrivals' after. */
 const PLACES = 6;
 const PLACE_STEP = (2 * BENCH_HALF_L - 0.3) / (PLACES - 1);
 const WAITING_PLACES = 3;
 /** A teddy's pick box about its middle, half sizes. */
 const TEDDY_HALF: readonly [number, number, number] = [0.16, 0.2, 0.16];
-/** The timetable: its board on the back wall over the bench. */
-const BOARD_W = 1.25;
-const BOARD_H = 0.78;
-const BOARD_Y = 1.45;
+/** The timetable: its board on the front of the post at the waiting places' end, over the backrest. */
+const BOARD_W = 0.8;
+const BOARD_H = 0.75;
+const BOARD_X = -POST_X;
+const BOARD_Y = 1.5;
+const BOARD_Z = POST_Z - POST_W / 2 - 0.015;
 const BOARD_PAINT = ['#f2ecd8', '#1f3f7a'] as const;
 /** The bench and the board are read again this often, s. */
 const REFRESH_S = 0.4;
@@ -124,7 +146,7 @@ export function buildShelter(
   const { x, z, yaw } = spotPose(ctx.road, at);
   const c = Math.cos(yaw);
   const s = Math.sin(yaw);
-  // The floor's top over the highest corner; the slab reaches under the lowest.
+  // The ground over the highest corner; the footings reach under the lowest.
   let low = Infinity;
   let high = -Infinity;
   for (const [lx, lz] of [[-HALF_W, -HALF_D], [HALF_W, -HALF_D], [-HALF_W, HALF_D], [HALF_W, HALF_D]] as const) {
@@ -132,47 +154,57 @@ export function buildShelter(
     low = Math.min(low, h);
     high = Math.max(high, h);
   }
-  const y = high + 0.06;
-  const slab = y - low + 0.08;
+  const y = high + 0.02;
+  const footBottom = low - y - 0.15;
 
   const root = new THREE.Group();
   root.name = 'teddy-shelter';
   root.position.set(x - ctx.originX, y, z - ctx.originZ);
   root.rotation.y = yaw;
 
-  box(root, [2 * HALF_W, slab, 2 * HALF_D], [0, -slab / 2, 0], C.concrete);
-  // The walls: the back across, the two sides out to the front.
-  box(root, [2 * HALF_W, WALL_H, WALL_T], [0, WALL_H / 2, HALF_D - WALL_T / 2], C.plasterBlue, undefined, false, 'plaster');
+  // The bench's arm runs from the post's back out under the seat's front; its strut
+  // from low on the post's front up to under the arm's front end.
+  const armFront = SEAT_Z - SEAT_D / 2;
+  const armLength = POST_Z + POST_W / 2 - armFront;
+  const strutDz = armFront + 0.05 - (POST_Z - POST_W / 2);
+  const strutDy = SEAT_Y - 0.1 - 0.15;
+  const strutLength = Math.hypot(strutDz, strutDy);
   for (const sx of [-1, 1]) {
-    box(root, [WALL_T, WALL_H, 2 * HALF_D - WALL_T], [sx * (HALF_W - WALL_T / 2), WALL_H / 2, -WALL_T / 2], C.plasterBlue, undefined, false, 'plaster');
-    // A red band round each wall's front edge, where a lamp finds it.
-    box(root, [WALL_T + 0.01, WALL_H, 0.06], [sx * (HALF_W - WALL_T / 2), WALL_H / 2, -HALF_D + 0.03], C.fadedRed);
+    const px = sx * POST_X;
+    // The post in its concrete footing, up to its rafter under the canopy.
+    box(root, [0.22, 0.05 - footBottom, 0.22], [px, (0.05 + footBottom) / 2, POST_Z], C.concrete);
+    box(root, [POST_W, POST_TOP, POST_W], [px, POST_TOP / 2, POST_Z], C.darkMetal, undefined, false, 'metal');
+    box(root, [RAFTER_W, RAFTER_H, 2 * HALF_D - 0.1], [px, RAFTER_Y, 0], C.darkMetal, [ROOF_PITCH, 0, 0], false, 'metal');
+    box(root, [0.05, 0.06, armLength], [px, SEAT_Y - 0.07, armFront + armLength / 2], C.darkMetal, undefined, false, 'metal');
+    box(root, [0.04, 0.04, strutLength], [px, 0.15 + strutDy / 2, POST_Z - POST_W / 2 + strutDz / 2], C.darkMetal, [Math.atan2(-strutDy, strutDz), 0, 0], false, 'metal');
   }
-  // The tin roof, falling to the back, and its fascia over the open front.
-  box(root, [2 * HALF_W, ROOF_T, 2 * HALF_D], [0, WALL_H + ROOF_T / 2 + 0.05, 0], C.roofTin, [0.05, 0, 0], false, 'metal');
-  box(root, [2 * HALF_W, 0.16, 0.04], [0, WALL_H + 0.06, -HALF_D + 0.02], C.white);
-  // The bench: three slats on iron legs, two for the back against the wall.
+  // The tin canopy, falling to the back, and its fascia along the high front edge.
+  box(root, [2 * HALF_W, ROOF_T, 2 * HALF_D], [0, ROOF_Y + ROOF_T / 2, 0], C.roofTin, [ROOF_PITCH, 0, 0], false, 'metal');
+  box(
+    root,
+    [2 * HALF_W, 0.1, 0.03],
+    [0, ROOF_Y + ROOF_T / 2 + HALF_D * Math.sin(ROOF_PITCH) - 0.03, -HALF_D * Math.cos(ROOF_PITCH) - 0.015],
+    C.white,
+  );
+  // The bench: three slats on the arms, two for the back on the posts' fronts.
   for (const k of [-1, 0, 1]) box(root, [2 * BENCH_HALF_L, 0.04, SEAT_D / 3 - 0.02], [0, SEAT_Y - 0.02, SEAT_Z + (k * SEAT_D) / 3], C.timber);
-  for (const lx of [-BENCH_HALF_L + 0.12, 0, BENCH_HALF_L - 0.12]) {
-    box(root, [0.05, SEAT_Y - 0.04, SEAT_D - 0.06], [lx, (SEAT_Y - 0.04) / 2, SEAT_Z], C.darkMetal);
-  }
-  for (const by of [0.66, 0.84]) box(root, [2 * BENCH_HALF_L, 0.1, 0.03], [0, by, HALF_D - WALL_T - 0.02], C.timber);
+  for (const by of BACK_SLATS) box(root, [2 * BENCH_HALF_L, 0.1, 0.03], [0, by, BACK_Z], C.timber);
   // The timetable's frame.
-  box(root, [BOARD_W + 0.06, BOARD_H + 0.06, 0.03], [0, BOARD_Y, HALF_D - WALL_T - 0.015], C.darkTimber);
+  box(root, [BOARD_W + 0.06, BOARD_H + 0.06, 0.03], [BOARD_X, BOARD_Y, BOARD_Z], C.darkTimber);
 
   const world = ctx.world;
   const bench = shelterBench(world.state, world.seed, stop.index);
-  const bay = postHaulBay(world.seed, ctx.road, stop.index);
+  const bay = postParkingSlot(world.seed, ctx.road, stop.index, 'handIn');
   const stickersNow = (): number => {
     const car = laybyCarId(world.state, bay.x, bay.z, (id) => world.state.cars[id] ?? null);
     return car ? carUniqueness(world.state.cars[car]!) : 0;
   };
   const stickers = stickersNow();
-  const boardMaterial = paintSign(timetable(world, stop, bench, stickers), ...BOARD_PAINT, 512, 320);
+  const boardMaterial = paintSign(timetable(world, stop, bench, stickers), ...BOARD_PAINT, 512, 480);
   const board = new THREE.Mesh(SIGN_PLANE, boardMaterial);
   board.userData.kitKeep = true;
   board.scale.set(BOARD_W, BOARD_H, 1);
-  board.position.set(0, BOARD_Y, HALF_D - WALL_T - 0.032);
+  board.position.set(BOARD_X, BOARD_Y, BOARD_Z - 0.017);
   board.rotation.y = Math.PI;
   root.add(board);
 
@@ -193,14 +225,17 @@ export function buildShelter(
 
   if (!ctx.hasPhysics) return;
   const rotation = yawRotation(yaw);
-  const solid = (lx: number, ly: number, lz: number, hx: number, hy: number, hz: number): void => {
-    addStatic(ctx, bodies, colliders, x + c * lx + s * lz, y + ly, z - s * lx + c * lz, RAPIER.ColliderDesc.cuboid(hx, hy, hz), SurfaceType.Concrete, rotation);
+  const solid = (lx: number, ly: number, lz: number, hx: number, hy: number, hz: number, rot = rotation): void => {
+    addStatic(ctx, bodies, colliders, x + c * lx + s * lz, y + ly, z - s * lx + c * lz, RAPIER.ColliderDesc.cuboid(hx, hy, hz), SurfaceType.Concrete, rot);
   };
-  solid(0, -slab / 2, 0, HALF_W, slab / 2, HALF_D);
-  solid(0, WALL_H / 2, HALF_D - WALL_T / 2, HALF_W, WALL_H / 2, WALL_T / 2);
-  for (const sx of [-1, 1]) solid(sx * (HALF_W - WALL_T / 2), WALL_H / 2, -WALL_T / 2, WALL_T / 2, WALL_H / 2, HALF_D - WALL_T / 2);
-  solid(0, WALL_H + ROOF_T / 2 + 0.05, 0, HALF_W, ROOF_T / 2, HALF_D);
+  for (const sx of [-1, 1]) solid(sx * POST_X, (POST_TOP + footBottom) / 2, POST_Z, POST_W / 2, (POST_TOP - footBottom) / 2, POST_W / 2);
+  // The seat down to the ground, so nothing dropped rolls under it out of reach; the backrest.
   solid(0, SEAT_Y / 2, SEAT_Z, BENCH_HALF_L, SEAT_Y / 2, SEAT_D / 2);
+  const backTop = BACK_SLATS[1] + 0.05;
+  solid(0, (SEAT_Y + backTop) / 2, BACK_Z, BENCH_HALF_L, (backTop - SEAT_Y) / 2, 0.015);
+  // The canopy, pitched with the yaw: a van's roof or a climber finds it.
+  const pitched = new THREE.Quaternion().setFromEuler(new THREE.Euler(ROOF_PITCH, yaw, 0, 'YXZ'));
+  solid(0, ROOF_Y + ROOF_T / 2, 0, HALF_W, ROOF_T / 2, HALF_D, { x: pitched.x, y: pitched.y, z: pitched.z, w: pitched.w });
 
   const shelter = new Shelter(world, stop, x, y, z, yaw, bay.x, bay.z, teddies, boardMaterial, stickersNow, bench, stickers);
   registered.push(fixtures.register(shelter));
@@ -221,7 +256,7 @@ class Shelter implements WorldFixture {
   constructor(
     private readonly world: GameWorld,
     private readonly stop: PostStop,
-    /** The floor's top centre, ABSOLUTE metres, and the front's yaw. */
+    /** The root's origin (on the ground at the canopy's centre), ABSOLUTE metres, and the front's yaw. */
     private readonly x: number,
     private readonly y: number,
     private readonly z: number,
@@ -295,11 +330,17 @@ class Shelter implements WorldFixture {
       }
     });
     if (best > range) {
-      // The bench's seat and the back wall with the timetable: not the air inside, so a
-      // thing lying on the floor or on the seat is still picked up before the shelter.
+      // The bench's seat and backrest, the posts and the timetable: not the air under the
+      // canopy, so a thing lying on the ground or on the seat is still picked up before
+      // the shelter.
       const seat = rayBox(ox, oy, oz, lx, dy, lz, 0, SEAT_Y / 2, SEAT_Z, BENCH_HALF_L, SEAT_Y / 2, SEAT_D / 2);
-      const wall = rayBox(ox, oy, oz, lx, dy, lz, 0, WALL_H / 2, HALF_D - WALL_T / 2 - 0.03, HALF_W, WALL_H / 2, WALL_T / 2 + 0.03);
-      best = Math.min(seat, wall);
+      const backTop = BACK_SLATS[1] + 0.05;
+      const back = rayBox(ox, oy, oz, lx, dy, lz, 0, (SEAT_Y + backTop) / 2, BACK_Z, BENCH_HALF_L, (backTop - SEAT_Y) / 2, 0.03);
+      const board = rayBox(ox, oy, oz, lx, dy, lz, BOARD_X, BOARD_Y, BOARD_Z, BOARD_W / 2 + 0.03, BOARD_H / 2 + 0.03, 0.03);
+      best = Math.min(seat, back, board);
+      for (const sx of [-1, 1]) {
+        best = Math.min(best, rayBox(ox, oy, oz, lx, dy, lz, sx * POST_X, POST_TOP / 2, POST_Z, POST_W / 2 + 0.02, POST_TOP / 2, POST_W / 2 + 0.02));
+      }
       part = { kind: 'shelter' };
     }
     this.part = best > range ? null : part;
