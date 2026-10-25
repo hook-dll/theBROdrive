@@ -24,6 +24,7 @@ import type { CarState, GameWorld, TrailerLoad, TrailerState } from '../game/sta
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
+import { TRAILER_SPAWN_HEIGHT } from '../vehicle/trailer';
 import { contractKindOf, contractThing, type ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -50,6 +51,16 @@ const CAR_CENTRE_GAP_M = 1.2;
  * half, so the trailer and the car stand clear of each other.
  */
 const HAUL_PLACE_HALF_Z = 2.7;
+/**
+ * The loaded trailer is set down this far above its settled ride height, m, not
+ * dropped. Dropped 0.5 m (the 0.9 m a POI's empty spare falls), it lands wheels
+ * first, the nose comes down on the prop leg and bounces back up 13°; a piano rides
+ * high enough (its centre of mass 0.53 m over the axle, 0.16 m ahead of it) that
+ * anything past 17° tips the trailer onto its tail, and it stood there at 28° nose-up
+ * on the lay-by. Set down 0.085 m it settles within 0.8° (measured in game,
+ * 230 kg).
+ */
+const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
 export interface ContractWorldDeps {
   readonly world: GameWorld;
@@ -130,11 +141,12 @@ function spawnContractTrailer(
 ): void {
   const id = contractTrailerId(item);
   if (deps.world.state.trailers[id]) return;
-  // Behind the haul's place, drawbar up the pad.
+  // Behind the haul's place, the drawbar pointing up the pad, the way the road runs, at
+  // the car on that place: a car stopped there backs a metre onto the ball.
   const back = HAUL_PLACE_HALF_Z + TRAILER_CENTRE_GAP_M;
   const x = pose.x - Math.sin(pose.yaw) * back;
   const z = pose.z - Math.cos(pose.yaw) * back;
-  const yaw = pose.yaw + Math.PI;
+  const yaw = pose.yaw;
   const trailer: TrailerState = {
     id,
     hitchedTo: null,
@@ -148,9 +160,8 @@ function spawnContractTrailer(
     // the middle of its box; a thing as long as the box simply stays in the middle.
     cargoZ: 1,
     x,
-    // Clear of the ground so it drops onto its own suspension rather than starting
-    // inside the terrain, exactly as a POI's spare trailer does.
-    y: deps.terrain.heightAt(x, z, pose.s) + 0.9,
+    // Set down on its own suspension; see TRAILER_SETTLE_CLEARANCE_M.
+    y: deps.terrain.heightAt(x, z, pose.s) + TRAILER_SPAWN_HEIGHT + TRAILER_SETTLE_CLEARANCE_M,
     z,
     qx: 0,
     qy: Math.sin(yaw / 2),
