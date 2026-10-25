@@ -18,11 +18,13 @@
  *   kick       65 km/h on a straight, a 0.3 s pulse of 1 degree, then hands steady: the
  *              articulation's peaks 1-3 s and 6-8 s after it (a snake grows, a stable
  *              rig decays) and the towed car's widest swing off the line.
- *   bend       the road's tightest corner, R 85 m and 50 degrees, at 60 and 70 km/h (and
- *              the tower alone at 70, for scale), a 140 m sweeper at 70 and the 85 m on
- *              gravel at 50: the tower's worst distance off the line, the towed car's,
+ *   bend       the road's tightest corner, R 85 m and 50 degrees, at 60 km/h, and at 70
+ *              as `limit` — past the coupled limit, where the rig is expected to fold —
+ *              with the tower alone at 70 for scale; a 140 m sweeper at 70 and the 85 m
+ *              on gravel at 50: the tower's worst distance off the line, the towed car's,
  *              the widest articulation and the hardest bar force.
- *   hairpin    a 30 m radius at 40 km/h, tighter than any road corner.
+ *   hairpin    a 30 m radius at 35 km/h, tighter than any road corner, and the tower
+ *              alone at 40.
  *   brake      60 km/h to rest at full pedal on the straight: stopping distance, bar
  *              force, articulation (a jackknife is the articulation running away).
  *   brakebend  the same pedal half way round the R 85 corner from 60 km/h.
@@ -798,11 +800,17 @@ async function main(): Promise<void> {
     }
     console.log(`  ${await kick(tower, towed)}`);
     console.log(`  ${await bend(tower, towed, 'bend R85 60', 85, 50, 60, SurfaceType.Asphalt)}`);
-    console.log(`  ${await bend(tower, towed, 'bend R85 70', 85, 50, 70, SurfaceType.Asphalt)}`);
+    // Past the documented limit (vehicle-pipeline.md §24.1: 58-62 km/h on R 85 coupled):
+    // the tower's rear axle lets go under the ball's side load and the rig folds. The
+    // solo line beside it is the tower alone holding the same corner, for scale.
+    console.log(`  ${await bend(tower, towed, 'limit R85 70', 85, 50, 70, SurfaceType.Asphalt)}`);
     console.log(`  ${await bend(tower, towed, 'solo R85 70', 85, 50, 70, SurfaceType.Asphalt, 'solo')}`);
     console.log(`  ${await bend(tower, towed, 'sweep R140 70', 140, 40, 70, SurfaceType.Asphalt)}`);
     console.log(`  ${await bend(tower, towed, 'gravel R85 50', 85, 50, 50, SurfaceType.Gravel)}`);
-    console.log(`  ${await bend(tower, towed, 'hairpin R30 40', 30, 90, 40, SurfaceType.Asphalt)}`);
+    // 35, under the UAZ + Volga limit (enters 37 holds, 38 folds: the UAZ's driven rear
+    // axle slides under the ball's load while the follower adds throttle to hold speed).
+    console.log(`  ${await bend(tower, towed, 'hairpin R30 35', 30, 90, 35, SurfaceType.Asphalt)}`);
+    console.log(`  ${await bend(tower, towed, 'solo R30 40', 30, 90, 40, SurfaceType.Asphalt, 'solo')}`);
     console.log(`  ${await brake(tower, towed, false)}`);
     console.log(`  ${await brake(tower, towed, true)}`);
     console.log(`  ${await rest(tower, towed)}`);

@@ -42,7 +42,11 @@
   is re-hitched before the solve: the towed car goes behind the tower, square and still.
   `tow-bench` adds `park`, backing 90° into a 3.2 m bay: round in 12–16 m with 0.2 m
   spread and articulation ≤ 44°. It also adds `teleport` (was 123 m ahead at 200 m/s,
-  now 4–5 m behind at 0°), and `reverse` is now 15 m out of a turn.
+  now 4–5 m behind at 0°), and `reverse` is now 15 m out of a turn. The R 85 run at 70
+  km/h is now labelled `limit`: it is past the documented coupled limit and folds on
+  purpose. The hairpin runs at 35 km/h. UAZ + Volga holds it up to a 37 km/h entry and
+  folds from 38, when the UAZ's driven rear axle slides. The bar, the castor and the
+  joint stay sound. A tower-alone hairpin at 40 km/h is added.
 
 - EVERY CAR HAS ITS OWN BOOT AND COMFORT (game-design2.md §13.6; `vehicle/carmodels.ts`
   `CarModelDef.trunkGrid` / `comfort`, `comfortFactor`, `CarComfort`; `vehicle/trunk.ts`
