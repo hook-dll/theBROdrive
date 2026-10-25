@@ -104,8 +104,9 @@ export const START_MONEY = 45;
 /**
  * Builds the starter car: the VAZ-1111 Oka, the cheapest car on the road, every
  * drive alike (economy plan: the first car is earned up from here). Its fuel, fluids
- * and bonnet wear stay seed-random, it is parked on the start settlement's lay-by, and
- * its papers are the player's.
+ * and bonnet wear stay seed-random, and so do its factory colour and wheels: both are
+ * hashed from the car's id (render/carmodel.ts), so the id carries the seed. It is
+ * parked on the start settlement's lay-by, and its papers are the player's.
  *
  * It takes the game's own `road`/`terrain` rather than constructing a second pair
  * (which meant a synchronous spine build while the loading cover was up).
@@ -114,11 +115,12 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
   const site = storySite(world.seed, road, terrain);
 
   const def = carModel(START_CAR_MODEL_ID);
+  const carId = `car:start:${world.seed.toString(36)}`;
   const engine = modelEngine(def);
 
   // Enough for the first courier and a little over; the next litre is bought.
   const fuelLitres = Math.min(8 + hash01(world.seed, 0x3f1) * 4, def.tankLitres);
-  const bonnet = createBonnetStorage('car:start', def.engineId, 0.15 + hash01(world.seed, 0x3f4) * 0.2);
+  const bonnet = createBonnetStorage(carId, def.engineId, 0.15 + hash01(world.seed, 0x3f4) * 0.2);
   const waterLitres = bonnetWaterCapacity(bonnet) * (0.45 + hash01(world.seed, 0x3f2) * 0.3);
   const oilLitres = oilCapacity(engine) * (0.4 + hash01(world.seed, 0x3f3) * 0.35);
 
@@ -132,7 +134,7 @@ export function createStartingCar(world: GameWorld, road: Road, terrain: Terrain
   const half = yaw / 2;
 
   return {
-    id: 'car:start',
+    id: carId,
     modelId: def.id,
     papers: true,
     stickers: [],
