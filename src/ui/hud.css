@@ -292,10 +292,8 @@ body.is-machine-focus .hud-crosshair {
  *  out of the way of every camera: faint glass in the corners — the  *
  *  navigator (hudmap.ts) left, the gyro and the pedal lever          *
  *  (hudgyro.ts) right — and between them the POD: the segment        *
- *  display, the money jar (hudjar.ts) beside it. The glass is lit    *
- *  like a car stereo of about 2000, in the backlight's one colour    *
- *  (Settings.hudBacklight), faults in red; the pod, the jar and the  *
- *  balls in it are things, not light.                                *
+ *  display. The glass is lit like a car stereo of about 2000, in     *
+ *  one amber-orange, faults in red; the pod is a thing, not light.   *
  * ------------------------------------------------------------------ */
 
 #ui {
@@ -304,14 +302,15 @@ body.is-machine-focus .hud-crosshair {
 }
 
 .hud-panel {
-  --lcd-on: #84d6ff;
-  --lcd-hot: #e4f6ff;
-  --lcd-glow: rgba(132, 214, 255, 0.45);
-  --lcd-dim: rgba(132, 214, 255, 0.13);
-  --lcd-mid: rgba(132, 214, 255, 0.45);
-  --lcd-edge: rgba(132, 214, 255, 0.24);
-  --lcd-glass: #07121a;
-  --lcd-alarm: #ff5b3a;
+  /* Amber-orange, the menu's accent (menu.css --m-accent) lit from behind. */
+  --lcd-on: #ff9a52;
+  --lcd-hot: #ffe3c8;
+  --lcd-glow: rgba(255, 140, 64, 0.45);
+  --lcd-dim: rgba(255, 140, 64, 0.13);
+  --lcd-mid: rgba(255, 140, 64, 0.45);
+  --lcd-edge: rgba(255, 140, 64, 0.26);
+  --lcd-glass: #160c05;
+  --lcd-alarm: #ff3b4e;
   /* The bezels' moulded plastic. */
   --bezel-hi: #48433b;
   --bezel: #1d1b17;
@@ -325,27 +324,6 @@ body.is-machine-focus .hud-crosshair {
   font-family: var(--menu-font-cond, 'Arial Narrow', sans-serif);
   color: var(--lcd-on);
   pointer-events: none;
-}
-
-.hud-panel[data-backlight='green'] {
-  --lcd-on: #a9ee6c;
-  --lcd-hot: #efffdc;
-  --lcd-glow: rgba(169, 238, 108, 0.42);
-  --lcd-dim: rgba(169, 238, 108, 0.12);
-  --lcd-mid: rgba(169, 238, 108, 0.42);
-  --lcd-edge: rgba(169, 238, 108, 0.22);
-  --lcd-glass: #08120a;
-}
-
-.hud-panel[data-backlight='amber'] {
-  --lcd-on: #ffb54a;
-  --lcd-hot: #fff0d6;
-  --lcd-glow: rgba(255, 181, 74, 0.42);
-  --lcd-dim: rgba(255, 181, 74, 0.12);
-  --lcd-mid: rgba(255, 181, 74, 0.42);
-  --lcd-edge: rgba(255, 181, 74, 0.22);
-  --lcd-glass: #150e06;
-  --lcd-alarm: #ff4630;
 }
 
 /* THE NAVIGATOR (hudmap.ts) and THE GYRO (hudgyro.ts): faint glass over the world,
@@ -550,7 +528,7 @@ body.is-machine-focus .hud-crosshair {
   opacity: calc(var(--hud-faint) * 0.45);
 }
 
-/* THE POD between the corners: the display hung from the top edge, the jar beside it. Its frame
+/* THE POD between the corners: the display hung from the top edge. Its frame
    says who drives: plain is the player's own hands, a coloured frame is a car driving
    itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the whole
    road at their limit. */
@@ -577,21 +555,6 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-pod[class*='is-autopilot-'] {
   border-width: 0 2px 2px;
-}
-
-/* THE MONEY JAR (hudjar.ts) hung beside the pod, left of the display: glass in section,
-   the balls in it. Sized in em by hudjar.ts. */
-.hud-jar {
-  position: absolute;
-  /* The jar's own top a little under the screen's edge; the canvas round it is for balls in the air. */
-  top: calc(-0.6em + env(safe-area-inset-top));
-  right: calc(100% - 2.2em);
-}
-
-.hud-jar-canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
 }
 
 .hud-lcd {
@@ -666,6 +629,37 @@ body.is-machine-focus .hud-crosshair {
   opacity: 0.35;
 }
 
+/* THE MONEY JAR (hudjar.ts) in the bottom right corner, out only on foot on a lay-by:
+   it rises into view and sinks away. Sized in em by hudjar.ts. */
+.hud-jar {
+  position: absolute;
+  right: calc(0.6 * var(--hud-u) + env(safe-area-inset-right));
+  bottom: calc(0.4 * var(--hud-u) + env(safe-area-inset-bottom));
+  font-size: calc(1.3 * var(--hud-u));
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(30%);
+  transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.hud-jar.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.hud-jar-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (pointer: coarse) {
+  /* Above the thumbs' controls. */
+  .hud-jar {
+    bottom: 46vh;
+  }
+}
+
 @media (pointer: coarse) {
   /* Phones draw the panel smaller: the screen is small and the thumbs are on it. */
   #ui {
@@ -680,7 +674,7 @@ body.is-machine-focus .hud-crosshair {
   }
 }
 
-/* Narrower still, the navigator gives up width so the jar keeps clear of it. */
+/* Narrower still, the navigator gives up width so the pod keeps clear of it. */
 @media (max-width: 1100px) {
   .hud-navi {
     width: 19em;
@@ -765,8 +759,7 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-toasts {
   position: absolute;
-  /* Under the jar hung beside the display. */
-  top: calc(9.6 * var(--hud-u) + env(safe-area-inset-top) + 8px);
+  top: calc(6.6 * var(--hud-u) + env(safe-area-inset-top) + 12px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;

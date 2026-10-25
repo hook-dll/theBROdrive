@@ -1,10 +1,10 @@
 /**
  * tools/look/hud.mjs
  *
- * Screenshots of the HUD panel (ui/hud.ts, ui/hudmap.ts, ui/hudgyro.ts, ui/balls.ts) in the real game:
- * driving under the autopilot with a fat purse and a thin one, a pile mid-change, each
- * backlight, on foot, far off the road, at a post's shop with prices on its cards, and
- * at a phone's width. Each card is also painted alone at full size (`card-*.png`), so
+ * Screenshots of the HUD (ui/hud.ts, ui/hudmap.ts, ui/hudgyro.ts, ui/hudjar.ts, ui/balls.ts)
+ * in the real game: driving under the autopilot and by hand, on foot, far off the road,
+ * on foot at a post's shop with the money jar out — a pour, the merges after it and a
+ * split to pay small change — prices on the shop's cards, and at a phone's width. Each card is also painted alone at full size (`card-*.png`), so
  * the balls on it can be judged without the world around them.
  *
  *   npm run dev -- --port 5199          (in another terminal)
@@ -36,7 +36,6 @@ try {
     console.log(`${out}/${name}.png`);
   };
   const money = (rubles) => page.evaluate((r) => window.__bro.world.apply({ t: 'money', rubles: r }), rubles);
-  const backlight = (b) => page.evaluate((v) => document.querySelector('.hud-panel')?.setAttribute('data-backlight', v), b);
 
   await money(1347);
   await page.evaluate(() => {
@@ -49,33 +48,6 @@ try {
   await page.evaluate(() => window.__bro.autopilot.setEngaged(false));
   await sleep(2500);
   await shot('drive');
-
-  // The pile changing: 1599 → 1600 fuses nine small and nine middle balls into a big one.
-  await money(1599);
-  await sleep(800);
-  await money(1600);
-  await sleep(150);
-  await shot('pile-mid-change');
-  await sleep(1600);
-  await shot('pile-1600');
-  await money(7);
-  await sleep(900);
-  await shot('pile-7');
-  await money(0);
-  await sleep(900);
-  await shot('pile-0');
-  // A pour: 7 → 1347, the balls dropping into the jar.
-  await money(1347);
-  await sleep(450);
-  await shot('pour-mid');
-  await sleep(2500);
-  await shot('pour-done');
-
-  for (const b of ['green', 'amber', 'blue']) {
-    await backlight(b);
-    await sleep(300);
-    await shot(`backlight-${b}`);
-  }
 
   // On foot, and then far off to the left of the road.
   await page.evaluate(() => window.__bro.world.apply({ t: 'exit_car' }));
@@ -95,6 +67,26 @@ try {
   await until(page, () => window.__bro.settled(), null, 120000, 'the post');
   await sleep(2500);
   await shot('shop');
+  // The jar: 1347 + 63 pours six middle balls and three small, then ten small merge into
+  // a middle and ten middle into a big: 1410. Paying 5 splits the middle one.
+  await money(1347);
+  await sleep(1500);
+  await shot('jar-1347');
+  await money(1410);
+  await sleep(350);
+  await shot('jar-pour');
+  await until(page, () => document.querySelectorAll('.hud-jar.is-shown').length > 0, null, 5000, 'the jar');
+  for (let i = 0; i < 8; i++) {
+    await sleep(250);
+    await shot(`jar-after-${i}`);
+  }
+  await sleep(1500);
+  await shot('jar-1410');
+  await money(1405);
+  await sleep(320);
+  await shot('jar-split');
+  await sleep(2000);
+  await shot('jar-1405');
   const cards = await page.evaluate(async () => {
     const { paintCardFace } = await import('/src/world/cardmachine.ts');
     const { formatMoney } = await import('/src/economy/economy.ts');

@@ -6,15 +6,16 @@ import { balls, hasMoney, splitMoney, type Balls } from '../economy/money';
  * game text — the boards (world/market.ts) and the cards (world/cardmachine.ts) — so
  * a price on a card is the same three balls as the money on the HUD.
  *
- * The three kinds differ in size first and in tint second, so a lone ball still says
- * which it is: the big one honey calcite, the middle one milky, the small one white.
- * Each has a dark rim, to stand on the cream card paper as well as on the sky.
+ * The three kinds differ in size and in colour both, so a lone ball still says which it
+ * is: the big one honey calcite, the middle one green, the small one blue. Each carries
+ * a faint film of rainbow, the shimmer of the stone (the jar moves it, ui/hudjar.ts),
+ * and a dark rim, to stand on the cream card paper as well as on the sky.
  */
 
 export type BallKind = 'big' | 'middle' | 'small';
 
 /** Diameters as a share of the text size they stand in. */
-export const BALL_SCALE: Readonly<Record<BallKind, number>> = { big: 1.1, middle: 0.86, small: 0.64 };
+export const BALL_SCALE: Readonly<Record<BallKind, number>> = { big: 1.2, middle: 0.86, small: 0.58 };
 
 const SPRITE_PX = 96;
 
@@ -28,12 +29,26 @@ interface BallLook {
 }
 
 const LOOKS: Readonly<Record<BallKind, BallLook>> = {
-  big: { light: '#fff6df', body: '#f1d9a6', shade: '#c99d5a', edge: '#8a6630', glow: 'rgba(255, 226, 160, 0.75)' },
-  middle: { light: '#fffdf6', body: '#ece2cc', shade: '#b8a782', edge: '#5f513a', glow: 'rgba(255, 244, 214, 0.7)' },
-  small: { light: '#ffffff', body: '#e9eceb', shade: '#a6aeb1', edge: '#4f585b', glow: 'rgba(240, 250, 255, 0.7)' },
+  big: { light: '#fff3d6', body: '#f2b84e', shade: '#c0761b', edge: '#6f420c', glow: 'rgba(255, 205, 120, 0.75)' },
+  middle: { light: '#ecfff5', body: '#79d3a4', shade: '#2c8f62', edge: '#18533a', glow: 'rgba(175, 255, 215, 0.7)' },
+  small: { light: '#f2f9ff', body: '#8ac2f0', shade: '#3a78ba', edge: '#203f66', glow: 'rgba(195, 228, 255, 0.7)' },
 };
 
 const sprites = new Map<BallKind, HTMLCanvasElement>();
+
+/**
+ * A ball's shimmer: a band of rainbow across a ball of radius `r` at (x, y), turned to
+ * `turn` (0..1 of a full turn). The jar turns it as the light plays (ui/hudjar.ts).
+ */
+export function shimmer(g: CanvasRenderingContext2D, x: number, y: number, r: number, turn: number): CanvasGradient {
+  const a = turn * Math.PI * 2;
+  const dx = Math.cos(a) * r;
+  const dy = Math.sin(a) * r;
+  const band = g.createLinearGradient(x - dx, y - dy, x + dx, y + dy);
+  const hues = [330, 40, 90, 170, 220, 280];
+  hues.forEach((hue, i) => band.addColorStop(i / (hues.length - 1), `hsl(${hue}, 90%, 62%)`));
+  return band;
+}
 
 /** The ball of `kind` on a square transparent canvas, `SPRITE_PX` across. */
 export function ballSprite(kind: BallKind): HTMLCanvasElement {
@@ -68,6 +83,13 @@ export function ballSprite(kind: BallKind): HTMLCanvasElement {
   g.beginPath();
   g.ellipse(c + r * 0.1, c + r * 0.15, r * 0.95, r * 0.42, -0.5, Math.PI * 0.05, Math.PI * 0.8);
   g.stroke();
+  // The film of rainbow on the stone.
+  g.globalCompositeOperation = 'overlay';
+  g.globalAlpha = 0.45;
+  g.fillStyle = shimmer(g, c, c, r, 0.62);
+  g.fillRect(0, 0, SPRITE_PX, SPRITE_PX);
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
   g.restore();
   // The highlight.
   const spot = g.createRadialGradient(c - r * 0.36, c - r * 0.42, 0, c - r * 0.36, c - r * 0.42, r * 0.3);

@@ -12,9 +12,6 @@ export type { MapPost, MapSource, MapView } from './hudmap';
 export { newMapView } from './hudmap';
 export type { PedalReadout, RideReadout } from './hudgyro';
 
-/** The HUD's backlight (Settings.hudBacklight): the colour its glass is lit in. */
-export type HudBacklight = 'blue' | 'green' | 'amber';
-
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
  * per-frame setters only touch the DOM when a displayed value actually changes.
@@ -154,8 +151,9 @@ export class Hud {
   /**
    * THE PANEL along the top edge, on foot and driving alike: the navigator screen in the
    * left corner (`map`), the gyro orb and the pedal lever scale in the right one (`gyro`),
-   * and between them the POD — the segment display with the money jar beside it. The
-   * display and the gyro go dark on foot; the jar and the map stay lit.
+   * and between them the POD — the segment display. The display and the gyro go dark
+   * on foot; the map stays lit. The money jar is not on it: it stands in the bottom
+   * right corner, and only on foot on a lay-by (`setMoneyShown`).
    */
   private readonly panelEl: HTMLElement;
   private readonly podEl: HTMLElement;
@@ -218,7 +216,7 @@ export class Hud {
     this.jar = new MoneyJar();
 
     this.podEl = el('div', 'hud-pod');
-    this.podEl.append(this.jar.el, this.lcdEl);
+    this.podEl.append(this.lcdEl);
     this.map = new MapScreen(mapSource);
     this.gyro = new GyroOrb();
     this.panelEl = el('div', 'hud-panel');
@@ -238,6 +236,7 @@ export class Hud {
       this.crosshairEl,
       this.promptEl,
       this.panelEl,
+      this.jar.el,
       this.inventoryEl,
       this.toastEl,
       this.gumBubbleEl,
@@ -245,7 +244,6 @@ export class Hud {
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
     root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
-    this.setBacklight('blue');
   }
 
   private buildSegmentDisplay(): {
@@ -370,16 +368,14 @@ export class Hud {
     this.jar.set(rubles);
   }
 
+  /** The money jar out in the bottom right corner (on foot on a lay-by, main.ts), or put away. */
+  setMoneyShown(shown: boolean): void {
+    this.jar.setShown(shown);
+  }
+
   /** Player's dashboard size (Settings.dashboardSize): the whole panel scales with it. */
   setDashboardScale(scale: number): void {
     this.root.style.setProperty('--hud-dash-scale', String(scale));
-  }
-
-  /** The panel's backlight colour (Settings.hudBacklight). */
-  setBacklight(backlight: HudBacklight): void {
-    if (this.panelEl.getAttribute('data-backlight') === backlight) return;
-    this.panelEl.setAttribute('data-backlight', backlight);
-    this.map.refreshPalette();
   }
 
   /** The gyro orb's steel ball: the ride of the car the player drives, or null for a still bowl. */

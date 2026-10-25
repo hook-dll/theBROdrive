@@ -123,6 +123,7 @@ import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
 import { nextPostIndex, postStop, postStopsBetween } from './world/poststops';
+import { laybyNear } from './world/layby';
 import { placeNameAt } from './world/placenames';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
@@ -423,7 +424,6 @@ async function boot(): Promise<void> {
     },
   });
   hud.setDashboardScale(world.state.settings.dashboardSize);
-  hud.setBacklight(world.state.settings.hudBacklight);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -885,6 +885,9 @@ async function boot(): Promise<void> {
   const mapView = newMapView();
   /** How far past a receiving post's arclength it stays the delivery target, m. */
   const DELIVERY_PAST_POST_M = 40;
+  /** The money jar is out on foot this near a lay-by: along it past its slips, and out across it past its pad (the post's furniture, the houses' fronts). */
+  const JAR_ALONG_M = 10;
+  const JAR_ACROSS_M = 25;
   /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
   const groundUnder = (x: number, y: number, z: number): boolean =>
     physics.hasFixedGroundBelow(
@@ -1827,6 +1830,14 @@ async function boot(): Promise<void> {
         if (!delivering) mapView.urgentS = null;
       }
       hud.setMap(mapView);
+      // THE MONEY JAR (ui/hudjar.ts): out only on foot on a lay-by, where money is made and spent.
+      const layby = driving === null ? laybyNear(world.seed, activeS) : null;
+      hud.setMoneyShown(
+        layby !== null &&
+          activeS > layby.sEntry - JAR_ALONG_M &&
+          activeS < layby.sExit + JAR_ALONG_M &&
+          Math.abs(activeLateral) < layby.padOuter + JAR_ACROSS_M,
+      );
     }
     frameProfiler?.end('traffic');
 
@@ -3294,7 +3305,6 @@ async function boot(): Promise<void> {
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);
       hud.setDashboardScale(world.state.settings.dashboardSize);
-      hud.setBacklight(world.state.settings.hudBacklight);
       // The tier owns four things that apply in place: the pixel ceiling, the shadow
       // pass, the sky's star depth and the presentation cap. The fifth — the visible-
       // light count — cannot, because it is compiled into every lit material as an

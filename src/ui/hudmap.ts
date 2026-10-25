@@ -59,7 +59,7 @@ export function newMapView(): MapView {
   };
 }
 
-/** The colours the screen paints in: the backlight's (hud.css `.hud-panel`), read when it changes. */
+/** The colours the screen paints in: the backlight's (hud.css `.hud-panel`). */
 interface Palette {
   on: string;
   hot: string;
@@ -143,7 +143,7 @@ export class MapScreen {
     }
   }
 
-  /** The backlight changed (hud.ts `setBacklight`): read its colours off the screen. */
+  /** Reads the backlight's colours off the screen. */
   refreshPalette(): void {
     const style = getComputedStyle(this.el);
     const read = (name: string): string => style.getPropertyValue(name).trim();

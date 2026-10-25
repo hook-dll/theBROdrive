@@ -1213,19 +1213,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           settings.dashboardSize = value;
         },
       ),
-      segmented(
-        'Panel Backlight',
-        (['blue', 'green', 'amber'] as const).map((backlight) => ({
-          label: backlight[0]!.toUpperCase() + backlight.slice(1),
-          icon: 'display',
-          hint: 'The colour the panel along the top of the screen is lit in.',
-          active: () => settings.hudBacklight === backlight,
-          pick: () => {
-            settings.hudBacklight = backlight;
-            apply();
-          },
-        })),
-      ),
     );
   };
 
@@ -2617,7 +2604,6 @@ export class MainMenu {
         abs: base.abs,
         tractionControl: base.tractionControl,
         dashboardSize: base.dashboardSize,
-        hudBacklight: base.hudBacklight,
         viewDistance: base.viewDistance,
         trafficDensity: base.trafficDensity,
       };
@@ -2654,7 +2640,6 @@ export class MainMenu {
           abs: settings.abs,
           tractionControl: settings.tractionControl,
           dashboardSize: settings.dashboardSize,
-          hudBacklight: settings.hudBacklight,
           viewDistance: settings.viewDistance,
           trafficDensity: settings.trafficDensity,
         });
