@@ -2653,6 +2653,11 @@ export class Vehicle implements Rebasable {
     return this.serviceBrakeCommand;
   }
 
+  /** Throttle demand, 0..1, as the pedal is now: the driver's or an autopilot's (the HUD's pedal arcs). */
+  get throttleCommand(): number {
+    return this.kitThrottle;
+  }
+
   /**
    * Flushes every runtime-owned value into serialisable state before a save.
    *

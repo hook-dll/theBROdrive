@@ -288,350 +288,360 @@ body.is-machine-focus .hud-crosshair {
 }
 
 /* ------------------------------------------------------------------ *
- *  THE STRIP (hud.ts): the whole panel as one backlit display along  *
- *  the top edge, on foot and driving alike, out of the way of every  *
- *  camera. Left to right: the money pile, the map ribbon            *
- *  (hudmap.ts), the instruments. Lit like a car stereo of about     *
- *  2000: dark glass, everything drawn in the backlight's one colour  *
- *  (Settings.hudBacklight), faults in red. The calcite balls are the *
- *  only thing on it that is not light: they lie on the glass.        *
+ *  THE PANEL (hud.ts) along the top edge, on foot and driving alike, *
+ *  out of the way of every camera: two glass orbs in the corners —   *
+ *  the navigator (hudmap.ts) left, the gyro and the pedals           *
+ *  (hudgyro.ts) right, Diablo II's health and mana hung from the top *
+ *  — and between them the POD: the money tray and the segment        *
+ *  display. The glass is lit like a car stereo of about 2000, in the *
+ *  backlight's one colour (Settings.hudBacklight), faults in red;    *
+ *  the bezels, the tray and the balls in it are things, not light.   *
  * ------------------------------------------------------------------ */
 
 #ui {
-  /* The strip's height; every size on it is in its em, a 4.2th of this. */
-  --hud-strip-h: calc(42px * var(--hud-dash-scale, 1));
+  /* Every size on the panel is in its em. */
+  --hud-u: calc(10px * var(--hud-dash-scale, 1));
 }
 
-.hud-strip {
+.hud-panel {
   --lcd-on: #84d6ff;
   --lcd-hot: #e4f6ff;
   --lcd-glow: rgba(132, 214, 255, 0.45);
   --lcd-dim: rgba(132, 214, 255, 0.13);
-  --lcd-mid: rgba(132, 214, 255, 0.42);
+  --lcd-mid: rgba(132, 214, 255, 0.45);
   --lcd-edge: rgba(132, 214, 255, 0.24);
   --lcd-glass: #07121a;
   --lcd-alarm: #ff5b3a;
+  /* The bezels' moulded plastic. */
+  --bezel-hi: #48433b;
+  --bezel: #1d1b17;
+  --bezel-lo: #0f0e0c;
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  box-sizing: content-box;
-  height: var(--hud-strip-h);
-  padding: env(safe-area-inset-top) max(1.2em, env(safe-area-inset-right)) 0 max(1.2em, env(safe-area-inset-left));
-  display: flex;
-  align-items: center;
-  gap: 1.4em;
-  font-size: calc(var(--hud-strip-h) / 4.2);
+  height: 0;
+  font-size: var(--hud-u);
   font-family: var(--menu-font-cond, 'Arial Narrow', sans-serif);
   color: var(--lcd-on);
-  /* The glass: flat, with the faint row lines of a dot-matrix panel. */
-  background:
-    repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px),
-    var(--lcd-glass);
-  border-bottom: 1px solid var(--lcd-edge);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.55), 0 3px 12px rgba(0, 0, 0, 0.28);
   pointer-events: none;
 }
 
-.hud-strip[data-backlight='green'] {
+.hud-panel[data-backlight='green'] {
   --lcd-on: #a9ee6c;
   --lcd-hot: #efffdc;
   --lcd-glow: rgba(169, 238, 108, 0.42);
   --lcd-dim: rgba(169, 238, 108, 0.12);
-  --lcd-mid: rgba(169, 238, 108, 0.4);
+  --lcd-mid: rgba(169, 238, 108, 0.42);
   --lcd-edge: rgba(169, 238, 108, 0.22);
   --lcd-glass: #08120a;
 }
 
-.hud-strip[data-backlight='amber'] {
+.hud-panel[data-backlight='amber'] {
   --lcd-on: #ffb54a;
   --lcd-hot: #fff0d6;
   --lcd-glow: rgba(255, 181, 74, 0.42);
   --lcd-dim: rgba(255, 181, 74, 0.12);
-  --lcd-mid: rgba(255, 181, 74, 0.4);
+  --lcd-mid: rgba(255, 181, 74, 0.42);
   --lcd-edge: rgba(255, 181, 74, 0.22);
   --lcd-glass: #150e06;
   --lcd-alarm: #ff4630;
 }
 
-/* THE MONEY: the pile, standing on the strip's floor. */
-.hud-strip-money {
-  flex: none;
-  display: flex;
-  align-items: flex-end;
-  height: 3.5em;
-}
-
-.hud-pile {
-  position: relative;
-  height: 3.5em;
-  transition: width 0.35s ease;
-}
-
-.hud-pile .ball {
+/* THE ORBS: a glass sphere in a moulded ring. */
+.hud-orb {
   position: absolute;
-  transition: left 0.35s ease, top 0.35s ease;
+  top: calc(1.1em + env(safe-area-inset-top));
+  width: 13em;
+  height: 13em;
+  isolation: isolate;
 }
 
-.hud-pile .ball--big { width: 1.7em; height: 1.7em; }
-.hud-pile .ball--middle { width: 1.26em; height: 1.26em; }
-.hud-pile .ball--small { width: 0.9em; height: 0.9em; }
+.hud-orb--map {
+  left: calc(1.1em + env(safe-area-inset-left));
+}
 
-/* No money: the empty place a small ball would lie in. */
-.hud-pile-empty {
+/* The gyro's svg reaches past its bowl to the pedal arcs: drawn larger and pulled out by
+   the margin, its bowl matches the navigator's glass (hudgyro.ts BOWL_R / VIEW). */
+.hud-orb--gyro {
+  top: calc(-1.25em + env(safe-area-inset-top));
+  right: calc(-1.05em + env(safe-area-inset-right));
+  width: 17.3em;
+  height: 17.3em;
+}
+
+.hud-orb--map::before {
+  content: '';
   position: absolute;
-  left: 0;
-  top: 2.6em;
-  width: 0.9em;
-  height: 0.9em;
-  border: 1px dashed var(--lcd-mid);
+  inset: -0.6em;
+  z-index: -1;
+  border-radius: 50%;
+  background: linear-gradient(160deg, var(--bezel-hi), var(--bezel) 40%, var(--bezel-lo));
+  box-shadow: 0 0.3em 1.1em rgba(0, 0, 0, 0.45), inset 0 0.06em 0 rgba(255, 255, 255, 0.14);
+}
+
+.hud-orb-screen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: 50%;
 }
 
-/* THE MAP RIBBON (hudmap.ts). Everything on the ribbon is placed by transform from its
-   top left corner, so each mark centres itself on its own origin. */
-.hud-map {
-  flex: 1 1 auto;
-  min-width: 14em;
-  height: 3.6em;
-  display: flex;
-  align-items: stretch;
-  gap: 0.9em;
-}
-
-.hud-map-ribbon {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.hud-map-ribbon > * {
+/* The glass over the screen: a window's highlight up and left, the sphere's dark edge. */
+.hud-orb-glass {
   position: absolute;
-  left: 0;
-  top: 0;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse 58% 36% at 38% 16%, rgba(255, 255, 255, 0.2), transparent 72%),
+    radial-gradient(circle at 50% 50%, transparent 64%, rgba(0, 0, 0, 0.5) 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 
-.hud-map-road {
-  right: 0;
-  top: 62%;
-  height: 1px;
-  background: var(--lcd-mid);
-}
-
-.hud-map-route {
-  width: 1px;
-  height: 3px;
-  margin-top: -1px;
-  transform-origin: 0 50%;
-  background: var(--lcd-on);
-}
-
-.hud-map.is-idle .hud-map-route {
-  background: color-mix(in srgb, var(--lcd-on) 55%, transparent);
-  height: 2px;
-  margin-top: -0.5px;
-}
-
-.hud-map-post::before {
-  content: '';
+/* The plate under the navigator: where the route goes and how far. */
+.hud-orb-plate {
   position: absolute;
-  left: -0.25em;
-  top: -0.25em;
-  width: 0.5em;
-  height: 0.5em;
-  box-sizing: border-box;
-  border: 1px solid var(--lcd-on);
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 1em);
+  padding: 0.3em 0.8em 0.35em;
   background: var(--lcd-glass);
-}
-
-.hud-map-post.is-target::before {
-  left: -0.36em;
-  top: -0.36em;
-  width: 0.72em;
-  height: 0.72em;
-  background: var(--lcd-on);
-  box-shadow: 0 0 0.5em var(--lcd-glow);
-}
-
-.hud-map-name {
-  position: absolute;
-  bottom: 0.5em;
-  left: 0;
-  transform: translateX(-50%);
-  font-size: 1.05em;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  border: 1px solid var(--lcd-edge);
+  border-radius: 0.35em;
+  box-shadow: 0 0 0 0.25em var(--bezel), 0 0.2em 0.8em rgba(0, 0, 0, 0.4);
+  text-align: center;
   white-space: nowrap;
-  opacity: 0.6;
-}
-
-.hud-map-post.is-target .hud-map-name {
-  opacity: 1;
-  color: var(--lcd-hot);
-}
-
-.hud-map.is-narrow .hud-map-name {
-  display: none;
-}
-
-.hud-map-car::before {
-  content: '';
-  position: absolute;
-  left: -0.6em;
-  top: -0.48em;
-  width: 1.2em;
-  height: 0.96em;
-  background: var(--lcd-hot);
-  clip-path: polygon(100% 50%, 0 0, 24% 50%, 0 100%);
-  /* A dark edge first, so the car stands clear of a post name it is lifted over. */
-  filter: drop-shadow(0 0 1px #000) drop-shadow(0 0 2px var(--lcd-glow));
-}
-
-.hud-map-ahead::before {
-  content: '';
-  position: absolute;
-  left: -0.62em;
-  top: -0.42em;
-  width: 0.56em;
-  height: 0.84em;
-  background: var(--lcd-on);
-  clip-path: polygon(0 0, 100% 50%, 0 100%);
-  animation: hud-map-ahead 1.4s steps(2, jump-none) infinite;
-}
-
-@keyframes hud-map-ahead {
-  from { opacity: 1; }
-  to { opacity: 0.35; }
-}
-
-.hud-map-finish::before {
-  content: '';
-  position: absolute;
-  left: -0.4em;
-  top: -1.1em;
-  width: 0.8em;
-  height: 0.8em;
-  box-sizing: border-box;
-  border: 1px solid var(--lcd-on);
-  background: repeating-conic-gradient(var(--lcd-on) 0 25%, transparent 0 50%) 0 0 / 0.4em 0.4em;
-}
-
-.hud-map-rival::before {
-  content: '';
-  position: absolute;
-  left: -0.3em;
-  top: -0.3em;
-  width: 0.6em;
-  height: 0.6em;
-  box-sizing: border-box;
-  border: 1.5px solid var(--lcd-on);
-  border-radius: 50%;
-  background: var(--lcd-glass);
-}
-
-/* The info pane at the ribbon's end: where the route goes, and how far. */
-.hud-map-info {
-  flex: none;
-  width: 10em;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 0.1em;
-  padding-left: 0.8em;
-  border-left: 1px solid var(--lcd-edge);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
 }
 
-.hud-map-place {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 1.15em;
+.hud-orb-place {
+  font-size: 1.2em;
   font-weight: 600;
-  opacity: 0.8;
 }
 
-.hud-map-dist {
-  display: flex;
-  align-items: center;
-  gap: 0.35em;
-  font-size: 1.4em;
+.hud-orb-dist {
+  font-size: 1.6em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--lcd-hot);
 }
 
-.hud-map.is-idle .hud-map-info {
-  opacity: 0.7;
-}
-
-.hud-map.is-idle .hud-map-dist {
-  color: var(--lcd-on);
-}
-
-.hud-map-dist.is-late {
+.hud-orb-dist.is-late,
+.hud-orb-dist.is-lost {
   color: var(--lcd-alarm);
 }
 
-/* The way back to the road, from the nose: up is straight ahead. */
-.hud-map-arrow {
-  display: inline-block;
-  width: 0.8em;
-  height: 0.9em;
-  background: currentColor;
-  clip-path: polygon(50% 0, 100% 100%, 50% 74%, 0 100%);
-  transition: transform 0.2s linear;
+.hud-orb.is-idle .hud-orb-plate {
+  opacity: 0.75;
 }
 
-/* THE INSTRUMENTS: the segment display, the G-force widget and the pedal lever. Their
-   frame says who drives: plain is the player's own hands, a coloured frame is a car
-   driving itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the
-   whole road at their limit. On foot they go dark. */
-.hud-strip-instruments {
-  --hud-frame: var(--lcd-edge);
-  flex: none;
+/* THE GYRO (hudgyro.ts): a steel ball in a glass bowl, the pedal arcs round its rim. */
+.hud-gyro {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transition: filter 0.4s ease;
+}
+
+.hud-gyro-glass-in { stop-color: color-mix(in srgb, var(--lcd-on) 16%, var(--lcd-glass)); }
+.hud-gyro-glass-out { stop-color: var(--lcd-glass); }
+
+.hud-gyro-bezel {
+  fill: var(--bezel);
+  stroke: var(--bezel-hi);
+  stroke-width: 1;
+}
+
+.hud-gyro-zone.is-harsh {
+  fill: color-mix(in srgb, var(--lcd-alarm) 9%, var(--lcd-glass));
+}
+
+.hud-gyro-zone.is-uncomfortable {
+  fill: var(--lcd-glass);
+  fill-opacity: 0.55;
+  stroke: var(--lcd-mid);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.hud-gyro-zone.is-calm {
+  fill: color-mix(in srgb, var(--lcd-on) 10%, var(--lcd-glass));
+  fill-opacity: 0.8;
+  stroke: var(--lcd-on);
+  stroke-width: 1.2;
+}
+
+.hud-gyro-cross {
+  stroke: var(--lcd-dim);
+  stroke-width: 1;
+}
+
+.hud-gyro-nose {
+  fill: var(--lcd-on);
+}
+
+.hud-gyro-ball-shadow {
+  fill: rgba(0, 0, 0, 0.4);
+}
+
+.hud-gyro.is-uncomfortable .hud-gyro-ball-steel {
+  stroke: var(--hud-amber);
+  stroke-width: 1.5;
+}
+
+.hud-gyro.is-harsh .hud-gyro-ball-steel {
+  stroke: var(--lcd-alarm);
+  stroke-width: 2;
+}
+
+/* Flashed once per harsh moment (Web Animations), invisible otherwise. */
+.hud-gyro-pulse {
+  fill: none;
+  stroke: var(--lcd-alarm);
+  stroke-width: 3;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hud-gyro-track {
+  fill: none;
+  stroke: rgba(8, 8, 7, 0.78);
+}
+
+.hud-gyro-throttle {
+  fill: none;
+  stroke: var(--lcd-on);
+}
+
+.hud-gyro.is-kickdown .hud-gyro-throttle {
+  stroke: var(--lcd-hot);
+  filter: drop-shadow(0 0 3px var(--lcd-glow));
+}
+
+.hud-gyro-brake {
+  fill: none;
+  stroke: var(--lcd-alarm);
+}
+
+.hud-gyro.is-locking .hud-gyro-brake {
+  filter: drop-shadow(0 0 3px var(--lcd-alarm));
+}
+
+.hud-gyro-tick {
+  stroke: rgba(0, 0, 0, 0.85);
+  stroke-width: 1.4;
+}
+
+.hud-gyro-notch {
+  fill: var(--lcd-hot);
+  stroke: #000;
+  stroke-width: 0.8;
+}
+
+/* Dark on foot: dimmed, not see-through, so the sky does not show through the glass. */
+.hud-panel:not(.is-driving) .hud-gyro {
+  filter: grayscale(0.7) brightness(0.6);
+}
+
+/* THE POD between the orbs: the tray and the display, hung from the top edge. Its frame
+   says who drives: plain is the player's own hands, a coloured frame is a car driving
+   itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the whole
+   road at their limit. */
+.hud-pod {
+  --hud-frame: rgba(255, 255, 255, 0.08);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 0.9em;
-  height: 3.6em;
-  padding: 0 0.7em;
+  gap: 1.1em;
+  padding: calc(0.5em + env(safe-area-inset-top)) 1.1em 0.6em;
+  background: linear-gradient(var(--bezel), var(--bezel-lo));
   border: 1px solid var(--hud-frame);
-  border-radius: 0.35em;
-  transition: opacity 0.4s ease;
+  border-top: none;
+  border-radius: 0 0 1em 1em;
+  box-shadow: inset 0 -0.06em 0 rgba(255, 255, 255, 0.1), 0 0.3em 1.1em rgba(0, 0, 0, 0.45);
 }
 
-.hud-strip-instruments.is-autopilot-sleeper { --hud-frame: #fffdd0; }
-.hud-strip-instruments.is-autopilot-hurried { --hud-frame: #ccff00; }
-.hud-strip-instruments.is-autopilot-frantic { --hud-frame: #d4174b; }
+.hud-pod.is-autopilot-sleeper { --hud-frame: #fffdd0; }
+.hud-pod.is-autopilot-hurried { --hud-frame: #ccff00; }
+.hud-pod.is-autopilot-frantic { --hud-frame: #d4174b; }
 
-.hud-strip-instruments[class*='is-autopilot-'] {
-  border-width: 2px;
+.hud-pod[class*='is-autopilot-'] {
+  border-width: 0 2px 2px;
 }
 
-.hud-strip:not(.is-driving) .hud-strip-instruments {
-  opacity: 0.5;
+/* THE MONEY TRAY: a conductor's coin tray, a socket for every ball, three compartments. */
+.hud-tray {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.3em;
+  padding: 0.22em;
+  background: var(--bezel-lo);
+  border-radius: 0.5em;
+  box-shadow: inset 0 0.12em 0.3em rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.hud-strip:not(.is-driving) .hud-ride-dot,
-.hud-strip:not(.is-driving) .hud-lever-throttle,
-.hud-strip:not(.is-driving) .hud-lever-brake,
-.hud-strip:not(.is-driving) .hud-lever-notch {
-  visibility: hidden;
+.hud-tray-cell {
+  position: relative;
+  flex: none;
+  border-radius: 0.4em;
+  background: linear-gradient(#2a2620, #1c1a16);
+  box-shadow: inset 0 0.1em 0.25em rgba(0, 0, 0, 0.75), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.hud-tray-socket {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 40%, rgba(0, 0, 0, 0.7) 0 44%, rgba(0, 0, 0, 0.3) 62%, rgba(255, 255, 255, 0.08) 71%, transparent 73%);
+}
+
+.hud-tray-socket--big,
+.hud-tray-cell .ball--big { width: 1.7em; height: 1.7em; }
+.hud-tray-socket--middle,
+.hud-tray-cell .ball--middle { width: 1.26em; height: 1.26em; }
+.hud-tray-socket--small,
+.hud-tray-cell .ball--small { width: 0.9em; height: 0.9em; }
+
+.hud-tray-cell .ball {
+  position: absolute;
+  box-shadow: 0 0.08em 0.14em rgba(0, 0, 0, 0.6);
+}
+
+/* More big balls than sockets: the rest as a count on the compartment's corner. */
+.hud-tray-overflow {
+  position: absolute;
+  right: -0.3em;
+  top: -0.3em;
+  padding: 0 0.3em;
+  border-radius: 0.6em;
+  background: #f1d9a6;
+  color: #3a2a10;
+  font-size: 1em;
+  font-weight: 700;
 }
 
 .hud-lcd {
   display: block;
   width: 21em;
   height: 2.8em;
+  background: var(--lcd-glass);
+  border-radius: 0.25em;
+  box-shadow: inset 0 0 0.4em rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: opacity 0.4s ease;
   /* Which segments are lit is decided by generated rules in hud.ts; both states read
      this variable, so a fault only has to change the colour. */
   --hud-lcd-on: var(--lcd-on);
+}
+
+.hud-panel:not(.is-driving) .hud-lcd {
+  opacity: 0.55;
 }
 
 /*
@@ -648,111 +658,6 @@ body.is-machine-focus .hud-crosshair {
   stroke: var(--lcd-dim);
   stroke-width: 1.25;
   stroke-linecap: square;
-}
-
-/* THE G-FORCE WIDGET (hud.ts `setRide`): the dot is the push on the load; the rings are
-   calm / uncomfortable / harsh. */
-.hud-ride {
-  display: block;
-  flex: none;
-  width: 3.4em;
-  height: 3.4em;
-  overflow: visible;
-}
-
-.hud-ride-face {
-  fill: none;
-  stroke: var(--lcd-edge);
-  stroke-width: 1;
-}
-
-.hud-ride-zone {
-  stroke: none;
-}
-
-.hud-ride-zone.is-harsh {
-  fill: color-mix(in srgb, var(--lcd-alarm) 16%, transparent);
-}
-
-.hud-ride-zone.is-uncomfortable {
-  fill: color-mix(in srgb, var(--lcd-on) 12%, var(--lcd-glass));
-}
-
-.hud-ride-zone.is-calm {
-  fill: var(--lcd-glass);
-  stroke: var(--lcd-mid);
-  stroke-width: 1;
-}
-
-.hud-ride-cross {
-  stroke: var(--lcd-dim);
-  stroke-width: 1;
-}
-
-.hud-ride-nose {
-  fill: var(--lcd-mid);
-}
-
-.hud-ride-dot {
-  fill: var(--lcd-hot);
-  stroke: var(--lcd-glass);
-  stroke-width: 1;
-}
-
-.hud-ride.is-uncomfortable .hud-ride-dot {
-  fill: var(--hud-amber);
-}
-
-.hud-ride.is-harsh .hud-ride-dot {
-  fill: var(--lcd-alarm);
-}
-
-/* Flashed once per harsh moment (Web Animations), invisible otherwise. */
-.hud-ride-pulse {
-  fill: none;
-  stroke: var(--lcd-alarm);
-  stroke-width: 2.5;
-  opacity: 0;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-/* THE PEDAL LEVER (core/pedallever.ts) at the strip's right end: six cells, throttle
-   notches over neutral over the brake. The frame is the notch the lever is on; the
-   fills are the pedals as they are now. */
-.hud-pedal-lever {
-  display: block;
-  flex: none;
-  width: 0.76em;
-  height: 3.4em;
-  outline: 1px solid var(--lcd-edge);
-}
-
-.hud-lever-tick {
-  stroke: var(--lcd-dim);
-  stroke-width: 1;
-}
-
-.hud-lever-tick.is-neutral {
-  stroke: var(--lcd-mid);
-}
-
-.hud-lever-throttle {
-  fill: color-mix(in srgb, var(--lcd-on) 75%, transparent);
-}
-
-.hud-pedal-lever.is-kickdown .hud-lever-throttle {
-  fill: var(--lcd-hot);
-}
-
-.hud-lever-brake {
-  fill: var(--lcd-alarm);
-}
-
-.hud-lever-notch {
-  fill: none;
-  stroke: var(--lcd-hot);
-  stroke-width: 1.5;
 }
 
 /* THE BALLS in a line of game text (ui/balls.ts `setGameText`): toasts, the prompt. */
@@ -795,23 +700,16 @@ body.is-machine-focus .hud-crosshair {
 }
 
 @media (pointer: coarse) {
-  /* Phones draw the strip smaller: the screen is small and the thumbs are on it. */
+  /* Phones draw the panel smaller: the screen is small and the thumbs are on it. */
   #ui {
-    --hud-strip-h: calc(34px * var(--hud-dash-scale, 1));
+    --hud-u: calc(7px * var(--hud-dash-scale, 1));
   }
 }
 
-/* A narrow window draws the strip lower, so the ribbon keeps room beside the pile
-   and the instruments. */
+/* A narrow window draws the panel smaller, so the orbs and the pod keep apart. */
 @media (max-width: 960px) {
   #ui {
-    --hud-strip-h: calc(32px * var(--hud-dash-scale, 1));
-  }
-}
-
-@media (max-width: 720px) {
-  .hud-map-name {
-    display: none;
+    --hud-u: calc(8px * var(--hud-dash-scale, 1));
   }
 }
 
@@ -828,7 +726,7 @@ body.is-machine-focus .hud-crosshair {
 }
 
 /* The carried slots are hand-state: hidden while driving. */
-.hud-strip.is-driving ~ .hud-inventory {
+.hud-panel.is-driving ~ .hud-inventory {
   display: none;
 }
 
@@ -892,7 +790,7 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-toasts {
   position: absolute;
-  top: calc(var(--hud-strip-h) + env(safe-area-inset-top) + 14px);
+  top: calc(6.6 * var(--hud-u) + env(safe-area-inset-top) + 12px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;

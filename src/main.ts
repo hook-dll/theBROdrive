@@ -411,10 +411,15 @@ async function boot(): Promise<void> {
   const pads = gamepads();
   pads.setDeadzone(world.state.settings.controllerDeadzone);
   pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
-  // The map ribbon's posts, named, asked for as the window moves on.
+  // The navigator orb's road and posts, named, asked for as the car moves on.
   const hud = new Hud(uiRoot, {
     postsBetween: (fromS, toS) =>
       postStopsBetween(world.seed, fromS, toS).map((stop) => ({ index: stop.index, s: stop.s, name: placeNameAt(world.seed, stop.s) })),
+    roadPoint: (s, out) => {
+      const sample = road.sampleAt(s);
+      out.x = sample.x;
+      out.z = sample.z;
+    },
   });
   hud.setDashboardScale(world.state.settings.dashboardSize);
   hud.setBacklight(world.state.settings.hudBacklight);
@@ -1737,16 +1742,16 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
-    // THE MAP RIBBON (ui/hudmap.ts): where the player is to the road, and where the
+    // THE NAVIGATOR ORB (ui/hudmap.ts): where the player is to the road, and where the
     // route goes — a race's finish, the nearest post ahead that will sign the cargo (it
     // stays the target until the car is past its stand, so stopping alongside does not
     // flip it to the next one), or with nothing aboard the next post.
     {
       mapView.s = activeS;
       mapView.lateral = activeLateral;
-      const facing = driving !== null ? driving.heading : camera.yaw;
-      const turn = facing - road.headingAt(activeS);
-      mapView.relHeading = Math.atan2(Math.sin(turn), Math.cos(turn));
+      mapView.x = projectedX;
+      mapView.z = projectedZ;
+      mapView.facing = driving !== null ? driving.heading : camera.yaw;
       mapView.urgentS = urgentLeft;
       if (race.progress(activeS, raceProgress)) {
         mapView.kind = 'race';
@@ -2790,7 +2795,12 @@ async function boot(): Promise<void> {
         // Null while the player steers, which keeps the panel's frame plain: it reports
         // WHO is driving, not whether an autopilot exists.
         autopilotMode: autopilot.engaged ? autopilot.mode : null,
-        pedalLever: autopilot.engaged ? null : input.pedalLever,
+        pedals: {
+          throttle: driving.throttleCommand,
+          brake: driving.brakeCommand,
+          knee: driving.thresholdBrakePedal,
+          notch: autopilot.engaged ? null : input.pedalLever?.notch ?? null,
+        },
       });
     } else {
       hud.setDriving(null);

@@ -1,7 +1,7 @@
 /**
  * tools/look/hud.mjs
  *
- * Screenshots of the HUD strip (ui/hud.ts, ui/hudmap.ts, ui/balls.ts) in the real game:
+ * Screenshots of the HUD panel (ui/hud.ts, ui/hudmap.ts, ui/hudgyro.ts, ui/balls.ts) in the real game:
  * driving under the autopilot with a fat purse and a thin one, a pile mid-change, each
  * backlight, on foot, far off the road, at a post's shop with prices on its cards, and
  * at a phone's width. Each card is also painted alone at full size (`card-*.png`), so
@@ -36,7 +36,7 @@ try {
     console.log(`${out}/${name}.png`);
   };
   const money = (rubles) => page.evaluate((r) => window.__bro.world.apply({ t: 'money', rubles: r }), rubles);
-  const backlight = (b) => page.evaluate((v) => document.querySelector('.hud-strip')?.setAttribute('data-backlight', v), b);
+  const backlight = (b) => page.evaluate((v) => document.querySelector('.hud-panel')?.setAttribute('data-backlight', v), b);
 
   await money(1347);
   await page.evaluate(() => {

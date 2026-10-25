@@ -3,15 +3,16 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
-import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
 import { balls } from '../economy/money';
 import { installBallStyle, ballElement, setGameText, type BallKind } from './balls';
-import { MapRibbon, type MapSource, type MapView } from './hudmap';
+import { MapOrb, type MapSource, type MapView } from './hudmap';
+import { GyroOrb, type PedalReadout, type RideReadout } from './hudgyro';
 
 export type { MapPost, MapSource, MapView } from './hudmap';
 export { newMapView } from './hudmap';
+export type { PedalReadout, RideReadout } from './hudgyro';
 
-/** The strip's backlight (Settings.hudBacklight): the colour its glass is lit in. */
+/** The HUD's backlight (Settings.hudBacklight): the colour its glass is lit in. */
 export type HudBacklight = 'blue' | 'green' | 'amber';
 
 /**
@@ -45,49 +46,17 @@ export interface DrivingReadout {
    */
   autopilotMode: AutopilotMode | null;
   /**
-   * The keyboard and mouse PEDAL LEVER (core/pedallever.ts) while it drives the pedals,
-   * null while a pad or touch does, or an autopilot drives: the notch the lever is on
-   * and the two pedals as they are now. Drawn as the vertical scale beside the
-   * speedometer, because the lever holds a pedal the keys no longer show by being down.
+   * The pedals as the car is given them now — by keys, a pad, a touch screen or the
+   * autopilot — with the keyboard PEDAL LEVER's notch (core/pedallever.ts) while it
+   * drives them: the gyro orb's arcs (ui/hudgyro.ts).
    */
-  pedalLever: {
-    readonly notch: number;
-    readonly throttle: number;
-    readonly brake: number;
-    /** The brake pedal's ceiling, the car's threshold pedal: a full brake cell. */
-    readonly knee: number;
-  } | null;
+  pedals: PedalReadout;
 }
-
-/**
- * The ride of the car the player drives (trip/ride.ts `RideMeter` is one): smoothed
- * horizontal acceleration in the car's frame, m/s², and the harsh moments counted so far.
- */
-export interface RideReadout {
-  /** Along the nose: positive speeding up, negative braking. */
-  readonly longitudinal: number;
-  /** Across the car: positive towards its left. */
-  readonly lateral: number;
-  readonly harshMoments: number;
-}
-
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const LCD_DIGITS = 16;
 
-/**
- * THE PEDAL LEVER SCALE: six sections stacked, the four throttle notches over neutral
- * over the brake (core/pedallever.ts), each `LEVER_CELL` tall.
- */
-const LEVER_W = 12;
-const LEVER_CELL = 9;
-const LEVER_THROTTLE_CELLS = 4;
-const LEVER_BRAKE_CELLS = 1;
-const LEVER_H = (LEVER_THROTTLE_CELLS + 1 + LEVER_BRAKE_CELLS) * LEVER_CELL;
-/** The top of the neutral cell and its foot: the throttle fills up, the brake down. */
-const LEVER_NEUTRAL_TOP = LEVER_THROTTLE_CELLS * LEVER_CELL;
-const LEVER_NEUTRAL_FOOT = LEVER_NEUTRAL_TOP + LEVER_CELL;
 const LCD_STEP_MS = 180;
 const LCD_INITIAL_PAUSE_STEPS = 4;
 const RADIO_OFF_MESSAGE = 'RADIO OFF';
@@ -135,24 +104,17 @@ const MAX_TOASTS = 4;
  */
 const CROSSHAIR_IDLE_MS = 4000;
 /**
- * THE G-FORCE WIDGET: a small round instrument on the panel that shows how hard the car
- * pushes what it carries. The dot is the push itself, where the load is thrown — up the
- * face when braking, to the right in a left bend — and the rings are the ride's
- * thresholds (trip/ride.ts): calm inside, uncomfortable between, harsh outside. Radius
- * in the widget's own units; the face's edge is `RIDE_FULL_MPS2`.
+ * THE MONEY TRAY: a conductor's coin tray with a socket for every ball it can hold —
+ * fifteen big, nine middle, nine small — in three compartments, each kind's sockets in
+ * two staggered rows. Diameters and padding in the pod's em.
  */
-const RIDE_R = 26;
-const RIDE_FULL_MPS2 = 5;
-
-/**
- * THE MONEY PILE on the strip: each kind of ball heaped in two rows, the second in the
- * first's hollows, big balls then middle then small. Diameters in strip units (em of the
- * strip's font), the pile's floor at `PILE_FLOOR` from its top.
- */
-const PILE_BALL: Readonly<Record<BallKind, number>> = { big: 1.7, middle: 1.26, small: 0.9 };
-const PILE_FLOOR = 3.5;
-const PILE_KIND_GAP = 0.45;
-const PILE_POP_MS = 320;
+const TRAY: Readonly<Record<BallKind, { readonly d: number; readonly bottom: number; readonly top: number }>> = {
+  big: { d: 1.7, bottom: 8, top: 7 },
+  middle: { d: 1.26, bottom: 5, top: 4 },
+  small: { d: 0.9, bottom: 5, top: 4 },
+};
+const TRAY_PAD = 0.28;
+const TRAY_POP_MS = 320;
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -203,45 +165,32 @@ export class Hud {
   private lastLookMs = -Infinity;
   private readonly promptEl: HTMLElement;
   /**
-   * THE STRIP: the whole HUD panel, one line along the top edge of the screen, on foot
-   * and driving alike. Left to right: the money, the map ribbon, and the instruments
-   * (the segment display, the G-force widget, the pedal lever), which go dark on foot.
+   * THE PANEL along the top edge, on foot and driving alike: the navigator orb in the
+   * left corner (`map`), the gyro orb in the right one (`gyro`), and between them the
+   * POD — the money tray and the segment display. The display and the gyro go dark on
+   * foot; the tray and the map stay lit.
    */
-  private readonly stripEl: HTMLElement;
-  private readonly instrumentsEl: HTMLElement;
+  private readonly panelEl: HTMLElement;
+  private readonly podEl: HTMLElement;
+  private readonly map: MapOrb;
+  private readonly gyro: GyroOrb;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly inventoryEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
-  /** The money pile (`setMoney`): calcite balls, a list per kind in pile order. */
-  private readonly pileEl: HTMLElement;
-  private readonly pileBalls: Record<BallKind, HTMLElement[]> = { big: [], middle: [], small: [] };
-  private readonly pileEmptyEl: HTMLElement;
+  /** The money tray (`setMoney`): its balls, a list per kind in socket order. */
+  private readonly trayEl: HTMLElement;
+  private readonly trayCells: Record<BallKind, HTMLElement>;
+  private readonly trayBalls: Record<BallKind, HTMLElement[]> = { big: [], middle: [], small: [] };
+  /** "+N" on the big compartment when there are more big balls than sockets. */
+  private readonly trayOverflowEl: HTMLElement;
   private moneyShown = -1;
-  /** The map ribbon (`setMap`). */
-  private readonly map: MapRibbon;
-  /** The pedal lever scale (`DrivingReadout.pedalLever`): the svg, the notch frame, the fills. */
-  private readonly leverEl: SVGSVGElement;
-  private readonly leverNotch: SVGRectElement;
-  private readonly leverThrottle: SVGRectElement;
-  private readonly leverBrake: SVGRectElement;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
   private readonly deathFadeEl: HTMLElement;
   private readonly root: HTMLElement;
-  /** The G-force widget (`setRide`), its dot, and the ring that flashes on a harsh moment. */
-  private readonly rideEl: SVGSVGElement;
-  private readonly rideDot: SVGCircleElement;
-  private readonly ridePulse: SVGCircleElement;
-  private rideShown = false;
-  /** Last written dot position (widget units) and zone; NaN/-1 force a write. */
-  private rideX = Number.NaN;
-  private rideY = Number.NaN;
-  private rideZone = -1;
-  /** Harsh moments already pulsed for; a new one past this flashes the ring. */
-  private rideHarshSeen = 0;
   private damageStrength = -1;
   private deathFade = -1;
   private gumBubbleProgress = -1;
@@ -283,29 +232,31 @@ export class Hud {
     const display = this.buildSegmentDisplay();
     this.lcdEl = display.svg;
     this.lcdDigits = display.digits;
-    const lever = this.buildPedalLever();
-    this.leverEl = lever.svg;
-    this.leverNotch = lever.notch;
-    this.leverThrottle = lever.throttle;
-    this.leverBrake = lever.brake;
-    const ride = this.buildRideWidget();
-    this.rideEl = ride.svg;
-    this.rideDot = ride.dot;
-    this.ridePulse = ride.pulse;
 
-    this.pileEl = el('div', 'hud-pile');
-    this.pileEmptyEl = el('div', 'hud-pile-empty');
-    this.pileEl.append(this.pileEmptyEl);
-    const money = el('div', 'hud-strip-money');
-    money.append(this.pileEl);
+    // The tray: three compartments, every socket drawn, the balls laid in them.
+    this.trayEl = el('div', 'hud-tray');
+    this.trayCells = { big: el('div', 'hud-tray-cell'), middle: el('div', 'hud-tray-cell'), small: el('div', 'hud-tray-cell') };
+    for (const kind of ['big', 'middle', 'small'] as const) {
+      const cell = this.trayCells[kind];
+      const { d, bottom, top } = TRAY[kind];
+      cell.style.width = `${(bottom * d + 2 * TRAY_PAD).toFixed(3)}em`;
+      cell.style.height = `${(d * 1.86 + 2 * TRAY_PAD).toFixed(3)}em`;
+      for (let i = 0; i < bottom + top; i++) {
+        const socket = el('i', `hud-tray-socket hud-tray-socket--${kind}`);
+        this.placeInTray(socket, kind, i);
+        cell.append(socket);
+      }
+      this.trayEl.append(cell);
+    }
+    this.trayOverflowEl = el('span', 'hud-tray-overflow is-hidden');
+    this.trayCells.big.append(this.trayOverflowEl);
 
-    this.map = new MapRibbon(mapSource);
-
-    this.instrumentsEl = el('div', 'hud-strip-instruments');
-    this.instrumentsEl.append(this.lcdEl, this.rideEl, this.leverEl);
-
-    this.stripEl = el('div', 'hud-strip');
-    this.stripEl.append(money, this.map.el, this.instrumentsEl);
+    this.podEl = el('div', 'hud-pod');
+    this.podEl.append(this.trayEl, this.lcdEl);
+    this.map = new MapOrb(mapSource);
+    this.gyro = new GyroOrb();
+    this.panelEl = el('div', 'hud-panel');
+    this.panelEl.append(this.map.el, this.podEl, this.gyro.el);
 
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
@@ -320,7 +271,7 @@ export class Hud {
     this.tops = [
       this.crosshairEl,
       this.promptEl,
-      this.stripEl,
+      this.panelEl,
       this.inventoryEl,
       this.toastEl,
       this.gumBubbleEl,
@@ -331,40 +282,12 @@ export class Hud {
     this.setBacklight('blue');
   }
 
-  private buildRideWidget(): { svg: SVGSVGElement; dot: SVGCircleElement; pulse: SVGCircleElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-ride');
-    svg.setAttribute('viewBox', `${-RIDE_R - 4} ${-RIDE_R - 4} ${2 * RIDE_R + 8} ${2 * RIDE_R + 8}`);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Ride: G-force');
-    const ring = (className: string, r: number): SVGCircleElement => {
-      const circle = svgEl('circle');
-      circle.setAttribute('class', className);
-      circle.setAttribute('r', r.toFixed(2));
-      svg.appendChild(circle);
-      return circle;
-    };
-    ring('hud-ride-face', RIDE_R + 3);
-    ring('hud-ride-zone is-harsh', RIDE_R);
-    ring('hud-ride-zone is-uncomfortable', (RIDE_HARSH_MPS2 / RIDE_FULL_MPS2) * RIDE_R);
-    ring('hud-ride-zone is-calm', (RIDE_EASY_MPS2 / RIDE_FULL_MPS2) * RIDE_R);
-    for (const [x1, y1, x2, y2] of [[-RIDE_R, 0, RIDE_R, 0], [0, -RIDE_R, 0, RIDE_R]] as const) {
-      const line = svgEl('line');
-      line.setAttribute('class', 'hud-ride-cross');
-      line.setAttribute('x1', String(x1));
-      line.setAttribute('y1', String(y1));
-      line.setAttribute('x2', String(x2));
-      line.setAttribute('y2', String(y2));
-      svg.appendChild(line);
-    }
-    // The car's nose, at the top of the face.
-    const nose = svgEl('path');
-    nose.setAttribute('class', 'hud-ride-nose');
-    nose.setAttribute('d', `M 0 ${-RIDE_R - 2.6} L 2.6 ${-RIDE_R + 1.4} H -2.6 Z`);
-    svg.appendChild(nose);
-    const pulse = ring('hud-ride-pulse', RIDE_R);
-    const dot = ring('hud-ride-dot', 3.4);
-    return { svg, dot, pulse };
+  /** Puts a socket or a ball on socket `i` of `kind`'s compartment: the bottom row first, then the top in its hollows. */
+  private placeInTray(node: HTMLElement, kind: BallKind, i: number): void {
+    const { d, bottom } = TRAY[kind];
+    const top = i >= bottom;
+    node.style.left = `${(TRAY_PAD + (top ? (i - bottom + 0.5) * d : i * d)).toFixed(3)}em`;
+    node.style.top = `${(TRAY_PAD + (top ? 0 : d * 0.86)).toFixed(3)}em`;
   }
 
   private buildSegmentDisplay(): {
@@ -430,18 +353,18 @@ export class Hud {
 
   /**
    * The car's readout while the player is in one, or null on foot: the instruments then
-   * go dark — the display blank, the G-force and the lever empty — and the strip stays.
+   * go dark — the display blank, the gyro still and its pedal arcs empty.
    */
   setDriving(readout: DrivingReadout | null): void {
     const driving = readout !== null;
     if (driving !== this.driving) {
       this.driving = driving;
-      this.stripEl.classList.toggle('is-driving', driving);
+      this.panelEl.classList.toggle('is-driving', driving);
       if (!driving) {
         this.warningsSignature = '';
         this.engineOff = false;
         this.refreshSegmentDisplay();
-        this.updatePedalLever(null);
+        this.gyro.setPedals(null);
       }
     }
     if (readout === null) {
@@ -474,34 +397,31 @@ export class Hud {
     if (signature !== this.warningsSignature) this.warningsSignature = signature;
     this.engineOff = !readout.engineRunning;
     this.refreshSegmentDisplay();
-    this.updatePedalLever(readout.pedalLever);
+    this.gyro.setPedals(readout.pedals);
   }
 
   private setAutopilotFaces(mode: AutopilotMode | null): void {
     this.autopilotFaces = mode;
-    this.instrumentsEl.classList.toggle('is-autopilot-sleeper', mode === 'sleeper');
-    this.instrumentsEl.classList.toggle('is-autopilot-hurried', mode === 'hurried');
-    this.instrumentsEl.classList.toggle('is-autopilot-frantic', mode === 'frantic');
+    this.podEl.classList.toggle('is-autopilot-sleeper', mode === 'sleeper');
+    this.podEl.classList.toggle('is-autopilot-hurried', mode === 'hurried');
+    this.podEl.classList.toggle('is-autopilot-frantic', mode === 'frantic');
   }
 
   /**
-   * The player's money, rubles, as the pile of calcite balls at the strip's left end.
-   * A ball that comes pops in and one that goes shrinks away; the ones that stay roll
-   * to their new places (hud.css `.hud-pile .ball`), so ten small balls fusing into a
-   * middle one is seen as it happens.
+   * The player's money, rubles, as calcite balls in the tray's sockets. A ball that comes
+   * pops in and one that goes shrinks away, so ten small balls fusing into a middle one
+   * is seen as it happens: nine small sockets empty and a middle one fills.
    */
   setMoney(rubles: number): void {
     if (rubles === this.moneyShown) return;
     const first = this.moneyShown < 0;
     this.moneyShown = rubles;
-    this.pileEl.setAttribute('aria-label', `${rubles} rubles`);
+    this.trayEl.setAttribute('aria-label', `${rubles} rubles`);
     const amount = balls(rubles);
-    this.pileEmptyEl.classList.toggle('is-hidden', rubles > 0);
-    let left = 0;
-    let placed = false;
     for (const kind of ['big', 'middle', 'small'] as const) {
-      const count = amount[kind];
-      const list = this.pileBalls[kind];
+      const { bottom, top } = TRAY[kind];
+      const count = Math.min(amount[kind], bottom + top);
+      const list = this.trayBalls[kind];
       while (list.length > count) {
         const ball = list.pop()!;
         if (first) {
@@ -509,108 +429,46 @@ export class Hud {
           continue;
         }
         ball.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.2)', opacity: 0 }], {
-          duration: PILE_POP_MS * 0.7,
+          duration: TRAY_POP_MS * 0.7,
           easing: 'ease-in',
         }).onfinish = () => ball.remove();
       }
       while (list.length < count) {
         const ball = ballElement(kind);
-        this.pileEl.append(ball);
+        this.placeInTray(ball, kind, list.length);
+        this.trayCells[kind].append(ball);
         list.push(ball);
         if (!first) {
           ball.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.18)', offset: 0.7 }, { transform: 'scale(1)' }], {
-            duration: PILE_POP_MS,
-            delay: PILE_POP_MS * 0.45,
+            duration: TRAY_POP_MS,
+            delay: TRAY_POP_MS * 0.45,
             easing: 'ease-out',
             fill: 'backwards',
           });
         }
       }
-      if (count === 0) continue;
-      if (placed) left += PILE_KIND_GAP;
-      placed = true;
-      // The heap: the bottom row takes the larger half, the top row sits in its hollows.
-      const d = PILE_BALL[kind];
-      const bottom = Math.ceil((count + 1) / 2);
-      for (let i = 0; i < count; i++) {
-        const top = i >= bottom;
-        const x = left + (top ? (i - bottom + 0.5) * d : i * d);
-        const y = PILE_FLOOR - d - (top ? d * 0.86 : 0);
-        const ball = list[i]!;
-        ball.style.left = `${x.toFixed(3)}em`;
-        ball.style.top = `${y.toFixed(3)}em`;
-      }
-      left += bottom * d;
     }
-    this.pileEl.style.width = `${Math.max(PILE_BALL.small, left).toFixed(3)}em`;
+    const { bottom, top } = TRAY.big;
+    const over = amount.big - (bottom + top);
+    this.trayOverflowEl.classList.toggle('is-hidden', over <= 0);
+    if (over > 0) this.trayOverflowEl.textContent = `+${over}`;
   }
 
-  /** Player's dashboard size (Settings.dashboardSize): the strip's height scales with it. */
+  /** Player's dashboard size (Settings.dashboardSize): the whole panel scales with it. */
   setDashboardScale(scale: number): void {
     this.root.style.setProperty('--hud-dash-scale', String(scale));
   }
 
-  /** The strip's backlight colour (Settings.hudBacklight). */
+  /** The panel's backlight colour (Settings.hudBacklight). */
   setBacklight(backlight: HudBacklight): void {
-    this.setAttr(this.stripEl, 'data-backlight', backlight);
+    if (this.panelEl.getAttribute('data-backlight') === backlight) return;
+    this.panelEl.setAttribute('data-backlight', backlight);
+    this.map.refreshPalette();
   }
 
-  /**
-   * The G-force widget on the panel: the ride of the car the player drives, or null for
-   * a still face (the dot at the centre).
-   */
+  /** The gyro orb's steel ball: the ride of the car the player drives, or null for a still bowl. */
   setRide(ride: RideReadout | null): void {
-    if (ride === null) {
-      // A still face: the dot at the centre.
-      if (this.rideX !== 0 || this.rideY !== 0) {
-        this.rideX = 0;
-        this.rideY = 0;
-        this.rideDot.setAttribute('cx', '0');
-        this.rideDot.setAttribute('cy', '0');
-      }
-      this.rideShown = false;
-      return;
-    }
-    if (!this.rideShown) {
-      this.rideShown = true;
-      // What happened before the readings started is not news.
-      this.rideHarshSeen = ride.harshMoments;
-    }
-    // The push is opposite the acceleration: braking throws the load forward (up the
-    // face), a left bend throws it right.
-    const scale = RIDE_R / RIDE_FULL_MPS2;
-    let x = ride.lateral * scale;
-    let y = ride.longitudinal * scale;
-    const reach = Math.hypot(x, y);
-    if (reach > RIDE_R) {
-      x *= RIDE_R / reach;
-      y *= RIDE_R / reach;
-    }
-    x = Math.round(x * 4) / 4;
-    y = Math.round(y * 4) / 4;
-    if (x !== this.rideX || y !== this.rideY) {
-      this.rideX = x;
-      this.rideY = y;
-      this.rideDot.setAttribute('cx', String(x));
-      this.rideDot.setAttribute('cy', String(y));
-    }
-    const magnitude = Math.hypot(ride.longitudinal, ride.lateral);
-    const zone = magnitude > RIDE_HARSH_MPS2 ? 2 : magnitude > RIDE_EASY_MPS2 ? 1 : 0;
-    if (zone !== this.rideZone) {
-      this.rideZone = zone;
-      this.rideEl.classList.toggle('is-uncomfortable', zone === 1);
-      this.rideEl.classList.toggle('is-harsh', zone === 2);
-    }
-    if (ride.harshMoments > this.rideHarshSeen) {
-      this.rideHarshSeen = ride.harshMoments;
-      this.ridePulse.animate(
-        [
-          { opacity: 0.95, transform: 'scale(0.75)' },
-          { opacity: 0, transform: 'scale(1.18)' },
-        ],
-        { duration: 650, easing: 'ease-out' },
-      );
-    }
+    this.gyro.setRide(ride);
   }
 
   /** Radio remains a message source for the LCD; it has no separate lamp cell. */
@@ -690,63 +548,6 @@ export class Hud {
       this.displayCharacters[digit] = character;
       this.lcdDigits[digit]!.setAttribute('data-c', character);
     }
-  }
-
-
-  /**
-   * The pedal lever scale: six cells, the four throttle notches over neutral over the
-   * brake. A frame marks the notch the lever is on; the throttle fills up from neutral
-   * and the brake down from it, as the pedals are now, and the throttle fill brightens
-   * past the top notch while the key kicks down.
-   */
-  private buildPedalLever(): { svg: SVGSVGElement; notch: SVGRectElement; throttle: SVGRectElement; brake: SVGRectElement } {
-    const svg = svgEl('svg');
-    svg.setAttribute('class', 'hud-pedal-lever');
-    svg.setAttribute('viewBox', `0 0 ${LEVER_W} ${LEVER_H}`);
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Pedal lever');
-    const rect = (cls: string, y: number, h: number): SVGRectElement => {
-      const r = svgEl('rect');
-      r.setAttribute('class', cls);
-      r.setAttribute('x', '2');
-      r.setAttribute('y', String(y));
-      r.setAttribute('width', String(LEVER_W - 4));
-      r.setAttribute('height', String(h));
-      svg.appendChild(r);
-      return r;
-    };
-    const throttle = rect('hud-lever-throttle', LEVER_NEUTRAL_TOP, 0);
-    const brake = rect('hud-lever-brake', LEVER_NEUTRAL_FOOT, 0);
-    for (let i = 1; i < LEVER_H / LEVER_CELL; i++) {
-      const line = svgEl('line');
-      const neutral = i === LEVER_THROTTLE_CELLS || i === LEVER_THROTTLE_CELLS + 1;
-      line.setAttribute('class', neutral ? 'hud-lever-tick is-neutral' : 'hud-lever-tick');
-      line.setAttribute('x1', '0');
-      line.setAttribute('x2', String(LEVER_W));
-      line.setAttribute('y1', String(i * LEVER_CELL));
-      line.setAttribute('y2', String(i * LEVER_CELL));
-      svg.appendChild(line);
-    }
-    const notch = rect('hud-lever-notch', LEVER_NEUTRAL_TOP, LEVER_CELL);
-    notch.setAttribute('x', '0.75');
-    notch.setAttribute('width', String(LEVER_W - 1.5));
-    return { svg, notch, throttle, brake };
-  }
-
-  private updatePedalLever(lever: DrivingReadout['pedalLever']): void {
-    this.leverEl.classList.toggle('is-hidden', lever === null);
-    if (lever === null) return;
-    // Notch n sits n cells above neutral; the brake below it.
-    this.setAttr(this.leverNotch, 'y', String(LEVER_NEUTRAL_TOP - lever.notch * LEVER_CELL));
-    // The throttle notches are 20 % apart, one cell each; past the top one's 80 % the
-    // fill is full and lit as a kickdown.
-    const up = Math.min(LEVER_NEUTRAL_TOP, (lever.throttle / 0.2) * LEVER_CELL);
-    this.setAttr(this.leverThrottle, 'y', (LEVER_NEUTRAL_TOP - up).toFixed(1));
-    this.setAttr(this.leverThrottle, 'height', up.toFixed(1));
-    this.leverEl.classList.toggle('is-kickdown', lever.throttle > 0.81);
-    // The brake at the car's threshold pedal fills its cell.
-    const down = Math.min(1, lever.knee > 0 ? lever.brake / lever.knee : 0) * LEVER_CELL;
-    this.setAttr(this.leverBrake, 'height', down.toFixed(1));
   }
 
 
@@ -842,7 +643,7 @@ export class Hud {
   }
 
 
-  /** The map ribbon on the strip: see ui/hudmap.ts. */
+  /** The navigator orb: see ui/hudmap.ts. */
   setMap(view: MapView): void {
     if (this.disposed) return;
     this.map.update(view);
