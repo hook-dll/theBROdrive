@@ -531,9 +531,10 @@ body.is-machine-focus .hud-crosshair {
 /* THE POD between the corners: the display hung from the top edge. Its frame
    says who drives: plain is the player's own hands, a coloured frame is a car driving
    itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the whole
-   road at their limit. */
+   road at their limit. Faint glass as the corners are; only the lit segments of the
+   display are bright, so a message stands out and nothing else does. */
 .hud-pod {
-  --hud-frame: rgba(255, 255, 255, 0.08);
+  --hud-frame: color-mix(in srgb, var(--lcd-edge) 62%, transparent);
   position: absolute;
   top: 0;
   left: 50%;
@@ -542,11 +543,10 @@ body.is-machine-focus .hud-crosshair {
   align-items: center;
   gap: 1.1em;
   padding: calc(0.5em + env(safe-area-inset-top)) 1.1em 0.6em;
-  background: linear-gradient(var(--bezel), var(--bezel-lo));
+  background: color-mix(in srgb, var(--lcd-glass) 16%, transparent);
   border: 1px solid var(--hud-frame);
   border-top: none;
   border-radius: 0 0 1em 1em;
-  box-shadow: inset 0 -0.06em 0 rgba(255, 255, 255, 0.1), 0 0.3em 1.1em rgba(0, 0, 0, 0.45);
 }
 
 .hud-pod.is-autopilot-sleeper { --hud-frame: #fffdd0; }
@@ -561,9 +561,8 @@ body.is-machine-focus .hud-crosshair {
   display: block;
   width: 21em;
   height: 2.8em;
-  background: var(--lcd-glass);
+  background: color-mix(in srgb, var(--lcd-glass) 12%, transparent);
   border-radius: 0.25em;
-  box-shadow: inset 0 0 0.4em rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: opacity 0.4s ease;
   /* Which segments are lit is decided by generated rules in hud.ts; both states read
      this variable, so a fault only has to change the colour. */
@@ -585,7 +584,8 @@ body.is-machine-focus .hud-crosshair {
 }
 
 .hud-lcd-segment {
-  stroke: var(--lcd-dim);
+  /* Unlit: as faint as the rest of the glass (--hud-faint of --lcd-dim). */
+  stroke: color-mix(in srgb, var(--lcd-dim) 62%, transparent);
   stroke-width: 1.25;
   stroke-linecap: square;
 }
