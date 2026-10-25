@@ -222,7 +222,7 @@ const MAX_VERGE_M = 22;
       name: structureDef(house.structure).id,
       rect: houseRect(seedRoad, house),
     }));
-    for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'trailer'] as const) {
+    for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'shelter', 'bay'] as const) {
       const at = stop.layout[name];
       if (!at) continue;
       const pose = spotPose(seedRoad, at);
@@ -431,7 +431,6 @@ const MAX_VERGE_M = 22;
   const WALK_CHUNKS = 1500;
   const walkKm = (WALK_CHUNKS * CHUNK_LENGTH) / 1000;
   const provider = new PoiProvider(
-    { register: () => {}, attachLids: () => {}, forget: () => {} } as never,
     roadDistance,
     new MarketField(),
     { register: () => {}, forget: () => {} } as never,
@@ -652,7 +651,7 @@ const MAX_VERGE_M = 22;
           rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across },
         });
       };
-      for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'trailer'] as const) {
+      for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'shelter', 'bay'] as const) {
         addSpot(name, layout[name], SERVICE_HALF[name][0], SERVICE_HALF[name][1]);
       }
       if (own) {

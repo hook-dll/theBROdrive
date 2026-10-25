@@ -81,8 +81,6 @@ export interface Layby {
 const PARK_INSET_M = 3;
 /** ...but never closer than this to the pad's outer edge. */
 const PARK_OUTER_CLEAR_M = 1.6;
-/** A haul's trailer or car (contracts/world.ts) is left this far in from the pad's outer edge. */
-const HAUL_INSET_M = 1.4;
 /**
  * Fall of the pad away from the road, metres per metre. Level along the road edge, so
  * the slips meet the road with no step, and a one-percent fall outward, so the pad
@@ -196,14 +194,6 @@ export function laybyDriveLateral(l: Layby, s: number, halfWidth: number): numbe
 /** Signed lateral of the parking line on the pad. The drive line runs along it. */
 export function laybyParkLateral(l: Layby): number {
   return l.side * parkU(l);
-}
-
-/**
- * Signed lateral on the pad's building side, at `l.s`, where a settlement's post leaves a
- * haul's trailer or car (contracts/world.ts): off the parking line, beside the post.
- */
-export function laybyHaulLateral(l: Layby): number {
-  return l.side * (l.padOuter - HAUL_INSET_M);
 }
 
 /** Whether a road-frame point is on the lay-by's own pad (not the road's carriageway). */

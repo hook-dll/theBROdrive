@@ -620,7 +620,6 @@ export function migrateState(raw: unknown): WorldState {
     trailers,
     looseParts,
     looseItems,
-    lootedPois: migrateNumberArray(obj.lootedPois),
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
     barrelLitres: migrateBarrelLitres(obj.barrelLitres),

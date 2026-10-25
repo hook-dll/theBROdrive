@@ -2,7 +2,6 @@ import type * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { isContractClosed } from '../contracts/registry';
-import { postHaulPlace } from '../contracts/world';
 import { carUniqueness } from '../economy/economy';
 import { poseOnGround } from '../game/spawn';
 import type { CarState, GameWorld, WorldState } from '../game/state';
@@ -14,26 +13,29 @@ import { trunkCellCount } from '../vehicle/trunk';
 import { buildCardMachine, CardMachine, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
+import { laybyNear, laybyParkLateral } from './layby';
 import { LAYBY_CAR_RANGE_M } from './post';
 import type { PostStop } from './poststops';
+import { spotPose, type SettlementSpot } from './settlement';
 import type { Terrain } from './terrain';
 
 /**
  * THE TOY BOX (game-design2.md §13.4): the collection of the player's cars, a card
- * machine (world/cardmachine.ts) beside every post, toward its lay-by's middle.
+ * machine (world/cardmachine.ts) beside every post, between it and the stop.
  *
  * Its cards are the boxed cars (`WorldState.toyBox`), one each: the model, its comfort
  * and boot, its stickers and its fuel; the footer says what TAKE OUT will do with the
  * lay-by. TAKE OUT on a card:
- *  - the player's car standing within `LAYBY_CAR_RANGE_M` of the post's haul place (the
- *    one he last drove when it is there, else the nearest) goes into the box first
+ *  - the player's car standing within `LAYBY_CAR_RANGE_M` of the box's spot on the pad
+ *    (the one he last drove when it is there, else the nearest) goes into the box first
  *    (`FixtureContext.boxCar`), refused while it holds an active job's cargo (a broken
  *    souvenir goes in with it), a trailer or a tow bar (`boxRefusal`); with none there,
  *    nothing goes in;
- *  - the card's car comes out standing on the haul place, heading along the road, as it
- *    went in (fuel, wear, stickers, parts, its boot's own things), refused while another
- *    car or a trailer stands on the place (`spotBlocker`). It is the car the post reads
- *    when none stands on its lay-by from then on (`PlayerState.lastDrivenCarId`).
+ *  - the card's car comes out on the pad in front of the box, on the parking line,
+ *    heading along the road, as it went in (fuel, wear, stickers, parts, its boot's own
+ *    things), refused while another car or a trailer stands there (`spotBlocker`). It is
+ *    the car the post reads when none stands on its lay-by from then on
+ *    (`PlayerState.lastDrivenCarId`).
  *
  * A boxed car is out of the world: in `WorldState.toyBox`, not in `cars`, so nothing
  * streams it, draws it or counts it (`car_box`, `car_unbox`). Only the player's own
@@ -52,7 +54,7 @@ const CARD_BAND = '#8a4a2a';
 const EMPTY_BAND = '#6b6355';
 const REFUSED_BAND = '#7a3a2a';
 
-/** Clear ground kept round the taken-out car on the haul place, m. */
+/** Clear ground kept round the taken-out car on its spot, m. */
 const SPOT_MARGIN_M = 0.4;
 
 /**
@@ -84,16 +86,14 @@ export function boxRefusal(state: WorldState, carId: string): string | null {
 }
 
 /**
- * Builds stop `stop`'s toy box at ABSOLUTE (`x`, `z`) on the sand, its front turned by
- * `yaw` (front local -Z). In the physics band it is solid and registers its fixture (id
- * pushed to `registered`); beyond it, it is only seen. `disposers` gets the card materials.
+ * Builds stop `stop`'s toy box on its settlement spot `at`, its front to the road. In the
+ * physics band it is solid and registers its fixture (id pushed to `registered`); beyond
+ * it, it is only seen. `disposers` gets the card materials.
  */
 export function buildToyBox(
   ctx: ChunkContext,
   stop: PostStop,
-  x: number,
-  z: number,
-  yaw: number,
+  at: SettlementSpot,
   group: THREE.Group,
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
@@ -101,12 +101,19 @@ export function buildToyBox(
   registered: string[],
   disposers: Array<() => void>,
 ): void {
+  const { x, z, yaw } = spotPose(ctx.road, at);
   const parts = buildCardMachine(ctx, stop.s, x, z, yaw, TOYBOX_LOOK, group, bodies, colliders, disposers);
-  const machine = new ToyBox(ctx.world, ctx.terrain, stop, postHaulPlace(ctx.world.seed, ctx.road, stop.index), parts);
+  const layby = laybyNear(ctx.world.seed, stop.s);
+  if (!layby) throw new Error(`buildToyBox: post ${stop.index} has no lay-by`);
+  const out = ctx.road.offsetPoint(at.s, laybyParkLateral(layby));
+  // Nosed the way traffic on that side runs, as the start's car is (story/site.ts).
+  const heading = ctx.road.headingAt(at.s);
+  const spot: Spot = { x: out.x, z: out.z, yaw: layby.side < 0 ? heading : heading + Math.PI, s: at.s };
+  const machine = new ToyBox(ctx.world, ctx.terrain, stop, spot, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
-/** Where a taken-out car stands: the post's haul place, ABSOLUTE metres, heading along the road. */
+/** Where a taken-out car stands: on the pad in front of the box, ABSOLUTE metres, heading along the road. */
 interface Spot {
   readonly x: number;
   readonly z: number;
@@ -187,8 +194,8 @@ class ToyBox extends CardMachine {
 
   /**
    * The player's car on the lay-by (the one he last drove when it is there, else the
-   * nearest within `LAYBY_CAR_RANGE_M` of the haul place), whether it may go in, and
-   * whether the haul place is clear for the car coming out.
+   * nearest within `LAYBY_CAR_RANGE_M` of the box's spot), whether it may go in, and
+   * whether the spot is clear for the car coming out.
    */
   private readSwap(ctx: FixtureContext): Swap {
     const state = this.world.state;
@@ -215,7 +222,7 @@ class ToyBox extends CardMachine {
   }
 
   /**
-   * What stands on the haul place, leaving no room for a car to come out: any car but
+   * What stands on the box's spot, leaving no room for a car to come out: any car but
    * `going` (the one that goes into the box), or a trailer. Each other body is taken as a
    * square of its half length, whichever way it stands; the room kept is the longest
    * and widest car in the box, so whichever card is turned to fits.
@@ -283,7 +290,7 @@ class ToyBox extends CardMachine {
     return 'mount';
   }
 
-  /** The pose `car` comes out at: on the haul place, on its own wheels, in clear air over the ground. */
+  /** The pose `car` comes out at: on the box's spot, on its own wheels, in clear air over the ground. */
   private standing(car: CarState): { x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number } {
     const { x, z, yaw, s } = this.spot;
     const measure = carModelMeasure(car.modelId);

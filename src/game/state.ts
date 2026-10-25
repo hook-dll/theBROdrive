@@ -338,20 +338,13 @@ export interface WorldState {
    */
   looseItems: Record<string, { item: Item; x: number; y: number; z: number }>;
   /**
-   * POI indices whose loot has already been materialised into `looseParts` /
-   * `looseItems`. Presence means "do not generate again" — the surviving loot lives
-   * in those maps, and anything picked up is simply absent. This is what stops a
-   * POI restocking itself every time its chunk reloads.
-   */
-  lootedPois: number[];
-  /**
    * Scatter props knocked to pieces, by packed cell identity (`propCellId` in
    * world/props/scatter.ts). Presence means "do not stand this one up again".
    *
-   * The same guard `lootedPois` is, for the same reason: a chunk is rebuilt every time
-   * it crosses the physics radius, so without a record every cactus you flattened would
-   * be standing again the next time you drove past. Numbers rather than strings so it
-   * migrates through `migrateNumberArray` like every other index list in the save.
+   * A chunk is rebuilt every time it crosses the physics radius, so without a record
+   * every cactus you flattened would be standing again the next time you drove past.
+   * Numbers rather than strings so it migrates through `migrateNumberArray` like every
+   * other index list in the save.
    */
   flattenedProps: number[];
   /**
@@ -443,7 +436,6 @@ export type WorldDelta =
   | { t: 'loose_item_fluid'; itemId: string; fluid: FluidKind; litres: number }
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
-  | { t: 'poi_looted'; poiIndex: number }
   | { t: 'prop_flatten'; propId: number }
   | { t: 'sticker_place'; carId: string; sticker: StickerState; envelopeId: string }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
@@ -507,7 +499,6 @@ export function newWorldState(seed: number): WorldState {
     trailers: {},
     looseParts: {},
     looseItems: {},
-    lootedPois: [],
     flattenedProps: [],
     vendingSold: {},
     barrelLitres: {},
@@ -897,9 +888,6 @@ export class GameWorld {
         break;
       case 'item_pickup':
         delete s.looseItems[delta.itemId];
-        break;
-      case 'poi_looted':
-        if (!s.lootedPois.includes(delta.poiIndex)) s.lootedPois.push(delta.poiIndex);
         break;
       case 'prop_flatten':
         if (!s.flattenedProps.includes(delta.propId)) s.flattenedProps.push(delta.propId);

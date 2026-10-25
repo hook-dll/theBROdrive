@@ -7,9 +7,10 @@
  * extra stored: `contract-trailer:<seed>` and `contract-car:<seed>` are in world
  * state like any other trailer or car.
  *
- * SPAWNED ONCE, ON THE FIRST PICKUP. The object appears on the SOURCE post's lay-by
- * the first time the cargo leaves that post's stock (its lever hands over the papers),
- * which is the moment the contract becomes physical. The guard is plain existence — an id already in state
+ * SPAWNED ONCE, ON THE FIRST PICKUP. The object appears in the SOURCE post's haul bay
+ * (world/haulbay.ts) the first time the cargo leaves that post's stock (its lever hands
+ * over the papers), nose out as if reversed in, which is the moment the contract becomes
+ * physical. The guard is plain existence — an id already in state
  * is never spawned again — so dropping and re-picking the cargo, stowing it in
  * another boot, or reloading a save cannot duplicate the object, and after delivery
  * the cargo is gone and there is nothing left to drive a respawn.
@@ -19,46 +20,27 @@
  * kind existed: the next tick spawns what the contract was missing.
  */
 
-import { hash01, pick } from '../core/rng';
+import { pick } from '../core/rng';
 import type { CarState, GameWorld, TrailerLoad, TrailerState } from '../game/state';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
-import { TRAILER_SPAWN_HEIGHT } from '../vehicle/trailer';
+import { TRAILER_BALL_Z, TRAILER_HALF_LENGTH, TRAILER_SPAWN_HEIGHT } from '../vehicle/trailer';
 import { contractKindOf, contractThing, type ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
-import { laybyHaulLateral, laybyNear } from '../world/layby';
-import { postStop } from '../world/poststops';
+import { postHaulBay, type HaulBay } from '../world/haulbay';
 import type { ContractPlace } from './types';
 
 /** 'CTC1': the car model. */
 const CAR_MODEL_DOMAIN = 0x43544331;
-/** Where a contract car is staggered around its place, so two do not coincide. */
-const CAR_STAGGER_DOMAIN = 0x43545331;
-
-/**
- * The haul's place on the lay-by to the trailer parked behind it, m: half a car's
- * length, the trailer's drawbar (its ball 2.08 m ahead of its middle) and a short gap,
- * so the trailer stands with its drawbar pointing up the pad at the car that is
- * supposed to take it.
- */
-const TRAILER_CENTRE_GAP_M = 2.7;
-/** The haul's place to the car parked ahead of it, m, on top of both half-lengths. */
-const CAR_CENTRE_GAP_M = 1.2;
-/**
- * Half a car's length kept clear round the haul's place, m: about the longest catalogue
- * half, so the trailer and the car stand clear of each other.
- */
-const HAUL_PLACE_HALF_Z = 2.7;
 /**
  * The loaded trailer is set down this far above its settled ride height, m, not
- * dropped. Dropped 0.5 m (the 0.9 m a POI's empty spare falls), it lands wheels
- * first, the nose comes down on the prop leg and bounces back up 13°; a piano rides
- * high enough (its centre of mass 0.53 m over the axle, 0.16 m ahead of it) that
- * anything past 17° tips the trailer onto its tail, and it stood there at 28° nose-up
- * on the lay-by. Set down 0.085 m it settles within 0.8° (measured in game,
- * 230 kg).
+ * dropped. Dropped 0.5 m, it lands wheels first, the nose comes down on the prop leg
+ * and bounces back up 13°; a piano rides high enough (its centre of mass 0.53 m over
+ * the axle, 0.16 m ahead of it) that anything past 17° tips the trailer onto its tail,
+ * and it stood there at 28° nose-up on the lay-by. Set down 0.085 m it settles within
+ * 0.8° (measured in game, 230 kg).
  */
 const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
@@ -95,27 +77,6 @@ export function isContractCarId(carId: string): boolean {
  */
 const BED_LOAD: TrailerLoad = { halfExtents: [0.8, 0.28, 1.6] };
 
-interface HaulPose {
-  x: number;
-  z: number;
-  yaw: number;
-  /** Arclength hint for terrain sampling. */
-  s: number;
-}
-
-/**
- * Where a post leaves its hauls: on its lay-by's building side, at the stop, heading
- * along the road (`laybyHaulLateral`). Pure from the seed, so it needs no chunk built;
- * the deliveries measure against the same place (`DeliveryProbe.postX`/`postZ`).
- */
-export function postHaulPlace(seed: number, road: Road, index: number): HaulPose {
-  const stop = postStop(seed, index);
-  const layby = laybyNear(seed, stop.s);
-  const lateral = layby && Math.abs(layby.s - stop.s) < 1 ? laybyHaulLateral(layby) : 0;
-  const point = road.offsetPoint(stop.s, lateral);
-  return { x: point.x, z: point.z, yaw: road.headingAt(stop.s), s: stop.s };
-}
-
 /**
  * Spawns a contract's own world object the first time the cargo leaves its source
  * post. Idempotent: an id already in state, or an offer still in the post's stock,
@@ -129,24 +90,24 @@ export function ensureContractWorldObjects(
   if (place === 'post') return;
   const kind = contractKindOf(item);
   if (kind !== 'trailer' && kind !== 'car_transfer' && kind !== 'towing') return;
-  const pose = postHaulPlace(deps.world.seed, deps.road, item.sourceCourierIndex);
-  if (kind === 'trailer') spawnContractTrailer(deps, item, pose);
-  else spawnContractCar(deps, item, pose);
+  const bay = postHaulBay(deps.world.seed, deps.road, item.sourceCourierIndex);
+  if (kind === 'trailer') spawnContractTrailer(deps, item, bay);
+  else spawnContractCar(deps, item, bay);
 }
 
 function spawnContractTrailer(
   deps: ContractWorldDeps,
   item: ContractCargoItem,
-  pose: HaulPose,
+  bay: HaulBay,
 ): void {
   const id = contractTrailerId(item);
   if (deps.world.state.trailers[id]) return;
-  // Behind the haul's place, the drawbar pointing up the pad, the way the road runs, at
-  // the car on that place: a car stopped there backs a metre onto the ball.
-  const back = HAUL_PLACE_HALF_Z + TRAILER_CENTRE_GAP_M;
-  const x = pose.x - Math.sin(pose.yaw) * back;
-  const z = pose.z - Math.cos(pose.yaw) * back;
-  const yaw = pose.yaw;
+  // Drawbar out of the opening, the trailer's length from its tail to the ball centred
+  // in the bay: a car backs up to the ball from the pad.
+  const back = (TRAILER_BALL_Z - TRAILER_HALF_LENGTH) / 2;
+  const yaw = bay.yaw;
+  const x = bay.x - Math.sin(yaw) * back;
+  const z = bay.z - Math.cos(yaw) * back;
   const trailer: TrailerState = {
     id,
     hitchedTo: null,
@@ -161,7 +122,7 @@ function spawnContractTrailer(
     cargoZ: 1,
     x,
     // Set down on its own suspension; see TRAILER_SETTLE_CLEARANCE_M.
-    y: deps.terrain.heightAt(x, z, pose.s) + TRAILER_SPAWN_HEIGHT + TRAILER_SETTLE_CLEARANCE_M,
+    y: deps.terrain.heightAt(x, z, bay.s) + TRAILER_SPAWN_HEIGHT + TRAILER_SETTLE_CLEARANCE_M,
     z,
     qx: 0,
     qy: Math.sin(yaw / 2),
@@ -175,29 +136,23 @@ function spawnContractTrailer(
 function spawnContractCar(
   deps: ContractWorldDeps,
   item: ContractCargoItem,
-  pose: HaulPose,
+  bay: HaulBay,
 ): void {
   const id = contractCarId(item);
   if (deps.world.state.cars[id]) return;
   const def = pick(CAR_MODELS, item.generatedSeed, CAR_MODEL_DOMAIN);
   const measure = carModelMeasure(def.id);
-  // Ahead of the haul's place: the trailer takes the space behind it. Two offers at the
-  // same post would otherwise put two contract cars in one spot, so the seed
-  // staggers this one across the verge and along the road by a couple of metres.
-  const stagger = hash01(item.generatedSeed, CAR_STAGGER_DOMAIN, 0);
-  const lateral = (stagger - 0.5) * 2.6;
-  const ahead = HAUL_PLACE_HALF_Z + measure.halfExtents[2] + CAR_CENTRE_GAP_M + stagger * 2.2;
-  const x = pose.x + Math.sin(pose.yaw) * ahead + Math.cos(pose.yaw) * lateral;
-  const z = pose.z + Math.cos(pose.yaw) * ahead - Math.sin(pose.yaw) * lateral;
-  const plane = poseOnGround(measure.wheels, x, z, pose.yaw, (gx, gz) => deps.terrain.heightAt(gx, gz));
-  const groundY = plane ? plane.groundY : deps.terrain.heightAt(x, z, pose.s);
+  // In the middle of the bay, nose out: the longest car has 0.86 m either end.
+  const { x, z, yaw } = bay;
+  const plane = poseOnGround(measure.wheels, x, z, yaw, (gx, gz) => deps.terrain.heightAt(gx, gz));
+  const groundY = plane ? plane.groundY : deps.terrain.heightAt(x, z, bay.s);
   const car: CarState = createServiceableCarState(
     id,
     def.id,
     x,
     carSpawnYAboveGround(measure, groundY),
     z,
-    pose.yaw,
+    yaw,
   );
   if (plane) {
     // Stood on its own wheels, tilted as the ground is; the same fit a POI's

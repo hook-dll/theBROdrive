@@ -215,17 +215,40 @@
   the start car, every bought car; never a haul's car or a lot car), each either out in
   the world (`cars`) or boxed (`toyBox`): out of the world, nothing streams or draws it,
   its `CarState` kept whole — fuel, wear, stickers, parts and its boot's own things.
-  A third card machine, TOY BOX (TAKE OUT), stands beside every post, 2.8 m from the
-  stop toward the lay-by's middle (`SettlementLayout.toybox`). Its cards are the boxed
+  A third card machine, TOY BOX (TAKE OUT), stands beside every post, 1.9 m short of the
+  stop (`SettlementLayout.toybox`). Its cards are the boxed
   cars: model, comfort, boot cells, stickers, fuel; the footer says what TAKE OUT will
-  do. TAKE OUT boxes the player's car standing within 20 m of the post's haul place (the
-  last driven, else the nearest) and stands the card's car on the haul place, on its
-  wheels, heading along the road; with none there it only takes the car out. Refused,
+  do. TAKE OUT boxes the player's car standing within 20 m of the box's spot on the pad
+  (the last driven, else the nearest) and stands the card's car on the pad in front of
+  the box, on the parking line, on its wheels, nosed the way that side's traffic runs;
+  with none there it only takes the car out. Refused,
   with the reason on the card and in a toast, while the lay-by car holds an active job's
   thing ("take the jobs out of the … first"; a broken souvenir or a returned party's
   leftover teddy goes into the box with the car), a trailer or a tow bar ("unhitch the …
-  first"), the player sits in a car, or another car or a trailer stands on the haul
-  place. The car taken out is the one the post reads as last driven.
+  first"), the player sits in a car, or another car or a trailer stands on that spot.
+  The car taken out is the one the post reads as last driven.
+- THE LAY-BY'S SERVICE STRIP IS LAID OUT TO game-design2.md §6.3 (`world/settlement.ts`).
+  Along the pad from the stop: signpost −26, car for sale −16 (sometimes), the teddy
+  shelter's place −9 (`SettlementLayout.shelter`, 3.8 × 2 m kept clear; nothing stands on
+  it yet), POST −4.8, toy box −1.9, the haul bay +4…+7, shop +13, and the barrel stand,
+  on its old 50% roll, at the pumps' place +19 until the pumps replace it. The post and
+  the toy box are 0.3 and 0.1 m off the table's −4.5 and −2: on the inside of a curve
+  the strip comes up to 12% shorter than its arclength, and the machines keep a metre
+  apart. The strip is 7.5 m deep (was 6) for the bay; houses on the lay-by's side stand
+  past its ends as before, and `tools/poi-placement.ts` holds every house, service and
+  the bay clear of one another and of the asphalt.
+- THE HAUL BAY (`world/haulbay.ts` `buildHaulBay`, `postHaulBay`; `SettlementLayout.bay`).
+  A pen at right angles to the road, 3.2 m along it by 6.6 m deep inside, open to the
+  pad half a metre off its edge: a concrete floor with yellow side lines and a white
+  stop line, two side walls and a back wall 0.9 m high, solid, with red and white bands
+  and a reflector chip on each wall end at the opening and two on the back wall
+  (`matReflector`, lit with the delineators after dusk). The floor is only drawn: the
+  ground under it is the levelled site, so there is no step. `postHaulBay(seed, road,
+  index)` is the one source of the bay's pose: middle, the yaw of a haul standing in it
+  nose out (+Z out of the opening), inner half extents, the opening's middle. It
+  replaces `postHaulPlace`: a haul's trailer (drawbar out, its length centred) or car
+  (nose out, centred) is left in the source post's bay, and the post reads its lay-by
+  car and measures deliveries from the bay's middle.
 - BUYING A CAR BOXES THE OLD ONE (`world/keybox.ts`): taking the key puts the car the
   player had (the last driven, else his car nearest the lot) into the toy box at once,
   unless it holds contract cargo or is coupled; then it waits where it stands as his car
@@ -283,6 +306,12 @@
   thing has its model.
 - Registered parcels and the PIN dial (`registeredPin`, `ui/dial.ts`, the `dial` hook).
 - `contracts.md` (the old prototype doc).
+- The spare trailer on a tenth of the settlements (`TRAILER_CHANCE`, `spawnTrailer`,
+  `SettlementLayout.trailer`): a trailer appears only as a contract's load. With it went
+  its once-only guard, `WorldState.lootedPois` and the `poi_looted` delta (a lot car is
+  guarded by its own id), and `PoiProvider`'s trailer field.
+- `layby.ts` `laybyHaulLateral`, `contracts/world.ts` `postHaulPlace` and the contract
+  car's stagger along the pad.
 
 ## 0.24.0 — 2026-10-24
 

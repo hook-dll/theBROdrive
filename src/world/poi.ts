@@ -17,7 +17,8 @@ import {
 } from '../render/carmodel';
 import { carPrice } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
-import type { TrailerField } from '../vehicle/trailer';
+import { buildHaulBay, postHaulBay } from './haulbay';
+import { setReflectorEmission } from './props/delineators';
 import { postStop } from './poststops';
 import { fitGround } from './footprint';
 import { halfWidthAt } from './roadprofile';
@@ -54,9 +55,8 @@ import { newRegionMix, regionAt } from './regions';
  * The building is drawn from `POI_STRUCTURES` (world/poistructures.ts). Nothing lies
  * about a stop for the taking: what a stop offers is sold (economy plan).
  *
- * A stop's world objects (a trailer, the car for sale) are materialised exactly once,
- * keyed by `Poi.index` and the car's id. `poi_looted` is the idempotency guard: on any
- * later rebuild that generation is skipped entirely.
+ * A stop's one world object, the car for sale, is materialised once, keyed by its own id
+ * in world state; everything else is scenery, built every time the chunk is.
  */
 
 /** Arclength between desert slots, from `config/gameplay.json`. */
@@ -92,8 +92,8 @@ const DESERT_NEIGHBOUR_CLEARANCE_M = 12;
 const DESERT_END_CLEARANCE_M = 2_500;
 
 /**
- * Where the desert population's identities live in `lootedPois` (the roadside one's
- * base is in world/poislots.ts).
+ * Where the desert population's identities start (the roadside one's base is in
+ * world/poislots.ts).
  *
  * Both are offset past anything a save written before the dwellings could hold: those
  * saves recorded the old buildings' slot indices, and the loot they left behind was laid
@@ -104,7 +104,7 @@ const DESERT_INDEX_BASE = 60_000_000;
 
 
 export interface Poi {
-  /** Identity in `WorldState.lootedPois` and in every generated item id. Stable forever. */
+  /** Identity in every generated item and car id. Stable forever. */
   readonly index: number;
   /** Arclength of the stop, metres from the house. */
   readonly s: number;
@@ -346,8 +346,8 @@ export function geometryToTrimesh(
 }
 
 // ---------------------------------------------------------------------------
-// Building a stop. Scenery is built unconditionally; world objects (a trailer, the car
-// for sale) only once, guarded by `poi_looted` and by the car's own id in world state.
+// Building a stop. Scenery is built unconditionally; the one world object, the car for
+// sale, only once, guarded by the car's own id in world state.
 //
 // NOTHING LIES ABOUT A STOP FOR THE TAKING (economy plan): fuel, fluids and parts are
 // bought at a settlement's machine; a car is bought from its lot.
@@ -634,34 +634,11 @@ function buildLot(
 }
 
 /**
- * A trailer left on a settlement's strip. Take one, leave one: they are never owned, so
- * this records a world object rather than giving the player a possession, and
- * `poi_looted` is what stops a stop growing a new one every reload.
- */
-function spawnTrailer(ctx: ChunkContext, poi: Poi, at: SettlementSpot, trailers: TrailerField): void {
-  const pose = spotPose(ctx.road, at);
-  const half = pose.yaw / 2;
-  trailers.spawn({
-    id: `trailer:${poi.index}`,
-    hitchedTo: null,
-    cargoKg: 0,
-    x: pose.x,
-    // Clear of the ground so it drops onto its own suspension rather than starting
-    // inside the terrain trimesh.
-    y: ctx.terrain.heightAt(pose.x, pose.z, at.s) + 0.9,
-    z: pose.z,
-    qx: 0,
-    qy: Math.sin(half),
-    qz: 0,
-    qw: Math.cos(half),
-  });
-}
-
-/**
  * One stop. Out in the desert: its building, facing wherever it was left facing. At the
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
- * sides, its «ПОЧТА» machine (world/post.ts) and toy box (world/toybox.ts), the shop's
- * machine, the car for sale with its key box, a barrel stand, and sometimes a trailer.
+ * sides, its «ПОЧТА» machine (world/post.ts), toy box (world/toybox.ts) and haul bay
+ * (world/haulbay.ts), the shop's machine, the car for sale with its key box, a barrel
+ * stand. True when it built a haul bay, whose reflectors follow the night.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -671,18 +648,17 @@ function buildPoi(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
-  trailers: TrailerField,
   market: MarketField,
   registeredMarket: string[],
   fixtures: FixtureField,
   registeredFixtures: string[],
   disposers: Array<() => void>,
-): void {
+): boolean {
   if (poi.desert) {
     const at = ctx.road.offsetPoint(poi.s, poi.lateral);
     const yaw = poiYaw(poi, ctx.road.headingAt(poi.s));
     seatStructure(ctx, poi.structure, at.x, at.z, yaw, poi.s, group, bodies, colliders);
-    return;
+    return false;
   }
 
   const layout = settlementLayout(ctx.world.seed, poi);
@@ -690,13 +666,15 @@ function buildPoi(
     const pose = spotPose(ctx.road, house);
     seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
   }
+  let bay = false;
   if (layout.post) {
     const stop = postStop(ctx.world.seed, slotPost(roadsideSlotOfIndex(poi.index)));
     const pose = spotPose(ctx.road, layout.post);
     buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
-    if (layout.toybox) {
-      const box = spotPose(ctx.road, layout.toybox);
-      buildToyBox(ctx, stop, box.x, box.z, box.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    if (layout.toybox) buildToyBox(ctx, stop, layout.toybox, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    if (layout.bay) {
+      buildHaulBay(ctx, postHaulBay(ctx.world.seed, ctx.road, stop.index), group, bodies, colliders);
+      bay = true;
     }
   }
   if (layout.shop) {
@@ -713,12 +691,7 @@ function buildPoi(
       market, registeredMarket, fixtures, registeredFixtures,
     );
   }
-
-  // Record that this stop's world objects are now materialised. The flag alone is the
-  // whole idempotency guard across chunk promotion / unload / reload.
-  if (!ctx.hasPhysics || ctx.world.state.lootedPois.includes(poi.index)) return;
-  if (layout.trailer) spawnTrailer(ctx, poi, layout.trailer, trailers);
-  ctx.world.apply({ t: 'poi_looted', poiIndex: poi.index });
+  return bay;
 }
 
 /**
@@ -730,7 +703,6 @@ export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
 
   constructor(
-    private readonly trailers: TrailerField,
     private readonly roadDistance: RoadDistance,
     /** The vending machines and lot cars' registry (world/market.ts). */
     private readonly market: MarketField,
@@ -758,8 +730,9 @@ export class PoiProvider implements ChunkProvider {
     /** Ids of the world fixtures this chunk registered; forgotten with it. */
     const registeredFixtures: string[] = [];
 
+    let bays = false;
     for (const poi of [...pois, ...desert]) {
-      buildPoi(
+      const bay = buildPoi(
         ctx,
         poi,
         this.roadDistance,
@@ -767,13 +740,13 @@ export class PoiProvider implements ChunkProvider {
         bodies,
         colliders,
         deferredVisuals,
-        this.trailers,
         this.market,
         registeredMarket,
         this.fixtures,
         registeredFixtures,
         deferredVisuals,
       );
+      bays ||= bay;
     }
 
     return {
@@ -787,6 +760,8 @@ export class PoiProvider implements ChunkProvider {
         this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();
       },
+      // The haul bays' reflector chips share the delineators' material.
+      ...(bays ? { setLamps: setReflectorEmission } : {}),
     };
   }
 }

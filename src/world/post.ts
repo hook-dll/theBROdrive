@@ -14,7 +14,7 @@ import {
   isContractClosed,
 } from '../contracts/registry';
 import { formatClock, urgentRemainingS, type ContractKind, type DeliveryEffect, type DeliveryProbe } from '../contracts/types';
-import { isContractCarId, postHaulPlace } from '../contracts/world';
+import { isContractCarId } from '../contracts/world';
 import { carUniqueness, contractPay, formatMoney, RELIC_STICKERS, SPECIAL_CARD_STICKERS, uniquenessBonusText } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import {
@@ -34,6 +34,7 @@ import type { FixtureContext, FixtureField } from './fixturefield';
 import { paintSign, SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
 import { postId, postStop, type PostStop } from './poststops';
+import { postHaulBay } from './haulbay';
 
 /**
  * THE POST MACHINE (game-design2.md §7): where contracts are taken and handed in, by
@@ -49,12 +50,12 @@ import { postId, postStop, type PostStop } from './poststops';
  * that car. The crank turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing falls into the
  * tray (a passenger party is one teddy each), and so do a haul's papers, its trailer or
- * car waiting on the lay-by (contracts/world.ts); the machine lets go of the player so he
+ * car waiting in the post's haul bay (contracts/world.ts); the machine lets go of the player so he
  * picks them up. The card it was on falls away and the slot's next offer is under it
  * (`nextOffer`): the machine never runs dry.
  *
- * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the lay-by's
- * haul place: the one he last drove (`PlayerState.lastDrivenCarId`) when it is there, else
+ * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the post's
+ * haul bay: the one he last drove (`PlayerState.lastDrivenCarId`) when it is there, else
  * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
  * cards print. A delivery is paid by the same car's stickers, read when the tray takes
  * it; with no car on the lay-by, by the car he last drove, wherever it stands.
@@ -106,7 +107,7 @@ const LIMIT_TEXT = 'three jobs already out — hand one in or return it';
 const HAUL_LIMIT_TEXT = 'one haul already out — hand it in or return it first';
 registerCardMachineSigns(POST_LOOK);
 
-/** A car counts as standing on the post's lay-by inside this radius of its haul place, m (the toy box's too). */
+/** A car counts as standing on the post's lay-by inside this radius of its haul bay, m. */
 export const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
@@ -131,7 +132,7 @@ function tagText(offer: ContractCargoItem, thing: ThingDef): string {
 function haulNote(thing: ThingDef): string | null {
   switch (thing.place) {
     case 'trailer':
-      return 'on a trailer, waiting on the lay-by';
+      return 'on a trailer, waiting in the bay';
     case 'tow':
       return 'to the repair on the tow bar';
     case 'transfer':
@@ -208,8 +209,8 @@ export function buildPost(
   plate.rotation.y = Math.PI;
   parts.root.add(plate);
 
-  const haul = postHaulPlace(ctx.world.seed, ctx.road, stop.index);
-  const machine = new PostMachine(ctx.world, stop, haul.x, haul.z, parts);
+  const bay = postHaulBay(ctx.world.seed, ctx.road, stop.index);
+  const machine = new PostMachine(ctx.world, stop, bay.x, bay.z, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
@@ -241,7 +242,7 @@ class PostMachine extends CardMachine {
   constructor(
     private readonly world: GameWorld,
     private readonly stop: PostStop,
-    /** ABSOLUTE metres of the lay-by place where hauls are left and handed in. */
+    /** ABSOLUTE metres of the middle of the post's haul bay, where hauls are left and handed in. */
     private readonly haulX: number,
     private readonly haulZ: number,
     parts: CardMachineParts,
@@ -271,7 +272,7 @@ class PostMachine extends CardMachine {
 
   /**
    * Finds the lay-by car (`position`: where a car stands, absolute): within
-   * `LAYBY_CAR_RANGE_M` of the lay-by's haul place, the car the player last drove, else
+   * `LAYBY_CAR_RANGE_M` of the post's haul bay, the car the player last drove, else
    * the nearest; none, null. A haul's own car is not one to load, and a car for sale is
    * nobody's. True when what the cards print of it (its model, its stickers) changed.
    */
@@ -408,7 +409,7 @@ class PostMachine extends CardMachine {
     this.saveStock();
     this.cardsChanged();
     // A haul's papers fall into the tray like any thing (`contractRelease`: a teddy party
-    // is one teddy each); its load is on the lay-by.
+    // is one teddy each); its load is in the bay.
     this.give(ctx, contractRelease(offer));
     this.refreshLimit();
     return 'mount';

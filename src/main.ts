@@ -631,7 +631,6 @@ async function boot(): Promise<void> {
   streamer.register(new MonumentProvider());
   streamer.register(
     new PoiProvider(
-      trailerField,
       roadDistance,
       market,
       fixtures,

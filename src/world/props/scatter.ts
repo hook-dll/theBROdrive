@@ -180,7 +180,7 @@ const GROUND_COVER_HIT_SHARE = 0.7;
 
 /**
  * Identity of a scatter cell, packed into one integer so it can live in a save's
- * number array exactly like `lootedPois` does.
+ * number array (`WorldState.flattenedProps`).
  *
  * `cl` spans a couple of hundred either side of nothing, so it is biased into the low
  * byte and `cs` — which reaches seven million over a forty-thousand-kilometre road —
@@ -387,9 +387,9 @@ export class ScatterProvider implements ChunkProvider {
 
           const form = pickDesertForm(forms, hash01(seed, TAG_SCATTER, cs, cl, 3), region.forms);
 
-          // A prop already knocked down stays down. Same guard `lootedPois` is for a
-          // looted stop: the chunk is rebuilt every time it crosses the physics radius,
-          // and without this every rebuild would stand the cactus back up.
+          // A prop already knocked down stays down: the chunk is rebuilt every time it
+          // crosses the physics radius, and without this every rebuild would stand the
+          // cactus back up.
           const id = propCellId(cs, cl);
           if (propPieces(form.id) && this.breakables?.isBroken(id)) break cell;
 

@@ -32,7 +32,7 @@ const LONE_OCCUPANCY_MAX = 0.92;
 const POI_DOMAIN = 0x504f4931; // 'POI1'
 
 /**
- * Where the roadside population's identities live in `lootedPois`; see
+ * Where the roadside population's identities start; see
  * `DESERT_INDEX_BASE` in world/poi.ts for why both are offset. Moved on from 50 000 000
  * when the slots stopped being a fixed lattice: an index from before names another stop.
  */
@@ -43,6 +43,11 @@ const START_SLOT = 1;
 /** The post stop a slot is (or follows, for a gap slot). */
 export function slotPost(slot: number): number {
   return (slot - 1) >> 1;
+}
+
+/** The roadside slot post stop `index` stands in: the inverse of `slotPost` on post slots. */
+export function postSlot(index: number): number {
+  return 2 * index + START_SLOT;
 }
 
 /** The roadside slot behind a roadside `Poi.index`. */
@@ -216,7 +221,7 @@ function rollSettlement(seed: number, slot: number, s: number): number {
 /** One occupied roadside slot, rolled: everything about the stop except its lateral. */
 export interface RoadsideSlot {
   readonly slot: number;
-  /** `Poi.index`: identity in `WorldState.lootedPois`, stable forever. */
+  /** `Poi.index`: the stop's identity in generated ids, stable forever. */
   readonly index: number;
   /** Arclength of the stop, metres from the house. */
   readonly s: number;

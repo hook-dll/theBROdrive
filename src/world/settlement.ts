@@ -10,9 +10,10 @@ import type { Road } from './road';
  * THE ROADSIDE STOP'S PLAN: where its buildings stand, how long and how wide its lay-by
  * is, and where the services go. Every courier/post stop is a SETTLEMENT (game-design2.md
  * §6): four to seven houses of the stop's one dwelling type on both sides of the road,
- * and on the lay-by's side one long pad with the post, the toy box, a parking place, the shop and
- * sometimes a barrel stand, a car for sale or a trailer. Every other roadside stop is one
- * house in front of its own short lay-by.
+ * and on the lay-by's side one long pad with its service strip (§6.3): the signpost,
+ * sometimes a car for sale, the teddy shelter's place, the post, the toy box, the haul bay
+ * reversed into off the pad, the shop and sometimes a barrel stand. Every other roadside
+ * stop is one house in front of its own short lay-by.
  *
  * PURE: a function of the seed and the slot, with no road or terrain sampling beyond
  * `halfWidthAt`, which is itself a function of the seed. Two worlds read it: world/poi.ts
@@ -35,7 +36,7 @@ import type { Road } from './road';
  * A place in the road frame. `yaw` is relative to the road heading at `s`: absolute is
  * `heading + yaw`. For anything authored with its front at local -Z (houses, the vending
  * machine, boards) it turns that front to the road, the convention of `faceRoadYaw`; for
- * `lot` and `trailer` it is the vehicle's own heading offset (0: parked along travel).
+ * `lot` it is the vehicle's own heading offset (0: parked along travel).
  */
 export interface SettlementSpot {
   readonly s: number;
@@ -66,17 +67,28 @@ export interface SettlementLayout {
   readonly post: SettlementSpot | null;
   /** Ditto. Settlements only. */
   readonly shop: SettlementSpot | null;
-  /** The toy box (world/toybox.ts), beside the post toward the lay-by's middle. Settlements only. */
+  /** The toy box (world/toybox.ts), between the post and the stop; its car comes out on the pad in front of it. Settlements only. */
   readonly toybox: SettlementSpot | null;
-  /** Half the settlements and a fifth of the lone houses; faces the road. */
+  /**
+   * Where the teddy shelter (game-design2.md §10) will stand, open to the pad: kept clear
+   * now, nothing is built on it yet. Settlements only.
+   */
+  readonly shelter: SettlementSpot | null;
+  /**
+   * The haul bay's centre (world/haulbay.ts), at right angles to the road, open to the pad;
+   * `yaw` is the machines' (`faceRoad`), its back wall away from the road. Settlements only.
+   */
+  readonly bay: SettlementSpot | null;
+  /**
+   * A fifth of the lone houses; half the settlements, on the place the fuel pumps will
+   * take (§6.3, +17…+21). Faces the road.
+   */
   readonly barrels: SettlementSpot | null;
   /**
    * The car for sale's centre, parked along the road; about 2.3 m of sand between the pad
    * edge and its road-side flank is kept for its price board and key box. Settlements only.
    */
   readonly lot: SettlementSpot | null;
-  /** A trailer left on the strip (`TRAILER_CHANCE` of settlements). */
-  readonly trailer: SettlementSpot | null;
 }
 
 /** The lay-by's numbers, in the road frame: see world/layby.ts for what each one shapes. */
@@ -103,8 +115,8 @@ export interface RoadsideStop {
 /** Arclength of a lone house's pad at full width either side of the stop, metres. */
 export const PAD_HALF_LENGTH_M = 22;
 /**
- * A settlement's pad, either side of the stop, metres: the service strip (post, toy box,
- * parking, shop, barrels, car for sale, trailer) and the signpost at its start.
+ * A settlement's pad, either side of the stop, metres: the service strip (game-design2.md
+ * §6.3) and the signpost at its start.
  */
 export const SETTLEMENT_PAD_HALF_M = 30;
 /** Length of each slip: road edge to full pad width, metres. */
@@ -118,8 +130,12 @@ const FRONT_CLEAR_M = 2;
  */
 const PAD_MAX_WIDTH_M = 8.5;
 
-/** Depth of the service strip past the pad's outer edge, metres. */
-export const SERVICE_DEPTH_M = 6;
+/**
+ * Depth of the service strip past the pad's outer edge, metres: the haul bay's 6.6 m
+ * inside, the sand before its opening and its back wall, with a little to spare
+ * (§6.3: the strip is deepened to 7 m for the bay).
+ */
+export const SERVICE_DEPTH_M = 7.5;
 /** Clear ground between the service strip and any house, metres. */
 const SERVICE_HOUSE_GAP_M = 2.5;
 /** Farthest from the stop any of a settlement's houses reaches along the road, metres. */
@@ -133,34 +149,54 @@ const VERGE_SPAN_M = 12;
 /** Largest yaw wobble a house is turned off square to the road, radians either way. */
 const HOUSE_WOBBLE = 0.08;
 
-/** Fraction of settlements with a barrel stand, and of lone houses. */
+/**
+ * Fraction of settlements with a barrel stand, and of lone houses. A settlement's stands
+ * where its fuel pumps will (§6.3, §9), on the same roll, until the pumps replace it.
+ */
 const SETTLEMENT_BARRELS_CHANCE = 0.5;
 const LONE_BARRELS_CHANCE = 0.2;
 /** Fraction of settlements with a car for sale. */
 const LOT_CHANCE = 0.3;
-/**
- * Fraction of settlements with a trailer left on the strip: what a stop had before, when
- * the fuel stops (5 of 23 by weight) left one 45% of the time.
- */
-const TRAILER_CHANCE = 0.1;
 
 /**
- * The service strip, along the pad from the stop (`s`), metres, and out past the pad's
- * edge (`u`), to each thing's centre. The signpost (world/signposts.ts) stands at the
- * pad's start, 26 m short of the stop; the courier parks on the pad at the stop itself.
+ * The service strip (game-design2.md §6.3 table), along the pad from the stop (`s`),
+ * metres, and out past the pad's edge (`u`), to each thing's centre. The signpost
+ * (world/signposts.ts) stands at the pad's start, 26 m short of the stop; the courier
+ * parks on the pad at the stop itself.
+ *
+ * `s` is the road's arclength, so on the inside of a curve the strip is shorter than the
+ * numbers: measured over 1 174 settlements, two spots 2.5 m apart come up to 12% closer.
+ * The post and the toy box stand 2.9 m apart (the table's −4.5 and −2, moved 0.3 and
+ * 0.1 m) so the two machines keep a metre between them everywhere.
  */
 const LOT_ALONG_M = -16;
 const LOT_OUT_M = 4.3;
-const POST_ALONG_M = -6;
+const SHELTER_ALONG_M = -9;
+const SHELTER_OUT_M = 1.4;
+const POST_ALONG_M = -4.8;
 const POST_OUT_M = 1.2;
-const TOYBOX_ALONG_M = -2.8;
+const TOYBOX_ALONG_M = -1.9;
 const TOYBOX_OUT_M = 1.2;
-const SHOP_ALONG_M = 6;
+/** The haul bay's middle along the road: it spans +4…+7 (§6.3). */
+const BAY_ALONG_M = 5.5;
+const SHOP_ALONG_M = 13;
 const SHOP_OUT_M = 1.2;
-const BARRELS_ALONG_M = 14;
+/** The pumps' place, +17…+21. */
+const BARRELS_ALONG_M = 19;
 const BARRELS_OUT_M = 1.4;
-const TRAILER_ALONG_M = 23;
-const TRAILER_OUT_M = 2.2;
+
+/**
+ * THE HAUL BAY (§7.8): inside, half its width along the road and half its depth across
+ * it, metres. 3.2 m holds the KMZ (1.72 m) with room either side; 6.6 m the longest car,
+ * the GAZ-31029's 4.88 m, with room to spare.
+ */
+export const HAUL_BAY_HALF_WIDTH_M = 1.6;
+export const HAUL_BAY_HALF_DEPTH_M = 3.3;
+/** Its walls' thickness, metres (world/haulbay.ts). */
+export const HAUL_BAY_WALL_M = 0.15;
+/** Sand between the pad's outer edge and the bay's opening, metres: no step, no kerb. */
+const BAY_OPENING_GAP_M = 0.5;
+
 /**
  * A lone house's barrel stand: clear sand between it and the end of the front wall,
  * metres. More than the 1.5 m the placement bench keeps every house off a spot by, so
@@ -184,7 +220,7 @@ const BARRELS_SIGN_CLEAR_M = 1;
  * placement bench (tools/poi-placement.ts) measures houses, the lay-by and one another
  * against these.
  */
-export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'barrels' | 'lot' | 'trailer', readonly [number, number]>> = {
+export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'barrels' | 'lot' | 'shelter' | 'bay', readonly [number, number]>> = {
   // The card machines (world/cardmachine.ts): the crank's knob past one flank, the tray
   // standing out of the front.
   post: [0.75, 0.8],
@@ -193,7 +229,11 @@ export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'barrels
   barrels: [1.8, 1.0],
   // The car and, on its road-side flank, its board and key box.
   lot: [2.7, 2.6],
-  trailer: [2.5, 1.1],
+  // The teddy shelter's ~4 x 2 m (§6.3): 3.8 m along, so it keeps a metre off the post
+  // on the inside of a curve.
+  shelter: [1.9, 1.0],
+  // The bay inside, its side walls' corner posts and its back wall.
+  bay: [HAUL_BAY_HALF_WIDTH_M + HAUL_BAY_WALL_M + 0.05, HAUL_BAY_HALF_DEPTH_M + HAUL_BAY_WALL_M],
 };
 
 /** The masts' authored footprints (world/poi-variants.ts), halved: they have no measured table. */
@@ -310,9 +350,10 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       post: null,
       shop: null,
       toybox: null,
+      shelter: null,
+      bay: null,
       barrels,
       lot: null,
-      trailer: null,
     },
   };
 }
@@ -413,7 +454,6 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
   const face = faceRoad(side, 0);
   const lot = roll01(5) < LOT_CHANCE ? spot(s0 + LOT_ALONG_M, side, padOuter + LOT_OUT_M, 0) : null;
   const barrels = roll01(6) < SETTLEMENT_BARRELS_CHANCE ? spot(s0 + BARRELS_ALONG_M, side, padOuter + BARRELS_OUT_M, face) : null;
-  const trailer = roll01(7) < TRAILER_CHANCE ? spot(s0 + TRAILER_ALONG_M, side, padOuter + TRAILER_OUT_M, 0) : null;
 
   let siteOuter = stripOuter;
   let siteHalfAlong = SETTLEMENT_PAD_HALF_M;
@@ -434,9 +474,10 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       post: spot(s0 + POST_ALONG_M, side, padOuter + POST_OUT_M, face),
       shop: spot(s0 + SHOP_ALONG_M, side, padOuter + SHOP_OUT_M, face),
       toybox: spot(s0 + TOYBOX_ALONG_M, side, padOuter + TOYBOX_OUT_M, face),
+      shelter: spot(s0 + SHELTER_ALONG_M, side, padOuter + SHELTER_OUT_M, face),
+      bay: spot(s0 + BAY_ALONG_M, side, padOuter + BAY_OPENING_GAP_M + HAUL_BAY_HALF_DEPTH_M, face),
       barrels,
       lot,
-      trailer,
     },
   };
 }

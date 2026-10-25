@@ -650,7 +650,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * 'tv_set', 'carpet', 'piano', 'teddies') signed out at the post nearest the player
    * and bound for the next, dropped in front of him as the post machine's tray would
    * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted), a
-   * haul as its papers, whose trailer or car then appears on that post's lay-by
+   * haul as its papers, whose trailer or car then appears in that post's haul bay
    * (contracts/world.ts); `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes it
    * a race to the post that many on, started when it is picked up. Returns the contract id.
    */
