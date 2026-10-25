@@ -243,11 +243,12 @@ export interface TrailerState {
   /** Mass on the bed, kg. Zero when empty. */
   cargoKg: number;
   /**
-   * Where that mass sits along the bed, metres forward of the bed centre: the
+   * Where that mass sits along the bed, metres forward of the box's middle: the
    * placement that decides how much of the rig's weight bears on the tow ball
-   * (`Trailer.tongueLoadN`). Absent is centred, 0.2 m ahead of the axle — 8% on the
-   * ball, an ordinary well-loaded trailer. Clamped by the trailer to keep a crate on
-   * the bed.
+   * (`Trailer.tongueLoadN`). Absent is centred, over the axle of the KMZ, where only
+   * the drawbar's own weight is on the ball. Clamped by the trailer to keep the load
+   * inside the box, so a contract load asks for a metre and stands against the
+   * headboard.
    */
   cargoZ?: number;
   /** A load longer than the bed (the bed, contracts/world.ts), or absent for an ordinary flatbed. */

@@ -11,7 +11,6 @@ import {
   combinedLateral,
   combinedLongitudinal,
   combinedLongitudinalSlope,
-  FOOT_BRAKE_GRIP_RATIO,
   GRAVITY,
   HANDLING_PROFILES,
   IMPACT_UNEXPLAINED_FLOOR_MPS,
@@ -45,13 +44,27 @@ import { TyreContacts, type TyreContact } from './tyrecontact';
  * sliding crate: the wheels resist sideways motion, so the thing tracks behind you,
  * and when it stops tracking you feel it in the car.
  *
+ * THE PROTOTYPE: the KMZ-8284 (КМЗ-8284, Kurganmashzavod), the commonest Soviet and
+ * Russian car trailer, and the trailer the GLB is: drawn at true size it measures
+ * 3.10 x 1.69 m over the drawbar and mudguards, a 1.905 x 1.262 m box with 0.336 m
+ * sides, an A-frame drawbar and 50 cm wheels on a 1.464 m track (render/trailermodel.ts
+ * reads it in centimetres). Every figure below is the passport's where one is
+ * published, the drawing's where none is:
+ *
+ *   overall 3085 x 1720 mm, box inside 1850 x 1204 x 335 mm, payload 570 kg, kerb
+ *   180 kg, gross 750 kg (KMZ-8284.20: mirpricep.ru, autoshinsnab.com, pricep-kmz.ru);
+ *   13-inch VAZ wheels on a four-leaf spring (makdon.pro); loading height 580-600 mm
+ *   (pricep-kmz.ru, 8284.20 V); no brakes of any kind — at 750 kg gross it is an O1
+ *   trailer, which needs none.
+ *
+ * The trailer it replaced was the same art scaled up 1.275 times round 0.32 m wheels:
+ * a 2.8 x 1.8 m bed on a 1.9 m track at 320 kg empty and 700 kg payload, with the
+ * car's own brake deceleration on its wheels. Nothing that size was ever on a Soviet
+ * road behind a Zhiguli.
+ *
  * The hitch sits just behind the measured rear face of the towing car. Car models
  * are centred on their measured body bounds, so `-halfExtents.z` is the exact rear
  * edge for every pack; `COUPLER_OFFSET` leaves the tow ball in free air.
- *
- * The trailer keeps one fixed physical drawbar. Its visual begins at the fitted
- * model's actual forward edge rather than the larger physics bed box, so there is
- * no empty seam between the shaft and the authored trailer body.
  *
  * Coupling is a spherical impulse joint: three free rotations, no relative
  * translation. That is a tow ball, and it gives yaw (following), pitch (cresting a
@@ -61,46 +74,81 @@ import { TyreContacts, type TyreContact } from './tyrecontact';
  * is follows from where the cargo sits (`TrailerState.cargoZ`, `tongueLoadN`).
  */
 
-/** Bed half-extents, metres: a 1.8 x 0.7 x 2.8 m flatbed. */
-const BED_HALF: readonly [number, number, number] = [0.9, 0.35, 1.4];
-const WHEEL_RADIUS = 0.32;
-/** Axle sits slightly behind the bed centre, which is what makes it track. */
-const AXLE_Z = -0.2;
-const TRACK_HALF = 0.95;
-/** Tow-ball height above the ground, metres. Ordinary for a light trailer. */
+/**
+ * The box, metres, in the trailer's own frame: origin in the middle of the box in
+ * plan, +Z toward the hitch. Outside 1.262 x 1.905 m as drawn (the passport's
+ * 1204 x 1850 inside, plus the walls), sides 0.336 m above the deck (the passport's
+ * 335 mm).
+ */
+const BOX_HALF_X = 0.631;
+const BOX_HALF_Z = 0.9525;
+const BOX_INNER_HALF_X = 0.602;
+const BOX_INNER_HALF_Z = 0.925;
+const WALL_HEIGHT = 0.336;
+/** Wall thickness of the box's colliders, m: the drawn sides are pressed sheet. */
+const WALL_THICKNESS = 0.03;
+/**
+ * The deck slab, metres: the box's floor and frame down to the wheel-centre line,
+ * which is the floor of the collider exactly as the car's is (so the bed does not
+ * catch on the ground before the suspension has any travel). The drawn deck stands
+ * 0.252 m above the axle; its top face is where a load stands.
+ */
+const BED_HALF: readonly [number, number, number] = [BOX_HALF_X, 0.126, BOX_HALF_Z];
+/**
+ * Road wheel, metres: a VAZ 13-inch wheel on 155/80 R13 (13 x 25.4 + 2 x 0.8 x 155
+ * = 578 mm), the passport's "13-inch, VAZ". With the drawn deck 0.252 m above the
+ * axle it puts the deck at 0.541 m, against the passport's 580-600 mm.
+ */
+const WHEEL_RADIUS = 0.289;
+/**
+ * The axle, metres forward of the box's middle: 22 mm, where the drawing has it. A
+ * tipping box (the 8284's tips back to unload) pivots on the axle with its own mass
+ * just behind it; the nose weight is the drawbar's.
+ */
+const AXLE_Z = 0.022;
+/** Half the track, metres: the drawing's 1.464 m between the tyre centres. */
+const TRACK_HALF = 0.732;
+/**
+ * Tow-ball height above the ground, metres. ГОСТ 28248-89 puts a car's ball 350-420
+ * mm up at its gross mass, which is 0.45 m or so unladen; the drawn coupler stands
+ * 0.47 m up on these wheels, so the box rides half a degree nose-down.
+ */
 const HITCH_HEIGHT = 0.45;
 /** Tow ball behind the measured rear face of the car, metres. */
 const COUPLER_OFFSET = 0.12;
-/** Physical distance from the trailer bed collider to the tow ball, metres. */
-const DRAWBAR_LENGTH = 0.9;
 /**
- * The tow ball's position along the trailer, metres forward of the bed centre. With
- * the axle at AXLE_Z it sets the lever the tongue load is taken on: a payload centred
- * over the axle puts nothing on the ball, one centred on the bed (0.2 m ahead of it)
- * puts 0.2 / 2.5 = 8% of itself there.
+ * The tow ball's position along the trailer, metres forward of the box's middle: the
+ * passport's 3085 mm overall from the tailboard to the coupler's nose, less the 50 mm
+ * ball (ГОСТ 28248-89) inside it. With the axle at AXLE_Z it sets the lever the tongue
+ * load is taken on.
  */
-export const TRAILER_BALL_Z = BED_HALF[2] + DRAWBAR_LENGTH;
-/** Empty mass, kg. */
-export const TRAILER_TARE_KG = 320;
-/** Most it will carry, kg. Enough to ruin the handling of a 900 kg car. */
-export const TRAILER_CAPACITY_KG = 700;
+export const TRAILER_BALL_Z = 3.085 - BOX_HALF_Z - 0.05;
+/** Empty mass, kg: the passport's kerb mass. */
+export const TRAILER_TARE_KG = 180;
+/** Most it will carry, kg: the passport's payload (750 kg gross). */
+export const TRAILER_CAPACITY_KG = 570;
+/**
+ * Where the kerb mass is, kg each, and the three parts' places (box-local metres).
+ * An estimate, not a published figure: two 13-inch wheels at 12 kg, the axle beam
+ * and its two leaf springs make the running gear; a coupler head and two drawbar
+ * tubes the drawbar; the box with its frame is the rest. The running gear sits on
+ * the axle at hub height, the drawbar half way out to the ball at its height, the box
+ * at the middle of its sides.
+ */
+const TARE_RUNNING_KG = 47;
+const TARE_DRAWBAR_KG = 20;
+const TARE_BOX_KG = TRAILER_TARE_KG - TARE_RUNNING_KG - TARE_DRAWBAR_KG;
 
 /**
- * Trailer brakes, and why a trailer needs its own.
+ * NO BRAKES, as the prototype has none (an O1 trailer at 750 kg gross needs none).
+ * Under tow the car's brakes stop the trailer's mass too, through the ball: a straight
+ * stop is a little longer, and a hard stop in a bend is the push on the ball that
+ * folds a rig (`tools/trailer-sway.ts`, BRAKE). At the KMZ's mass against a car's
+ * that push is a share of what the old 1020 kg trailer put through the ball, and it
+ * is the honest one. The trailer used to ask its tyres for the towing car's own brake
+ * deceleration, an overrun brake this trailer never had.
  *
- * Without them a trailer is two free-rolling wheels: under tow the car's brakes have
- * to stop the trailer's mass too, through the ball, and that push is what folds a rig
- * in a braked bend (`tools/trailer-sway.ts`, BRAKE).
- *
- * A light trailer's brakes are worked by the drawbar and sized to its own mass, so
- * they slow the trailer about as hard as the car slows itself: the ball carries
- * almost nothing in a straight stop. That is modelled directly: at full pedal the
- * trailer asks its tyres for the TOWING CAR's own brake deceleration
- * (`CarModelDef.brakeDecelG`, latched at coupling), as brake torque on its wheels.
- * The tyres then decide what they deliver — a trailer on sand locks its wheels like
- * the car does. It used to be a fixed 9.6 m/s² through Rapier's brake channel, which
- * could not lock and could not slide: with a real tyre that figure would lock both
- * trailer wheels on any surface at full pedal.
+ * Uncoupled it stands CHOCKED: both wheels held still (see `fixedUpdate`).
  */
 
 /**
@@ -120,15 +168,15 @@ export const TRAILER_CAPACITY_KG = 700;
  * trailer had no slip angle to speak of and could neither sway nor be dragged
  * sideways on a loose verge.
  *
- * The tyre is a period trailer's 13-inch cross-ply (`tyreCurve`: peak at 8°, on loose
- * ground fading to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a
- * little under the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap.
- * No temperature model: a trailer tyre does no work but roll.
+ * The tyre is a period 13-inch cross-ply (`tyreCurve`: peak at 8°, on loose ground
+ * fading to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a little
+ * under the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap. No
+ * temperature model: a trailer tyre does no work but roll.
  */
 const TRAILER_TYRE = tyreCurve({ construction: 'crossply', aspect: 0.8 }, HANDLING_PROFILES.classic);
 const TRAILER_TYRE_GRIP = 0.5;
-/** Tread width, metres: a 145-13 trailer tyre. The contact's profile (vehicle/tyrecontact.ts). */
-const TYRE_WIDTH = 0.145;
+/** Tread width, metres: a 155/80 R13. The contact's profile (vehicle/tyrecontact.ts). */
+const TYRE_WIDTH = 0.155;
 /** One road wheel's spin inertia, kg·m²: the car's wheel (vehicletuning.ts) at this radius. */
 const WHEEL_INERTIA =
   0.5 * WHEEL_MASS_KG * (WHEEL_RADIUS / WHEEL_REFERENCE_RADIUS) ** 2 * WHEEL_RADIUS * WHEEL_RADIUS;
@@ -178,7 +226,7 @@ const SUSPENSION = {
  *
  * Re-measure with `bun tools/trailer-bench.ts 32 0.3 0.3 <hang>` after any change
  * to the spring above: the bench prints the settled bed height against the height
- * the art expects (0.670 m), and the two have to agree. They do at 0.166.
+ * the art expects (0.415 m, the deck slab's middle), and the two have to agree.
  */
 const WHEEL_HANG = 0.166;
 /** Wheel mount height in bed-local space, so a settled wheel centre sits at the bed underside. */
@@ -211,11 +259,9 @@ export const TRAILER_HALF_LENGTH = BED_HALF[2];
 /**
  * The prop stand under the drawbar, and why a trailer needs one.
  *
- * Both wheels sit BEHIND the bed's centre of mass (AXLE_Z), which is what makes a
- * trailer track instead of snake, and it means the tongue is heavy: uncoupled, there
- * is nothing ahead of the axle holding the nose up, so the whole thing pivots onto
- * its drawbar and stands 18 degrees nose-down (measured, `tools/trailer-bench.ts`,
- * the "standing" case). Real trailers answer this with a jockey wheel or a prop
+ * The drawbar's own mass hangs out ahead of the axle with nothing under it, so the
+ * tongue is heavy: uncoupled, the whole thing pivots onto its drawbar and stands
+ * nose-down on the coupler. Real trailers answer this with a jockey wheel or a prop
  * stand, and so does this one: a leg from the drawbar to the ground, whose collider
  * and mesh exist only while the trailer is standing on its own.
  *
@@ -223,22 +269,16 @@ export const TRAILER_HALF_LENGTH = BED_HALF[2];
  * gone entirely — a leg left down would drag over every crest and fight the ball for
  * the nose weight the car is supposed to be carrying.
  */
-const PROP_Z = BED_HALF[2] + 0.45;
+const PROP_Z = BOX_HALF_Z + 0.45;
 const PROP_LEG_HALF: readonly [number, number, number] = [0.04, (HITCH_LOCAL_Y - GROUND_Y) / 2, 0.04];
 const PROP_LEG_CENTRE_Y = (HITCH_LOCAL_Y + GROUND_Y) / 2;
 const PROP_FOOT_HALF: readonly [number, number, number] = [0.1, 0.02, 0.1];
 
-/** Cargo crate, drawn on the bed and carrying the payload's centre of mass. */
-const CRATE_HALF: readonly [number, number, number] = [0.7, 0.45, 1.1];
-const CRATE_CENTRE_Y = BED_HALF[1] + CRATE_HALF[1];
 /**
- * How far the payload may sit fore or aft of the bed centre, metres: what keeps the
- * 2.2 m crate on the 2.8 m bed. Across that range the share of the rig's weight on the
- * ball runs from about 15% (crate against the headboard) to under 1% (against the
- * tailgate, its centre over the axle) at 500 kg — the whole span from a nose-heavy,
- * dead-stable tow to a tail-light one that snakes.
+ * Cargo crate, drawn in the box for a load that is no particular thing and carrying
+ * the payload's centre of mass: 1.1 x 0.6 x 1.7 m, what the box holds below its sides.
  */
-const CARGO_Z_LIMIT = BED_HALF[2] - CRATE_HALF[2];
+const CRATE_HALF: readonly [number, number, number] = [0.55, 0.3, 0.85];
 
 /** Wheel spin is kept inside one turn, so a long haul cannot lose float precision. */
 const TWO_PI = Math.PI * 2;
@@ -351,8 +391,6 @@ interface TrailerWheel {
   readonly normal: { x: number; y: number; z: number };
   /** Rolling direction in the ground plane, world, unit. */
   readonly forward: { x: number; y: number; z: number };
-  /** Surface under it on the last step it touched, for the brake's grip ceiling. */
-  surface: SurfaceType;
 }
 
 export class Trailer implements Rebasable {
@@ -369,18 +407,21 @@ export class Trailer implements Rebasable {
   private readonly impulseScratch = { x: 0, y: 0, z: 0 };
   private readonly pointScratch = { x: 0, y: 0, z: 0 };
   private readonly rotationScratch = new RAPIER.Quaternion(0, 0, 0, 1);
-  /**
-   * Full-pedal deceleration the trailer's brakes ask its tyres for, m/s²: the towing
-   * car's own (see the brake note at the top of the file). Latched at coupling.
-   */
-  private serviceBrakeDecel = 0;
   /** Static vertical load on the ball for the current payload, N (`tongueLoadN`). */
   private tongueN = 0;
+  /**
+   * The payload's box, half extents in metres: the drawn thing's own bounds, a long
+   * load's collider, or the crate. Its centre of mass and its inertia are this box's.
+   */
+  private readonly payloadHalf: readonly [number, number, number];
+  /** Height of the payload's foot in the trailer's frame: the deck, or the sides' tops. */
+  private readonly payloadFootY: number;
+  /** How far the payload may sit fore or aft of the box's middle and stay inside it, m. */
+  private readonly cargoZLimit: number;
   private readonly body: RAPIER.RigidBody;
   private readonly tyres: TyreContacts;
   private readonly root = new THREE.Group();
   private readonly wheelMeshes: THREE.Mesh[] = [];
-  private readonly drawbar: THREE.Mesh;
   private readonly crate: THREE.Mesh;
   /** A contract thing on the bed (render/thingmesh.ts), drawn where the crate would ride. */
   private readonly thingMesh: THREE.Object3D | null;
@@ -405,8 +446,6 @@ export class Trailer implements Rebasable {
 
   private joint: RAPIER.ImpulseJoint | null = null;
   private disposed = false;
-  /** Forward edge of the fitted trailer body, where the visual drawbar begins. */
-  private readonly drawbarMountZ: number;
   /**
    * The towing chassis and both local anchors, held only while coupled. Needed by
    * `enforceHitch`, which runs every step and must not re-derive the geometry.
@@ -443,8 +482,9 @@ export class Trailer implements Rebasable {
       .setCanSleep(false);
     this.body = physics.world.createRigidBody(desc);
 
-    // Collider floor raised to the wheel-centre line, exactly as the car's is, so
-    // the bed does not catch on the ground before the suspension has any travel.
+    // Collider floor raised to the wheel mounts, so the bed does not catch on the
+    // ground before the suspension has any travel, up to the deck; and the box's four
+    // sides on it, so a car or a rock meets the walls it can see.
     const colliderHalfY = (BED_HALF[1] - MOUNT_Y) / 2;
     physics.world.createCollider(
       RAPIER.ColliderDesc.cuboid(BED_HALF[0], colliderHalfY, BED_HALF[2])
@@ -454,6 +494,25 @@ export class Trailer implements Rebasable {
         .setRestitution(0.02),
       this.body,
     );
+    const wallHalfY = WALL_HEIGHT / 2;
+    const wallY = BED_HALF[1] + wallHalfY;
+    const sideX = BOX_HALF_X - WALL_THICKNESS / 2;
+    const endZ = BOX_HALF_Z - WALL_THICKNESS / 2;
+    for (const [hx, hz, x, z] of [
+      [WALL_THICKNESS / 2, BOX_HALF_Z, sideX, 0],
+      [WALL_THICKNESS / 2, BOX_HALF_Z, -sideX, 0],
+      [BOX_HALF_X, WALL_THICKNESS / 2, 0, endZ],
+      [BOX_HALF_X, WALL_THICKNESS / 2, 0, -endZ],
+    ] as const) {
+      physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(hx, wallHalfY, hz)
+          .setTranslation(x, wallY, z)
+          .setDensity(0)
+          .setFriction(0.5)
+          .setRestitution(0.02),
+        this.body,
+      );
+    }
 
     // Prop stand (see PROP_Z above). A plain collider rather than a third ray-cast
     // wheel: it is a leg, not a spring, and the difference is what stops the parked
@@ -496,7 +555,6 @@ export class Trailer implements Rebasable {
         contact: { x: 0, y: 0, z: 0 },
         normal: { x: 0, y: 1, z: 0 },
         forward: { x: 0, y: 0, z: 1 },
-        surface: SurfaceType.Asphalt,
       });
       // Pre-allocated alongside the wheel, so the per-step refresh never allocates.
       this.sprayStates.push({
@@ -520,37 +578,26 @@ export class Trailer implements Rebasable {
     }
 
     // --- Visuals -----------------------------------------------------------
-    // Body and wheels come from the fitted GLB (render/trailermodel.ts). Their
+    // Body, drawbar and wheels come from the fitted GLB (render/trailermodel.ts). Their
     // geometry and materials are shared with every other trailer in the world, so
-    // they are never disposed here — only the procedural drawbar and crate below
+    // they are never disposed here — only the procedural crate and prop stand below
     // own geometry of their own.
     const model = createTrailerModel();
     this.root.add(model.body);
-    this.drawbarMountZ = model.drawbarMountZ;
 
-    // The physical bed collider ends where the cargo box ends, while the action the
-    // player aims at is the coupler out on the tongue. A sensor along the procedural
-    // drawbar makes that visible geometry ray-pickable without letting a long narrow
-    // collision box snag the towing car or the road. TrailerField registers it with
-    // the same trailer id as the bed and prop colliders.
-    const hitchZ = TRAILER_BALL_Z;
-    const drawbarStart = Math.min(this.drawbarMountZ, hitchZ);
-    const drawbarLength = Math.max(0.05, hitchZ - drawbarStart);
+    // The physical box ends where the box ends, while the action the player aims at
+    // is the coupler out on the drawbar. A sensor along the drawn A-frame makes it
+    // ray-pickable without letting a long narrow collision box snag the towing car or
+    // the road. TrailerField registers it with the same trailer id as the bed and prop
+    // colliders.
+    const drawbarLength = TRAILER_BALL_Z - BOX_HALF_Z;
     physics.world.createCollider(
       RAPIER.ColliderDesc.cuboid(0.14, 0.14, drawbarLength / 2)
-        .setTranslation(0, HITCH_LOCAL_Y, drawbarStart + drawbarLength / 2)
+        .setTranslation(0, HITCH_LOCAL_Y, BOX_HALF_Z + drawbarLength / 2)
         .setDensity(0)
         .setSensor(true),
       this.body,
     );
-
-    // Unit-length bar along +Z, scaled per coupling so the drawn tongue always
-    // reaches exactly to the joint.
-    const barGeo = new THREE.BoxGeometry(0.09, 0.09, 1);
-    this.disposables.push(barGeo);
-    this.drawbar = new THREE.Mesh(barGeo, matSteel);
-    this.drawbar.castShadow = true;
-    this.root.add(this.drawbar);
 
     // The wheels are listed right (-1) first, so the visual list must be built in the
     // same order or syncVisuals reads the wrong side's suspension.
@@ -560,30 +607,44 @@ export class Trailer implements Rebasable {
     this.root.add(model.leftWheel);
     this.wheelMeshes.push(model.rightWheel, model.leftWheel);
 
+    // THE PAYLOAD'S BOX: a long load's collider, the drawn thing's own bounds (its
+    // geometry and materials are the shared item caches, so nothing of it is disposed
+    // here), or the crate. A load wider than the inside of the box rides on the tops
+    // of its sides, as a bed frame does on a KMZ; anything else stands on the deck.
+    // It may slide fore and aft only as far as the box holds it.
+    this.thingMesh = state.loadThing === undefined ? null : createTrailerLoadMesh(state.loadThing);
+    const load = state.load;
+    if (load) {
+      this.payloadHalf = load.halfExtents;
+    } else if (this.thingMesh) {
+      const size = new THREE.Box3().setFromObject(this.thingMesh).getSize(this.vScratch);
+      this.payloadHalf = [size.x / 2, size.y / 2, size.z / 2];
+    } else {
+      this.payloadHalf = CRATE_HALF;
+    }
+    this.payloadFootY = this.payloadHalf[0] > BOX_INNER_HALF_X ? BED_HALF[1] + WALL_HEIGHT : BED_HALF[1];
+    this.cargoZLimit = Math.max(0, BOX_INNER_HALF_Z - this.payloadHalf[2]);
+
     const crateGeo = new THREE.BoxGeometry(CRATE_HALF[0] * 2, CRATE_HALF[1] * 2, CRATE_HALF[2] * 2);
     this.disposables.push(crateGeo);
     this.crate = new THREE.Mesh(crateGeo, matCrate);
-    this.crate.position.set(0, CRATE_CENTRE_Y, this.cargoZ);
+    this.crate.position.set(0, this.payloadFootY + CRATE_HALF[1], this.cargoZ);
     this.crate.castShadow = true;
     this.root.add(this.crate);
 
-    // A contract trailer carries the thing itself, its foot on the bed. Its geometry and
-    // materials are the shared item caches, so nothing of it is disposed here.
-    this.thingMesh = state.loadThing === undefined ? null : createTrailerLoadMesh(state.loadThing);
     if (this.thingMesh) {
-      this.thingMesh.position.set(0, BED_HALF[1], this.cargoZ);
+      this.thingMesh.position.set(0, this.payloadFootY, this.cargoZ);
       this.root.add(this.thingMesh);
     }
 
     // A long load (contracts/world.ts), a box overhanging both ends of the bed: a real
     // collider rather than decoration, so the overhang can take a traffic car or a rock.
     // Its mass is the bed's `cargoKg` like any load; the thing above shows it.
-    const load = state.load;
     if (load) {
       const [lx, ly, lz] = load.halfExtents;
       physics.world.createCollider(
         RAPIER.ColliderDesc.cuboid(lx, ly, lz)
-          .setTranslation(0, BED_HALF[1] + ly, this.cargoZ)
+          .setTranslation(0, this.payloadFootY + ly, this.cargoZ)
           .setDensity(0)
           .setFriction(0.6)
           .setRestitution(0.02),
@@ -607,7 +668,6 @@ export class Trailer implements Rebasable {
 
     scene.add(this.root);
 
-    this.setDrawbarVisual();
     // A trailer restored from a save may already be coupled; the second pass in
     // TrailerField re-hitches it, but until then the stand matches its state.
     this.setPropStand(this.state.hitchedTo === null);
@@ -638,11 +698,11 @@ export class Trailer implements Rebasable {
   }
 
   /**
-   * Where the payload's centre of mass sits, metres forward of the bed centre
-   * (`TrailerState.cargoZ`), held to what keeps the crate on the bed.
+   * Where the payload's centre of mass sits, metres forward of the box's middle
+   * (`TrailerState.cargoZ`), held to what keeps the payload inside the box.
    */
   get cargoZ(): number {
-    return Math.min(CARGO_Z_LIMIT, Math.max(-CARGO_Z_LIMIT, this.state.cargoZ ?? 0));
+    return Math.min(this.cargoZLimit, Math.max(-this.cargoZLimit, this.state.cargoZ ?? 0));
   }
 
   /**
@@ -673,15 +733,15 @@ export class Trailer implements Rebasable {
     return this.impactThisStep ? this.impactState : null;
   }
 
-  /** True when a world-space sphere touches the trailer bed's oriented box. */
+  /** True when a world-space sphere touches the trailer's box, deck slab to the tops of its sides. */
   touchesSphere(x: number, y: number, z: number, radius: number): boolean {
     const t = this.body.translation();
     const r = this.body.rotation();
     this.qScratch.set(r.x, r.y, r.z, r.w).invert();
     const local = this.vScratch.set(x - t.x, y - t.y, z - t.z).applyQuaternion(this.qScratch);
-    const dx = Math.max(0, Math.abs(local.x) - BED_HALF[0]);
-    const dy = Math.max(0, Math.abs(local.y) - BED_HALF[1]);
-    const dz = Math.max(0, Math.abs(local.z) - BED_HALF[2]);
+    const dx = Math.max(0, Math.abs(local.x) - BOX_HALF_X);
+    const dy = Math.max(0, Math.abs(local.y - WALL_HEIGHT / 2) - (BED_HALF[1] + WALL_HEIGHT / 2));
+    const dz = Math.max(0, Math.abs(local.z) - BOX_HALF_Z);
     return dx * dx + dy * dy + dz * dz <= radius * radius;
   }
 
@@ -792,8 +852,6 @@ export class Trailer implements Rebasable {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.snapshotPrimed = false;
     this.resetTyres();
-    // The trailer's brakes are matched to the car that tows it: see the brake note.
-    this.serviceBrakeDecel = vehicle.modelDef.brakeDecelG * GRAVITY;
 
     this.joint = this.physics.world.createImpulseJoint(
       RAPIER.JointData.spherical(carAnchor, trailerAnchor),
@@ -812,7 +870,6 @@ export class Trailer implements Rebasable {
     // car from passing through the trailer during a jackknife or reversing impact.
     this.joint.setContactsEnabled(true);
 
-    this.setDrawbarVisual();
     // Stand wound up: the ball has the nose weight now.
     this.setPropStand(false);
     if (recordHitch) {
@@ -854,21 +911,18 @@ export class Trailer implements Rebasable {
   /**
    * Suspension, then tyres.
    *
-   * `carBrake` is the towing car's SERVICE brake demand, 0..1 — the pedal, not the
-   * handbrake. A real light trailer's brakes are actuated by the drawbar, so they
-   * come on with the car's and let go with it; mirroring the pedal is that
-   * behaviour without inventing an overrun mechanism the player cannot see.
+   * Coupled, the wheels roll free: the trailer has no brakes (see NO BRAKES above).
    *
-   * Uncoupled, the brakes are simply ON: both wheels held still, as by a wound-on
-   * handbrake. That is the whole answer to a trailer parked on a grade rolling away:
-   * since a trailer with no car attached is by definition parked, there is no state to
-   * track and nothing for the player to remember. Dropping a trailer therefore leaves
-   * it exactly where it was dropped.
+   * Uncoupled, it is CHOCKED: both wheels held still, as a chock under a wheel holds
+   * a trailer that has no handbrake. That is the whole answer to a trailer parked on a
+   * grade rolling away: since a trailer with no car attached is by definition parked,
+   * there is no state to track and nothing for the player to remember. Dropping a
+   * trailer therefore leaves it exactly where it was dropped.
    */
-  fixedUpdate(dt: number, carBrake = 0): void {
+  fixedUpdate(dt: number): void {
     this.lastStepDt = dt;
     this.tyres.update(dt);
-    this.applyTyres(dt, Math.min(1, Math.max(0, carBrake)));
+    this.applyTyres(dt);
   }
 
   /**
@@ -885,10 +939,10 @@ export class Trailer implements Rebasable {
    *             a beam axle hands it to the bed there, and the moment of it about the
    *             ground goes to the tyres as `linkN`.
    *   along     the car's implicit wheel-and-carcass solve (vehicle.ts, the wheel
-   *             pass): brake torque on a wheel of the car's inertia, the force read back
-   *             out of the wheel's own change, never driving it past synchronous speed.
-   *             Parked, the wheels are held still as the car's cable holds a wheel, and
-   *             a locked patch at a crawl may spend its capacity on stopping (the car's
+   *             pass): a free wheel of the car's inertia, the force read back out of
+   *             the wheel's own change, never driving it past synchronous speed.
+   *             Parked, the wheels are held still as a chock holds a wheel, and a
+   *             locked patch at a crawl may spend its capacity on stopping (the car's
    *             static hold, both ways here).
    *   rolling   the surface's own rolling resistance at the patch, never reversing it.
    *
@@ -897,26 +951,11 @@ export class Trailer implements Rebasable {
    * is capped at what stops the patch within the step — the car's guard against a
    * stiff tyre overshooting at 60 Hz.
    */
-  private applyTyres(dt: number, pedal: number): void {
+  private applyTyres(dt: number): void {
     if (!(dt > 0)) return;
     const body = this.body;
     const rotation = body.rotation(this.rotationScratch);
     const parked = !this.coupled;
-    // An overrun brake's law, not the car's: the pedal asks for the towing car's brake
-    // deceleration or for what the trailer's tyres can take at their threshold
-    // (FOOT_BRAKE_GRIP_RATIO), summed over the axle on last step's loads, whichever
-    // gives out first, shared equally — the drawbar works these brakes, not a foot, so
-    // a straight stop on sand does not lock both wheels, while an inside wheel unloaded
-    // in a bend still can. The car's own pedal has no such cap and locks.
-    let gripN = 0;
-    for (const w of this.wheels) {
-      gripN += SURFACES[w.surface].mu * weatherGrip(w.surface) * TRAILER_TYRE_GRIP * w.loadN;
-    }
-    const brakeTorque =
-      (pedal *
-        Math.min(this.serviceBrakeDecel * this.massKg, FOOT_BRAKE_GRIP_RATIO * gripN) *
-        WHEEL_RADIUS) /
-      this.wheels.length;
     const lv = body.linvel(this.velocityScratch);
     const speed = Math.hypot(lv.x, lv.z);
     const travelX = speed > 1e-3 ? lv.x / speed : 0;
@@ -934,10 +973,8 @@ export class Trailer implements Rebasable {
       w.loadN = inContact ? Math.max(0, w.tyre.forceN + w.linkN) : 0;
       s.inContact = inContact;
       if (!inContact || !(w.loadN > 0) || !(w.staticLoadN > 0)) {
-        // In the air a wheel only turns, and its brake (or the parked lock) slows it.
-        const brakeDelta = parked ? Infinity : (dt * brakeTorque) / WHEEL_INERTIA;
-        w.spinRadS =
-          Math.abs(w.spinRadS) <= brakeDelta ? 0 : w.spinRadS - Math.sign(w.spinRadS) * brakeDelta;
+        // In the air a wheel only turns, unless it is chocked.
+        if (parked) w.spinRadS = 0;
         w.carcassSlip = 0;
         w.slipRatio = 0;
         w.drawnRad = (w.drawnRad + w.spinRadS * dt) % TWO_PI;
@@ -1042,9 +1079,7 @@ export class Trailer implements Rebasable {
         forceN = Math.abs(hold) > Math.abs(slide) ? hold : slide;
         spin = 0;
       } else {
-        const brakeDelta = (dt * brakeTorque) / WHEEL_INERTIA;
-        spin =
-          Math.abs(w.spinRadS) <= brakeDelta ? 0 : w.spinRadS - Math.sign(w.spinRadS) * brakeDelta;
+        spin = w.spinRadS;
         const carcass0 =
           w.carcassSlip + ((spin * WHEEL_RADIUS - forwardSpeed) / reference - w.carcassSlip) * carcassBlend;
         const stiffness =
@@ -1132,7 +1167,6 @@ export class Trailer implements Rebasable {
       s.normalY = n.y;
       s.normalZ = n.z;
       s.surface = surfaceType;
-      w.surface = surfaceType;
       s.forwardSpeed = forwardSpeed;
       s.slipRatio = w.slipRatio;
       // Past the surface's slip unit, as the car reports it: a locked trailer wheel throws.
@@ -1353,14 +1387,6 @@ export class Trailer implements Rebasable {
     for (const geo of this.disposables) geo.dispose();
   }
 
-  /** Bridges the fitted body's real front edge to the tow-ball anchor. */
-  private setDrawbarVisual(): void {
-    const hitchZ = TRAILER_BALL_Z;
-    const length = Math.max(0.05, hitchZ - this.drawbarMountZ);
-    this.drawbar.scale.z = length;
-    this.drawbar.position.set(0, HITCH_LOCAL_Y, (this.drawbarMountZ + hitchZ) / 2);
-  }
-
   /**
    * Winds the prop stand down (standing) or up (coupled). One collider and two
    * meshes, switched together — the leg has to disappear from the solver as well as
@@ -1374,12 +1400,13 @@ export class Trailer implements Rebasable {
   /**
    * Mass, centre of mass, inertia and tongue load for the current load.
    *
-   * Two solid boxes: the empty bed, whose mass sits low as a trailer's does, and the
-   * payload — the crate, or a long load's own box — at its centre on top of the
-   * bed, `cargoZ` along it. The inertia is the two boxes' own plus their offsets from
-   * the combined centre (parallel axes), so a long load resists yaw in a way the crate
-   * does not and a load pushed to the tailgate swings a longer arm. Blending the two
-   * by mass is what makes a full trailer roll and a light one dart.
+   * Four parts, each with its own inertia and its offset from the combined centre
+   * (parallel axes): the box with its frame, a solid box from the deck up its sides;
+   * the running gear, a rod across the track at hub height; the drawbar, a rod out to
+   * the ball; and the payload's own box (`payloadHalf`) standing on its foot, `cargoZ`
+   * along. So a long load resists yaw in a way a crate does not, a tall piano raises
+   * the centre and rolls, a load pushed to the tailboard swings a longer arm, and the
+   * empty KMZ, most of its kerb mass in the box and the axle, darts.
    *
    * The same centre of mass sets the static tongue load and each wheel's static load,
    * which is the reference the tyres' load sensitivity is taken against.
@@ -1387,41 +1414,49 @@ export class Trailer implements Rebasable {
   private applyMass(): void {
     const cargo = this.state.cargoKg;
     const mass = TRAILER_TARE_KG + cargo;
-    const tareY = -0.35 * BED_HALF[1];
-    const load = this.state.load;
-    const [cx, cy, cz] = load ? load.halfExtents : CRATE_HALF;
-    const cargoY = BED_HALF[1] + cy;
-    const cargoZ = this.cargoZ;
-    const comY = (TRAILER_TARE_KG * tareY + cargo * cargoY) / mass;
-    const comZ = (cargo * cargoZ) / mass;
-
-    const [bx, by, bz] = BED_HALF;
-    const tareDy = tareY - comY;
-    const tareDz = -comZ;
-    const cargoDy = cargoY - comY;
-    const cargoDz = cargoZ - comZ;
-    const tareBox = TRAILER_TARE_KG / 3;
-    const cargoBox = cargo / 3;
+    const [px, py, pz] = this.payloadHalf;
+    const drawbarHalf = (TRAILER_BALL_Z - BOX_HALF_Z) / 2;
+    // [mass, y, z, own Ixx, own Iyy, own Izz]
+    const parts: readonly (readonly [number, number, number, number, number, number])[] = [
+      [
+        TARE_BOX_KG,
+        BED_HALF[1],
+        0,
+        (TARE_BOX_KG / 3) * ((WALL_HEIGHT / 2) ** 2 + BOX_HALF_Z ** 2),
+        (TARE_BOX_KG / 3) * (BOX_HALF_X ** 2 + BOX_HALF_Z ** 2),
+        (TARE_BOX_KG / 3) * (BOX_HALF_X ** 2 + (WALL_HEIGHT / 2) ** 2),
+      ],
+      [TARE_RUNNING_KG, -BED_HALF[1], AXLE_Z, 0, (TARE_RUNNING_KG / 3) * TRACK_HALF ** 2, (TARE_RUNNING_KG / 3) * TRACK_HALF ** 2],
+      [
+        TARE_DRAWBAR_KG,
+        HITCH_LOCAL_Y,
+        BOX_HALF_Z + drawbarHalf,
+        (TARE_DRAWBAR_KG / 3) * drawbarHalf ** 2,
+        (TARE_DRAWBAR_KG / 3) * drawbarHalf ** 2,
+        0,
+      ],
+      [cargo, this.payloadFootY + py, this.cargoZ, (cargo / 3) * (py * py + pz * pz), (cargo / 3) * (px * px + pz * pz), (cargo / 3) * (px * px + py * py)],
+    ];
+    let comY = 0;
+    let comZ = 0;
+    for (const [m, y, z] of parts) {
+      comY += (m * y) / mass;
+      comZ += (m * z) / mass;
+    }
+    let ixx = 0;
+    let iyy = 0;
+    let izz = 0;
+    for (const [m, y, z, ox, oy, oz] of parts) {
+      const dy = y - comY;
+      const dz = z - comZ;
+      ixx += ox + m * (dy * dy + dz * dz);
+      iyy += oy + m * dz * dz;
+      izz += oz + m * dy * dy;
+    }
     this.body.setAdditionalMassProperties(
       mass,
       { x: 0, y: comY, z: comZ },
-      {
-        x:
-          tareBox * (by * by + bz * bz) +
-          cargoBox * (cy * cy + cz * cz) +
-          TRAILER_TARE_KG * (tareDy * tareDy + tareDz * tareDz) +
-          cargo * (cargoDy * cargoDy + cargoDz * cargoDz),
-        y:
-          tareBox * (bx * bx + bz * bz) +
-          cargoBox * (cx * cx + cz * cz) +
-          TRAILER_TARE_KG * tareDz * tareDz +
-          cargo * cargoDz * cargoDz,
-        z:
-          tareBox * (bx * bx + by * by) +
-          cargoBox * (cx * cx + cy * cy) +
-          TRAILER_TARE_KG * tareDy * tareDy +
-          cargo * cargoDy * cargoDy,
-      },
+      { x: ixx, y: iyy, z: izz },
       { x: 0, y: 0, z: 0, w: 1 },
       false,
     );
@@ -1630,18 +1665,9 @@ export class TrailerField {
     return null;
   }
 
-  /**
-   * Suspension and brake step for every live trailer, towed or standing.
-   *
-   * `brakeForCar` reports a car's service-brake demand (0..1) by id. It is a lookup
-   * rather than a single number because each coupled trailer follows the pedal of
-   * the car it is actually attached to, not the one the player happens to be in.
-   */
-  fixedUpdate(dt: number, brakeForCar: (carId: string) => number): void {
-    for (const trailer of this.trailers.values()) {
-      const carId = trailer.hitchedTo;
-      trailer.fixedUpdate(dt, carId === null ? 0 : brakeForCar(carId));
-    }
+  /** Suspension and tyre step for every live trailer, towed or standing. */
+  fixedUpdate(dt: number): void {
+    for (const trailer of this.trailers.values()) trailer.fixedUpdate(dt);
   }
 
   postStep(): void {

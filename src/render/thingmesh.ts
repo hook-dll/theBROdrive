@@ -922,7 +922,10 @@ function wardrobe(b: MeshBuilder): void {
   straps(b, 0.95, 0.58, [-0.55, 0.55]);
 }
 
-/** An upright piano stood across the bed, keyboard (lid shut) to the rear, strapped round. */
+/**
+ * An upright piano, keyboard (lid shut) to -Z, strapped round. Its 1.45 m case does not
+ * go across a KMZ's 1.2 m box, so `createTrailerLoadMesh` stands it along the box.
+ */
 function piano(b: MeshBuilder): void {
   const case_ = flat(0x3a2216, 0.35);
   box(b, case_, [1.45, 1.2, 0.42], [0, 0.6, 0.04]);
@@ -964,10 +967,13 @@ function bed(b: MeshBuilder): void {
 }
 
 const TRAILER_LOADS: Partial<Readonly<Record<ThingId, (b: MeshBuilder) => void>>> = { wardrobe, piano, sofa, bed };
+/** A load turned on the box, radians about the vertical: the piano goes in lengthwise. */
+const TRAILER_LOAD_YAW: Partial<Readonly<Record<ThingId, number>>> = { piano: Math.PI / 2 };
 
 /**
  * The thing a contract trailer carries, drawn on its bed (vehicle/trailer.ts): its foot at
  * the origin, centred across and along. Null for a thing that is not a trailer load.
+ * The trailer reads its bounds as the payload's box, so they are the thing's own.
  */
 export function createTrailerLoadMesh(id: ThingId): THREE.Group | null {
   const build = TRAILER_LOADS[id];
@@ -978,5 +984,6 @@ export function createTrailerLoadMesh(id: ThingId): THREE.Group | null {
   group.traverse((node) => {
     if ((node as THREE.Mesh).isMesh) node.castShadow = true;
   });
+  group.rotation.y = TRAILER_LOAD_YAW[id] ?? 0;
   return group;
 }

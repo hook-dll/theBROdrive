@@ -4,23 +4,48 @@
  * Headless bench for the car-to-car tow bar (contract kind towing,
  * src/vehicle/cartow.ts).
  *
- *   npx tsx tools/tow-bench.ts
+ *   bun tools/tow-bench.ts            every pair, every manoeuvre
+ *   bun tools/tow-bench.ts kit_vaz2101 kit_vaz2110
  *
  * Nothing here is part of the game bundle, and nothing is a re-implementation: the
- * bar is the shipped `CarTowField`, the cars are the shipped `Vehicle`.
+ * bar is the shipped `CarTowField`, the cars are the shipped `Vehicle`, and the towed
+ * car has its engine taken out exactly as the contract spawns it (contracts/world.ts).
  *
- * TOWING measures what the bar exists for:
- *   - 0-60 km/h from rest on a straight, and the joint's stretch while it happens;
- *   - the same through a 30 m radius bend at 60 km/h, with the worst stretch, the
- *     worst relative speed between the two chassis and the lateral error;
- *   - a snag: the towed car held still while the tower drives off, which must SNAP
- *     the bar rather than drag or explode;
- *   - a NaN / explosion sweep over every step of every run.
+ * The tower is driven by a pure-pursuit follower on a path laid out the way the road
+ * lays its corners (world/roadcurve.ts: an 85 m tightest radius, entered and left on a
+ * spiral), so what is measured is the rig, not a driver yanking the wheel:
+ *
+ *   kick       65 km/h on a straight, a 0.3 s pulse of 1 degree, then hands steady: the
+ *              articulation's peaks 1-3 s and 6-8 s after it (a snake grows, a stable
+ *              rig decays) and the towed car's widest swing off the line.
+ *   bend       the road's tightest corner, R 85 m and 50 degrees, at 60 and 70 km/h (and
+ *              the tower alone at 70, for scale), a 140 m sweeper at 70 and the 85 m on
+ *              gravel at 50: the tower's worst distance off the line, the towed car's,
+ *              the widest articulation and the hardest bar force.
+ *   hairpin    a 30 m radius at 40 km/h, tighter than any road corner.
+ *   brake      60 km/h to rest at full pedal on the straight: stopping distance, bar
+ *              force, articulation (a jackknife is the articulation running away).
+ *   brakebend  the same pedal half way round the R 85 corner from 60 km/h.
+ *   rest       standing coupled on the pedal: what either body still moves.
+ *   reverse    backing up 8 m at a walk with the wheel straight: allowed to be awkward,
+ *              not allowed to fold or explode.
+ *   snag       the towed car held while the tower drives off: the bar must SNAP.
+ *   rope       the same pair on a 5 m rope with nobody in the towed car: why the bar.
+ *
+ *   SWEEP=1 bun tools/tow-bench.ts     the R 85 m corner from 60 to 68 km/h: where the
+ *                                      rig lets go.
+ *
+ * BAR FORCE is read off the towed car alone: its momentum change over a step less every
+ * impulse its own wheels, suspension and aerodynamics applied (the chassis' impulse
+ * calls are counted), horizontal part only. Rapier exposes no joint force, and this is
+ * the force the bar actually had to deliver, the post-step correction included.
  */
 
 import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
+import { SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { benchCarState } from './benchcar';
 import { addGround } from './handling-bench';
@@ -33,44 +58,84 @@ import { carModel } from '../src/vehicle/carmodels';
 import { WorldOrigin } from '../src/world/origin';
 import { encodeSaveCode, decodeSaveCode } from '../src/save/save';
 import type { WorldState } from '../src/game/state';
-import { DAY_LENGTH } from '../src/game/state';
 
 // Building a Vehicle paints the sticker atlas, which needs a canvas.
 installDocumentShim();
 installAssetShim();
 
-const TOWER_MODEL = 'sv_vaz2101';
-const TOWED_MODEL = 'gt_vaz2110';
-/** The bend the bar has to survive: 30 m radius, as asked for. */
-const BEND_RADIUS_M = 30;
-const TARGET_SPEED_MPS = 60 / 3.6;
-/** A 30 m radius at 60 km/h needs 9.3 m/s² of grip, which no car on this road has;
- *  the bend is taken at the speed a driver would actually take it. */
-const BEND_SPEED_MPS = 40 / 3.6;
-/** metres of straight before the bend starts, and of road the straight phase covers */
-const ARC_FROM_M = 500;
-const STRAIGHT_RUN_M = 400;
-/** Heading-error trim on top of the curvature feed-forward, and the cross-track
- *  gain, rad of wheel angle per metre off the line. */
-const HEADING_TRIM = 0.4;
-const CROSS_GAIN = 0.06;
-// ---------------------------------------------------------------------------
-// helpers
+/** Oka to UAZ, each towing a car of about its own mass. */
+const PAIRS: readonly (readonly [string, string])[] =
+  process.argv.length >= 4
+    ? [[process.argv[2]!, process.argv[3]!]]
+    : [
+        ['kit_vaz1111', 'kit_vaz1111'],
+        ['kit_vaz2101', 'kit_vaz2110'],
+        ['kit_uaz469', 'kit_gaz24'],
+      ];
+const KMH = 1 / 3.6;
+const DEG = 180 / Math.PI;
 
-interface Stats {
-  max: number;
-  median: number;
-  steps: number;
+// ---------------------------------------------------------------------------
+// the path: a curvature profile integrated into a polyline
+
+interface Path {
+  x: Float64Array;
+  z: Float64Array;
+  yaw: Float64Array;
+  step: number;
 }
 
-function summarise(values: number[]): Stats {
-  if (values.length === 0) return { max: 0, median: 0, steps: 0 };
-  const sorted = values.slice().sort((a, b) => a - b);
-  return {
-    max: sorted[sorted.length - 1]!,
-    median: sorted[Math.floor(sorted.length / 2)]!,
-    steps: values.length,
-  };
+/**
+ * A straight lead-in, a spiral into a constant radius, the arc, a spiral out and a
+ * straight run-out. Heading 0 is +Z; a positive curvature turns left (+X), which is the
+ * direction a positive yaw rate turns the cars.
+ */
+function cornerPath(leadM: number, radiusM: number, turnDeg: number, spiralM: number): Path {
+  const step = 0.25;
+  const turn = turnDeg / DEG;
+  const k = 1 / radiusM;
+  // A spiral turns half as much as an arc of its length.
+  const arcM = Math.max(0, (turn - k * spiralM) / k);
+  const total = leadM + 2 * spiralM + arcM + 600;
+  const n = Math.ceil(total / step);
+  const x = new Float64Array(n);
+  const z = new Float64Array(n);
+  const yaw = new Float64Array(n);
+  for (let i = 1; i < n; i++) {
+    const s = i * step;
+    let kappa = 0;
+    if (s > leadM && s <= leadM + spiralM) kappa = (k * (s - leadM)) / spiralM;
+    else if (s > leadM + spiralM && s <= leadM + spiralM + arcM) kappa = k;
+    else if (s > leadM + spiralM + arcM && s <= leadM + 2 * spiralM + arcM) {
+      kappa = k * (1 - (s - leadM - spiralM - arcM) / spiralM);
+    }
+    yaw[i] = yaw[i - 1]! + kappa * step;
+    x[i] = x[i - 1]! + Math.sin(yaw[i]!) * step;
+    z[i] = z[i - 1]! + Math.cos(yaw[i]!) * step;
+  }
+  return { x, z, yaw, step };
+}
+
+/** Nearest path index to a point, searched forward of a hint. */
+function nearest(path: Path, px: number, pz: number, hint: number): number {
+  let best = hint;
+  let bestD = Infinity;
+  const from = Math.max(0, hint - 40);
+  const to = Math.min(path.x.length - 1, hint + 400);
+  for (let i = from; i <= to; i++) {
+    const d = (path.x[i]! - px) ** 2 + (path.z[i]! - pz) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+/** Signed distance of a point from the path at index `i`, positive to the path's left. */
+function lateralOf(path: Path, i: number, px: number, pz: number): number {
+  const yaw = path.yaw[i]!;
+  return (px - path.x[i]!) * Math.cos(yaw) - (pz - path.z[i]!) * Math.sin(yaw);
 }
 
 function yawOf(q: { x: number; y: number; z: number; w: number }): number {
@@ -89,33 +154,28 @@ function speedOf(v: Vehicle): number {
   return Math.hypot(l.x, l.z);
 }
 
-/**
- * Where a point stands relative to the driven path — straight along +Z to `arcFrom`,
- * then a constant-radius left bend: arclength along it, the signed offset out of it
- * (positive to the path's left), and the path's own yaw and radius there.
- *
- * Derived from the POSITION, never integrated from the car's speed: a car that
- * spins on the spot reports a speed every step while covering no road, and an
- * integrated arclength then runs away from the car — which is exactly how an early
- * version of this bench reported 246 m of "path error" over 65 m of arc.
- */
-function pathFoot(x: number, z: number, arcFrom: number, radius: number): {
-  s: number;
-  lateral: number;
-  yaw: number;
-  radius: number;
-} {
-  if (z <= arcFrom) return { s: z, lateral: x, yaw: 0, radius: Infinity };
-  const dx = x - radius;
-  const dz = z - arcFrom;
-  const phi = Math.atan2(dz, -dx);
-  const r = Math.hypot(dx, dz);
-  // Radial error: positive when the car is inside the bend.
-  return { s: arcFrom + radius * phi, lateral: radius - r, yaw: phi, radius: r };
+/** Body-local point to world, Rapier's frame. */
+function worldPoint(v: Vehicle, local: { x: number; y: number; z: number }): THREE.Vector3 {
+  const t = v.chassis.translation();
+  const r = v.chassis.rotation();
+  return new THREE.Vector3(local.x, local.y, local.z)
+    .applyQuaternion(new THREE.Quaternion(r.x, r.y, r.z, r.w))
+    .add(new THREE.Vector3(t.x, t.y, t.z));
+}
+
+function axleZ(v: Vehicle, front: boolean): number {
+  let sum = 0;
+  let n = 0;
+  for (const w of v.modelMeasure.wheels) {
+    if (w.isFront !== front) continue;
+    sum += w.pos[2];
+    n++;
+  }
+  return n > 0 ? sum / n : 0;
 }
 
 // ---------------------------------------------------------------------------
-// towing rig
+// the rig
 
 interface TowRig {
   physics: PhysicsWorld;
@@ -124,24 +184,41 @@ interface TowRig {
   towed: Vehicle;
   field: CarTowField;
   input: InputFrame;
-  stretch: number[];
-  relSpeed: number[];
-  lateral: number[];
+  path: Path;
+  hint: number;
+  /** Horizontal impulse the towed car's own code applied this step, N·s. */
+  ownX: number;
+  ownZ: number;
+  prevVx: number;
+  prevVz: number;
+  /** Horizontal bar force of the last step, N. */
+  barN: number;
+  broke: boolean;
+  /** The `rope` comparison only: a 5 m rope instead of the shipped bar. */
+  rope: RAPIER.ImpulseJoint | null;
+  /** The rope-towed car's own controls: nobody at the wheel, nobody on the pedal. */
+  towedInput: InputFrame;
 }
 
-async function makeTowRig(): Promise<TowRig> {
+/** Rope length, m: the middle of the law's 4-6 m (ПДД РФ 20.3). */
+const ROPE_M = 5;
+
+async function makeTowRig(
+  towerModel: string,
+  towedModel: string,
+  path: Path,
+  surface = SurfaceType.Asphalt,
+  coupling: 'bar' | 'rope' | 'solo' = 'bar',
+): Promise<TowRig> {
   const physics = await PhysicsWorld.create();
-  addGround(physics);
+  addGround(physics, surface);
   const world = new GameWorld(newWorldState(7));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
-  const measureTower = carModelMeasure(TOWER_MODEL);
-  const measureTowed = carModelMeasure(TOWED_MODEL);
-  const gap = measureTower.halfExtents[2] + measureTowed.halfExtents[2] + 1.2;
-  const towerState = benchCarState(TOWER_MODEL, { id: 'tower', z: 0 });
-  const towedState = benchCarState(TOWED_MODEL, { id: 'towed', z: -gap });
-  // The contract's stranded car: no engine in the bay. Nothing else about it is
-  // special — it is a complete car otherwise.
+  const gap = carModelMeasure(towerModel).halfExtents[2] + carModelMeasure(towedModel).halfExtents[2] + 1.2;
+  const towerState = benchCarState(towerModel, { id: 'tower', z: 0 });
+  const towedState = benchCarState(towedModel, { id: 'towed', z: -gap });
+  // The contract's broken car: no engine in the bay, as contracts/world.ts spawns it.
   towedState.bonnet[0] = null;
   world.state.cars.tower = towerState;
   world.state.cars.towed = towedState;
@@ -150,16 +227,52 @@ async function makeTowRig(): Promise<TowRig> {
   const towed = new Vehicle(physics, world, towedState, scene, origin);
   vehicles.set('tower', tower);
   vehicles.set('towed', towed);
-  const field = new CarTowField(
+  const rig: TowRig = {
+    physics,
+    world,
+    tower,
+    towed,
+    field: null as unknown as CarTowField,
+    input: emptyInput(),
+    path,
+    hint: 0,
+    ownX: 0,
+    ownZ: 0,
+    prevVx: 0,
+    prevVz: 0,
+    barN: 0,
+    broke: false,
+    rope: null,
+    towedInput: emptyInput(),
+  };
+  rig.field = new CarTowField(
     physics,
     world,
     scene,
     origin,
     (carId) => vehicles.get(carId) ?? null,
-    () => {},
+    () => {
+      rig.broke = true;
+    },
   );
-  const input = emptyInput();
-  // Let both settle onto their springs before coupling.
+  // Count what the towed car's own code pushes it with, so the rest is the bar.
+  const body = towed.chassis;
+  const applyImpulse = body.applyImpulse.bind(body);
+  const applyImpulseAtPoint = body.applyImpulseAtPoint.bind(body);
+  body.applyImpulse = (impulse: RAPIER.Vector, wake: boolean): void => {
+    rig.ownX += impulse.x;
+    rig.ownZ += impulse.z;
+    applyImpulse(impulse, wake);
+  };
+  body.applyImpulseAtPoint = (impulse: RAPIER.Vector, point: RAPIER.Vector, wake: boolean): void => {
+    rig.ownX += impulse.x;
+    rig.ownZ += impulse.z;
+    applyImpulseAtPoint(impulse, point, wake);
+  };
+
+  // Both settle onto their springs before coupling.
+  const input = rig.input;
+  input.autoShift = true;
   input.brake = 1;
   for (let i = 0; i < 240; i++) {
     tower.fixedUpdate(FIXED_DT, input);
@@ -169,59 +282,85 @@ async function makeTowRig(): Promise<TowRig> {
     towed.postStep();
   }
   input.brake = 0;
-  field.hitch(tower, 'tower', towed, 'towed');
-  return { physics, world, tower, towed, field, input, stretch: [], relSpeed: [], lateral: [] };
+  if (coupling === 'bar') {
+    rig.field.hitch(tower, 'tower', towed, 'towed');
+  } else if (coupling === 'rope') {
+    // Bumper eye to bumper eye, the rope as long as the law asks; the towed car's
+    // wheel is let go (`analog` at 0 is hands off: its own castor swings it).
+    const towerEye = { x: 0, y: 0, z: -tower.modelMeasure.halfExtents[2] };
+    const towedEye = { x: 0, y: 0, z: towed.modelMeasure.halfExtents[2] };
+    rig.rope = physics.world.createImpulseJoint(
+      physics.rapier.JointData.rope(ROPE_M, towerEye, towedEye),
+      tower.chassis,
+      towed.chassis,
+      true,
+    );
+    rig.rope.setContactsEnabled(true);
+    rig.towedInput.steerMode = 'analog';
+  }
+  const v = towed.chassis.linvel();
+  rig.prevVx = v.x;
+  rig.prevVz = v.z;
+  return rig;
 }
 
-function towStep(rig: TowRig, target: number, holdPoint: { x: number; y: number; z: number } | null): void {
-  const t = rig.tower.chassis.translation();
-  const r = rig.tower.chassis.rotation();
-  const yaw = yawOf(r);
-  const v = speedOf(rig.tower);
-  // The bend is driven from a curvature feed-forward, trimmed by the heading error
-  // against the path's own tangent at the car's arclength and by the radial offset.
-  // A follower that fights the tow would report its own gain rather than the bar, so
-  // the gains are slack and the radius actually driven is what gets reported.
-  const foot = pathFoot(t.x, t.z, ARC_FROM_M, BEND_RADIUS_M);
-  const curvature = foot.s >= ARC_FROM_M ? 1 / BEND_RADIUS_M : 0;
-  const ff = Math.atan(rig.tower.modelDef.factory.wheelbase * curvature);
-  const want =
-    ff + wrapPi(foot.yaw - yaw) * HEADING_TRIM - CROSS_GAIN * foot.lateral;
-  rig.input.steer = rig.tower.steeringInputForWheelAngle(want);
-  const dv = target - v;
-  rig.input.throttle = Math.max(0, Math.min(1, dv * 0.4));
-  rig.input.brake = dv < -0.5 ? Math.max(0, Math.min(1, -dv * 0.4)) : 0;
-  rig.input.handbrake = false;
-
+/**
+ * One fixed step in the game's own order (main.ts): the tower's controls, the bar's
+ * step for the towed car, the solve, the bar's correction, the latches.
+ */
+function step(rig: TowRig, control: (rig: TowRig) => void, afterSolve?: (rig: TowRig) => void): void {
+  control(rig);
   rig.tower.fixedUpdate(FIXED_DT, rig.input);
-  rig.field.fixedUpdate(FIXED_DT, (carId) => (carId === 'tower' ? rig.tower.brakeCommand : 0));
-
+  rig.ownX = 0;
+  rig.ownZ = 0;
+  if (rig.rope) rig.towed.fixedUpdate(FIXED_DT, rig.towedInput);
+  else rig.field.fixedUpdate(FIXED_DT, (carId) => (carId === 'tower' ? rig.tower.brakeCommand : 0));
   rig.physics.step();
-
-  if (holdPoint) {
-    // A snag: the towed car is against something immovable, so it does not move at
-    // all. The bar sees the whole of the tower's motion from here as stretch.
-    rig.towed.chassis.setTranslation({ x: holdPoint.x, y: holdPoint.y, z: holdPoint.z }, true);
-    rig.towed.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    rig.towed.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  }
+  afterSolve?.(rig);
   rig.field.postStep(FIXED_DT);
   rig.tower.postStep();
   rig.towed.postStep();
-
-  const eyeTower = towEyeWorld(rig.tower, 'rear', { x: 0, y: 0, z: 0 });
-  const eyeTowed = towEyeWorld(rig.towed, 'front', { x: 0, y: 0, z: 0 });
-  rig.stretch.push(Math.hypot(eyeTower.x - eyeTowed.x, eyeTower.y - eyeTowed.y, eyeTower.z - eyeTowed.z));
-  const lv = rig.tower.chassis.linvel();
-  const tw = rig.towed.chassis.linvel();
-  rig.relSpeed.push(Math.hypot(lv.x - tw.x, lv.z - tw.z));
-  rig.lateral.push(Math.abs(foot.lateral));
+  const v = rig.towed.chassis.linvel();
+  const m = rig.towed.chassis.mass();
+  rig.barN = rig.field.isTowed('towed') || rig.rope
+    ? Math.hypot(m * (v.x - rig.prevVx) - rig.ownX, m * (v.z - rig.prevVz) - rig.ownZ) / FIXED_DT
+    : 0;
+  rig.prevVx = v.x;
+  rig.prevVz = v.z;
 }
 
-/** Arclength the tower is at, from its own position. */
-function towProgress(rig: TowRig): number {
-  const t = rig.tower.chassis.translation();
-  return pathFoot(t.x, t.z, ARC_FROM_M, BEND_RADIUS_M).s;
+/** Pure pursuit on the path at a target speed; `pedal` overrides the speed control. */
+function follow(targetMps: number, pedal: number | null = null, kickRad = 0): (rig: TowRig) => void {
+  return (rig) => {
+    const t = rig.tower.chassis.translation();
+    const yaw = yawOf(rig.tower.chassis.rotation());
+    const v = speedOf(rig.tower);
+    rig.hint = nearest(rig.path, t.x, t.z, rig.hint);
+    const wheelbase = rig.tower.modelDef.factory.wheelbase;
+    const lookM = Math.max(6, 0.9 * v);
+    const ahead = Math.min(rig.path.x.length - 1, rig.hint + Math.round(lookM / rig.path.step));
+    const dx = rig.path.x[ahead]! - t.x;
+    const dz = rig.path.z[ahead]! - t.z;
+    const alpha = wrapPi(Math.atan2(dx, dz) - yaw);
+    const want = Math.atan((2 * wheelbase * Math.sin(alpha)) / Math.hypot(dx, dz)) + kickRad;
+    rig.input.steer = rig.tower.steeringInputForWheelAngle(want);
+    rig.input.steerMode = 'direct';
+    rig.input.reverse = false;
+    rig.input.handbrake = false;
+    if (pedal !== null) {
+      rig.input.throttle = 0;
+      rig.input.brake = pedal;
+      return;
+    }
+    const dv = targetMps - v;
+    rig.input.throttle = Math.max(0, Math.min(1, dv * 0.5));
+    rig.input.brake = dv < -1 ? Math.max(0, Math.min(1, -dv * 0.3)) : 0;
+  };
+}
+
+/** Articulation, the towed car's heading off the tower's, degrees. */
+function articulation(rig: TowRig): number {
+  return wrapPi(yawOf(rig.tower.chassis.rotation()) - yawOf(rig.towed.chassis.rotation())) * DEG;
 }
 
 function finiteRig(rig: TowRig): boolean {
@@ -230,105 +369,253 @@ function finiteRig(rig: TowRig): boolean {
     const l = body.linvel();
     if (!Number.isFinite(t.x + t.y + t.z + l.x + l.y + l.z)) return false;
   }
-  return rig.stretch.every((s) => Number.isFinite(s));
+  return true;
 }
 
-async function benchTowing(): Promise<void> {
-  console.log('\n== towing: car-to-car bar ==');
-  const rig = await makeTowRig();
+/** Accelerates on the path's lead-in to `mps`, then holds it for `holdS`. */
+function runUp(rig: TowRig, mps: number, holdS: number): void {
+  const control = follow(mps);
+  for (let i = 0; i < 60 / FIXED_DT && speedOf(rig.tower) < mps - 0.3; i++) step(rig, control);
+  for (let i = 0; i < holdS / FIXED_DT; i++) step(rig, control);
+}
 
-  // Phase A: straight, rest to 60 km/h, over STRAIGHT_RUN_M of road.
-  let to60 = null as number | null;
-  const straightSteps = Math.ceil(45 / FIXED_DT);
-  for (let i = 0; i < straightSteps; i++) {
-    towStep(rig, TARGET_SPEED_MPS, null);
-    if (to60 === null && speedOf(rig.tower) >= TARGET_SPEED_MPS) to60 = (i + 1) * FIXED_DT;
-    if (towProgress(rig) >= STRAIGHT_RUN_M) break;
-  }
-  const straightStretch = summarise(rig.stretch);
-  const straightRel = summarise(rig.relSpeed);
-  console.log(
-    `  straight  0-60 km/h ${to60 === null ? 'never' : `${to60.toFixed(2)} s`}` +
-    `  over ${towProgress(rig).toFixed(0)} m  tower ${(speedOf(rig.tower) * 3.6).toFixed(1)} km/h` +
-    `  towed ${(speedOf(rig.towed) * 3.6).toFixed(1)} km/h`,
-  );
-  console.log(
-    `  stretch    median ${(straightStretch.median * 1000).toFixed(3)} mm` +
-    `  max ${(straightStretch.max * 1000).toFixed(2)} mm`,
-  );
-  console.log(`  rel speed  max ${straightRel.max.toFixed(3)} m/s`);
+interface Track {
+  towerOff: number;
+  towedOff: number;
+  artic: number;
+  barN: number;
+}
 
-  // Phase B: approach the bend, slowing to the radius's speed well before it, then
-  // take the arc.
-  while (towProgress(rig) < ARC_FROM_M - 5 && rig.field.isTowed('towed')) {
-    const approach = towProgress(rig) > ARC_FROM_M - 70 ? BEND_SPEED_MPS : TARGET_SPEED_MPS;
-    towStep(rig, approach, null);
-  }
-  rig.stretch.length = 0;
-  rig.relSpeed.length = 0;
-  rig.lateral.length = 0;
-  const bendStart = towProgress(rig);
-  const bendEnd = ARC_FROM_M + 60;
-  const bendSteps = Math.ceil(30 / FIXED_DT);
-  let yawTravelled = 0;
-  let previousYaw = yawOf(rig.tower.chassis.rotation());
-  let pathMetres = 0;
-  let previousSpeed = speedOf(rig.tower);
-  for (let i = 0; i < bendSteps && rig.field.isTowed('towed') && towProgress(rig) < bendEnd; i++) {
-    towStep(rig, BEND_SPEED_MPS, null);
-    const yaw = yawOf(rig.tower.chassis.rotation());
-    yawTravelled += wrapPi(yaw - previousYaw);
-    previousYaw = yaw;
-    pathMetres += previousSpeed * FIXED_DT;
-    previousSpeed = speedOf(rig.tower);
-  }
-  const bendStretch = summarise(rig.stretch);
-  const bendRel = summarise(rig.relSpeed);
-  const bendLat = summarise(rig.lateral);
-  const meanSpeed = pathMetres / (rig.stretch.length * FIXED_DT);
-  const drivenRadius = Math.abs(yawTravelled) > 1e-3
-    ? meanSpeed * (rig.stretch.length * FIXED_DT) / Math.abs(yawTravelled)
-    : Infinity;
-  console.log(
-    `  bend       ${(towProgress(rig) - bendStart).toFixed(1)} m of arc at` +
-    ` ${(BEND_SPEED_MPS * 3.6).toFixed(0)} km/h target; radius driven ${drivenRadius.toFixed(1)} m` +
-    ` (nominal ${BEND_RADIUS_M} m)  still coupled: ${rig.field.isTowed('towed')}`,
-  );
-  console.log(
-    `  stretch    median ${(bendStretch.median * 1000).toFixed(3)} mm` +
-    `  max ${(bendStretch.max * 1000).toFixed(2)} mm`,
-  );
-  console.log(`  rel speed  max ${bendRel.max.toFixed(3)} m/s`);
-  console.log(`  path error max ${bendLat.max.toFixed(2)} m`);
-  console.log(`  finite     ${finiteRig(rig)}`);
+function newTrack(): Track {
+  return { towerOff: 0, towedOff: 0, artic: 0, barN: 0 };
+}
 
-  // Phase C: the snag. The towed car is against something immovable from this step
-  // on, and the bar must SNAP rather than drag it.
-  const snag = await makeTowRig();
-  const cruiseSteps = Math.ceil(12 / FIXED_DT);
-  for (let i = 0; i < cruiseSteps; i++) towStep(snag, 30 / 3.6, null);
-  const snagSpeed = speedOf(snag.tower) * 3.6;
-  const holdPoint = snag.towed.chassis.translation();
-  const snagTowerStart = snag.tower.chassis.translation().z;
-  let brokeAt = null as number | null;
-  let stretchWhenBroke = 0;
-  let towerMoved = 0;
-  for (let i = 0; i < Math.ceil(4 / FIXED_DT); i++) {
-    towStep(snag, 30 / 3.6, holdPoint);
-    if (!snag.field.isTowed('towed')) {
+/** Folds this step into the running worst figures. */
+function track(rig: TowRig, into: Track): void {
+  const t = rig.tower.chassis.translation();
+  const hint = nearest(rig.path, t.x, t.z, rig.hint);
+  into.towerOff = Math.max(into.towerOff, Math.abs(lateralOf(rig.path, hint, t.x, t.z)));
+  const rear = worldPoint(rig.towed, { x: 0, y: 0, z: axleZ(rig.towed, false) });
+  const towedHint = nearest(rig.path, rear.x, rear.z, Math.max(0, hint - 60));
+  into.towedOff = Math.max(into.towedOff, Math.abs(lateralOf(rig.path, towedHint, rear.x, rear.z)));
+  into.artic = Math.max(into.artic, Math.abs(articulation(rig)));
+  into.barN = Math.max(into.barN, rig.barN);
+}
+
+function status(rig: TowRig): string {
+  if (!finiteRig(rig)) return 'NON-FINITE';
+  if (rig.rope) return 'rope';
+  if (rig.broke || !rig.field.isTowed('towed')) return 'bar broke';
+  return 'coupled';
+}
+
+const fmt = (n: number, d = 2): string => n.toFixed(d);
+
+// ---------------------------------------------------------------------------
+// manoeuvres
+
+async function kick(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  runUp(rig, 65 * KMH, 4);
+  const control = follow(65 * KMH);
+  const pulse = follow(65 * KMH, null, 1 / DEG);
+  let early = 0;
+  let late = 0;
+  const all = newTrack();
+  for (let i = 0; i < 10 / FIXED_DT; i++) {
+    const t = i * FIXED_DT;
+    step(rig, t < 0.3 ? pulse : control);
+    track(rig, all);
+    const a = Math.abs(articulation(rig));
+    if (t >= 1 && t < 3) early = Math.max(early, a);
+    if (t >= 6 && t < 8) late = Math.max(late, a);
+  }
+  return (
+    `kick 65 km/h   artic peak 1-3 s ${fmt(early)}°  6-8 s ${fmt(late)}°` +
+    `  towed swing ${fmt(all.towedOff)} m  bar ${fmt(all.barN, 0)} N  ${status(rig)}`
+  );
+}
+
+async function bend(
+  tower: string,
+  towed: string,
+  label: string,
+  radius: number,
+  turnDeg: number,
+  kmh: number,
+  surface: SurfaceType,
+  coupling: 'bar' | 'solo' = 'bar',
+): Promise<string> {
+  const lead = 250;
+  const rig = await makeTowRig(tower, towed, cornerPath(lead, radius, turnDeg, 35), surface, coupling);
+  // Up to speed on the lead-in, then measured from the spiral to well past the exit.
+  const control = follow(kmh * KMH);
+  while (rig.hint * rig.path.step < lead - 30 && (coupling === 'solo' || rig.field.isTowed('towed'))) step(rig, control);
+  const worst = newTrack();
+  const enter = speedOf(rig.tower) / KMH;
+  const exitS = lead + 70 + (turnDeg / DEG) * radius + 60;
+  for (let i = 0; i < 40 / FIXED_DT && rig.hint * rig.path.step < exitS && (coupling === 'solo' || rig.field.isTowed('towed')); i++) {
+    step(rig, control);
+    track(rig, worst);
+  }
+  if (coupling === 'solo') {
+    return `${label.padEnd(14)} in at ${fmt(enter, 0)} km/h  tower alone, off line ${fmt(worst.towerOff)} m`;
+  }
+  return (
+    `${label.padEnd(14)} in at ${fmt(enter, 0)} km/h  tower off line ${fmt(worst.towerOff)} m` +
+    `  towed ${fmt(worst.towedOff)} m  artic ${fmt(worst.artic, 1)}°  bar ${fmt(worst.barN, 0)} N  ${status(rig)}`
+  );
+}
+
+async function brake(tower: string, towed: string, inBend: boolean): Promise<string> {
+  const lead = inBend ? 250 : 5000;
+  const rig = await makeTowRig(tower, towed, cornerPath(lead, 85, 50, 35));
+  const control = follow(60 * KMH);
+  if (inBend) {
+    // Into the corner and half way round it.
+    const brakeAt = lead + 35 + 25;
+    while (rig.hint * rig.path.step < brakeAt && rig.field.isTowed('towed')) step(rig, control);
+  } else {
+    runUp(rig, 60 * KMH, 3);
+  }
+  const from = speedOf(rig.tower) / KMH;
+  const start = rig.tower.chassis.translation();
+  const worst = newTrack();
+  const pedal = follow(0, 1);
+  let seconds = 0;
+  for (let i = 0; i < 20 / FIXED_DT && speedOf(rig.tower) > 0.2; i++) {
+    step(rig, pedal);
+    track(rig, worst);
+    seconds += FIXED_DT;
+  }
+  const end = rig.tower.chassis.translation();
+  return (
+    `${(inBend ? 'brake in bend' : 'brake').padEnd(14)} from ${fmt(from, 0)} km/h: ${fmt(Math.hypot(end.x - start.x, end.z - start.z), 1)} m` +
+    ` in ${fmt(seconds, 1)} s  artic ${fmt(worst.artic, 1)}°  bar ${fmt(worst.barN, 0)} N` +
+    (inBend ? `  tower off line ${fmt(worst.towerOff)} m` : '') +
+    `  ${status(rig)}`
+  );
+}
+
+/**
+ * Standing coupled for 10 s on the tower's pedal, as at a junction: the worst ground
+ * speed either body still has over the last 8 s. A coupling that jitters shows here.
+ */
+async function rest(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  let towerMps = 0;
+  let towedMps = 0;
+  let spin = 0;
+  const hold = follow(0, 1);
+  for (let i = 0; i < 10 / FIXED_DT; i++) {
+    step(rig, hold);
+    if (i * FIXED_DT < 2) continue;
+    towerMps = Math.max(towerMps, speedOf(rig.tower));
+    towedMps = Math.max(towedMps, speedOf(rig.towed));
+    const w = rig.towed.chassis.angvel();
+    spin = Math.max(spin, Math.hypot(w.x, w.y, w.z));
+  }
+  return (
+    `rest 10 s      worst speed tower ${fmt(towerMps * 1000, 1)} mm/s  towed ${fmt(towedMps * 1000, 1)} mm/s` +
+    `  towed spin ${fmt(spin * DEG, 2)}°/s  ${status(rig)}`
+  );
+}
+
+async function reverse(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  const start = rig.tower.chassis.translation();
+  let worst = 0;
+  let travelled = 0;
+  for (let i = 0; i < 25 / FIXED_DT && travelled < 8; i++) {
+    step(rig, (r) => {
+      r.input.steer = 0;
+      r.input.steerMode = 'direct';
+      r.input.throttle = 0;
+      r.input.reverse = true;
+      // Reverse is driven by the brake pedal once it is in (`reverseDriveEngaged`).
+      r.input.brake = speedOf(r.tower) < 5 * KMH ? 0.35 : 0;
+    });
+    const t = rig.tower.chassis.translation();
+    travelled = Math.hypot(t.x - start.x, t.z - start.z);
+    worst = Math.max(worst, Math.abs(articulation(rig)));
+  }
+  return `reverse        ${fmt(travelled, 1)} m back, artic ${fmt(worst, 1)}°  ${status(rig)}`;
+}
+
+/** True while the two bodies' own chassis colliders touch. */
+function touching(rig: TowRig): boolean {
+  let touch = false;
+  rig.physics.world.contactPair(rig.tower.collisionCollider, rig.towed.collisionCollider, (manifold) => {
+    for (let i = 0; i < manifold.numContacts(); i++) if (manifold.contactDist(i) <= 0.01) touch = true;
+  });
+  return touch;
+}
+
+/**
+ * WHY NOT A ROPE: the same pair on a 5 m rope, nobody at the towed car's wheel or
+ * pedal (the only way a towed car with nobody in it can be on a rope). A straight
+ * stop from 60 km/h: does it roll into the tower, and how hard. The road's tightest
+ * corner at 60 km/h: how far off the tower's line it runs.
+ */
+async function rope(tower: string, towed: string): Promise<string[]> {
+  const stop = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10), SurfaceType.Asphalt, 'rope');
+  runUp(stop, 60 * KMH, 4);
+  const from = speedOf(stop.tower) / KMH;
+  let hitKmh: number | null = null;
+  const pedal = follow(0, 1);
+  for (let i = 0; i < 20 / FIXED_DT && (speedOf(stop.tower) > 0.2 || speedOf(stop.towed) > 0.2); i++) {
+    const closing = Math.hypot(
+      stop.towed.chassis.linvel().x - stop.tower.chassis.linvel().x,
+      stop.towed.chassis.linvel().z - stop.tower.chassis.linvel().z,
+    );
+    step(stop, pedal);
+    if (hitKmh === null && touching(stop)) hitKmh = closing / KMH;
+  }
+  const corner = await makeTowRig(tower, towed, cornerPath(250, 85, 50, 35), SurfaceType.Asphalt, 'rope');
+  const control = follow(60 * KMH);
+  while (corner.hint * corner.path.step < 220) step(corner, control);
+  const worst = newTrack();
+  const exitS = 250 + 70 + (50 / DEG) * 85 + 60;
+  for (let i = 0; i < 40 / FIXED_DT && corner.hint * corner.path.step < exitS; i++) {
+    step(corner, control);
+    track(corner, worst);
+  }
+  return [
+    `rope brake     from ${fmt(from, 0)} km/h: ` +
+      (hitKmh === null ? 'no contact' : `towed car runs into the tower at ${fmt(hitKmh, 1)} km/h`) +
+      `  ${status(stop)}`,
+    `rope R85 60    tower off line ${fmt(worst.towerOff)} m  towed ${fmt(worst.towedOff)} m  artic ${fmt(worst.artic, 1)}°` +
+      `  ${status(corner)}`,
+  ];
+}
+
+async function snag(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  runUp(rig, 30 * KMH, 2);
+  const at = speedOf(rig.tower) / KMH;
+  const hold = rig.towed.chassis.translation();
+  const holdPoint = { x: hold.x, y: hold.y, z: hold.z };
+  const control = follow(30 * KMH);
+  let brokeAt: number | null = null;
+  for (let i = 0; i < 4 / FIXED_DT; i++) {
+    // A snag: the towed car is against something immovable, every step, so the bar
+    // sees the whole of the tower's motion as stretch.
+    step(rig, control, (r) => {
+      r.towed.chassis.setTranslation(holdPoint, true);
+      r.towed.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      r.towed.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    });
+    if (!rig.field.isTowed('towed')) {
       brokeAt = (i + 1) * FIXED_DT;
-      stretchWhenBroke = snag.stretch[snag.stretch.length - 1] ?? 0;
-      towerMoved = snag.tower.chassis.translation().z - snagTowerStart;
       break;
     }
   }
-  console.log(
-    `  snag       held at ${snagSpeed.toFixed(0)} km/h: bar ` +
-    (brokeAt === null
-      ? 'DID NOT BREAK (still coupled)'
-      : `snapped after ${brokeAt.toFixed(2)} s at ${(stretchWhenBroke * 1000).toFixed(0)} mm`) +
-    `  tower moved ${towerMoved.toFixed(2)} m against the hold` +
-    `  state cleared: ${snag.world.state.cars.towed?.towedBy === null}`,
+  const a = towEyeWorld(rig.tower, 'rear', { x: 0, y: 0, z: 0 });
+  const b = towEyeWorld(rig.towed, 'front', { x: 0, y: 0, z: 0 });
+  return (
+    `snag           held at ${fmt(at, 0)} km/h: ` +
+    (brokeAt === null ? 'DID NOT BREAK' : `snapped after ${fmt(brokeAt)} s, eyes ${fmt(Math.hypot(a.x - b.x, a.z - b.z))} m apart`) +
+    `  state cleared: ${rig.world.state.cars.towed?.towedBy === null}`
   );
 }
 
@@ -337,11 +624,12 @@ async function benchTowing(): Promise<void> {
 
 function benchSave(): void {
   console.log('\n== save round-trip ==');
+  const [towerModel, towedModel] = PAIRS[0]!;
   const world = newWorldState(9);
-  const tower = benchCarState(TOWER_MODEL, { id: 'tower', z: 0 });
-  const towed = benchCarState(TOWED_MODEL, { id: 'towed', z: -5 });
+  const tower = benchCarState(towerModel, { id: 'tower', z: 0 });
+  const towed = benchCarState(towedModel, { id: 'towed', z: -5 });
   towed.bonnet[0] = null;
-  const spare = benchCarState(TOWER_MODEL, { id: 'contract-car:spare', z: 5 });
+  const spare = benchCarState(towerModel, { id: 'contract-car:spare', z: 5 });
   world.cars.tower = tower;
   world.cars.towed = towed;
   world.cars['contract-car:spare'] = spare;
@@ -376,10 +664,31 @@ function benchSave(): void {
 }
 
 async function main(): Promise<void> {
-  await preloadCarModels([TOWER_MODEL, TOWED_MODEL]);
-  console.log(`tow bench  models ${carModel(TOWER_MODEL).label} / ${carModel(TOWED_MODEL).label}` +
-    `  day ${DAY_LENGTH}s`);
-  await benchTowing();
+  await preloadCarModels([...new Set(PAIRS.flat())]);
+  for (const [tower, towed] of PAIRS) {
+    const probe = await makeTowRig(tower, towed, cornerPath(100, 85, 1, 10));
+    console.log(
+      `\n== ${carModel(tower).label} (${fmt(probe.tower.chassis.mass(), 0)} kg) towing` +
+      ` ${carModel(towed).label} without its engine (${fmt(probe.towed.chassis.mass(), 0)} kg) ==`,
+    );
+    if (process.env.SWEEP) {
+      for (const kmh of [60, 62, 64, 66, 68]) console.log(`  ${await bend(tower, towed, `R85 ${kmh}`, 85, 50, kmh, SurfaceType.Asphalt)}`);
+      continue;
+    }
+    console.log(`  ${await kick(tower, towed)}`);
+    console.log(`  ${await bend(tower, towed, 'bend R85 60', 85, 50, 60, SurfaceType.Asphalt)}`);
+    console.log(`  ${await bend(tower, towed, 'bend R85 70', 85, 50, 70, SurfaceType.Asphalt)}`);
+    console.log(`  ${await bend(tower, towed, 'solo R85 70', 85, 50, 70, SurfaceType.Asphalt, 'solo')}`);
+    console.log(`  ${await bend(tower, towed, 'sweep R140 70', 140, 40, 70, SurfaceType.Asphalt)}`);
+    console.log(`  ${await bend(tower, towed, 'gravel R85 50', 85, 50, 50, SurfaceType.Gravel)}`);
+    console.log(`  ${await bend(tower, towed, 'hairpin R30 40', 30, 90, 40, SurfaceType.Asphalt)}`);
+    console.log(`  ${await brake(tower, towed, false)}`);
+    console.log(`  ${await brake(tower, towed, true)}`);
+    console.log(`  ${await rest(tower, towed)}`);
+    console.log(`  ${await reverse(tower, towed)}`);
+    console.log(`  ${await snag(tower, towed)}`);
+    for (const line of await rope(tower, towed)) console.log(`  ${line}`);
+  }
   benchSave();
 }
 

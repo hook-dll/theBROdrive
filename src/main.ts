@@ -1793,7 +1793,7 @@ async function boot(): Promise<void> {
 
     // Trailers get the same treatment for the same reason: their springs only exist
     // inside `updateVehicle`, towed or standing.
-    trailerField.fixedUpdate(dt, (carId) => vehicles.get(carId)?.brakeCommand ?? 0);
+    trailerField.fixedUpdate(dt);
 
     // FLOATING ORIGIN. Here and nowhere else: after every controller has written this
     // tick's intent, immediately before the solver. The order is load-bearing twice.

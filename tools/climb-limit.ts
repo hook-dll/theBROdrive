@@ -252,8 +252,9 @@ const args = process.argv.slice(2);
 const sweep = args.includes('--sweep');
 const chosen = args.filter((a) => !a.startsWith('--'));
 /**
- * Trailer mass hanging off the ball, kg. `--tow=1020` is TRAILER_TARE_KG plus a full
- * TRAILER_CAPACITY_KG load, i.e. the worst thing the player can be dragging uphill.
+ * Trailer mass hanging off the ball, kg. `--tow=750` is TRAILER_TARE_KG plus a full
+ * TRAILER_CAPACITY_KG load (the KMZ's gross), i.e. the worst thing the player can be
+ * dragging uphill.
  */
 const towKg = Number(args.find((a) => a.startsWith('--tow='))?.slice(6) ?? 0);
 const bodies =

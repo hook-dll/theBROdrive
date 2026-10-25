@@ -24,7 +24,6 @@ import type { CarState, GameWorld, TrailerLoad, TrailerState } from '../game/sta
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
-import { TRAILER_BALL_Z } from '../vehicle/trailer';
 import { contractKindOf, contractThing, type ContractCargoItem } from '../items/items';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -39,8 +38,9 @@ const CAR_STAGGER_DOMAIN = 0x43545331;
 
 /**
  * The haul's place on the lay-by to the trailer parked behind it, m: half a car's
- * length plus 0.9 m of drawbar and a short gap, so the trailer stands with its drawbar
- * pointing up the pad at the car that is supposed to take it.
+ * length, the trailer's drawbar (its ball 2.08 m ahead of its middle) and a short gap,
+ * so the trailer stands with its drawbar pointing up the pad at the car that is
+ * supposed to take it.
  */
 const TRAILER_CENTRE_GAP_M = 2.7;
 /** The haul's place to the car parked ahead of it, m, on top of both half-lengths. */
@@ -76,19 +76,13 @@ export function isContractCarId(carId: string): boolean {
 }
 
 /**
- * The long load (game-design2.md §7.3): the bed with its frame and boards, 3.2 m against
- * the trailer's 2.8 m bed, so it overhangs each end and is what the traffic and the
- * rocks get to hit. Every other trailer load rides as the bed's own crate.
+ * The long load (game-design2.md §7.3): the bed with its frame and boards, 3.2 m long and
+ * 1.6 m wide against the KMZ's 1.9 x 1.26 m box, so it lies across the tops of the sides
+ * (vehicle/trailer.ts), overhangs both ends and is what the traffic and the rocks get to
+ * hit. Centred on the box, its front end clears the ball by half a metre for the drawbar
+ * to swing under. Every other load stands on the deck.
  */
 const BED_LOAD: TrailerLoad = { halfExtents: [0.8, 0.28, 1.6] };
-
-/**
- * Where the long load sits along the bed: its front end this far behind the tow ball,
- * the room the drawbar needs to swing under the overhang. A longer load is a lighter
- * tongue, which is the real reason a long load is the more nervous tow
- * (vehicle/trailer.ts, `tongueLoadN`).
- */
-const LONG_LOAD_BALL_CLEARANCE_M = 0.45;
 
 interface HaulPose {
   x: number;
@@ -147,6 +141,12 @@ function spawnContractTrailer(
     // The thing itself is the load: its own mass on the bed, drawn as itself.
     cargoKg: contractThing(item).massKg,
     loadThing: item.thing,
+    // Loaded the way a load goes on a trailer, against the headboard: a metre forward
+    // is further than any box holds a thing, so the trailer stands it as far forward
+    // as its box lets it (`Trailer.cargoZ`). That ahead-of-the-axle placement is what
+    // puts a towable share of the weight on the ball of a KMZ, whose axle sits under
+    // the middle of its box; a thing as long as the box simply stays in the middle.
+    cargoZ: 1,
     x,
     // Clear of the ground so it drops onto its own suspension rather than starting
     // inside the terrain, exactly as a POI's spare trailer does.
@@ -157,10 +157,7 @@ function spawnContractTrailer(
     qz: 0,
     qw: Math.cos(yaw / 2),
   };
-  if (item.thing === 'bed') {
-    trailer.load = BED_LOAD;
-    trailer.cargoZ = TRAILER_BALL_Z - LONG_LOAD_BALL_CLEARANCE_M - BED_LOAD.halfExtents[2];
-  }
+  if (item.thing === 'bed') trailer.load = BED_LOAD;
   deps.world.apply({ t: 'trailer_add', trailer });
 }
 

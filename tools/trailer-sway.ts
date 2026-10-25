@@ -6,13 +6,15 @@
  * in the game's own order (car, trailer, solver, post-steps).
  *
  *   ~/.bun/bin/bun tools/trailer-sway.ts            all sections
- *   ~/.bun/bin/bun tools/trailer-sway.ts sway       one section: load | sway | brake | park
+ *   ~/.bun/bin/bun tools/trailer-sway.ts sway       one section: load | sway | brake | park | rest
  *   TOW=sv_gaz24 CARGO=500 ~/.bun/bin/bun tools/trailer-sway.ts sway
+ *   THING=piano CARGO=230 ~/.bun/bin/bun tools/trailer-sway.ts      a contract load, drawn as itself
+ *   SURFACE=gravel ~/.bun/bin/bun tools/trailer-sway.ts sway       the same on the loose road
  *
- * The default rig is the worst the game allows: a VAZ-2101 (955 kg) towing a full
- * trailer (1020 kg). The cargo sits in one of three places on the bed (PLACEMENTS):
- * centred (8% of the trailer's weight on the ball), against the headboard (15-16%) or
- * against the tailgate with its centre over the axle (0-1%).
+ * The default rig is the worst the game allows: a VAZ-2101 (955 kg) towing a full KMZ
+ * (750 kg). The payload — the crate, or with THING the contract thing's own box —
+ * sits in one of three places on the bed (PLACEMENTS): centred, against the headboard
+ * or against the tailboard, as far as the box lets it go (the trailer clamps it).
  *
  * LOAD   the tow car's axle loads parked, solo and towing: the tongue as the car's
  *        own wheels measure it (front + rear change), as the trailer's axle leaves it
@@ -25,11 +27,13 @@
  *        a rig that folds past 25° is DIVERGED, and one that snakes past 25° on the way
  *        up to the speed is reported as SNAKED.
  * BRAKE  braking in a bend with the wheel frozen (R, KMH, PEDAL; default 80 m,
- *        70 km/h, full pedal), trailer brakes mirroring the pedal against none: the
- *        articulation added (fold), the car's path tightening (turn-in), the push on
- *        the ball, whether a trailer wheel locked, and the stop.
+ *        70 km/h, full pedal) on the car's brakes alone, as the brakeless KMZ has it:
+ *        the articulation added (fold), the car's path tightening (turn-in), the push
+ *        on the ball, and the stop.
  * PARK   an uncoupled trailer standing on a 12° grade, nose down and side on: how far
- *        it creeps in 10 s on its held wheels.
+ *        it creeps in 10 s on its chocked wheels.
+ * REST   coupled and standing on the car's pedal for 10 s: the worst ground speed and turn
+ *        rate the trailer still has after the first 2 s. A coupling that jitters shows.
  *
  * SWAY also reports the hitch's anchor error, how often the post-step correction
  * (`enforceHitch`) fires, and an A/B of the tail-heavy case at AB_KMH (100) with that
@@ -42,7 +46,9 @@ import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
-import { Trailer, TRAILER_BALL_Z, TRAILER_MODEL_FIT, TRAILER_TARE_KG } from '../src/vehicle/trailer';
+import { Trailer, TRAILER_BALL_Z, TRAILER_MODEL_FIT } from '../src/vehicle/trailer';
+import type { ThingId } from '../src/items/things';
+import { SurfaceType } from '../src/core/surfaces';
 import type { TyreContacts } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { carModel } from '../src/vehicle/carmodels';
@@ -56,25 +62,33 @@ installDocumentShim();
 installAssetShim();
 
 const TOW = process.env.TOW ?? 'sv_vaz2101';
-const CARGO_KG = Number(process.env.CARGO ?? 700);
+const CARGO_KG = Number(process.env.CARGO ?? 570);
+const THING = process.env.THING as ThingId | undefined;
+/** The plate's surface: SURFACE=gravel runs the same rig on the loose road. */
+const SURFACE = process.env.SURFACE === 'gravel' ? SurfaceType.Gravel : SurfaceType.Asphalt;
 const SECTION = process.argv[2] ?? 'all';
 const G = 9.81;
 
-/** The axle's position on the bed, metres forward of its centre (trailer.ts AXLE_Z). */
-const AXLE_Z = -0.2;
+/** The axle's position, metres forward of the box's middle (trailer.ts AXLE_Z). */
+const AXLE_Z = 0.022;
 
-/** Cargo placements, metres forward of the bed centre: the 2.2 m crate on the 2.8 m bed. */
+/**
+ * Cargo placements, metres forward of the box's middle, asked for: the trailer holds
+ * the payload inside the box, so ±1 is against the headboard or the tailboard.
+ */
 const PLACEMENTS = {
-  nose: 0.3,
+  nose: 1,
   normal: 0,
-  tail: -0.29,
+  tail: -1,
 } as const;
 type Placement = keyof typeof PLACEMENTS;
 
-/** The tongue share the lever predicts: the empty bed's mass is centred, the cargo at `cargoZ`. */
-function predictedTongueFraction(cargoKg: number, cargoZ: number): number {
-  const comZ = (cargoKg * cargoZ) / (TRAILER_TARE_KG + cargoKg);
-  return (comZ - AXLE_Z) / (TRAILER_BALL_Z - AXLE_Z);
+/**
+ * The tongue the lever predicts, N: the empty trailer's own (as it reports it) plus the
+ * payload's weight at the cargo's place about the axle, over the axle-to-ball lever.
+ */
+function predictedTongueN(emptyN: number, cargoKg: number, cargoZ: number): number {
+  return emptyN + (cargoKg * G * (cargoZ - AXLE_Z)) / (TRAILER_BALL_Z - AXLE_Z);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +99,6 @@ interface SwayRig {
   vehicle: Vehicle;
   trailer: Trailer | null;
   input: InputFrame;
-  /** Pedal the trailer's brakes see: the car's, or nothing for brakes-off runs. */
-  trailerBrakes: boolean;
   /** Integral of the speed hold, so cruise sits ON the target rather than below it. */
   throttleI: number;
   /**
@@ -101,7 +113,7 @@ const START_Z = -3500;
 
 async function makeRig(cargoKg: number | null, placement: Placement): Promise<SwayRig> {
   const physics = await PhysicsWorld.create();
-  addGround(physics);
+  addGround(physics, SURFACE);
   const world = new GameWorld(newWorldState(3));
   const scene = new THREE.Scene();
   const origin = new WorldOrigin();
@@ -115,12 +127,15 @@ async function makeRig(cargoKg: number | null, placement: Placement): Promise<Sw
       id: 'bench:trailer', hitchedTo: null, cargoKg: 0, cargoZ: PLACEMENTS[placement],
       x: 0, y: 1, z: START_Z - 6, qx: 0, qy: 0, qz: 0, qw: 1,
     };
+    if (THING !== undefined) ts.loadThing = THING;
+    // The long load rides as its own collider too, as contracts/world.ts spawns it.
+    if (THING === 'bed') ts.load = { halfExtents: [0.8, 0.28, 1.6] };
     world.state.trailers[ts.id] = ts;
     trailer = new Trailer(physics, world, ts, scene, origin);
     trailer.setCargo(cargoKg);
     trailer.hitchTo(vehicle, state.id);
   }
-  const rig: SwayRig = { physics, vehicle, trailer, input, trailerBrakes: true, throttleI: 0, laneX: 0 };
+  const rig: SwayRig = { physics, vehicle, trailer, input, throttleI: 0, laneX: 0 };
   input.brake = 1;
   for (let i = 0; i < 480; i++) step(rig);
   input.brake = 0;
@@ -140,7 +155,7 @@ const WRAP_BY_Z = 5000;
 
 function step(rig: SwayRig): void {
   rig.vehicle.fixedUpdate(FIXED_DT, rig.input);
-  rig.trailer?.fixedUpdate(FIXED_DT, rig.trailerBrakes ? rig.vehicle.brakeCommand : 0);
+  rig.trailer?.fixedUpdate(FIXED_DT);
   // Same slot as main.ts: after the controllers, before the solver.
   const ct = rig.vehicle.chassis.translation();
   if (ct.z > WRAP_AT_Z) {
@@ -374,12 +389,16 @@ function report(r: SwayResult): string {
 }
 
 async function sway(): Promise<void> {
-  console.log(`\n== SWAY: ${carModel(TOW).label} + trailer ${CARGO_KG} kg, ${PULSE_RAD} rad pulse ${PULSE_S}s, fixed control ==`);
+  console.log(`\n== SWAY: ${carModel(TOW).label} + trailer ${CARGO_KG} kg${THING ? ` (${THING})` : ''}, ${PULSE_RAD} rad pulse ${PULSE_S}s, fixed control ==`);
   const places = (process.env.PLACES?.split(',') ?? ['normal', 'tail', 'nose']) as Placement[];
   const speeds = process.env.SPEEDS?.split(',').map(Number) ?? [60, 80, 100, 120, 130, 140];
   for (const placement of places) {
-    const tongue = predictedTongueFraction(CARGO_KG, PLACEMENTS[placement]);
-    console.log(`  ${placement.padEnd(6)} cargo z ${PLACEMENTS[placement].toFixed(2)} m  tongue ${(tongue * 100).toFixed(1)}%`);
+    const probe = await makeRig(CARGO_KG, placement);
+    console.log(
+      `  ${placement.padEnd(6)} cargo z ${probe.trailer!.cargoZ.toFixed(2)} m  tongue ${(probe.trailer!.tongueFraction * 100).toFixed(1)}%`,
+    );
+    probe.vehicle.dispose();
+    probe.trailer?.dispose();
     hitchErrors = [];
     hitchAudit.calls = 0; hitchAudit.fired = 0; hitchAudit.dvSum = 0;
     // A fresh rig per speed, run up from rest on the lane hold: nothing one point
@@ -437,6 +456,7 @@ function axleLoads(rig: SwayRig): { front: number; rear: number; rearReserveMm: 
 
 async function load(): Promise<void> {
   console.log(`\n== LOAD: ${carModel(TOW).label} parked, axle loads (N) ==`);
+  let emptyTongueN = 0;
   const solo = await makeRig(null, 'normal');
   for (let i = 0; i < 120; i++) { solo.input.brake = 1; step(solo); }
   const s = axleLoads(solo);
@@ -446,14 +466,14 @@ async function load(): Promise<void> {
     const rig = await makeRig(kg, placement);
     const trailer = rig.trailer;
     if (!trailer) continue;
-    // Trailer wheels free (rolling resistance only): with both ends braked the pair is
-    // statically indeterminate, and a horizontal preload left by the settle moves the
-    // tongue by H · hitch height / wheelbase.
-    rig.trailerBrakes = false;
+    // Trailer wheels free (it has no brakes): with both ends braked the pair would be
+    // statically indeterminate, and a horizontal preload left by the settle would move
+    // the tongue by H · hitch height / wheelbase.
     for (let i = 0; i < 240; i++) { rig.input.brake = 1; step(rig); }
     const l = axleLoads(rig);
     const weight = trailer.massKg * G;
-    const predicted = predictedTongueFraction(kg, PLACEMENTS[placement]) * weight;
+    if (kg === 0) emptyTongueN = trailer.tongueLoadN;
+    const predicted = predictedTongueN(emptyTongueN, kg, trailer.cargoZ);
     const measured = l.front + l.rear - (s.front + s.rear);
     // The trailer's own springs, read off its private tyre contacts: bench introspection.
     const springs = (trailer as unknown as { tyres: TyreContacts }).tyres.wheels;
@@ -482,9 +502,8 @@ async function brake(): Promise<void> {
     '\n  sense the rig was already bent, above what it had in the steady turn.',
   );
   for (const placement of ['normal', 'tail'] as Placement[]) {
-    for (const brakes of [true, false]) {
+    {
       const rig = await makeRig(CARGO_KG, placement);
-      rig.trailerBrakes = brakes;
       // Accelerate on the straight, then hold a circle by curvature feedback.
       for (let i = 0; i < Math.round(60 / FIXED_DT); i++) {
         cruise(rig, v0, null);
@@ -546,7 +565,7 @@ async function brake(): Promise<void> {
       }
       const end = rig.vehicle.chassis.translation();
       console.log(
-        `  ${placement.padEnd(6)} trailer brakes ${brakes ? 'on ' : 'off'}  articulation ${deg(art0).toFixed(1)}°  fold +${deg(maxFold).toFixed(1)}°` +
+        `  ${placement.padEnd(6)} no trailer brakes  articulation ${deg(art0).toFixed(1)}°  fold +${deg(maxFold).toFixed(1)}°` +
         `  turn-in ×${maxTurnIn.toFixed(2)}  ball push mean ${(pushSum / Math.max(1, pushSteps) / 1000).toFixed(2)} kN` +
         ` peak ${(pushMax / 1000).toFixed(2)} kN  trailer wheel slide ${maxSlide.toFixed(2)}` +
         `  stop ${Math.hypot(end.x - sx, end.z - sz).toFixed(1)} m in ${t.toFixed(1)} s${maxFold > deg2rad(30) ? '  JACKKNIFE' : ''}`,
@@ -576,11 +595,11 @@ async function park(): Promise<void> {
     world.state.trailers[ts.id] = ts;
     const trailer = new Trailer(physics, world, ts, scene, origin);
     trailer.setCargo(CARGO_KG);
-    for (let i = 0; i < 120; i++) { trailer.fixedUpdate(FIXED_DT, 0); physics.step(); trailer.postStep(); }
+    for (let i = 0; i < 120; i++) { trailer.fixedUpdate(FIXED_DT); physics.step(); trailer.postStep(); }
     const p0 = trailer.rigidBody.translation();
     const a = { x: p0.x, y: p0.y, z: p0.z };
     for (let i = 0; i < 600; i++) {
-      trailer.fixedUpdate(FIXED_DT, 0);
+      trailer.fixedUpdate(FIXED_DT);
       physics.step();
       trailer.postStep();
       if (process.env.TRACE && i % 60 === 59) {
@@ -595,10 +614,37 @@ async function park(): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+
+async function rest(): Promise<void> {
+  console.log('\n== REST: coupled, standing on the car\'s pedal for 10 s ==');
+  const rig = await makeRig(CARGO_KG, 'normal');
+  let worstMps = 0;
+  let worstTurn = 0;
+  hitchErrors = [];
+  for (let i = 0; i < Math.round(10 / FIXED_DT); i++) {
+    rig.input.brake = 1;
+    rig.input.throttle = 0;
+    step(rig);
+    if (i * FIXED_DT < 2 || !rig.trailer) continue;
+    const v = rig.trailer.rigidBody.linvel();
+    const w = rig.trailer.rigidBody.angvel();
+    worstMps = Math.max(worstMps, Math.hypot(v.x, v.z));
+    worstTurn = Math.max(worstTurn, Math.hypot(w.x, w.y, w.z));
+  }
+  console.log(
+    `  worst trailer speed ${(worstMps * 1000).toFixed(1)} mm/s  turn ${deg(worstTurn).toFixed(2)}°/s` +
+    `  hitch error max ${(Math.max(0, ...hitchErrors) * 1000).toFixed(2)} mm`,
+  );
+  rig.vehicle.dispose();
+  rig.trailer?.dispose();
+}
+
 await preloadCarModels([TOW]);
 await preloadTrailerModel(TRAILER_MODEL_FIT);
-console.log(`trailer bench: tow ${TOW}, cargo ${CARGO_KG} kg`);
+console.log(`trailer bench: tow ${TOW}, cargo ${CARGO_KG} kg${THING ? ` (${THING})` : ''} on ${SURFACE === SurfaceType.Gravel ? 'gravel' : 'asphalt'}`);
 if (SECTION === 'all' || SECTION === 'load') await load();
 if (SECTION === 'all' || SECTION === 'sway') await sway();
 if (SECTION === 'all' || SECTION === 'brake') await brake();
 if (SECTION === 'all' || SECTION === 'park') await park();
+if (SECTION === 'all' || SECTION === 'rest') await rest();

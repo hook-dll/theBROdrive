@@ -4,6 +4,35 @@
 
 ### Changed
 
+- THE TRAILER IS A KMZ-8284 (`vehicle/trailer.ts`, `render/trailermodel.ts`). The GLB is
+  a KMZ-8284 at true size in centimetres; it used to be scaled 1.275x round 0.32 m wheels
+  to fill a 2.8 x 1.8 m physics bed on a 1.9 m track, 320 kg empty and 700 kg payload,
+  with brakes copied from the towing car. Now it uses the passport figures: box 1.905 x
+  1.262 m with 0.336 m sides, 180 kg kerb and 570 kg payload, 13-inch VAZ wheels (155/80
+  R13) on the drawn 1.464 m track, axle 22 mm ahead of the middle of the box, ball 2.08 m
+  ahead of it (3085 mm overall), and no brakes (O1 category, 750 kg gross). A parked
+  trailer stands chocked. The box is drawn at 1:1 with its own A-frame drawbar, and only
+  the wheels are scaled. Colliders are the deck slab plus four sides. Mass is split into
+  box, running gear and drawbar. The payload is its own box: the drawn thing's bounds, the
+  long load's collider or the crate. The piano now stands along the box
+  (`render/thingmesh.ts`), and a load wider than the box (the bed) rides on the tops of
+  the sides. Contract loads stand against the headboard (`cargoZ: 1`, clamped). In
+  `trailer-sway`, with a VAZ-2101, the piano (7.8% tongue) has ζ 0.22–0.24 at 60–90 km/h
+  and the wardrobe (4.2%) 0.14–0.18; on gravel they are 0.31 and 0.14 at 70. Standing
+  jitter went from 10.9 to 6.5 mm/s. `TrailerField.fixedUpdate(dt)` no longer takes the
+  pedal.
+- CAR TOWING USES AN A-FRAME (`vehicle/cartow.ts`). The ball is now the tower's tow ball,
+  0.12 m behind the bumper; it used to be 0.55 m behind. The coupling is a generic joint
+  that holds the towed car's nose sideways and fore-aft but leaves height free, so each
+  car rides its own springs. The towed car's front wheels caster to the line of the front
+  axle. Gone: the caster that aimed along the centre's travel with a 60% lock cap, and the
+  one-sided 16/s yaw "damper". `tow-bench`, rewritten with a road-like path, bar force, a
+  rope comparison and Oka/VAZ/UAZ pairs, shows the old bar folded even on a straight
+  (kick: 68°). The new one gives 0.9° → 0.02° after a kick, and the R 85 m corner at 57
+  km/h goes from 10.5 m off line to 0.36 m. Braking in a bend goes from 24.5° to 4.2° of
+  articulation. The tightest corner holds to about 58–62 km/h depending on the pair. On a
+  rope with nobody in the towed car, it rams the tower at 30–34 km/h.
+
 - EVERY CAR HAS ITS OWN BOOT AND COMFORT (game-design2.md §13.6; `vehicle/carmodels.ts`
   `CarModelDef.trunkGrid` / `comfort`, `comfortFactor`, `CarComfort`; `vehicle/trunk.ts`
   `TrunkGrid`, `trunkCellCount`, `TRUNK_MAX_CELL_COUNT`, `StorageGridShape.trunkGrid`;

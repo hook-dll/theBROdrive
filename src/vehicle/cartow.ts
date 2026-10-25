@@ -1,42 +1,77 @@
 /**
- * The car-to-car tow bar: an immobilised car dragged on a rigid link behind a
- * working one. Contract kind 17 is its user, but nothing here knows about
- * contracts — it is an ordinary world coupling between two `Vehicle`s.
+ * The car-to-car tow bar: an immobilised car dragged behind a working one on an
+ * A-FRAME. Contract kind `towing` is its user, but nothing here knows about contracts
+ * — it is an ordinary world coupling between two `Vehicle`s.
  *
- * WHY A BAR AND NOT A ROPE.
+ * WHAT A REAL TOW WITH NOBODY IN THE TOWED CAR IS.
  *
- * A rope is a maximum-distance constraint. It is slack whenever the towed car
- * closes on the tower — under braking, downhill, or over any bump — and then snaps
- * taut again, which is the classic way a tow goes wrong: the slack phase lets the
- * two chassis touch, and the taut phase delivers the whole stored momentum as one
- * impulse the moment the slack is gone. A rigid bar keeps the pair at a known
- * distance in compression AND tension, so there is no slack phase, no chassis to
- * chassis contact and no snap; braking is a compression the bar simply carries,
- * exactly like a real recovery bar.
+ * Russian traffic law allows a towed car with nobody at its wheel on ONE coupling
+ * only: a rigid one "whose construction makes the towed vehicle follow the tower's
+ * track" (ПДД РФ 20.1; 20.3 keeps the cars at most 4 m apart on it, 4-6 m on a rope;
+ * 10.4 limits any tow of a car to 50 km/h). A rope, and a plain rigid bar with an eye
+ * pinned at each end, both need a driver in the towed car: they pass force only ALONG
+ * themselves, so nothing but a hand on its wheel keeps the towed car's nose on the
+ * tower's line. The coupling that follows by construction is the A-frame (the
+ * triangle bar, US "flat towing"): two arms bolted to the towed car's front, meeting
+ * at a coupler on the tower's tow ball.
  *
- * The joint is a Rapier spherical joint with the two anchors coincident — the
- * coupling the game already ships for trailers (`vehicle/trailer.ts`), and the one
- * this file's direct stretch correction was measured against. The bar's LENGTH is
- * made by the anchor offsets inside each body (tower rear face to towed front
- * face), and the joint leaves all three rotations free, which is what a bar with a
- * ball at each end transmits. One coupled-body model in the codebase, with the
- * coupling's measured drift behaviour already known.
+ * Measured, not argued (`tools/tow-bench.ts`, `rope`): the same pairs on a 5 m rope
+ * with nobody at the towed car's wheel or pedal, braking from 57 km/h, roll into the
+ * tower's bumper (the Oka pair at 34 km/h, the Volga behind a UAZ at 30), and in the
+ * road's tightest corner at 60 km/h the towed car runs 7.6-19 m off the tower's line
+ * and swaps ends. So the bar is not optional — with nobody in the towed car it is the
+ * only tow that works — and it has to be an A-frame, not a pinned bar.
  *
- * WHY THE TOWED CAR BRAKES WITH THE TOWER.
+ * THE MODEL, PIECE BY PIECE, AND WHY.
  *
- * A free-rolling towed car pushes its whole mass into the tower through the
- * fixed-length joint, and the solver's positional error under that load is exactly
- * the judder the trailer's `enforceHitch` was written to remove (the measurement at
- * the top of trailer.ts: 90th-percentile drift 0.18 m, 99th 0.40 m, while braking,
- * because uncorrected velocity mismatch is left to the solver). Letting the towed
- * car's service brakes follow the tower's pedal — the coupling a truck's air line
- * makes, and the one trailer.ts already models — keeps the pair's relative speed
- * near zero under the hardest input and leaves the bar carrying tongue weight and
- * cornering load instead of every deceleration.
+ *   The ball.  The tower's own tow ball, where `vehicle/trailer.ts` couples a
+ *              trailer: `TOW_BALL_OFFSET` behind the measured rear face, at
+ *              `HITCH_HEIGHT`. The bar used to pivot 0.55 m behind the bumper, which
+ *              lengthened the lever the towed car's side force has about the tower's
+ *              rear axle by that much and put the tower into a spin on the road's
+ *              corners (the bench's `before` column).
+ *   The arms.  Rigid in YAW against the towed car: the coupler's sideways place is
+ *              fixed in the towed car's frame, so the towed nose goes where the ball
+ *              goes and the car tracks. FREE in height: the arms are pinned to the
+ *              towed car's front on a cross pin, so the frame swings up and down and
+ *              each car rides its own springs. The first version held the towed nose
+ *              to the ball's height as well, a stiff vertical link between two sprung
+ *              cars that lifted the tower's rear axle by 380 N standing and rang it by
+ *              ±1.2 kN on the move — grip taken off the very axle that has to carry
+ *              the tow. A Rapier GENERIC joint is exactly this: the two horizontal
+ *              axes of the towed car's frame locked at the coupler, its vertical and
+ *              all three rotations free.
+ *   The steering. FREE, as a flat-towed car's has to be: the castored front wheels
+ *              swing to the line the front axle is travelling along, so they carry no
+ *              side force and the towed car rolls behind on its rear axle like a
+ *              trailer on its axle. The old caster aimed the wheels along the CHASSIS
+ *              centre's travel, capped at 60% of lock — in a bend that is the wrong
+ *              line, so the front tyres scrubbed sideways against the bar. Rolling
+ *              backwards the wheels are held straight: a castored wheel reversing
+ *              flips round, which is why every A-frame maker says not to back up far.
+ *   The brakes. The towed car's service brakes follow the tower's pedal, the
+ *              supplementary braking every flat-towed car over a light weight needs.
+ *              Without them the tower's brakes stop both cars, at equal masses about
+ *              half the deceleration, and the towed car's mass pushes the tower's tail
+ *              through the ball in a braked corner. (A trailer is light enough to go
+ *              without: `vehicle/trailer.ts`.)
  *
- * The towed car still has no engine: it is stepped by `fixedUpdate` with no
- * throttle and no gear command, only a passive caster steer, so it rolls, steers
- * and brakes but never drives.
+ * WHAT IS GONE. A yaw "damper" that copied the tower's yaw rate onto the towed car
+ * at 16 s⁻¹ and gave the tower no reaction. It hid the wrong caster on the straight,
+ * and in a corner it swung the towed car round its own centre instead of letting it
+ * follow, which is the push that spun the tower. Nothing replaces it: with the right
+ * caster and ball the snake it was written against decays on its own (the bench's
+ * `kick`).
+ *
+ * WHAT IS STILL TRUE AND IS NOT A BUG. A car of the tower's own mass on the ball is a
+ * trailer that puts about a third of its side force on the tower's tail — a light
+ * trailer puts a tenth. The rig therefore loses its tail well below the tower's solo
+ * cornering speed: in the road's tightest corner (85 m), which every tower holds alone
+ * at 68 km/h, an Oka pair still holds at 62 (as fast as it gets there), a Zhiguli
+ * pulling a VAZ-2110 lets go above 61 and a UAZ pulling a Volga above 58; the 140 m
+ * corners hold at the 63-66 km/h the towers reach (`tools/tow-bench.ts`, `sweep`
+ * and SWEEP). That is the reason for the law's 50 km/h, and it is left for the player
+ * to feel.
  */
 
 import * as THREE from 'three';
@@ -47,14 +82,20 @@ import type { GameWorld } from '../game/state';
 import type { WorldOrigin } from '../world/origin';
 import type { Vehicle } from './vehicle';
 
-/** Tow height above the car's own contact plane, m. The trailer's ball height. */
-const HITCH_HEIGHT = 0.45;
 /**
- * Each car's bumper face to the bar's eye, m. The joint's anchors sit at these
- * points, so the two bumpers end up `2 * COUPLER_OFFSET` apart — a 1.1 m bar,
- * which is the length of a real rigid recovery bar.
+ * Tow-ball height above the car's own contact plane, m, and the ball's place behind
+ * the measured rear face: the trailer's ball (`vehicle/trailer.ts`), the same part.
  */
-const COUPLER_OFFSET = 0.55;
+const HITCH_HEIGHT = 0.45;
+const TOW_BALL_OFFSET = 0.12;
+/**
+ * The A-frame's reach, m: the towed car's front face to the coupler. With the ball's
+ * own offset the bumpers stand 1.1 m apart, inside the law's 4 m (ПДД РФ 20.3) and
+ * the length of a real car A-frame.
+ */
+const A_FRAME_REACH = 0.98;
+/** Half the spread of the arms' feet on the towed car's front, m. */
+const A_FRAME_HALF_SPAN = 0.32;
 /**
  * Drift tolerance, m. The trailer's HITCH_TOLERANCE, for the same reason: a bar
  * does not stretch, so anything above this is the solver's positional error and is
@@ -84,12 +125,10 @@ const TOW_BREAK_M = 1.2;
  *
  * A rigid bar cannot drag a snagged car through the world — the correction that
  * keeps the eye together is rate-limited (below), so a held car simply STALLS the
- * whole rig, which the bench measures: the tower's speed falls to 2.6 km/h, it
- * makes no progress, and the eye settles at a steady 25 mm of stretch instead of
- * the sub-millimetre it holds while free. That steady stretch IS the load: the bar
- * is carrying the tower's whole drive and nothing is moving. TOW_LOAD_M is 46x the
- * worst stretch ordinary towing measured (0.43 mm through the bend), so a bump or a
- * kerb cannot reach it, and 1.5 s makes sure a transient cannot either.
+ * whole rig and the eye settles at a steady stretch of a few centimetres instead of
+ * the sub-millimetre it holds while free. That steady stretch IS the load: the bar is
+ * carrying the tower's whole drive and nothing is moving. 1.5 s makes sure a bump or
+ * a kerb cannot reach it.
  */
 const TOW_LOAD_M = 0.02;
 const TOW_SNAG_S = 1.5;
@@ -106,29 +145,10 @@ const TOW_SNAG_S = 1.5;
  */
 const TOW_CORRECTION_SPEED = 0.6;
 const TOW_CORRECTION_ACCEL = 40;
-/**
- * Yaw damper at the bar, s^-1: share of the two cars' relative yaw rate removed per
- * second, applied to the TOWED car alone.
- *
- * MEASURED, and the reason it exists: the coupling is a length constraint, and a
- * length constraint cannot see the one mode that actually kills a two-car tow. The
- * pair SNAKES — a yaw oscillation between the two bodies at a nearly constant eye
- * distance — and the bench found its critical speed at about 54 km/h: the straight
- * held 0.006 m/s of relative speed up to 54 km/h and then diverged inside two
- * seconds, with the bar's own stretch under 2 mm throughout, so the positional
- * correction never had anything to grip. A real flat tow suppresses the snake with
- * the towed car's self-aligning steering and nose weight; here the towed car's rack
- * holds whatever angle it is given, so the bar carries a friction damper instead. It
- * models nothing away — a bar transmits no yaw torque — it only removes the
- * oscillation.
- */
-const TOW_YAW_DAMP = 16;
-/** Below this the passive caster steer is not applied, m/s. */
+/** Below this the castored wheels are not steered, m/s: at a walk they stay put. */
 const CASTER_MIN_SPEED_MPS = 0.8;
-/** Share of the steering lock the caster correction may ask for. */
-const CASTER_MAX_SHARE = 0.6;
-const BAR_RADIUS = 0.05;
-const EYE_RADIUS = 0.075;
+const BAR_RADIUS = 0.03;
+const EYE_RADIUS = 0.06;
 /** Above this the bar-dropped car is still rolling and brakes itself, m/s. */
 const COAST_SPEED_MPS = 0.6;
 /** Give up on the coast after this long; the car is on its own brakes by then. */
@@ -140,7 +160,7 @@ const matBar = new THREE.MeshStandardMaterial({
   metalness: 0.75,
 });
 
-/** Local +Z: the bar's axis once the cylinder geometry is rotated onto it. */
+/** Local +Z: an arm's axis once the cylinder geometry is rotated onto it. */
 const BAR_AXIS = new THREE.Vector3(0, 0, 1);
 
 /**
@@ -193,7 +213,12 @@ interface TowLink {
   readonly towedBody: RAPIER.RigidBody;
   readonly towerAnchor: { x: number; y: number; z: number };
   readonly towedAnchor: { x: number; y: number; z: number };
+  /** The towed car's front axle, metres forward of its body centre: the caster's point. */
+  readonly frontAxleZ: number;
+  /** The coupler at the ball and the two arms, placed in world space every frame. */
   readonly bar: THREE.Group;
+  readonly arms: readonly [THREE.Mesh, THREE.Mesh];
+  readonly coupler: THREE.Mesh;
   /** Reused frame for the towed car's own fixed step. */
   readonly input: InputFrame;
   /** Seconds the eye has been under sustained load; see TOW_LOAD_M. */
@@ -201,19 +226,16 @@ interface TowLink {
 }
 
 /**
- * The bar's eyes, in each body's own frame.
- *
- * Rear of the tower and front of the towed car, because a towed car sits nose to
- * tail pointing the same way as the car pulling it. `contactPlaneLocalY` differs
- * between models, so each eye is at ITS OWN car's hitch height and the difference
- * is carried by the towed car's front suspension, exactly as a bar dictates the
- * nose height of the car behind.
+ * The coupling points, in each body's own frame: the ball behind the tower's rear
+ * face, the A-frame's coupler ahead of the towed car's front face. A towed car sits
+ * nose to tail pointing the same way as the car pulling it. Each is at its OWN car's
+ * hitch height; the A-frame's cross pin takes up the difference (see the file note).
  */
 function towerAnchorOf(vehicle: Vehicle): { x: number; y: number; z: number } {
   return {
     x: 0,
     y: vehicle.contactPlaneLocalY + HITCH_HEIGHT,
-    z: -vehicle.modelMeasure.halfExtents[2] - COUPLER_OFFSET,
+    z: -vehicle.modelMeasure.halfExtents[2] - TOW_BALL_OFFSET,
   };
 }
 
@@ -221,8 +243,20 @@ function towedAnchorOf(vehicle: Vehicle): { x: number; y: number; z: number } {
   return {
     x: 0,
     y: vehicle.contactPlaneLocalY + HITCH_HEIGHT,
-    z: vehicle.modelMeasure.halfExtents[2] + COUPLER_OFFSET,
+    z: vehicle.modelMeasure.halfExtents[2] + A_FRAME_REACH,
   };
+}
+
+/** The front axle's place along the body, metres: the mean of the front wheels' mounts. */
+function frontAxleZOf(vehicle: Vehicle): number {
+  let sum = 0;
+  let count = 0;
+  for (const wheel of vehicle.modelMeasure.wheels) {
+    if (!wheel.isFront) continue;
+    sum += wheel.pos[2];
+    count++;
+  }
+  return count > 0 ? sum / count : 0;
 }
 
 /** Scratch for the chassis translation inside `towEyeWorld`; see its contract. */
@@ -260,12 +294,11 @@ export class CarTowField {
    * doing 60 km/h in one step. They are stepped here with full service brake until
    * they stop, then become ordinary parked cars.
    */
-  private readonly coasting = new Map<string, { input: InputFrame; remaining: number }>();
+  private readonly coasting = new Map<string, { input: InputFrame; remaining: number; frontAxleZ: number }>();
   /** Invisible holder that compiles the bar's program from boot; see the rule. */
   private readonly warmup = new THREE.Group();
   private readonly barGeometry: THREE.CylinderGeometry;
   private readonly eyeGeometry: THREE.SphereGeometry;
-  private readonly vScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
   private readonly aScratch = new THREE.Vector3();
   private readonly bScratch = new THREE.Vector3();
@@ -279,13 +312,15 @@ export class CarTowField {
     /** Called once when a live bar snaps under overstretch, for the toast. */
     private readonly onBreak: (towedCarId: string, towerCarId: string) => void,
   ) {
-    // Cylinder axis along local +Z, so scaling z lengths the bar.
+    // Cylinder axis along local +Z, so scaling z lengths the arm.
     this.barGeometry = new THREE.CylinderGeometry(BAR_RADIUS, BAR_RADIUS, 1, 8);
     this.barGeometry.rotateX(Math.PI / 2);
     this.eyeGeometry = new THREE.SphereGeometry(EYE_RADIUS, 6, 5);
     // One invisible instance of each shared material is enough for Three's
     // `compile` walk (traverse, not traverseVisible) to link the program at boot.
+    // The arms cast shadows and the coupler does not, and the anchors copy that.
     const bar = new THREE.Mesh(this.barGeometry, matBar);
+    bar.castShadow = true;
     bar.visible = false;
     this.warmup.add(bar);
     const eye = new THREE.Mesh(this.eyeGeometry, matBar);
@@ -334,10 +369,20 @@ export class CarTowField {
     towed.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
     towed.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
+    // The A-frame (see the file note): the joint's X axis is the towed car's up, and
+    // the two axes across it — the car's own sideways and fore-aft — are locked at the
+    // coupler. Height and every rotation stay free. The towed car is the joint's first
+    // body, so the locked axes are ITS axes, the frame the arms are bolted to.
+    const rapier = this.physics.rapier;
     const joint = this.physics.world.createImpulseJoint(
-      this.physics.rapier.JointData.spherical(towerAnchor, towedAnchor),
-      tower.chassis,
+      rapier.JointData.generic(
+        towedAnchor,
+        towerAnchor,
+        { x: 0, y: 1, z: 0 },
+        rapier.JointAxesMask.LinY | rapier.JointAxesMask.LinZ,
+      ),
       towed.chassis,
+      tower.chassis,
       true,
     );
     // The bodies are a bar length apart, so contacts can stay on and stop one
@@ -345,15 +390,15 @@ export class CarTowField {
     joint.setContactsEnabled(true);
 
     const bar = new THREE.Group();
-    const shaft = new THREE.Mesh(this.barGeometry, matBar);
-    shaft.castShadow = true;
-    shaft.receiveShadow = false;
-    bar.add(shaft);
-    for (const eye of [-0.5, 0.5]) {
-      const ball = new THREE.Mesh(this.eyeGeometry, matBar);
-      ball.position.z = eye;
-      bar.add(ball);
-    }
+    const arm = (): THREE.Mesh => {
+      const mesh = new THREE.Mesh(this.barGeometry, matBar);
+      mesh.castShadow = true;
+      bar.add(mesh);
+      return mesh;
+    };
+    const arms: [THREE.Mesh, THREE.Mesh] = [arm(), arm()];
+    const coupler = new THREE.Mesh(this.eyeGeometry, matBar);
+    bar.add(coupler);
     this.scene.add(bar);
     const link: TowLink = {
       towerId,
@@ -363,7 +408,10 @@ export class CarTowField {
       towedBody: towed.chassis,
       towerAnchor,
       towedAnchor,
+      frontAxleZ: frontAxleZOf(towed),
       bar,
+      arms,
+      coupler,
       input: emptyInput(),
       loadFor: 0,
     };
@@ -390,7 +438,7 @@ export class CarTowField {
     // pinned where it stands; see `coasting`.
     const vehicle = this.vehicleFor(towedCarId);
     if (vehicle && Math.hypot(vehicle.chassis.linvel().x, vehicle.chassis.linvel().z) > COAST_SPEED_MPS) {
-      this.coasting.set(towedCarId, { input: emptyInput(), remaining: COAST_MAX_S });
+      this.coasting.set(towedCarId, { input: emptyInput(), remaining: COAST_MAX_S, frontAxleZ: link.frontAxleZ });
     }
     if (record && this.world.state.cars[towedCarId]?.towedBy != null) {
       this.world.apply({ t: 'car_tow', carId: towedCarId, towerId: null });
@@ -428,7 +476,7 @@ export class CarTowField {
 
   /**
    * The towed car's own step: suspension, wheels, brakes and cooling through the
-   * ordinary vehicle path, with no throttle, no gear command and a caster steer.
+   * ordinary vehicle path, with no throttle, no gear command and castored steering.
    *
    * `brakeForCar` reports the TOWER's service-brake demand (0..1); the towed car's
    * brakes follow it, the coupling argued for at the top of the file.
@@ -443,10 +491,10 @@ export class CarTowField {
       input.handbrake = false;
       input.shift = 0;
       input.brake = Math.min(1, Math.max(0, brakeForCar(link.towerId)));
-      input.steer = this.casterSteer(vehicle);
+      input.steer = this.casterSteer(vehicle, link.frontAxleZ);
       vehicle.fixedUpdate(dt, input);
     }
-    // Cars just off a bar: full service brake, straight wheels, until stopped.
+    // Cars just off a bar: full service brake, castored wheels, until stopped.
     for (const [carId, coast] of this.coasting) {
       const vehicle = this.vehicleFor(carId);
       if (!vehicle) {
@@ -463,37 +511,46 @@ export class CarTowField {
       coast.input.throttle = 0;
       coast.input.reverse = false;
       coast.input.handbrake = false;
-      coast.input.steer = this.casterSteer(vehicle);
+      coast.input.steer = this.casterSteer(vehicle, coast.frontAxleZ);
       vehicle.fixedUpdate(dt, coast.input);
     }
   }
 
   /**
-   * The front-wheel angle that rolls the tyres along the direction the car is being
-   * dragged, as a driver input. Frame-independent: the velocity is rotated into the
-   * car's own frame and the angle from its forward axis is the wheel angle wanted,
-   * so no steering sign convention has to be guessed in world space.
+   * CASTOR: the rack angle that rolls the front tyres along the line the front axle
+   * is travelling — the chassis velocity plus its yaw carried out to the axle — as a
+   * `direct` steering input. Frame-independent: the axle's velocity is rotated into
+   * the car's own frame and its angle from the forward axis is the wheel angle wanted,
+   * so no steering sign convention has to be guessed in world space. Rolling
+   * backwards, or at a walk, the wheels are held straight.
    */
-  private casterSteer(vehicle: Vehicle): number {
-    const lv = vehicle.chassis.linvel();
-    const speed = Math.hypot(lv.x, lv.z);
-    if (speed < CASTER_MIN_SPEED_MPS) return 0;
-    const local = rotateInverseLocal(lv, vehicle.chassis.rotation());
-    // Not backwards: a car being dragged backwards must not steer to 180 degrees.
-    if (local.z <= 0) return 0;
-    const lock = vehicle.modelDef.steerLock;
-    const wanted = Math.max(
-      -lock * CASTER_MAX_SHARE,
-      Math.min(lock * CASTER_MAX_SHARE, Math.atan2(local.x, local.z)),
+  private casterSteer(vehicle: Vehicle, frontAxleZ: number): number {
+    const body = vehicle.chassis;
+    const q = body.rotation();
+    const v = body.linvel();
+    const w = body.angvel();
+    const arm = rotateLocal({ x: 0, y: 0, z: frontAxleZ }, q);
+    const local = rotateInverseLocal(
+      {
+        x: v.x + (w.y * arm.z - w.z * arm.y),
+        y: v.y + (w.z * arm.x - w.x * arm.z),
+        z: v.z + (w.x * arm.y - w.y * arm.x),
+      },
+      q,
     );
-    return vehicle.steeringInputForWheelAngle(wanted);
+    if (Math.hypot(local.x, local.z) < CASTER_MIN_SPEED_MPS || local.z <= 0) return 0;
+    const lock = vehicle.modelDef.steerLock;
+    return vehicle.steeringInputForWheelAngle(Math.max(-lock, Math.min(lock, Math.atan2(local.x, local.z))));
   }
 
   /**
-   * Pulls the towed car's eye back onto the tower's ball, or drops the bar when the
-   * overstretch is a snag rather than drift. Runs after the physics step and before
-   * the vehicles' own post-step latches, so the corrected pose and speed are the
-   * ones the renderer and the impact classifier see.
+   * Pulls the towed car's coupler back onto the tower's ball, or drops the bar when
+   * the overstretch is a snag rather than drift. Runs after the physics step and
+   * before the vehicles' own post-step latches, so the corrected pose and speed are
+   * the ones the renderer and the impact classifier see.
+   *
+   * Only the error ACROSS the towed car's up axis is a stretch: along it the A-frame
+   * swings on its pin, so that difference is the joint's free axis, not drift.
    *
    * The correction is RATE-LIMITED, which is what makes the break reachable: a bar
    * can pull a car along but cannot move it through something it is jammed against,
@@ -511,23 +568,15 @@ export class CarTowField {
       const tr = link.towedBody.rotation();
       const bl = rotateLocal(link.towerAnchor, cr);
       const el = rotateLocal(link.towedAnchor, tr);
-      const dx = ct.x + bl.x - (tt.x + el.x);
-      const dy = ct.y + bl.y - (tt.y + el.y);
-      const dz = ct.z + bl.z - (tt.z + el.z);
+      const up = rotateLocal({ x: 0, y: 1, z: 0 }, tr);
+      let dx = ct.x + bl.x - (tt.x + el.x);
+      let dy = ct.y + bl.y - (tt.y + el.y);
+      let dz = ct.z + bl.z - (tt.z + el.z);
+      const swing = dx * up.x + dy * up.y + dz * up.z;
+      dx -= up.x * swing;
+      dy -= up.y * swing;
+      dz -= up.z * swing;
       const err = Math.hypot(dx, dy, dz);
-
-      // The yaw damper runs every step, not only when there is stretch to remove:
-      // the snake it exists for happens at a millimetre of eye error. See TOW_YAW_DAMP.
-      const cv0 = link.towerBody.angvel();
-      const tv0 = link.towedBody.angvel();
-      const wRel = cv0.y - tv0.y;
-      const share = Math.min(1, TOW_YAW_DAMP * Math.max(dt, 0));
-      if (share > 0 && Number.isFinite(wRel) && wRel !== 0) {
-        link.towedBody.setAngvel(
-          { x: tv0.x, y: tv0.y + wRel * share, z: tv0.z },
-          true,
-        );
-      }
 
       if (!Number.isFinite(err) || err <= TOW_TOLERANCE) {
         link.loadFor = 0;
@@ -588,32 +637,33 @@ export class CarTowField {
   }
 
   /**
-   * Places the drawn bar between the two bumper faces, which is where a real bar is
-   * bolted (the joint's coincident point is its middle). Reads the live bodies, so
-   * the bar is drawn on the corrected pose; the origin is added because the scene is
-   * in absolute coordinates and the bodies are not.
+   * Draws the A-frame on the live bodies: the coupler on the tower's ball and an arm
+   * from it to each foot on the towed car's front face. The scene is in absolute
+   * coordinates and the bodies are not, so the origin is added; the group itself
+   * stays at the scene origin and only its children move.
    */
   private placeBar(link: TowLink): void {
     const ct = link.towerBody.translation();
     const cr = link.towerBody.rotation();
     const tt = link.towedBody.translation();
     const tr = link.towedBody.rotation();
-    const rear = rotateLocal({ x: 0, y: link.towerAnchor.y, z: -link.towerAnchor.z - COUPLER_OFFSET }, cr);
-    const front = rotateLocal({ x: 0, y: link.towedAnchor.y, z: link.towedAnchor.z - COUPLER_OFFSET }, tr);
-    this.aScratch.set(ct.x + rear.x, ct.y + rear.y, ct.z + rear.z);
-    this.bScratch.set(tt.x + front.x, tt.y + front.y, tt.z + front.z);
-    this.bScratch.sub(this.aScratch);
-    const length = Math.max(0.05, this.bScratch.length());
-    this.bScratch.multiplyScalar(1 / length);
-    const bar = link.bar;
-    bar.position.set(
-      this.aScratch.x + (this.bScratch.x * length) / 2 + this.origin.x,
-      this.aScratch.y + (this.bScratch.y * length) / 2,
-      this.aScratch.z + (this.bScratch.z * length) / 2 + this.origin.z,
-    );
-    this.qScratch.setFromUnitVectors(BAR_AXIS, this.bScratch);
-    bar.quaternion.copy(this.qScratch);
-    bar.scale.set(1, 1, length);
+    const ball = rotateLocal(link.towerAnchor, cr);
+    const ballX = ct.x + ball.x + this.origin.x;
+    const ballY = ct.y + ball.y;
+    const ballZ = ct.z + ball.z + this.origin.z;
+    link.coupler.position.set(ballX, ballY, ballZ);
+    const footZ = link.towedAnchor.z - A_FRAME_REACH;
+    for (let i = 0; i < 2; i++) {
+      const foot = rotateLocal({ x: i === 0 ? -A_FRAME_HALF_SPAN : A_FRAME_HALF_SPAN, y: link.towedAnchor.y, z: footZ }, tr);
+      this.aScratch.set(tt.x + foot.x + this.origin.x, tt.y + foot.y, tt.z + foot.z + this.origin.z);
+      this.bScratch.set(ballX, ballY, ballZ).sub(this.aScratch);
+      const length = Math.max(0.05, this.bScratch.length());
+      this.bScratch.multiplyScalar(1 / length);
+      const arm = link.arms[i]!;
+      arm.position.copy(this.aScratch).addScaledVector(this.bScratch, length / 2);
+      arm.quaternion.setFromUnitVectors(BAR_AXIS, this.bScratch);
+      arm.scale.set(1, 1, length);
+    }
   }
 
   /** Draws every bar on this frame's corrected pose. */

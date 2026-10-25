@@ -3,11 +3,11 @@
  *
  * The role is the reverse of render/carmodel.ts. A car's physics is measured OFF
  * its GLB and the vehicle is built to match; the trailer's physics is a fixed set
- * of constants in vehicle/trailer.ts (bed half-extents, wheel radius, axle offset),
- * and this module fits the ART to those constants. What it returns is therefore not
- * a set of measurements but a body mesh and two wheel meshes already posed in
- * trailer-local space — metres, +X left, +Y up, +Z the hitch direction — ready to be
- * parented under the trailer's rigid-body group.
+ * of constants in vehicle/trailer.ts (box, wheel radius, axle, ball), and this module
+ * fits the ART to those constants. What it returns is therefore not a set of
+ * measurements but a body mesh and two wheel meshes already posed in trailer-local
+ * space — metres, +X left, +Y up, +Z the hitch direction — ready to be parented under
+ * the trailer's rigid-body group.
  *
  * The Sketchfab Collada export arrives two ways it should not. Its two root nodes
  * (Sketchfab_model -> Collada visual scene group) are the usual Z-up-to-Y-up pair
@@ -15,21 +15,22 @@
  * so after loading the trailer sits Y-up with X = length (hitch at -X, tail at +X),
  * Z = width, and 1 scene unit = 1 cm.
  *
- * The wheels are the reference for the whole fit. Their radius sets the uniform
- * scale — the model's 25.1 cm tyres become the physics 0.32 m — and because the
- * model's track is proportional to its wheel radius, the 1.5 m track lands on
- * TRACK_HALF to within a centimetre a side. The axle line is then translated onto
- * the physics axle (axleZ, axleY); the bed rides along, its deck a hand's width
- * under the collider's top face, which is the honest fit for an asset whose bed is
- * 1.9 m long against the physics 2.8 m.
+ * In those centimetres the model IS a KMZ-8284 at true size: 3.10 m from the tailboard
+ * to the coupler against the passport's 3085 mm, a 1.905 x 1.262 m box with 0.336 m
+ * sides against 1850 x 1204 x 335 inside, 1.69 m over the mudguards against 1720
+ * (vehicle/trailer.ts has the sources). So the BODY is taken at exactly 1 cm = 1 cm,
+ * drawbar and coupler included: the ball is a fixed point, where the passport puts
+ * it, so the authored A-frame reaches it. Only the WHEELS are not to scale: the
+ * model's 50 cm tyres stand in for the 13-inch VAZ wheel (578 mm), so they alone are
+ * scaled to the physics radius, round the axle and not across it.
  *
- * The GLB's own A-frame drawbar and hitch coupler are DROPPED. They are a fixed
- * length, and the physics drawbar stretches per coupling (vehicle/trailer.ts scales
- * a unit bar to the towing car's rear overhang), so the authored tongue would leave
- * a visible gap on long-tailed cars. The procedural drawbar stays, and everything
- * forward of the bed's leading face is removed here. The merged wheel pair is also
- * split into two wheels so each rides its own suspension like the procedural pair
- * did; the unsprung axle beam is dropped for the same reason.
+ * It used to be scaled up 1.275 times round 0.32 m wheels to fill a 2.8 m physics
+ * bed, with its own drawbar cut off and a procedural bar stretched to the ball.
+ *
+ * The axle line is translated onto the physics axle (axleZ, axleY), which puts the
+ * box where the physics box is. The merged wheel pair is split into two wheels so
+ * each rides its own suspension; the unsprung axle beam is dropped for the same
+ * reason.
  */
 
 import * as THREE from 'three';
@@ -42,7 +43,7 @@ const TRAILER_URL = '/models/trailer/trailer.glb';
 export interface TrailerFit {
   /** Rolling radius of the physics wheel, metres — the model scales to match. */
   readonly wheelRadius: number;
-  /** Axle offset from the bed centre along +Z (forward), metres. */
+  /** Axle offset from the box's middle along +Z (forward), metres. */
   readonly axleZ: number;
   /** Settled wheel-centre height in trailer-local space, metres. */
   readonly axleY: number;
@@ -55,8 +56,6 @@ export interface TrailerModelInstance {
   readonly leftWheel: THREE.Mesh;
   /** The wheel that sits at -X (right); already mirrored about X. */
   readonly rightWheel: THREE.Mesh;
-  /** Forward edge of the authored body, where the procedural drawbar begins. */
-  readonly drawbarMountZ: number;
 }
 
 interface Template {
@@ -64,20 +63,13 @@ interface Template {
   /** One centred wheel geometry (axle along X, radius = fit.wheelRadius). */
   readonly wheel: THREE.BufferGeometry;
   readonly material: THREE.Material;
-  /** Forward edge of the fitted body in trailer-local +Z. */
-  readonly drawbarMountZ: number;
 }
 
 let gltf: GLTFLoader | null = null;
 let template: Template | null = null;
 
-/**
- * The authored drawbar and hitch coupler are the only parts forward of the bed's
- * leading face. In the loaded scene that face sits at -1.88 m on X (X is length,
- * hitch at -X, and the scene is in centimetres); every drawbar part has its centre
- * further forward than -1.9 m, every bed part further back than -1.87 m.
- */
-const DRAWBAR_FRONT_CM = -190;
+/** Scene units to metres: the model is drawn in centimetres at true size. */
+const MODEL_SCALE = 0.01;
 
 /** Diameter of a mesh's round cross-section in the loaded scene (cm). */
 function discDiameter(mesh: THREE.Mesh, box: THREE.Box3): number {
@@ -187,42 +179,39 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
   const axleScene = tyreBox.getCenter(new THREE.Vector3());
 
   // Fit: scene (cm, Y-up, X = length) -> game (m, Y-up, Z = forward). Rotate +90°
-  // about Y so the hitch (-X) faces +Z; scale by the wheel-radius ratio; translate
-  // so the model's axle line lands on the physics axle.
-  const s = fit.wheelRadius / wheelRadiusScene;
+  // about Y so the hitch (-X) faces +Z; centimetres to metres; translate so the
+  // model's axle line lands on the physics axle.
+  const turn = new THREE.Matrix4().makeRotationY(Math.PI / 2);
   const fitMatrix = new THREE.Matrix4()
-    .makeTranslation(0, fit.axleY - axleScene.y * s, fit.axleZ + axleScene.x * s)
-    .multiply(new THREE.Matrix4().makeScale(s, s, s))
-    .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2));
+    .makeTranslation(0, fit.axleY - axleScene.y * MODEL_SCALE, fit.axleZ + axleScene.x * MODEL_SCALE)
+    .multiply(new THREE.Matrix4().makeScale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE))
+    .multiply(turn);
 
   // --- Wheels ---------------------------------------------------------------
   // Split the merged pair, keep the left half as the shared wheel geometry and
   // mirror it for the right at draw time. `local Y < 0` lands on game +X (left).
+  // Turned, the axle is game X: the tread keeps the drawn width, the radius is the
+  // physics wheel's.
+  const wheelScale = fit.wheelRadius / wheelRadiusScene;
   const { left, right } = splitTyrePair(tyreMesh.geometry);
   left.applyMatrix4(tyreMesh.matrixWorld);
-  left.applyMatrix4(fitMatrix);
+  left.applyMatrix4(new THREE.Matrix4().makeScale(MODEL_SCALE, wheelScale, wheelScale).multiply(turn));
   centreOnSelf(left);
   right.dispose();
 
   // --- Body ---------------------------------------------------------------
-  // Everything except the wheel assembly and the authored drawbar, baked to scene
-  // space and merged into one geometry (all 57 meshes share the single material).
+  // Everything except the wheel assembly, drawbar and coupler included, baked to
+  // scene space and merged into one geometry (all 57 meshes share the one material).
   const bodyGeometries: THREE.BufferGeometry[] = [];
   scene.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
     if (child === tyreMesh || child === axleMesh) return;
-    if (new THREE.Box3().setFromObject(child).getCenter(new THREE.Vector3()).x < DRAWBAR_FRONT_CM) return;
     child.geometry.applyMatrix4(child.matrixWorld);
     bodyGeometries.push(child.geometry);
   });
   const body = mergeGeometries(bodyGeometries);
   if (!body) throw new Error('Trailer model: body merge failed (incompatible attributes)');
   body.applyMatrix4(fitMatrix);
-  body.computeBoundingBox();
-  const drawbarMountZ = body.boundingBox?.max.z;
-  if (drawbarMountZ === undefined || !Number.isFinite(drawbarMountZ)) {
-    throw new Error('Trailer model: fitted body has no forward bound');
-  }
 
   // The GLB ships three PBR maps (base colour, normal, occlusion+metal-roughness),
   // but this renderer flat-shades with base colour only — comic banding and an ink
@@ -266,7 +255,7 @@ export async function preloadTrailerModel(fit: TrailerFit): Promise<void> {
     child.geometry.dispose();
   });
 
-  template = { body, wheel: left, material, drawbarMountZ };
+  template = { body, wheel: left, material };
 }
 
 /** A fresh trailer visual, sharing geometry and material with every other trailer. */
@@ -284,5 +273,5 @@ export function createTrailerModel(): TrailerModelInstance {
   rightWheel.castShadow = true;
   rightWheel.scale.x = -1; // the authored half is the left wheel
 
-  return { body, leftWheel, rightWheel, drawbarMountZ: t.drawbarMountZ };
+  return { body, leftWheel, rightWheel };
 }

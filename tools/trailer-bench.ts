@@ -38,14 +38,18 @@ await RAPIER.init();
 
 // Mirrors src/vehicle/trailer.ts. Kept as literals rather than imported: that file
 // pulls in three.js and the renderer.
-const BED_HALF = [0.9, 0.35, 1.4] as const;
-const WHEEL_RADIUS = 0.32;
-const TYRE_WIDTH = 0.145;
-const AXLE_Z = -0.2;
-const TRACK_HALF = 0.95;
-const TARE = 320;
+const BED_HALF = [0.631, 0.126, 0.9525] as const;
+const WHEEL_RADIUS = 0.289;
+const TYRE_WIDTH = 0.155;
+const AXLE_Z = 0.022;
+const TRACK_HALF = 0.732;
+const TARE = 180;
+/** The kerb mass's three parts (trailer.ts TARE_*): box, running gear, drawbar. */
+const TARE_RUNNING = 47;
+const TARE_DRAWBAR = 20;
 const HITCH_HEIGHT = 0.45;
-const DRAWBAR = 0.9;
+const BALL_Z = 3.085 - BED_HALF[2] - 0.05;
+const WALL_HEIGHT = 0.336;
 const MAX_FORCE_N = 26000;
 const G = 9.81;
 const DT = 1 / 60;
@@ -172,13 +176,17 @@ function settle({ susp, hang, cargoKg = 0, ground = flat(), ballHeight = HITCH_H
     body,
   );
   prop.setEnabled(ballHeight === null);
-  const crateCentreY = BED_HALF[1] + 0.45;
-  const tareComY = -0.35 * BED_HALF[1];
-  const comY = (TARE * tareComY + cargoKg * crateCentreY) / mass;
-  const hy = BED_HALF[1] + (cargoKg > 0 ? 0.45 : 0);
+  // The crate (0.6 m tall) on the deck, and the kerb mass where trailer.ts puts it: the
+  // box at the deck, the running gear on the axle, the drawbar half way to the ball.
+  const crateCentreY = BED_HALF[1] + 0.3;
+  const tareBox = TARE - TARE_RUNNING - TARE_DRAWBAR;
+  const comY =
+    (tareBox * BED_HALF[1] + TARE_RUNNING * -BED_HALF[1] + TARE_DRAWBAR * hitchLocalY + cargoKg * crateCentreY) / mass;
+  const comZ = (TARE_RUNNING * AXLE_Z + TARE_DRAWBAR * (BED_HALF[2] + BALL_Z) / 2) / mass;
+  const hy = BED_HALF[1] + (cargoKg > 0 ? 0.3 : WALL_HEIGHT / 2);
   body.setAdditionalMassProperties(
     mass,
-    { x: 0, y: comY, z: 0 },
+    { x: 0, y: comY, z: comZ },
     {
       x: (mass / 3) * (hy * hy + BED_HALF[2] ** 2),
       y: (mass / 3) * (BED_HALF[0] ** 2 + BED_HALF[2] ** 2),
@@ -193,7 +201,7 @@ function settle({ susp, hang, cargoKg = 0, ground = flat(), ballHeight = HITCH_H
   // exactly, which is the point — the question is what the trailer does with the ball
   // at the right height and at the wrong one.
   if (ballHeight !== null) {
-    const ballZ = BED_HALF[2] + DRAWBAR;
+    const ballZ = BALL_Z;
     const anchor = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, ballHeight, ballZ));
     world.createImpulseJoint(
       RAPIER.JointData.spherical({ x: 0, y: 0, z: 0 }, { x: 0, y: hitchLocalY, z: ballZ }),
@@ -282,7 +290,7 @@ if (process.argv[2] === 'sweep') {
   }
   console.log('');
   console.log('Mass independence (rates scaled by the mass, as applyMass does, k=32):');
-  for (const cargo of [0, 350, 700]) {
+  for (const cargo of [0, 285, 570]) {
     const { wheels } = settle({ susp: suspension(32, 0.3, 0.3), hang: 0.166, cargoKg: cargo });
     console.log(`   cargo ${String(cargo).padStart(3)} kg -> settled length ${f3(wheels[0]!.lengthM)}`);
   }
@@ -308,7 +316,7 @@ console.log('');
 
 console.log('--- coupled, ball at the design height (0.45 m) ---');
 console.log(report('flat, empty      ', { susp, hang }));
-console.log(report('flat, 700 kg     ', { susp, hang, cargoKg: 700 }));
+console.log(report('flat, 570 kg     ', { susp, hang, cargoKg: 570 }));
 console.log(report('4deg cross-slope ', { susp, hang, ground: slope(4) }));
 console.log(report('120 mm step      ', { susp, hang, ground: step(0.12) }));
 console.log(report('200 mm step      ', { susp, hang, ground: step(0.2) }));
@@ -316,6 +324,6 @@ console.log('');
 console.log('--- coupled, ball 0.15 m high: what the old hitch code computed ---');
 console.log(report('flat, empty      ', { susp, hang, ballHeight: HITCH_HEIGHT + 0.15 }));
 console.log('');
-console.log('--- uncoupled, standing on its prop stand. The axle is behind the bed centre,');
-console.log('    so the tongue is heavy: without the stand this pitched 17.8deg nose-down ---');
+console.log('--- uncoupled, standing on its prop stand. The drawbar\'s mass is ahead of the');
+console.log('    axle, so the tongue is heavy: without the stand it stands on its coupler ---');
 console.log(report('standing, empty  ', { susp, hang, ballHeight: null }));
