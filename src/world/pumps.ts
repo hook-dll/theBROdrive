@@ -76,8 +76,8 @@ const HOSE_RADIUS = 0.016;
 /** The hose as a tube: rings along it and sides round it. */
 const HOSE_RINGS = 20;
 const HOSE_SIDES = 6;
-/** Lowest the hose lies, pump-local: on the sand, or on the island where it lies over it. */
-const HOSE_FLOOR = HOSE_RADIUS + 0.01;
+/** How far over the ground the hose's centre lies: its radius and a little, clear of the asphalt. */
+const HOSE_FLOOR = HOSE_RADIUS + 0.02;
 
 /** Litres per second out of a nozzle held open, into a car or into a can. */
 export const PUMP_RATE = 2;
@@ -181,7 +181,11 @@ export function buildPumpStand(
     pump.add(hose);
     disposers.push(() => hose.geometry.dispose());
 
-    const fixture = new Pump(`pump:${poi.index}:${fluid}`, fluid, tenLitres, x + c * lx, y, z - s * lx, yaw, -lx, nozzle, hose);
+    // The ground under a pump-local point, pump-local: the asphalt or the sand the hose lies on.
+    const px = x + c * lx;
+    const pz = z - s * lx;
+    const ground = (hx: number, hz: number): number => ctx.terrain.heightAt(px + c * hx + s * hz, pz - s * hx + c * hz, poi.s) - y;
+    const fixture = new Pump(`pump:${poi.index}:${fluid}`, fluid, tenLitres, px, y, pz, yaw, -lx, nozzle, hose, ground);
     fixture.hangUp();
     // Built before the chunk freezes it: the first frame draws it in its holster.
     fixture.update();
@@ -262,34 +266,47 @@ const _normal = new THREE.Vector3();
 const _binormal = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 
+/** The ground under a pump-local point, as a pump-local height. */
+type PumpGround = (x: number, z: number) => number;
+
+/** The floor under each ring of the hose, pump-local heights: refilled by `layHose`. */
+const _floors = new Float64Array(HOSE_RINGS + 1);
+
 /**
- * The hose's centre line at `t`, 0 at the outlet, 1 at the nozzle: a parabola sagging by
- * `sag`, on the ground or the island (centred at pump-local x `islandX`) under it.
+ * The hose's centre line at ring `ring`, 0 at the outlet, `HOSE_RINGS` at the nozzle: a
+ * parabola sagging by `sag`, never under the ring's floor (`_floors`).
  */
-function hosePoint(from: THREE.Vector3, to: THREE.Vector3, sag: number, islandX: number, t: number, out: THREE.Vector3): THREE.Vector3 {
+function hosePoint(from: THREE.Vector3, to: THREE.Vector3, sag: number, ring: number, out: THREE.Vector3): THREE.Vector3 {
+  const t = ring / HOSE_RINGS;
   out.lerpVectors(from, to, t);
-  const onIsland = Math.abs(out.x - islandX) < ISLAND_W / 2 && Math.abs(out.z) < ISLAND_D / 2;
-  out.y = Math.max(HOSE_FLOOR + (onIsland ? ISLAND_H : 0), out.y - 4 * sag * t * (1 - t));
+  out.y = Math.max(_floors[ring]!, out.y - 4 * sag * t * (1 - t));
   return out;
 }
 
 /**
  * Lays the hose from `from` to `to` (pump-local): it hangs in the parabola whose length
- * is the hose's, and lies on the ground where that would go under it.
+ * is the hose's, and lies on the ground where that would go under it — the asphalt or
+ * the sand as they really lie (`ground`), or the island (centred at pump-local x
+ * `islandX`) where it crosses that.
  */
-function layHose(geometry: THREE.BufferGeometry, from: THREE.Vector3, to: THREE.Vector3, islandX: number): void {
+function layHose(geometry: THREE.BufferGeometry, from: THREE.Vector3, to: THREE.Vector3, islandX: number, ground: PumpGround): void {
+  for (let ring = 0; ring <= HOSE_RINGS; ring++) {
+    const t = ring / HOSE_RINGS;
+    const x = from.x + (to.x - from.x) * t;
+    const z = from.z + (to.z - from.z) * t;
+    const onIsland = Math.abs(x - islandX) < ISLAND_W / 2 && Math.abs(z) < ISLAND_D / 2;
+    _floors[ring] = Math.max(ground(x, z), onIsland ? ISLAND_H : -Infinity) + HOSE_FLOOR;
+  }
   const chord = from.distanceTo(to);
   const slack = Math.max(0, HOSE_LENGTH_M - chord);
   // A shallow parabola of chord d and sag h is d + 8h²/3d long.
   const sag = Math.min(1.4, Math.sqrt((3 * Math.max(chord, 0.3) * slack) / 8));
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
   const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
-  const step = 1 / HOSE_RINGS;
   for (let ring = 0; ring <= HOSE_RINGS; ring++) {
-    const t = ring * step;
-    hosePoint(from, to, sag, islandX, t, _point);
-    if (ring < HOSE_RINGS) _tangent.subVectors(hosePoint(from, to, sag, islandX, t + step, _next), _point);
-    else _tangent.subVectors(_point, hosePoint(from, to, sag, islandX, t - step, _next));
+    hosePoint(from, to, sag, ring, _point);
+    if (ring < HOSE_RINGS) _tangent.subVectors(hosePoint(from, to, sag, ring + 1, _next), _point);
+    else _tangent.subVectors(_point, hosePoint(from, to, sag, ring - 1, _next));
     if (_tangent.lengthSq() < 1e-10) _tangent.set(0, -1, 0);
     _tangent.normalize();
     _normal.crossVectors(_tangent, _up);
@@ -338,6 +355,8 @@ class Pump implements WorldFixture, PumpNozzle {
     private readonly islandX: number,
     private readonly nozzle: THREE.Object3D,
     private readonly hose: THREE.Mesh,
+    /** The ground under a pump-local point, pump-local: the hose lies on it. */
+    private readonly ground: PumpGround,
   ) {}
 
   private priceText(): string {
@@ -449,6 +468,6 @@ class Pump implements WorldFixture, PumpNozzle {
     else this.nozzle.rotation.set(-Math.PI / 2, 0, 0);
     // The chunk froze every matrix when it was placed (world/chunks.ts `freezeStaticSubtree`).
     this.nozzle.updateMatrix();
-    layHose(this.hose.geometry, OUTLET, this.end, this.islandX);
+    layHose(this.hose.geometry, OUTLET, this.end, this.islandX, this.ground);
   }
 }

@@ -651,6 +651,8 @@ body.is-machine-focus .hud-crosshair {
   display: block;
   width: 100%;
   height: 100%;
+  /* The jar rocks on its foot when it is shaken (hudjar.ts `shake`). */
+  transform-origin: 50% 96%;
 }
 
 @media (pointer: coarse) {

@@ -6,7 +6,8 @@ import { ballSprite, shimmer, type BallKind } from './balls';
  * drawn in section, as the purse in Kingdom Two Crowns. It stands in the bottom right
  * corner, and only while the player is on foot on a lay-by — where money is made and
  * spent (main.ts); elsewhere it is put away. The light plays on the balls while the jar
- * is out: their film of rainbow turns, each ball its own way.
+ * is out: their film of rainbow turns, each ball its own way; and every couple of
+ * seconds the jar is given a little shake, so the balls shift in it.
  *
  *  - Money coming in is POURED through the neck as its own balls, a ball at a time,
  *    and they roll and settle on the rest. Once everything lies still, every ten balls
@@ -63,6 +64,11 @@ const MERGE_S = 0.35;
 const MERGE_REST_S = 0.25;
 const MERGE_WAIT_MS = 1200;
 const MERGE_GAP_MS = 160;
+/** The shake: every `SHAKE_MIN_MS`..`SHAKE_MAX_MS` while the jar is out and nothing else goes on; the jar rocks this far, degrees, and the balls are kicked up to this fast, em/s. */
+const SHAKE_MIN_MS = 2000;
+const SHAKE_MAX_MS = 3500;
+const SHAKE_DEG = 2;
+const SHAKE_KICK = 2.6;
 /** A ball born of a merge or a split swells to its size in this long. */
 const POP_S = 0.22;
 /** A ball leaving: the height over the mouth its leap tops out at, em; its throw aside, em/s; how long it fades. */
@@ -152,6 +158,38 @@ function jarWall(): number[] {
 
 const WALL_LINE = jarWall();
 
+/** Half the belly's inside width at height `y`, for a ball of radius `r` (0 where none fits). */
+function bellyHalfAt(y: number, r: number): number {
+  const a = BELLY_A - WALL / 2 - r;
+  const b = BELLY_B - WALL / 2 - r;
+  const k = Math.abs(y - BELLY_CY) / b;
+  return k >= 1 ? 0 : a * (1 - k ** BELLY_ROUND) ** (1 / BELLY_ROUND);
+}
+
+/**
+ * Puts a ball found outside the belly (a contact pass can push one through the glass
+ * where the wall turns sharply) back in, on the line to the belly's middle.
+ */
+function keepInBelly(b: Ball): void {
+  if (b.y < BELLY_TOP) return;
+  const a = BELLY_A - WALL / 2 - b.r;
+  const h = BELLY_B - WALL / 2 - b.r;
+  const dx = b.x - CX;
+  const dy = b.y - BELLY_CY;
+  const reach = Math.abs(dx / a) ** BELLY_ROUND + Math.abs(dy / h) ** BELLY_ROUND;
+  if (reach <= 1) return;
+  const k = reach ** (-1 / BELLY_ROUND) * 0.995;
+  b.x = CX + dx * k;
+  b.y = BELLY_CY + dy * k;
+  // What was carrying it out is gone.
+  const n = Math.hypot(dx, dy) || 1;
+  const out = (b.vx * dx + b.vy * dy) / n;
+  if (out > 0) {
+    b.vx -= (out * dx) / n;
+    b.vy -= (out * dy) / n;
+  }
+}
+
 export class MoneyJar {
   readonly el: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
@@ -167,6 +205,7 @@ export class MoneyJar {
   private merge: Merge | null = null;
   private nextActionMs = 0;
   private lastOpMs = 0;
+  private nextShakeMs = 0;
   private restS = 0;
   private frame = 0;
   private lastMs = 0;
@@ -204,8 +243,12 @@ export class MoneyJar {
     this.shown = shown;
     this.el.classList.toggle('is-shown', shown);
     // Put away, whatever was still falling settles at once: the jar comes out as it is.
-    if (shown) this.wake();
-    else this.settle();
+    if (shown) {
+      this.nextShakeMs = performance.now() + SHAKE_MIN_MS;
+      this.wake();
+    } else {
+      this.settle();
+    }
   }
 
   /** The money now: poured or spent while the jar is out, laid in settled while it is away. */
@@ -273,17 +316,21 @@ export class MoneyJar {
     this.balls.length = 0;
     this.ops.length = 0;
     this.merge = null;
-    let row = 0;
-    let x = CX - BELLY_A + 0.9;
+    // In rows from the foot up, each as wide as the belly is at its height.
+    let y = FLOOR_Y - WALL / 2 - DIAMETER.big / 2;
+    let half = bellyHalfAt(y, DIAMETER.big / 2);
+    let x = CX - half;
     for (const kind of KINDS_DOWN) {
       const count = kind === 'big' ? amount.big - this.overflow : amount[kind];
+      const d = DIAMETER[kind];
       for (let i = 0; i < count; i++) {
-        this.balls.push(this.newBall(kind, x + (row % 2) * 0.2, FLOOR_Y - 1 - row * 1.3));
-        x += DIAMETER[kind] * 1.05;
-        if (x > CX + BELLY_A - 0.9) {
-          x = CX - BELLY_A + 0.9;
-          row++;
+        if (x + d > CX + half) {
+          y -= DIAMETER.big;
+          half = Math.max(0, bellyHalfAt(y, DIAMETER.big / 2));
+          x = CX - half;
         }
+        this.balls.push(this.newBall(kind, x + d / 2, y));
+        x += d * 1.02;
       }
     }
     for (let i = 0; i < 700; i++) this.step();
@@ -352,7 +399,9 @@ export class MoneyJar {
     const op = this.ops.shift();
     if (op === undefined) {
       const still = this.restS >= MERGE_REST_S || now - this.lastOpMs >= MERGE_WAIT_MS;
-      if (still && this.balls.every((b) => b.leftS < 0)) this.startMerge();
+      if (!still || this.balls.some((b) => b.leftS >= 0)) return;
+      if (this.canMerge()) this.startMerge();
+      else if (now >= this.nextShakeMs) this.shake(now);
       return;
     }
     this.restS = 0;
@@ -408,6 +457,27 @@ export class MoneyJar {
         this.balls.push(ball);
       }
     }
+  }
+
+  /** A little shake: the jar rocks on its foot and the balls are kicked, all a little the same way. */
+  private shake(now: number): void {
+    this.nextShakeMs = now + SHAKE_MIN_MS + Math.random() * (SHAKE_MAX_MS - SHAKE_MIN_MS);
+    const way = Math.random() < 0.5 ? -1 : 1;
+    for (const b of this.balls) {
+      if (b.leftS >= 0 || b.mergeS >= 0) continue;
+      b.vx += way * SHAKE_KICK * (0.4 + Math.random() * 0.6);
+      b.vy -= SHAKE_KICK * Math.random();
+    }
+    this.restS = 0;
+    this.canvas.animate?.(
+      [
+        { transform: 'rotate(0deg)' },
+        { transform: `rotate(${way * SHAKE_DEG}deg)`, offset: 0.25 },
+        { transform: `rotate(${-way * SHAKE_DEG * 0.5}deg)`, offset: 0.6 },
+        { transform: 'rotate(0deg)' },
+      ],
+      { duration: 420, easing: 'ease-out' },
+    );
   }
 
   /** Ten lying balls of a kind run together: the topmost and the nine nearest it, into their middle. */
@@ -567,6 +637,7 @@ export class MoneyJar {
         b.vy -= vt * (1 - FRICTION) * ty;
       }
     }
+    keepInBelly(b);
     // Never through the foot.
     const floor = FLOOR_Y - WALL / 2 - b.r;
     if (b.y > floor) {

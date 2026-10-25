@@ -1538,7 +1538,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
   // All four cells or none: the bonnet's grid is indexed by kind.
   const cellBoxes = BONNET_SLOT_KINDS.map((kind) => anchorAt(`${KIT_BONNET_CELL_NODE}:${kind}`));
   const bonnetCells = cellBoxes.every((box) => box !== undefined)
-    ? cellBoxes.map(({ centre: [x, y, z], size: [width, height, depth] }): StorageCellRect => ({ x, y, z, width, depth, height }))
+    ? clipEngineCell(cellBoxes.map(({ centre: [x, y, z], size: [width, height, depth] }): StorageCellRect => ({ x, y, z, width, depth, height })))
     : undefined;
 
   // The unified style's normals, before the chassis stamp below reads the buffers
@@ -2485,4 +2485,46 @@ export function disposeCarModelCache(): void {
   fbx = null;
   glassMaterial = null;
   sharedWheelMaterials.clear();
+}
+
+/** The radiator's cell is at least this deep, metres, and the engine's keeps at least this much. */
+const RADIATOR_CELL_MIN_DEPTH = 0.26;
+const ENGINE_CELL_MIN_DEPTH = 0.36;
+
+/**
+ * The bonnet's cells as the kit measures them, with the radiator's room made big enough
+ * to aim at. The kits draw the radiator as a slab 14 cm deep at the front of the bay and
+ * the engine's box round the whole block behind it, and seen from where the player
+ * stands the engine — its box and the block drawn in it — covered the radiator's strip:
+ * the aim found the engine. The radiator's room is deepened back into the engine's (the
+ * engine is drawn to its cell, so it steps back with it), and where the two boxes
+ * overlapped (the Oka) the engine's ends at the radiator's. Along the car's length only.
+ */
+function clipEngineCell(cells: StorageCellRect[]): StorageCellRect[] {
+  const e = BONNET_SLOT_KINDS.indexOf('engine');
+  const r = BONNET_SLOT_KINDS.indexOf('radiator');
+  const engine = cells[e];
+  const radiator = cells[r];
+  if (!engine || !radiator) return cells;
+  const apart = (a: number, aw: number, b: number, bw: number): boolean => Math.abs(a - b) >= (aw + bw) / 2;
+  const overlapsY = engine.y < radiator.y + radiator.height && radiator.y < engine.y + engine.height;
+  if (apart(engine.x, engine.width, radiator.x, radiator.width) || !overlapsY) return cells;
+  // Along the car: the engine's ends, and the radiator's, the radiator ahead (`ahead` 1) or behind (-1).
+  const ahead = radiator.z > engine.z ? 1 : -1;
+  let engineNear = engine.z + (ahead * engine.depth) / 2;
+  const engineFar = engine.z - (ahead * engine.depth) / 2;
+  const radiatorFar = radiator.z + (ahead * radiator.depth) / 2;
+  // The boundary: the radiator's inner face, pushed into the engine until the radiator is
+  // deep enough — but never so far the engine keeps less than its least (a short bay: the
+  // Oka's), where the radiator takes what is left.
+  let boundary = radiatorFar - ahead * Math.max(radiator.depth, RADIATOR_CELL_MIN_DEPTH);
+  if (ahead * (boundary - engineFar) < ENGINE_CELL_MIN_DEPTH) boundary = engineFar + ahead * ENGINE_CELL_MIN_DEPTH;
+  if (ahead * (radiatorFar - boundary) <= 0) return cells;
+  if (ahead * (engineNear - boundary) > 0) engineNear = boundary;
+  const engineDepth = ahead * (engineNear - engineFar);
+  const radiatorDepth = ahead * (radiatorFar - boundary);
+  const out = cells.slice();
+  out[e] = { ...engine, z: (engineNear + engineFar) / 2, depth: engineDepth };
+  out[r] = { ...radiator, z: (radiatorFar + boundary) / 2, depth: radiatorDepth };
+  return out;
 }

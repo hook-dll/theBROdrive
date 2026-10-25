@@ -331,7 +331,9 @@ export interface TrunkGridRayHit {
 /**
  * Intersects a chassis-local aim ray with the exact cells drawn by a trunk or bonnet
  * visualizer. Cell selection and rendering therefore cannot drift. The nearest cell
- * the ray enters wins: the bonnet's cells stand at different heights in the bay.
+ * the ray enters wins: the bonnet's cells stand at different heights in the bay — but
+ * a smaller cell the ray enters while still inside a bigger one wins over it, so a part
+ * standing in another's room (an air filter on the engine) can be aimed at.
  */
 export function intersectStorageGrid(
   eye: THREE.Vector3,
@@ -340,22 +342,28 @@ export function intersectStorageGrid(
   side: StorageSide,
   out: TrunkGridRayHit,
 ): boolean {
-  let best = Infinity;
-  let bestCell = -1;
   const count = storageCellCount(shape, side);
+  _hits.length = 0;
   for (let cell = 0; cell < count; cell++) {
     if (!cellBounds(cell, shape, side, _cell)) continue;
-    const distance = rayBox(eye, direction, _cell);
-    if (distance < best) {
-      best = distance;
-      bestCell = cell;
-    }
+    const near = rayBox(eye, direction, _cell);
+    if (!(near < Infinity) || !(near > 0)) continue;
+    const volume = (_cell.maxX - _cell.minX) * (_cell.maxY - _cell.minY) * (_cell.maxZ - _cell.minZ);
+    _hits.push({ cell, near, far: slabFar, volume });
   }
-  if (bestCell < 0 || !(best > 0)) return false;
-  out.cell = bestCell;
-  out.distance = best;
+  if (_hits.length === 0) return false;
+  _hits.sort((a, b) => a.near - b.near);
+  let pick = _hits[0]!;
+  for (let i = 1; i < _hits.length; i++) {
+    const hit = _hits[i]!;
+    if (hit.near < pick.far && hit.volume < pick.volume) pick = hit;
+  }
+  out.cell = pick.cell;
+  out.distance = pick.near;
   return true;
 }
+
+const _hits: { cell: number; near: number; far: number; volume: number }[] = [];
 
 /**
  * Distance along a chassis-local ray to the whole grid padded by `margin` on every
