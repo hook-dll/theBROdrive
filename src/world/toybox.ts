@@ -247,7 +247,7 @@ class ToyBox extends CardMachine {
       const at = probe.carPosition(carId);
       // Whichever way it stands: its half length both ways.
       const half = carModelMeasure(car.modelId).halfExtents[2];
-      if (at && blocks(at.x, at.z, half, half)) return `the lay-by is taken: a ${carModel(car.modelId).label} stands on it`;
+      if (at && blocks(at.x, at.z, half, half)) return `the lay-by is taken: the ${carModel(car.modelId).label} stands on it`;
     }
     for (const trailerId of Object.keys(state.trailers)) {
       const at = probe.trailerPosition(trailerId);
