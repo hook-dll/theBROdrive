@@ -72,8 +72,10 @@ export class TrunkView {
     depthWrite: false,
     side: THREE.DoubleSide,
   });
+  // Both borders share one program (transparent, as the plain one), so the first aimed
+  // cell links nothing mid-drive: an opaque selected border was a program of its own.
   private readonly borderMaterial = new THREE.LineBasicMaterial({ color: 0xd9c8ad, transparent: true, opacity: 0.8 });
-  private readonly selectedBorderMaterial = new THREE.LineBasicMaterial({ color: 0xffbad7 });
+  private readonly selectedBorderMaterial = new THREE.LineBasicMaterial({ color: 0xffbad7, transparent: true, opacity: 1 });
   private readonly panels: THREE.Mesh[] = [];
   private readonly borders: THREE.LineLoop[] = [];
   private readonly itemHolders: THREE.Group[] = [];

@@ -38,8 +38,14 @@
 - THE POST'S FOUR CARDS by property: ordinary, fragile, bulky-or-haul, teddies. A card
   prints the thing, destination, km, pay, tags (and mass from 20 kg), a haul's note, a
   race note and "won't fit your <model>" when the car on the lay-by has too small a boot
-  grid; TAKE always gives. Race is a 30 % seeded modifier per ordinary/fragile/teddy
-  offer (1 or 2 stops); the drive's first offer is a plain ordinary thing.
+  grid; TAKE always gives. Race is a 30 % seeded modifier per ordinary/fragile/bulky/teddy
+  offer and per trailer haul (1 or 2 stops); a tow or a car to drive over never races
+  (one car in the job, no rival copy of it), nor does the drive's first offer, a plain
+  ordinary thing.
+- RIVALS CARRY THE RACE CARGO AS ITS WEIGHT (`contracts/race.ts` `Race.cargoKg`;
+  `world/traffic.ts` `RivalSpawn.cargoKg`): no copy in a boot cell, so a TV, a carpet or
+  a trailer's piano races like a parcel. A live rival carries the thing's mass (a whole
+  teddy party, a trailer's load) as carried mass (`Vehicle.setCarriedMass`).
 - Pay is the thing's base pay × km index (`deliveryPay(baseKopecks, …)`); fragile wear
   (`contracts/runtime.ts`) and the G-force widget (`rideSensitive`) follow the fragile tag.
 - Trailer loads: the thing's mass on the bed; the bed is the long load overhanging the
@@ -95,7 +101,8 @@
   - its contract closes at that moment, and no post signs for it as a delivery; any
     post's tray takes it back as a return to sender (no pay) so the player can be rid
     of it;
-  - a race for it is lost;
+  - a race for it is lost, and called off at once: its rivals leave the race (a live one
+    drives on as traffic, a ghost vanishes) and nothing more is announced;
   - it no longer wears, no longer counts towards the delivery hint or the G-force widget,
     and is labelled "broken old TV set";
   - it stays a normal item that can be carried, stowed and dropped;
@@ -114,7 +121,9 @@
   frees its place. The hand-in card reads RETURN — NO PAY. A valid delivery always wins.
   A haul goes back as it is delivered: papers in hand and its trailer or car on that
   post's lay-by by its kind's rule, and the load is taken in. Returning one teddy closes
-  its party; the other teddies become leftovers any tray takes.
+  its party; the other teddies become leftovers any tray takes. Returning the raced thing
+  calls the race off at once ("race off — the … went back to the sender",
+  `RivalRace.playerReturned`): no win, the rivals leave the race as for a broken thing.
 - URGENT CONTRACTS (game-design2.md §7.5; `contracts/offers.ts` `urgentDeadlineS`,
   `ContractCargoItem.urgentS`, `ContractProgress.elapsedS`). A quarter of the offers on
   any card (never the drive's first) are urgent. The clock is road km to the destination
@@ -129,12 +138,12 @@
   at condition ≥ 90% (teddies: their ride quality ≥ 90%) and not late. The hand-in card
   says which: "a sticker envelope comes with it", "85%: no sticker (needs 90%)", "late:
   no sticker"; its band reads HAND IN · ON TIME / · LATE for an urgent one.
-- `__bro.thing(id, size?, urgent?)` can spawn an urgent thing.
+- `__bro.thing(id, size?, urgent?, raceLegs?)` can spawn an urgent thing or a race.
 - UNIQUENESS (game-design2.md §12; `economy/economy.ts` `SPECIAL_CARD_STICKERS`,
   `RELIC_STICKERS`, `uniquenessBonus`, `uniquenessBonusText`; `contracts/offers.ts`
   `SPECIAL_SLOT`, `redrawOffer`; `items/things.ts` `specialThings`). The post's lay-by
   car — the player's car within 20 m of the lay-by's haul place, the one he last drove
-  (`GameWorld.lastDrivenCarId`, session only) when it is there, else the nearest — opens
+  (`PlayerState.lastDrivenCarId`, saved) when it is there, else the nearest — opens
   a fifth card from 3 stickers: a SPECIAL thing (gold band): grandpa's radio, stamp
   album, mum's music box, old camera, chess set, model plane (11–14 р base, tags
   `special` + fragile or ordinary, 1 or 2 cells). From 8 stickers the same slot may draw
@@ -145,7 +154,7 @@
 - STICKER PAY BONUS: +3% per sticker of the delivering car, at most +30%
   (`contractPay(seed, item, stickers)`). The delivering car is the lay-by car at the
   delivering post when the tray takes the thing; with none there, the car the player
-  last drove this session, wherever it stands. Offer cards print the pay with the
+  last drove, wherever it stands. Offer cards print the pay with the
   lay-by car's bonus and "+12% for 4 stickers"; the hand-in card prints the same line.
 - `__bro.stickers(n, carId?)`: the given (else driven, else last driven) car has exactly
   `n` dev stickers. `__bro.stickerSheet` shares its placement, which now bounds the car
@@ -162,8 +171,9 @@
   do. TAKE OUT boxes the player's car standing within 20 m of the post's haul place (the
   last driven, else the nearest) and stands the card's car on the haul place, on its
   wheels, heading along the road; with none there it only takes the car out. Refused,
-  with the reason on the card and in a toast, while the lay-by car holds any contract
-  thing ("take the jobs out of the … first"), a trailer or a tow bar ("unhitch the …
+  with the reason on the card and in a toast, while the lay-by car holds an active job's
+  thing ("take the jobs out of the … first"; a broken souvenir or a returned party's
+  leftover teddy goes into the box with the car), a trailer or a tow bar ("unhitch the …
   first"), the player sits in a car, or another car or a trailer stands on the haul
   place. The car taken out is the one the post reads as last driven.
 - BUYING A CAR BOXES THE OLD ONE (`world/keybox.ts`): taking the key puts the car the
@@ -171,8 +181,9 @@
   unless it holds contract cargo or is coupled; then it waits where it stands as his car
   until he boxes it at a post. A rebuilt lot does not stand a fresh car where a bought,
   boxed one came from.
-- Saves keep the toy box; boxing or taking out on foot autosaves. `__bro.standAtPost(i,
-  'toybox')` stands the player at a post's toy box.
+- Saves keep the toy box and the last driven car (`PlayerState.lastDrivenCarId`,
+  forgotten on load when that car is gone or boxed); boxing or taking out on foot
+  autosaves. `__bro.standAtPost(i, 'toybox')` stands the player at a post's toy box.
 
 ### Fixed
 
@@ -185,6 +196,13 @@
   off (`contracts/runtime.ts` `CarImpacts`).
 - Wording: "PUT DAD'S TOOL BOX IN THE TRAY" (no "THE" before a possessive name), and
   "[F] lay carpet … across the rear bench" instead of "on the seat".
+- Aiming at an open boot's cell linked a shader program mid-drive: the aimed cell's
+  opaque border (`render/trunkview.ts`) was a program of its own, also on `variety`. It
+  now shares the plain border's transparent program, so the boot shows nothing beyond
+  `config/program-budget.json`.
+- A reload could hand a dev contract (`__bro.thing`) the id of one already handed in or
+  returned, which then read as closed: runtime ids now resume past
+  `completedContractIds` too (`GameWorld`).
 
 ### Removed
 

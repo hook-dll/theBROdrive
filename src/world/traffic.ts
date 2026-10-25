@@ -19,7 +19,6 @@ import {
 } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
-import type { Item } from '../items/items';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
 import { Vehicle } from '../vehicle/vehicle';
@@ -565,8 +564,11 @@ export interface RivalSpawn {
    * it came from the catalogue.
    */
   readonly mode: 'frantic' | 'hurried';
-  /** Its copy of the race cargo, loaded into the boot so its mass is the player's. */
-  readonly cargo: Item | null;
+  /**
+   * What its copy of the race cargo weighs, kg: carried as mass with no item in the
+   * boot, so the load counts whatever its footprint (a TV, a trailer's piano).
+   */
+  readonly cargoKg: number;
 }
 
 /**
@@ -3072,17 +3074,17 @@ export class RoadTraffic {
     ) {
       return;
     }
-    const record = this.placeCar(request, null, null, false);
+    const record = this.placeCar(request, null, 0, false);
     if (record) this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
   }
 
   /**
    * Puts a loaded spawn on the road if its site is still good: the lane, the stopping
    * room, the ground, the support window and every body nearby. Null with nothing
-   * changed when it is not. `launchSpeed` null is the ordinary rolling start; `cargo`
-   * goes into the boot before the body exists, so its mass is there from the first step.
+   * changed when it is not. `launchSpeed` null is the ordinary rolling start; `cargoKg`
+   * is loaded before the first step, so a rival's cargo mass is there from the start.
    */
-  private placeCar(request: PendingSpawn, launchSpeed: number | null, cargo: Item | null, rival: boolean): TrafficCar | null {
+  private placeCar(request: PendingSpawn, launchSpeed: number | null, cargoKg: number, rival: boolean): TrafficCar | null {
     const offset = request.forwardS - this.playerS;
     const measure = carModelMeasure(request.modelId);
     const bodyRadius = Math.hypot(...measure.halfExtents);
@@ -3151,7 +3153,6 @@ export class RoadTraffic {
       state.qz = pose.qz;
       state.qw = pose.qw;
     }
-    if (cargo) state.storage[0] = cargo;
     // Nobody meets a traffic car at the start of its journey: it has already driven
     // the desert road to get here, so it arrives carrying that road's film and the
     // odd scuff, and its own driving adds to it from there. Hashed from the id rather
@@ -3178,6 +3179,7 @@ export class RoadTraffic {
     // bench read - correctly - as "18 of 19 cars lit".
     vehicle.setHeadlights('low');
     autopilot.setPassingEnabled(true);
+    if (cargoKg > 0) vehicle.setCarriedMass(cargoKg);
     autopilot.setFollowingHeadway(request.headwayS);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
@@ -3270,7 +3272,7 @@ export class RoadTraffic {
       () => {
         if (request.generation !== this.generation) return false;
         if (this.carList.some((car) => car.id === spec.id)) return false;
-        const record = this.placeCar(request, spec.speed, spec.cargo, true);
+        const record = this.placeCar(request, spec.speed, spec.cargoKg, true);
         if (!record) return false;
         record.rival = true;
         return true;

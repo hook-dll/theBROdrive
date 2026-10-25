@@ -1283,9 +1283,12 @@ async function boot(): Promise<void> {
   );
   world.onDelta((delta) => {
     // The post machine (world/post.ts) shows the delivery itself; a completed contract
-    // (kind recorded: not one teddy of a party) decides the race.
+    // (kind recorded: not one teddy of a party) decides the race, and one closed with no
+    // kind is a return to sender, which calls it off.
     if (delta.t === 'courier_storage' && delta.completedContractId && delta.completedContractKind) {
       race.playerDelivered(delta.completedContractId);
+    } else if (delta.t === 'courier_storage' && delta.completedContractId) {
+      race.playerReturned(delta.completedContractId);
     } else if (delta.t === 'sticker_place') {
       hud.setToast('stuck on');
     } else if (delta.t === 'settings') {

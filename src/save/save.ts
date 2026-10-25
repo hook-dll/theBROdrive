@@ -512,6 +512,7 @@ export function migrateState(raw: unknown): WorldState {
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
     // Saves from before seats were always in the driver's.
     seat: PLAYER_SEATS.includes(playerRaw.seat as PlayerSeat) ? (playerRaw.seat as PlayerSeat) : 'driver',
+    lastDrivenCarId: typeof playerRaw.lastDrivenCarId === 'string' ? playerRaw.lastDrivenCarId : null,
     carried,
     carriedSelected: Math.min(
       Math.max(0, Math.trunc(numOr(playerRaw.carriedSelected, 0))),
@@ -528,6 +529,8 @@ export function migrateState(raw: unknown): WorldState {
   for (const [id, value] of Object.entries(carsRaw)) {
     cars[id] = migrateCar(asRecord(value, `car "${id}"`), version);
   }
+  // The last driven car must still be out in the world: gone or boxed, it is forgotten.
+  if (player.lastDrivenCarId !== null && !cars[player.lastDrivenCarId]) player.lastDrivenCarId = null;
   // A tow bar needs both ends and only one end per car. Checked here, where the
   // whole car set is known: a save naming a tower that is gone (or claiming a
   // second car on one tower, or a three-car chain) loads with the bar off rather

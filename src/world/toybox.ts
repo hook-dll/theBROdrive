@@ -1,10 +1,12 @@
 import type * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
+import { isContractClosed } from '../contracts/registry';
 import { postHaulPlace } from '../contracts/world';
 import { carUniqueness } from '../economy/economy';
 import { poseOnGround } from '../game/spawn';
 import type { CarState, GameWorld, WorldState } from '../game/state';
+import type { Item } from '../items/items';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { carModel, hasCarModel } from '../vehicle/carmodels';
 import { TRAILER_BALL_Z } from '../vehicle/trailer';
@@ -25,12 +27,13 @@ import type { Terrain } from './terrain';
  * lay-by. TAKE OUT on a card:
  *  - the player's car standing within `LAYBY_CAR_RANGE_M` of the post's haul place (the
  *    one he last drove when it is there, else the nearest) goes into the box first
- *    (`FixtureContext.boxCar`), refused while it holds contract cargo, a trailer or a tow
- *    bar (`boxRefusal`); with none there, nothing goes in;
+ *    (`FixtureContext.boxCar`), refused while it holds an active job's cargo (a broken
+ *    souvenir goes in with it), a trailer or a tow bar (`boxRefusal`); with none there,
+ *    nothing goes in;
  *  - the card's car comes out standing on the haul place, heading along the road, as it
  *    went in (fuel, wear, stickers, parts, its boot's own things), refused while another
  *    car or a trailer stands on the place (`spotBlocker`). It is the car the post reads
- *    when none stands on its lay-by from then on (`GameWorld.lastDrivenCarId`).
+ *    when none stands on its lay-by from then on (`PlayerState.lastDrivenCarId`).
  *
  * A boxed car is out of the world: in `WorldState.toyBox`, not in `cars`, so nothing
  * streams it, draws it or counts it (`car_box`, `car_unbox`). Only the player's own
@@ -54,9 +57,14 @@ const SPOT_MARGIN_M = 0.4;
 /** A trailer's half width with its wheels, m: the bed is narrower than a car. */
 const TRAILER_HALF_WIDTH_M = 1.0;
 
-/** True when `car` carries any contract thing, in its boot or its cabin, broken or not. */
-export function carHoldsContract(car: CarState): boolean {
-  return car.storage.some((item) => item?.type === 'contract_cargo') || car.cabin.some((item) => item?.type === 'contract_cargo');
+/**
+ * True when `car` carries an active contract thing (`isContractClosed` false), in its boot
+ * or its cabin. A closed one — a broken souvenir, a teddy left from a returned party — is
+ * the car's own thing now and goes into the box with it.
+ */
+export function carHoldsContract(car: CarState, completedIds: readonly string[]): boolean {
+  const active = (item: Item | null): boolean => item?.type === 'contract_cargo' && !isContractClosed(item, completedIds);
+  return car.storage.some(active) || car.cabin.some(active);
 }
 
 /**
@@ -68,7 +76,7 @@ export function boxRefusal(state: WorldState, carId: string): string | null {
   if (!car?.papers) return 'only your own car goes in the box';
   const label = carModel(car.modelId).label;
   if (state.player.drivingCarId === carId) return `get out of the ${label} first`;
-  if (carHoldsContract(car)) return `take the jobs out of the ${label} first`;
+  if (carHoldsContract(car, state.completedContractIds)) return `take the jobs out of the ${label} first`;
   const coupled =
     (car.towedBy ?? null) !== null ||
     Object.values(state.cars).some((other) => other.towedBy === carId) ||
@@ -196,7 +204,7 @@ class ToyBox extends CardMachine {
       if (!at) continue;
       const d2 = (at.x - this.spot.x) ** 2 + (at.z - this.spot.z) ** 2;
       if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
-      if (carId === this.world.lastDrivenCarId) {
+      if (carId === this.world.state.player.lastDrivenCarId) {
         inCarId = carId;
         break;
       }

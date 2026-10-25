@@ -10,10 +10,12 @@
  *
  * The offer is a plain `contract_cargo` item with its thing, destination, seed-random
  * reward (paid by kinds without a signature sticker) and fresh progress already on it.
- * RACE is a modifier on top: an ordinary, fragile or teddy offer is a race to the next
- * post or the one after with `RACE_SHARE` chance, drawn per offer (contracts/race.ts).
- * Bulky things and hauls never race: the rivals' boot copy would not hold them. The
- * drive's very first offer is a plain ordinary thing, never a race.
+ * RACE is a modifier on top: an ordinary, fragile, bulky or teddy offer, or a trailer
+ * haul, is a race to the next post or the one after with `RACE_SHARE` chance, drawn per
+ * offer (contracts/race.ts); the rivals carry the cargo as its weight, so footprint
+ * does not matter. A tow or a car to drive over never races: there is one car in the
+ * job, and no rival can bring its own copy of it. The drive's very first offer is a
+ * plain ordinary thing, never a race.
  * URGENT is the other modifier, on any card: `URGENT_SHARE` of the offers (never the
  * drive's first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
  *
@@ -40,7 +42,7 @@ import { defaultProgress } from './types';
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
 const THING_DOMAIN = 0x4f464b31; // 'OFK1'
 const RACE_DOMAIN = 0x4f465231; // 'OFR1'
-/** Share of the ordinary, fragile and teddy offers that are a race. */
+/** Share of the offers that may race (all but tows, drives and the special card) that are a race. */
 const RACE_SHARE = 0.3;
 const URGENT_DOMAIN = 0x4f465531; // 'OFU1'
 /** Share of the offers, any card, that are urgent (game-design2.md §7.5). */
@@ -139,8 +141,9 @@ export function generateContractOffer(
   const thing = pool[Math.min(pool.length - 1, Math.floor(hash01(seed, THING_DOMAIN, courierIndex, key) * pool.length))]!;
   const first = courierIndex === 0 && key === 0;
   const raceRoll = hash01(seed, RACE_DOMAIN, courierIndex, key);
-  // A special thing never races: it is the boy's own, not one of three copies.
-  const raceLegs = card === 'bulky' || special || first || raceRoll >= RACE_SHARE
+  // A special thing never races: it is the boy's own, not one of three copies. Nor does
+  // a tow or a drive: the one car in the job cannot be copied.
+  const raceLegs = thing.place === 'tow' || thing.place === 'transfer' || special || first || raceRoll >= RACE_SHARE
     ? undefined
     : raceRoll < RACE_SHARE / 2 ? 1 : 2;
   const urgent = !first && hash01(seed, URGENT_DOMAIN, courierIndex, key) < URGENT_SHARE;

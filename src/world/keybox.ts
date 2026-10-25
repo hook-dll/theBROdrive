@@ -318,7 +318,7 @@ class KeyBox implements WorldFixture {
    */
   private oldCar(): string | null {
     const cars = this.world.state.cars;
-    const last = this.world.lastDrivenCarId;
+    const last = this.world.state.player.lastDrivenCarId;
     if (last && last !== this.carId && cars[last]?.papers) return last;
     let best: string | null = null;
     let bestD2 = Infinity;

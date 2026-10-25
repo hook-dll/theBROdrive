@@ -206,6 +206,13 @@ export interface PlayerState {
    */
   seat: PlayerSeat;
   /**
+   * The car he last sat in at the wheel, or took out of the toy box; null once it is
+   * boxed or gone. Saved: the car he arrived in, which a post pays the uniqueness bonus
+   * by when none stands on its lay-by (world/post.ts), and the old car a purchase boxes
+   * (world/keybox.ts).
+   */
+  lastDrivenCarId: string | null;
+  /**
    * The pack, in slot order. `Inventory` is authoritative in-session and mirrors
    * itself here through the `inventory` delta; this array holds the same item
    * objects, so in-place changes (ammo counts, can litres) need no delta.
@@ -483,6 +490,7 @@ export function newWorldState(seed: number): WorldState {
       s: 0,
       drivingCarId: null,
       seat: 'driver',
+      lastDrivenCarId: null,
       carried: [],
       carriedSelected: 0,
       wornSunShades: null,
@@ -571,17 +579,9 @@ export class GameWorld {
   readonly state: WorldState;
   private readonly listeners = new Set<(delta: WorldDelta) => void>();
   private partCounter = 0;
-  /**
-   * The car the player last sat in at the wheel this session, or took out of the toy box,
-   * or null (boxed away): the car he arrived in, which a post pays the uniqueness bonus
-   * by when none stands on its lay-by (world/post.ts), and the old car a purchase boxes
-   * (world/keybox.ts). Session memory, not saved: a reload starts from the car he sits in.
-   */
-  lastDrivenCarId: string | null;
 
   constructor(state: WorldState) {
     this.state = state;
-    this.lastDrivenCarId = state.player.drivingCarId;
     // Continue runtime ids past anything already in the save, or a reloaded game
     // hands out an id something is still holding. Counting collections is not
     // enough — the pack persists across a save and its items keep their `rt:`
@@ -611,6 +611,9 @@ export class GameWorld {
       }
     }
     for (const trailer of Object.values(state.trailers)) bump(trailer.id);
+    // A dev contract (app/devtools.ts `thing`) handed in or returned lives on only as its
+    // id here; reused, the new contract would read as already closed.
+    for (const id of state.completedContractIds) bump(id);
     this.partCounter = highest;
   }
 
@@ -662,6 +665,7 @@ export class GameWorld {
         break;
       case 'car_remove':
         delete s.cars[delta.carId];
+        if (s.player.lastDrivenCarId === delta.carId) s.player.lastDrivenCarId = null;
         break;
       case 'car_box': {
         // Only the player's own car, and not the one he sits in: the box takes it as it
@@ -671,7 +675,7 @@ export class GameWorld {
         delete s.cars[delta.carId];
         car.towedBy = null;
         s.toyBox[delta.carId] = car;
-        if (this.lastDrivenCarId === delta.carId) this.lastDrivenCarId = null;
+        if (s.player.lastDrivenCarId === delta.carId) s.player.lastDrivenCarId = null;
         break;
       }
       case 'car_unbox': {
@@ -687,7 +691,7 @@ export class GameWorld {
         car.qw = delta.qw;
         s.cars[delta.carId] = car;
         // Taken out to be driven: the car a post reads when none stands on its lay-by.
-        this.lastDrivenCarId = delta.carId;
+        s.player.lastDrivenCarId = delta.carId;
         break;
       }
       case 'car_tow': {
@@ -711,7 +715,7 @@ export class GameWorld {
       case 'enter_car':
         s.player.drivingCarId = delta.carId;
         s.player.seat = delta.seat;
-        if (delta.seat === 'driver') this.lastDrivenCarId = delta.carId;
+        if (delta.seat === 'driver') s.player.lastDrivenCarId = delta.carId;
         break;
       case 'exit_car':
         s.player.drivingCarId = null;

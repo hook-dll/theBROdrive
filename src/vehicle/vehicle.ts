@@ -5204,7 +5204,8 @@ export class Vehicle implements Rebasable {
    * The three hand slots are physically in the car with whoever is sitting in it, so
    * they are part of what the springs carry. `Vehicle` cannot read them itself — the
    * pack belongs to the player, not to the car — so `main` reports it, and this
-   * refreshes the load only when the number actually moves.
+   * refreshes the load only when the number actually moves. A race rival's cargo rides
+   * the same way: its weight with no item (world/traffic.ts `RivalSpawn.cargoKg`).
    */
   setCarriedMass(kilograms: number): void {
     const next = Math.max(0, kilograms);

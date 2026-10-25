@@ -9,6 +9,10 @@
  * into the post's lay-by, standing beside the post for `HAND_IN_S` — a parcel
  * dropped in the slot from the window, not the player's walk to it — and pulling back out.
  * The delivery always pays its sticker; winning adds a ruble per leg (`winPay`).
+ * A rival's cargo is its weight alone (`Race.cargoKg`), never an item in a boot cell, so
+ * a bulky thing or a trailer's load races as well as a parcel. A raced contract closed
+ * without a hand-in — the thing broken, or sent back to its sender — calls the race off
+ * (`callOff`): no win, and its rivals leave the race at once.
  * Slice rules: no save (a reload forgets the race).
  *
  * A RIVAL IS A GHOST UNTIL IT IS NEAR. Physics exists only `ROAD_PHYSICS_REACH_M` (world/ranges.ts) either
@@ -171,6 +175,11 @@ interface Rival {
 interface Race {
   readonly itemId: string;
   readonly cargo: ContractCargoItem;
+  /**
+   * What each rival's copy of the cargo weighs, kg: the thing's own mass (a trailer
+   * haul's load, a whole teddy party), carried with no item and no boot cell.
+   */
+  readonly cargoKg: number;
   readonly sourceS: number;
   /** The receiving post, and its lay-by (null without one). */
   readonly postS: number;
@@ -239,16 +248,37 @@ export class RivalRace {
   /**
    * Called for every live cargo item BEFORE the contract runtime marks it started,
    * so `!started` away from the post is exactly the moment it was first taken. The raced
-   * thing broken closes its contract, and with it the race.
+   * thing broken closes its contract, and with it the race (`callOff`).
    */
   observe(item: ContractCargoItem, place: ContractPlace, playerS: number): void {
     if (this.race !== null && this.race.itemId === contractIdOf(item) && item.progress?.broken) {
-      this.end(`race lost — the ${contractThing(item).name} broke`);
+      this.callOff(`race lost — the ${contractThing(item).name} broke`);
       return;
     }
     if (this.race !== null || place === 'post' || item.progress?.started) return;
     if (item.raceLegs === undefined) return;
     this.start(item, playerS);
+  }
+
+  /** The player sent `contractId` back to its sender: the race is off (`callOff`). */
+  playerReturned(contractId: string): void {
+    const race = this.race;
+    if (race === null || race.itemId !== contractId) return;
+    this.callOff(`race off — the ${contractThing(race.cargo).name} went back to the sender`);
+  }
+
+  /**
+   * The raced contract closed without a hand-in (broken, returned): nothing is left to
+   * race for, so its rivals do not finish their run. A live one drives on as ordinary
+   * traffic at once, a ghost vanishes, and nothing more is announced.
+   */
+  private callOff(text: string): void {
+    const race = this.race;
+    if (race === null) return;
+    this.notify(text);
+    this.race = null;
+    race.decided = true;
+    this.retire(race);
   }
 
   /**
@@ -450,6 +480,7 @@ export class RivalRace {
       // The contract, not the item: a passenger party races as one (`contractIdOf`).
       itemId: contractIdOf(item),
       cargo: item,
+      cargoKg: contractThing(item).massKg * (item.party?.size ?? 1),
       sourceS,
       postS,
       layby,
@@ -594,11 +625,8 @@ export class RivalRace {
     if (!inBand) return;
     rival.retryIn = SPAWN_RETRY_S;
     rival.spawning = true;
-    const cargo: ContractCargoItem = {
-      ...race.cargo,
-      id: `${race.cargo.id}:${rival.id}`,
-      progress: { ...race.cargo.progress },
-    };
+    // No copy of the thing in a boot cell: a rival carries the race cargo as its mass
+    // alone (`Race.cargoKg`), so a TV, a carpet or a trailer's piano needs no room to fit.
     void this.host
       .spawnRival({
         id: rival.id,
@@ -608,7 +636,7 @@ export class RivalRace {
         // Its own ceiling; the stop curve is applied by `fixedUpdate` from the next step.
         speedCap: rival.capMps,
         mode: RIVAL_MODE,
-        cargo,
+        cargoKg: race.cargoKg,
       })
       .then((placed) => {
         rival.spawning = false;

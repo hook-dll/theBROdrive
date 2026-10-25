@@ -57,7 +57,7 @@ import { postId, postStop, type PostStop } from './poststops';
  * (`nextOffer`): the machine never runs dry.
  *
  * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the lay-by's
- * haul place: the one he last drove (`GameWorld.lastDrivenCarId`) when it is there, else
+ * haul place: the one he last drove (`PlayerState.lastDrivenCarId`) when it is there, else
  * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
  * cards print. A delivery is paid by the same car's stickers, read when the tray takes
  * it; with no car on the lay-by, by the car he last drove, wherever it stands.
@@ -285,7 +285,7 @@ class PostMachine extends CardMachine {
       if (!at) continue;
       const d2 = (at.x - this.haulX) ** 2 + (at.z - this.haulZ) ** 2;
       if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
-      if (carId === this.world.lastDrivenCarId) {
+      if (carId === this.world.state.player.lastDrivenCarId) {
         best = carId;
         break;
       }
@@ -310,7 +310,7 @@ class PostMachine extends CardMachine {
   private deliveryStickers(ctx: FixtureContext): number {
     this.refreshLayby(ctx);
     if (this.laybyCarId) return this.laybyStickers;
-    const last = this.world.lastDrivenCarId;
+    const last = this.world.state.player.lastDrivenCarId;
     const car = last ? this.world.state.cars[last] : undefined;
     return car ? carUniqueness(car) : 0;
   }

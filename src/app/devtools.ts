@@ -649,21 +649,22 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
   /**
-   * `thing(id, size?, urgent?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
+   * `thing(id, size?, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
    * 'tv_set', 'carpet', 'piano', 'teddies') signed out at the post nearest the player
    * and bound for the next, dropped in front of him as the post machine's tray would
    * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted), a
    * haul as its papers, whose trailer or car then appears on that post's lay-by
-   * (contracts/world.ts); `urgent` gives it the urgent clock. Returns the contract id.
+   * (contracts/world.ts); `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes it
+   * a race to the post that many on, started when it is picked up. Returns the contract id.
    */
-  dev['thing'] = (id: string, size?: number, urgent = false): string => {
+  dev['thing'] = (id: string, size?: number, urgent = false, raceLegs?: 1 | 2): string => {
     if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
     const seed = ctx.world.seed;
     const { before, after } = postBracket(seed, ctx.world.state.player.s);
     const playerS = ctx.world.state.player.s;
     const source = before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
     // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
-    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, undefined, urgent);
+    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, raceLegs, urgent);
     if (offer.party && size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
     const eye = ctx.camera.eyePosition;
     const dir = ctx.camera.eyeDirection;
@@ -775,7 +776,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * relics from 8, +3% pay each up to +30%). Returns the count.
    */
   dev['stickers'] = (n: number, carId?: string): number =>
-    devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId ?? ctx.world.lastDrivenCarId, Math.max(0, Math.trunc(n)));
+    devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId ?? ctx.world.state.player.lastDrivenCarId, Math.max(0, Math.trunc(n)));
   dev['killPlayer'] = (): void => {
     if (!ctx.vitals.dead) {
       ctx.vitals.beginCollisionFrame('foot');
