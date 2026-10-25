@@ -32,6 +32,17 @@
   km/h goes from 10.5 m off line to 0.36 m. Braking in a bend goes from 24.5° to 4.2° of
   articulation. The tightest corner holds to about 58–62 km/h depending on the pair. On a
   rope with nobody in the towed car, it rams the tower at 30–34 km/h.
+- TOWED CAR BACKS UP STRAIGHT, AND A TELEPORTED TOW RE-SEATS (`vehicle/cartow.ts`). While
+  the rig reverses, the towed car's castored front wheels are locked straight. They ease
+  there with τ 0.12 s. Reversing is latched on the TOWER: backwards along its heading
+  past 0.3 m/s, or R selected below 0.5 m/s. It is released only at +0.5 m/s, so the
+  wheels no longer flick at a standstill, and at a forward walk they hold their angle. A
+  tower moved outside the step (`__bro.jumpTo`, a rescue) used to drag the towed car
+  through the joint, leaving it 32 m ahead and turned 96° on a "live" bar. Now the bar
+  is re-hitched before the solve: the towed car goes behind the tower, square and still.
+  `tow-bench` adds `park`, backing 90° into a 3.2 m bay: round in 12–16 m with 0.2 m
+  spread and articulation ≤ 44°. It also adds `teleport` (was 123 m ahead at 200 m/s,
+  now 4–5 m behind at 0°), and `reverse` is now 15 m out of a turn.
 
 - EVERY CAR HAS ITS OWN BOOT AND COMFORT (game-design2.md §13.6; `vehicle/carmodels.ts`
   `CarModelDef.trunkGrid` / `comfort`, `comfortFactor`, `CarComfort`; `vehicle/trunk.ts`

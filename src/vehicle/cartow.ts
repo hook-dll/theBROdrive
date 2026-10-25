@@ -147,8 +147,46 @@ const TOW_SNAG_S = 1.5;
  */
 const TOW_CORRECTION_SPEED = 0.6;
 const TOW_CORRECTION_ACCEL = 40;
-/** Below this the castored wheels are not steered, m/s: at a walk they stay put. */
+/** Below this the castored wheels are not swung, m/s: at a walk they hold where they are. */
 const CASTER_MIN_SPEED_MPS = 0.8;
+/**
+ * REVERSING, with hysteresis so the wheels do not flick at a standstill: the rig is
+ * backing once the tower runs backwards along its heading faster than this, or has
+ * reverse selected and is all but stopped (below CASTER_REVERSE_GEAR_MPS either way)…
+ */
+const CASTER_REVERSE_ENTER_MPS = 0.3;
+const CASTER_REVERSE_GEAR_MPS = 0.5;
+/** …and is going forward again only past this, m/s. */
+const CASTER_REVERSE_EXIT_MPS = 0.5;
+/** Backing up the castored wheels ease to straight over this time constant, s. */
+const CASTER_STRAIGHTEN_TAU_S = 0.12;
+
+/** The towed car's castored wheels between steps. */
+interface CastorState {
+  /** Commanded rack angle, rad (positive left, as `steeringInputForWheelAngle`). */
+  angle: number;
+  reversing: boolean;
+}
+
+/** The rig's reversing latch from the tower's speed along its heading and its gear. */
+function towerReversing(tower: Vehicle, was: boolean): boolean {
+  const body = tower.chassis;
+  const ahead = rotateLocal({ x: 0, y: 0, z: 1 }, body.rotation());
+  const v = body.linvel();
+  const fwd = v.x * ahead.x + v.y * ahead.y + v.z * ahead.z;
+  if (fwd < -CASTER_REVERSE_ENTER_MPS) return true;
+  if (tower.gearLabel === 'R' && Math.abs(fwd) < CASTER_REVERSE_GEAR_MPS) return true;
+  return was && fwd < CASTER_REVERSE_EXIT_MPS;
+}
+
+/** The tower moving this much further than the towed car in one step is a teleport, m. */
+const TOW_TELEPORT_M = 3;
+
+function copyVec(into: { x: number; y: number; z: number }, from: { x: number; y: number; z: number }): void {
+  into.x = from.x;
+  into.y = from.y;
+  into.z = from.z;
+}
 const BAR_RADIUS = 0.03;
 const EYE_RADIUS = 0.06;
 /** Above this the bar-dropped car is still rolling and brakes itself, m/s. */
@@ -217,6 +255,11 @@ interface TowLink {
   readonly towedAnchor: { x: number; y: number; z: number };
   /** The towed car's front axle, metres forward of its body centre: the caster's point. */
   readonly frontAxleZ: number;
+  /** The castored wheels' commanded angle and whether the rig is backing. */
+  readonly castor: CastorState;
+  /** Both bodies' positions after the last step, to tell a teleport; see `reseatTeleported`. */
+  readonly towerLast: { x: number; y: number; z: number };
+  readonly towedLast: { x: number; y: number; z: number };
   /** The coupler at the ball and the two arms, placed in world space every frame. */
   readonly bar: THREE.Group;
   readonly arms: readonly [THREE.Mesh, THREE.Mesh];
@@ -296,7 +339,10 @@ export class CarTowField {
    * doing 60 km/h in one step. They are stepped here with full service brake until
    * they stop, then become ordinary parked cars.
    */
-  private readonly coasting = new Map<string, { input: InputFrame; remaining: number; frontAxleZ: number }>();
+  private readonly coasting = new Map<
+    string,
+    { input: InputFrame; remaining: number; frontAxleZ: number; castor: CastorState }
+  >();
   /** Invisible holder that compiles the bar's program from boot; see the rule. */
   private readonly warmup = new THREE.Group();
   private readonly barGeometry: THREE.CylinderGeometry;
@@ -414,11 +460,14 @@ export class CarTowField {
       towerAnchor,
       towedAnchor,
       frontAxleZ: frontAxleZOf(towed),
+      castor: { angle: 0, reversing: false },
       bar,
       arms,
       coupler,
       input: emptyInput(),
       loadFor: 0,
+      towerLast: { ...tower.chassis.translation() },
+      towedLast: { ...towed.chassis.translation() },
     };
     this.links.set(towedId, link);
     this.coasting.delete(towedId);
@@ -443,7 +492,12 @@ export class CarTowField {
     // pinned where it stands; see `coasting`.
     const vehicle = this.vehicleFor(towedCarId);
     if (vehicle && Math.hypot(vehicle.chassis.linvel().x, vehicle.chassis.linvel().z) > COAST_SPEED_MPS) {
-      this.coasting.set(towedCarId, { input: emptyInput(), remaining: COAST_MAX_S, frontAxleZ: link.frontAxleZ });
+      this.coasting.set(towedCarId, {
+        input: emptyInput(),
+        remaining: COAST_MAX_S,
+        frontAxleZ: link.frontAxleZ,
+        castor: { angle: link.castor.angle, reversing: link.castor.reversing },
+      });
     }
     if (record && this.world.state.cars[towedCarId]?.towedBy != null) {
       this.world.apply({ t: 'car_tow', carId: towedCarId, towerId: null });
@@ -487,6 +541,7 @@ export class CarTowField {
    * brakes follow it, the coupling argued for at the top of the file.
    */
   fixedUpdate(dt: number, brakeForCar: (carId: string) => number): void {
+    this.reseatTeleported(dt);
     for (const link of this.links.values()) {
       const vehicle = this.vehicleFor(link.towedId);
       if (!vehicle) continue;
@@ -496,7 +551,9 @@ export class CarTowField {
       input.handbrake = false;
       input.shift = 0;
       input.brake = Math.min(1, Math.max(0, brakeForCar(link.towerId)));
-      input.steer = this.casterSteer(vehicle, link.frontAxleZ);
+      const tower = this.vehicleFor(link.towerId);
+      if (tower) link.castor.reversing = towerReversing(tower, link.castor.reversing);
+      input.steer = this.casterSteer(vehicle, link.frontAxleZ, link.castor, dt);
       vehicle.fixedUpdate(dt, input);
     }
     // Cars just off a bar: full service brake, castored wheels, until stopped.
@@ -516,7 +573,7 @@ export class CarTowField {
       coast.input.throttle = 0;
       coast.input.reverse = false;
       coast.input.handbrake = false;
-      coast.input.steer = this.casterSteer(vehicle, coast.frontAxleZ);
+      coast.input.steer = this.casterSteer(vehicle, coast.frontAxleZ, coast.castor, dt, true);
       vehicle.fixedUpdate(dt, coast.input);
     }
   }
@@ -526,10 +583,22 @@ export class CarTowField {
    * is travelling — the chassis velocity plus its yaw carried out to the axle — as a
    * `direct` steering input. Frame-independent: the axle's velocity is rotated into
    * the car's own frame and its angle from the forward axis is the wheel angle wanted,
-   * so no steering sign convention has to be guessed in world space. Rolling
-   * backwards, or at a walk, the wheels are held straight.
+   * so no steering sign convention has to be guessed in world space.
+   *
+   * BACKING UP the wheels are LOCKED STRAIGHT: a castored wheel reversing flips round
+   * and the towed car would go wherever it liked; held straight it backs like a
+   * two-axle trailer the tower can steer (tools/tow-bench.ts `park`). They ease there
+   * over CASTER_STRAIGHTEN_TAU_S rather than snap. `castor.reversing` is the rig's
+   * (`towerReversing`) on a bar; a car just off the bar reads its own axle's travel.
+   * At a walk forward the wheels hold where they are.
    */
-  private casterSteer(vehicle: Vehicle, frontAxleZ: number): number {
+  private casterSteer(
+    vehicle: Vehicle,
+    frontAxleZ: number,
+    castor: CastorState,
+    dt: number,
+    ownTravel = false,
+  ): number {
     const body = vehicle.chassis;
     const q = body.rotation();
     const v = body.linvel();
@@ -543,9 +612,16 @@ export class CarTowField {
       },
       q,
     );
-    if (Math.hypot(local.x, local.z) < CASTER_MIN_SPEED_MPS || local.z <= 0) return 0;
+    if (ownTravel) {
+      castor.reversing = castor.reversing ? local.z < CASTER_REVERSE_EXIT_MPS : local.z < -CASTER_REVERSE_ENTER_MPS;
+    }
     const lock = vehicle.modelDef.steerLock;
-    return vehicle.steeringInputForWheelAngle(Math.max(-lock, Math.min(lock, Math.atan2(local.x, local.z))));
+    if (castor.reversing) {
+      castor.angle *= Math.exp(-dt / CASTER_STRAIGHTEN_TAU_S);
+    } else if (Math.hypot(local.x, local.z) >= CASTER_MIN_SPEED_MPS && local.z > 0) {
+      castor.angle = Math.max(-lock, Math.min(lock, Math.atan2(local.x, local.z)));
+    }
+    return vehicle.steeringInputForWheelAngle(castor.angle);
   }
 
   /**
@@ -644,13 +720,46 @@ export class CarTowField {
       this.onBreak(towedId, link.towerId);
       this.drop(towedId, true);
     }
-    for (const towedId of reseat) {
-      const link = this.links.get(towedId);
-      if (!link) continue;
-      const tower = this.vehicleFor(link.towerId);
-      const towed = this.vehicleFor(towedId);
-      if (tower && towed) this.hitch(tower, link.towerId, towed, towedId);
+    for (const towedId of reseat) this.rehitch(towedId);
+    for (const link of this.links.values()) {
+      copyVec(link.towerLast, link.towerBody.translation());
+      copyVec(link.towedLast, link.towedBody.translation());
     }
+  }
+
+  /** Re-hitches a bar from scratch: the towed car behind the tower at bar length, still. */
+  private rehitch(towedId: string): void {
+    const link = this.links.get(towedId);
+    if (!link) return;
+    const tower = this.vehicleFor(link.towerId);
+    const towed = this.vehicleFor(towedId);
+    if (tower && towed) this.hitch(tower, link.towerId, towed, towedId);
+  }
+
+  /**
+   * TELEPORTS. Something outside the step (a dev jump, a respawn) moved the tower and
+   * not the towed car. Left alone, the next solve yanks the towed car across the gap
+   * through the joint — 32 m ahead and turned 96° in one game run — with the eye then
+   * back on the ball, so postStep's overstretch never sees it. Caught here, before the
+   * solve: the tower moved further than the towed car by more than any step can, so the
+   * pair is re-hitched in place behind it. Measured RELATIVE to the towed car so a
+   * world-origin shift, which moves both, is not one.
+   */
+  private reseatTeleported(dt: number): void {
+    const jumped = this.reseat;
+    jumped.length = 0;
+    for (const link of this.links.values()) {
+      const ct = link.towerBody.translation();
+      const tt = link.towedBody.translation();
+      const v = link.towerBody.linvel();
+      const gap = Math.hypot(
+        ct.x - link.towerLast.x - (tt.x - link.towedLast.x),
+        ct.y - link.towerLast.y - (tt.y - link.towedLast.y),
+        ct.z - link.towerLast.z - (tt.z - link.towedLast.z),
+      );
+      if (!(gap <= TOW_TELEPORT_M + 2 * Math.hypot(v.x, v.y, v.z) * dt)) jumped.push(link.towedId);
+    }
+    for (const towedId of jumped) this.rehitch(towedId);
   }
 
   /**

@@ -521,25 +521,146 @@ async function rest(tower: string, towed: string): Promise<string> {
   );
 }
 
+/** Backing at a walk: reverse is driven by the brake pedal once it is in (`reverseDriveEngaged`). */
+function backUp(r: TowRig, steer: number): void {
+  r.input.steer = steer;
+  r.input.steerMode = 'direct';
+  r.input.throttle = 0;
+  r.input.reverse = true;
+  r.input.handbrake = false;
+  r.input.brake = speedOf(r.tower) < 5 * KMH ? 0.35 : 0;
+}
+
+/**
+ * Out of a turn, stop, then straight back 15 m with the wheel straight. The rig first
+ * rolls forward at 8 km/h on a quarter lock so the towed car's castored wheels are
+ * turned, then stops on the brake. Reported: the towed wheels' angle once stopped
+ * (`held`, share of lock), how long after the reverse pedal they are straight
+ * (|angle| < 2% of lock), their travel while backing in locks (a castor reversing flips
+ * round), the worst articulation and the towed car's drift off its starting line.
+ */
 async function reverse(tower: string, towed: string): Promise<string> {
   const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
-  const start = rig.tower.chassis.translation();
-  let worst = 0;
-  let travelled = 0;
-  for (let i = 0; i < 25 / FIXED_DT && travelled < 8; i++) {
+  for (let i = 0; i < 4 / FIXED_DT; i++) {
     step(rig, (r) => {
-      r.input.steer = 0;
+      r.input.steer = 0.25;
       r.input.steerMode = 'direct';
-      r.input.throttle = 0;
-      r.input.reverse = true;
-      // Reverse is driven by the brake pedal once it is in (`reverseDriveEngaged`).
-      r.input.brake = speedOf(r.tower) < 5 * KMH ? 0.35 : 0;
+      r.input.reverse = false;
+      r.input.brake = 0;
+      r.input.throttle = speedOf(r.tower) < 8 * KMH ? 0.3 : 0;
     });
+  }
+  for (let i = 0; i < 4 / FIXED_DT && speedOf(rig.tower) > 0.02; i++) {
+    step(rig, (r) => {
+      r.input.throttle = 0;
+      r.input.brake = 1;
+    });
+  }
+  const held = rig.towed.steeringFraction;
+  const start = rig.tower.chassis.translation();
+  const from = rig.towed.chassis.translation();
+  const yaw0 = yawOf(rig.towed.chassis.rotation());
+  let worst = 0;
+  let drift = 0;
+  let travelled = 0;
+  let travel = 0;
+  let straightS = -1;
+  let prev = held;
+  for (let i = 0; i < 40 / FIXED_DT && travelled < 15; i++) {
+    step(rig, (r) => backUp(r, 0));
     const t = rig.tower.chassis.translation();
     travelled = Math.hypot(t.x - start.x, t.z - start.z);
     worst = Math.max(worst, Math.abs(articulation(rig)));
+    const c = rig.towed.chassis.translation();
+    drift = Math.max(drift, Math.abs((c.x - from.x) * Math.cos(yaw0) - (c.z - from.z) * Math.sin(yaw0)));
+    const f = rig.towed.steeringFraction;
+    travel += Math.abs(f - prev);
+    prev = f;
+    if (straightS < 0 && Math.abs(f) < 0.02) straightS = (i + 1) * FIXED_DT;
   }
-  return `reverse        ${fmt(travelled, 1)} m back, artic ${fmt(worst, 1)}°  ${status(rig)}`;
+  return (
+    `reverse 15 m   ${fmt(travelled, 1)} m back, held ${fmt(held)} lock, straight in ${fmt(straightS)} s` +
+    `  wheels travel ${fmt(travel)} lock  artic ${fmt(worst, 1)}°  drift ${fmt(drift)} m  ${status(rig)}`
+  );
+}
+
+/**
+ * Backing the towed car round 90° into a 3.2 m bay, the haul bay's manoeuvre
+ * (game-design2.md §6.4). The tower is steered the way a driver backs a trailer: the
+ * articulation wanted grows with the towed car's heading still to turn (capped at
+ * PARK_ARTIC_DEG), and the wheel chases that articulation. Once the towed car is within
+ * 5° of square it backs 4 m more into the bay on the same rule. Reported: whether it got
+ * round, the widest articulation (a jackknife is past 60°), and the towed car's sideways
+ * spread over the last 4 m against the bay's free width (3.2 m less the car's width).
+ */
+const PARK_ARTIC_DEG = 40;
+async function park(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  const target = wrapPi(yawOf(rig.towed.chassis.rotation()) + Math.PI / 2);
+  const start = rig.tower.chassis.translation();
+  let travelled = 0;
+  let worst = 0;
+  let squaredAt = -1;
+  let lo = Infinity;
+  let hi = -Infinity;
+  let worstHeading = 0;
+  let wheels = 0;
+  for (let i = 0; i < 120 / FIXED_DT && travelled < 60; i++) {
+    step(rig, (r) => {
+      const err = wrapPi(target - yawOf(r.towed.chassis.rotation())) * DEG;
+      const want = Math.max(-PARK_ARTIC_DEG, Math.min(PARK_ARTIC_DEG, -1.5 * err));
+      backUp(r, Math.max(-1, Math.min(1, 0.08 * (want - articulation(r)))));
+    });
+    const t = rig.tower.chassis.translation();
+    travelled += Math.hypot(t.x - start.x, t.z - start.z);
+    start.x = t.x;
+    start.z = t.z;
+    worst = Math.max(worst, Math.abs(articulation(rig)));
+    wheels = Math.max(wheels, Math.abs(rig.towed.steeringFraction));
+    const heading = wrapPi(target - yawOf(rig.towed.chassis.rotation())) * DEG;
+    if (squaredAt < 0 && Math.abs(heading) < 5) squaredAt = travelled;
+    if (squaredAt >= 0) {
+      // Across the bay: the towed centre against the target heading's right-hand axis.
+      const c = rig.towed.chassis.translation();
+      const across = c.x * Math.cos(target) - c.z * Math.sin(target);
+      lo = Math.min(lo, across);
+      hi = Math.max(hi, across);
+      worstHeading = Math.max(worstHeading, Math.abs(heading));
+      if (travelled - squaredAt >= 4) break;
+    }
+  }
+  const free = 3.2 - 2 * rig.towed.modelMeasure.halfExtents[0];
+  const into = squaredAt < 0 ? 'NOT ROUND' : `round in ${fmt(squaredAt, 1)} m, bay spread ${fmt(hi - lo)} m of ${fmt(free)} free, heading ±${fmt(worstHeading, 1)}°`;
+  return `park 90°       ${into}  artic max ${fmt(worst, 1)}°  towed wheels widest ${fmt(wheels)} lock  ${status(rig)}`;
+}
+
+/**
+ * The tower teleported mid-tow (`__bro.jumpTo`, a rescue): 400 m ahead and turned 90°
+ * at 30 km/h. The towed car must come back on the bar BEHIND the tower, square to it
+ * and still — not yanked through the joint. Reported 1 s after the jump: the towed
+ * car's centre ahead (+) or behind (−) the tower along its heading, sideways, the
+ * articulation and the towed car's speed.
+ */
+async function teleport(tower: string, towed: string): Promise<string> {
+  const rig = await makeTowRig(tower, towed, cornerPath(5000, 85, 1, 10));
+  runUp(rig, 30 * KMH, 1);
+  const t = rig.tower.chassis.translation();
+  rig.tower.rescueTo(t.x + 400, t.y + 0.3, t.z + 400, Math.PI / 2, 0);
+  const hold = (r: TowRig): void => {
+    r.input.throttle = 0;
+    r.input.brake = 1;
+    r.input.steer = 0;
+  };
+  for (let i = 0; i < 1 / FIXED_DT; i++) step(rig, hold);
+  const c = rig.tower.chassis.translation();
+  const d = rig.towed.chassis.translation();
+  const yaw = yawOf(rig.tower.chassis.rotation());
+  const ahead = (d.x - c.x) * Math.sin(yaw) + (d.z - c.z) * Math.cos(yaw);
+  const side = (d.x - c.x) * Math.cos(yaw) - (d.z - c.z) * Math.sin(yaw);
+  return (
+    `teleport       towed ${fmt(ahead)} m along, ${fmt(side)} m across, artic ${fmt(articulation(rig), 1)}°` +
+    `  towed ${fmt(speedOf(rig.towed))} m/s  ${status(rig)}`
+  );
 }
 
 /** True while the two bodies' own chassis colliders touch. */
@@ -686,6 +807,8 @@ async function main(): Promise<void> {
     console.log(`  ${await brake(tower, towed, true)}`);
     console.log(`  ${await rest(tower, towed)}`);
     console.log(`  ${await reverse(tower, towed)}`);
+    console.log(`  ${await park(tower, towed)}`);
+    console.log(`  ${await teleport(tower, towed)}`);
     console.log(`  ${await snag(tower, towed)}`);
     for (const line of await rope(tower, towed)) console.log(`  ${line}`);
   }
