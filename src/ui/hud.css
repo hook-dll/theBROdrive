@@ -289,13 +289,13 @@ body.is-machine-focus .hud-crosshair {
 
 /* ------------------------------------------------------------------ *
  *  THE PANEL (hud.ts) along the top edge, on foot and driving alike, *
- *  out of the way of every camera: two glass orbs in the corners —   *
- *  the navigator (hudmap.ts) left, the gyro and the pedals           *
- *  (hudgyro.ts) right, Diablo II's health and mana hung from the top *
- *  — and between them the POD: the money tray and the segment        *
- *  display. The glass is lit like a car stereo of about 2000, in the *
- *  backlight's one colour (Settings.hudBacklight), faults in red;    *
- *  the bezels, the tray and the balls in it are things, not light.   *
+ *  out of the way of every camera: faint glass in the corners — the  *
+ *  navigator (hudmap.ts) left, the gyro and the pedal lever          *
+ *  (hudgyro.ts) right — and between them the POD: the segment        *
+ *  display, the money jar (hudjar.ts) beside it. The glass is lit    *
+ *  like a car stereo of about 2000, in the backlight's one colour    *
+ *  (Settings.hudBacklight), faults in red; the pod, the jar and the  *
+ *  balls in it are things, not light.                                *
  * ------------------------------------------------------------------ */
 
 #ui {
@@ -348,129 +348,115 @@ body.is-machine-focus .hud-crosshair {
   --lcd-alarm: #ff4630;
 }
 
-/* THE ORBS: a glass sphere in a moulded ring. */
-.hud-orb {
+/* THE NAVIGATOR (hudmap.ts) and THE GYRO (hudgyro.ts): faint glass over the world,
+   barely there, the road and the ball on it as faint — read when looked at, not in
+   the way of the view. */
+.hud-panel {
+  --hud-faint: 0.62;
+  --hud-faint-glass: color-mix(in srgb, var(--lcd-glass) 26%, transparent);
+}
+
+.hud-navi {
   position: absolute;
   top: calc(1.1em + env(safe-area-inset-top));
-  width: 13em;
-  height: 13em;
-  isolation: isolate;
-}
-
-.hud-orb--map {
   left: calc(1.1em + env(safe-area-inset-left));
+  width: 26em;
+  height: 16em;
+  opacity: var(--hud-faint);
+  background: var(--hud-faint-glass);
+  border: 1px solid var(--lcd-edge);
+  border-radius: 0.7em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* The gyro's svg reaches past its bowl to the pedal arcs: drawn larger and pulled out by
-   the margin, its bowl matches the navigator's glass (hudgyro.ts BOWL_R / VIEW). */
-.hud-orb--gyro {
-  top: calc(-1.25em + env(safe-area-inset-top));
-  right: calc(-1.05em + env(safe-area-inset-right));
-  width: 17.3em;
-  height: 17.3em;
-}
-
-.hud-orb--map::before {
-  content: '';
-  position: absolute;
-  inset: -0.6em;
-  z-index: -1;
-  border-radius: 50%;
-  background: linear-gradient(160deg, var(--bezel-hi), var(--bezel) 40%, var(--bezel-lo));
-  box-shadow: 0 0.3em 1.1em rgba(0, 0, 0, 0.45), inset 0 0.06em 0 rgba(255, 255, 255, 0.14);
-}
-
-.hud-orb-screen {
+.hud-navi-screen {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  border-radius: 50%;
-}
-
-/* The glass over the screen: a window's highlight up and left, the sphere's dark edge. */
-.hud-orb-glass {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background:
-    radial-gradient(ellipse 58% 36% at 38% 16%, rgba(255, 255, 255, 0.2), transparent 72%),
-    radial-gradient(circle at 50% 50%, transparent 64%, rgba(0, 0, 0, 0.5) 100%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  border-radius: inherit;
 }
 
 /* The plate under the navigator: where the route goes and how far. */
-.hud-orb-plate {
+.hud-navi-plate {
   position: absolute;
   top: 100%;
-  left: 50%;
-  transform: translate(-50%, 1em);
-  padding: 0.3em 0.8em 0.35em;
-  background: var(--lcd-glass);
+  left: 0;
+  margin-top: 0.5em;
+  padding: 0.25em 0.7em 0.3em;
+  background: var(--hud-faint-glass);
   border: 1px solid var(--lcd-edge);
   border-radius: 0.35em;
-  box-shadow: 0 0 0 0.25em var(--bezel), 0 0.2em 0.8em rgba(0, 0, 0, 0.4);
-  text-align: center;
   white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   line-height: 1.1;
+  text-shadow: 0 0 0.25em rgba(0, 0, 0, 0.9);
 }
 
-.hud-orb-place {
+.hud-navi-place {
   font-size: 1.2em;
   font-weight: 600;
 }
 
-.hud-orb-dist {
+.hud-navi-dist {
   font-size: 1.6em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--lcd-hot);
 }
 
-.hud-orb-dist.is-late,
-.hud-orb-dist.is-lost {
+.hud-navi-dist.is-late,
+.hud-navi-dist.is-lost {
   color: var(--lcd-alarm);
 }
 
-.hud-orb.is-idle .hud-orb-plate {
-  opacity: 0.75;
+.hud-navi.is-idle .hud-navi-plate {
+  opacity: 0.8;
 }
 
-/* THE GYRO (hudgyro.ts): a steel ball in a glass bowl, the pedal arcs round its rim. */
+/* THE GYRO: a steel ball in a glass bowl; the pedal lever scale beside it. */
+.hud-orb--gyro {
+  position: absolute;
+  top: calc(1.1em + env(safe-area-inset-top));
+  right: calc(1.1em + env(safe-area-inset-right));
+  width: 16em;
+  height: 16em;
+  opacity: var(--hud-faint);
+  transition: opacity 0.4s ease;
+}
+
 .hud-gyro {
   display: block;
   width: 100%;
   height: 100%;
   overflow: visible;
-  transition: filter 0.4s ease;
 }
 
-.hud-gyro-glass-in { stop-color: color-mix(in srgb, var(--lcd-on) 16%, var(--lcd-glass)); }
-.hud-gyro-glass-out { stop-color: var(--lcd-glass); }
+.hud-gyro-glass-in { stop-color: color-mix(in srgb, var(--lcd-on) 30%, var(--lcd-glass)); stop-opacity: 0.3; }
+.hud-gyro-glass-out { stop-color: var(--lcd-glass); stop-opacity: 0.3; }
 
 .hud-gyro-bezel {
-  fill: var(--bezel);
-  stroke: var(--bezel-hi);
+  fill: none;
+  stroke: var(--lcd-edge);
   stroke-width: 1;
 }
 
 .hud-gyro-zone.is-harsh {
-  fill: color-mix(in srgb, var(--lcd-alarm) 9%, var(--lcd-glass));
+  fill: var(--lcd-alarm);
+  fill-opacity: 0.06;
 }
 
 .hud-gyro-zone.is-uncomfortable {
-  fill: var(--lcd-glass);
-  fill-opacity: 0.55;
+  fill: none;
   stroke: var(--lcd-mid);
   stroke-width: 1;
   stroke-dasharray: 3 3;
 }
 
 .hud-gyro-zone.is-calm {
-  fill: color-mix(in srgb, var(--lcd-on) 10%, var(--lcd-glass));
-  fill-opacity: 0.8;
+  fill: var(--lcd-on);
+  fill-opacity: 0.08;
   stroke: var(--lcd-on);
   stroke-width: 1.2;
 }
@@ -485,7 +471,7 @@ body.is-machine-focus .hud-crosshair {
 }
 
 .hud-gyro-ball-shadow {
-  fill: rgba(0, 0, 0, 0.4);
+  fill: rgba(0, 0, 0, 0.3);
 }
 
 .hud-gyro.is-uncomfortable .hud-gyro-ball-steel {
@@ -508,47 +494,63 @@ body.is-machine-focus .hud-crosshair {
   transform-origin: center;
 }
 
-.hud-gyro-track {
-  fill: none;
-  stroke: rgba(8, 8, 7, 0.78);
+/* THE PEDAL LEVER (core/pedallever.ts) left of the bowl: six cells, throttle notches
+   over neutral over the brake. The frame is the notch the lever is on; the fills are
+   the pedals as they are now. */
+.hud-lever {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 0.6em);
+  width: 1.8em;
+  height: 8.1em;
+  transform: translateY(-50%);
+  overflow: visible;
+  background: var(--hud-faint-glass);
+  outline: 1px solid var(--lcd-edge);
 }
 
-.hud-gyro-throttle {
-  fill: none;
+.hud-lever-tick {
+  stroke: var(--lcd-mid);
+  stroke-width: 0.5;
+}
+
+.hud-lever-tick.is-neutral {
   stroke: var(--lcd-on);
-}
-
-.hud-gyro.is-kickdown .hud-gyro-throttle {
-  stroke: var(--lcd-hot);
-  filter: drop-shadow(0 0 3px var(--lcd-glow));
-}
-
-.hud-gyro-brake {
-  fill: none;
-  stroke: var(--lcd-alarm);
-}
-
-.hud-gyro.is-locking .hud-gyro-brake {
-  filter: drop-shadow(0 0 3px var(--lcd-alarm));
-}
-
-.hud-gyro-tick {
-  stroke: rgba(0, 0, 0, 0.85);
-  stroke-width: 1.4;
-}
-
-.hud-gyro-notch {
-  fill: var(--lcd-hot);
-  stroke: #000;
   stroke-width: 0.8;
 }
 
-/* Dark on foot: dimmed, not see-through, so the sky does not show through the glass. */
-.hud-panel:not(.is-driving) .hud-gyro {
-  filter: grayscale(0.7) brightness(0.6);
+.hud-lever-throttle {
+  fill: var(--lcd-on);
+  fill-opacity: 0.75;
 }
 
-/* THE POD between the orbs: the tray and the display, hung from the top edge. Its frame
+.hud-lever.is-kickdown .hud-lever-throttle {
+  fill: var(--lcd-hot);
+  fill-opacity: 1;
+}
+
+.hud-lever-brake {
+  fill: var(--lcd-alarm);
+  fill-opacity: 0.85;
+}
+
+.hud-lever.is-locking .hud-lever-brake {
+  fill-opacity: 1;
+  filter: drop-shadow(0 0 1.5px var(--lcd-alarm));
+}
+
+.hud-lever-notch {
+  fill: none;
+  stroke: var(--lcd-hot);
+  stroke-width: 1.4;
+}
+
+/* Dark on foot: fainter still. */
+.hud-panel:not(.is-driving) .hud-orb--gyro {
+  opacity: calc(var(--hud-faint) * 0.45);
+}
+
+/* THE POD between the corners: the display hung from the top edge, the jar beside it. Its frame
    says who drives: plain is the player's own hands, a coloured frame is a car driving
    itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the whole
    road at their limit. */
@@ -577,54 +579,19 @@ body.is-machine-focus .hud-crosshair {
   border-width: 0 2px 2px;
 }
 
-/* THE MONEY TRAY: a conductor's coin tray, a socket for every ball, three compartments. */
-.hud-tray {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.3em;
-  padding: 0.22em;
-  background: var(--bezel-lo);
-  border-radius: 0.5em;
-  box-shadow: inset 0 0.12em 0.3em rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.hud-tray-cell {
-  position: relative;
-  flex: none;
-  border-radius: 0.4em;
-  background: linear-gradient(#2a2620, #1c1a16);
-  box-shadow: inset 0 0.1em 0.25em rgba(0, 0, 0, 0.75), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.hud-tray-socket {
+/* THE MONEY JAR (hudjar.ts) hung beside the pod, left of the display: glass in section,
+   the balls in it. Sized in em by hudjar.ts. */
+.hud-jar {
   position: absolute;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, rgba(0, 0, 0, 0.7) 0 44%, rgba(0, 0, 0, 0.3) 62%, rgba(255, 255, 255, 0.08) 71%, transparent 73%);
+  /* The jar's own top a little under the screen's edge; the canvas round it is for balls in the air. */
+  top: calc(-0.6em + env(safe-area-inset-top));
+  right: calc(100% - 2.2em);
 }
 
-.hud-tray-socket--big,
-.hud-tray-cell .ball--big { width: 1.7em; height: 1.7em; }
-.hud-tray-socket--middle,
-.hud-tray-cell .ball--middle { width: 1.26em; height: 1.26em; }
-.hud-tray-socket--small,
-.hud-tray-cell .ball--small { width: 0.9em; height: 0.9em; }
-
-.hud-tray-cell .ball {
-  position: absolute;
-  box-shadow: 0 0.08em 0.14em rgba(0, 0, 0, 0.6);
-}
-
-/* More big balls than sockets: the rest as a count on the compartment's corner. */
-.hud-tray-overflow {
-  position: absolute;
-  right: -0.3em;
-  top: -0.3em;
-  padding: 0 0.3em;
-  border-radius: 0.6em;
-  background: #f1d9a6;
-  color: #3a2a10;
-  font-size: 1em;
-  font-weight: 700;
+.hud-jar-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .hud-lcd {
@@ -713,6 +680,14 @@ body.is-machine-focus .hud-crosshair {
   }
 }
 
+/* Narrower still, the navigator gives up width so the jar keeps clear of it. */
+@media (max-width: 1100px) {
+  .hud-navi {
+    width: 19em;
+    height: 14em;
+  }
+}
+
 .hud-inventory {
   position: absolute;
   left: 50%;
@@ -790,7 +765,8 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-toasts {
   position: absolute;
-  top: calc(6.6 * var(--hud-u) + env(safe-area-inset-top) + 12px);
+  /* Under the jar hung beside the display. */
+  top: calc(9.6 * var(--hud-u) + env(safe-area-inset-top) + 8px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;

@@ -3,9 +3,9 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
-import { balls } from '../economy/money';
-import { installBallStyle, ballElement, setGameText, type BallKind } from './balls';
-import { MapOrb, type MapSource, type MapView } from './hudmap';
+import { installBallStyle, setGameText } from './balls';
+import { MapScreen, type MapSource, type MapView } from './hudmap';
+import { MoneyJar } from './hudjar';
 import { GyroOrb, type PedalReadout, type RideReadout } from './hudgyro';
 
 export type { MapPost, MapSource, MapView } from './hudmap';
@@ -48,7 +48,7 @@ export interface DrivingReadout {
   /**
    * The pedals as the car is given them now — by keys, a pad, a touch screen or the
    * autopilot — with the keyboard PEDAL LEVER's notch (core/pedallever.ts) while it
-   * drives them: the gyro orb's arcs (ui/hudgyro.ts).
+   * drives them: the lever scale beside the gyro orb (ui/hudgyro.ts).
    */
   pedals: PedalReadout;
 }
@@ -103,19 +103,6 @@ const MAX_TOASTS = 4;
  * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
  */
 const CROSSHAIR_IDLE_MS = 4000;
-/**
- * THE MONEY TRAY: a conductor's coin tray with a socket for every ball it can hold —
- * fifteen big, nine middle, nine small — in three compartments, each kind's sockets in
- * two staggered rows. Diameters and padding in the pod's em.
- */
-const TRAY: Readonly<Record<BallKind, { readonly d: number; readonly bottom: number; readonly top: number }>> = {
-  big: { d: 1.7, bottom: 8, top: 7 },
-  middle: { d: 1.26, bottom: 5, top: 4 },
-  small: { d: 0.9, bottom: 5, top: 4 },
-};
-const TRAY_PAD = 0.28;
-const TRAY_POP_MS = 320;
-
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
@@ -165,27 +152,22 @@ export class Hud {
   private lastLookMs = -Infinity;
   private readonly promptEl: HTMLElement;
   /**
-   * THE PANEL along the top edge, on foot and driving alike: the navigator orb in the
-   * left corner (`map`), the gyro orb in the right one (`gyro`), and between them the
-   * POD — the money tray and the segment display. The display and the gyro go dark on
-   * foot; the tray and the map stay lit.
+   * THE PANEL along the top edge, on foot and driving alike: the navigator screen in the
+   * left corner (`map`), the gyro orb and the pedal lever scale in the right one (`gyro`),
+   * and between them the POD — the segment display with the money jar beside it. The
+   * display and the gyro go dark on foot; the jar and the map stay lit.
    */
   private readonly panelEl: HTMLElement;
   private readonly podEl: HTMLElement;
-  private readonly map: MapOrb;
+  private readonly map: MapScreen;
   private readonly gyro: GyroOrb;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly inventoryEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
-  /** The money tray (`setMoney`): its balls, a list per kind in socket order. */
-  private readonly trayEl: HTMLElement;
-  private readonly trayCells: Record<BallKind, HTMLElement>;
-  private readonly trayBalls: Record<BallKind, HTMLElement[]> = { big: [], middle: [], small: [] };
-  /** "+N" on the big compartment when there are more big balls than sockets. */
-  private readonly trayOverflowEl: HTMLElement;
-  private moneyShown = -1;
+  /** The money jar (`setMoney`, ui/hudjar.ts). */
+  private readonly jar: MoneyJar;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
@@ -233,27 +215,11 @@ export class Hud {
     this.lcdEl = display.svg;
     this.lcdDigits = display.digits;
 
-    // The tray: three compartments, every socket drawn, the balls laid in them.
-    this.trayEl = el('div', 'hud-tray');
-    this.trayCells = { big: el('div', 'hud-tray-cell'), middle: el('div', 'hud-tray-cell'), small: el('div', 'hud-tray-cell') };
-    for (const kind of ['big', 'middle', 'small'] as const) {
-      const cell = this.trayCells[kind];
-      const { d, bottom, top } = TRAY[kind];
-      cell.style.width = `${(bottom * d + 2 * TRAY_PAD).toFixed(3)}em`;
-      cell.style.height = `${(d * 1.86 + 2 * TRAY_PAD).toFixed(3)}em`;
-      for (let i = 0; i < bottom + top; i++) {
-        const socket = el('i', `hud-tray-socket hud-tray-socket--${kind}`);
-        this.placeInTray(socket, kind, i);
-        cell.append(socket);
-      }
-      this.trayEl.append(cell);
-    }
-    this.trayOverflowEl = el('span', 'hud-tray-overflow is-hidden');
-    this.trayCells.big.append(this.trayOverflowEl);
+    this.jar = new MoneyJar();
 
     this.podEl = el('div', 'hud-pod');
-    this.podEl.append(this.trayEl, this.lcdEl);
-    this.map = new MapOrb(mapSource);
+    this.podEl.append(this.jar.el, this.lcdEl);
+    this.map = new MapScreen(mapSource);
     this.gyro = new GyroOrb();
     this.panelEl = el('div', 'hud-panel');
     this.panelEl.append(this.map.el, this.podEl, this.gyro.el);
@@ -280,14 +246,6 @@ export class Hud {
     // rather than tuned.
     root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
     this.setBacklight('blue');
-  }
-
-  /** Puts a socket or a ball on socket `i` of `kind`'s compartment: the bottom row first, then the top in its hollows. */
-  private placeInTray(node: HTMLElement, kind: BallKind, i: number): void {
-    const { d, bottom } = TRAY[kind];
-    const top = i >= bottom;
-    node.style.left = `${(TRAY_PAD + (top ? (i - bottom + 0.5) * d : i * d)).toFixed(3)}em`;
-    node.style.top = `${(TRAY_PAD + (top ? 0 : d * 0.86)).toFixed(3)}em`;
   }
 
   private buildSegmentDisplay(): {
@@ -353,7 +311,7 @@ export class Hud {
 
   /**
    * The car's readout while the player is in one, or null on foot: the instruments then
-   * go dark — the display blank, the gyro still and its pedal arcs empty.
+   * go dark — the display blank, the gyro still and the lever scale empty.
    */
   setDriving(readout: DrivingReadout | null): void {
     const driving = readout !== null;
@@ -407,51 +365,9 @@ export class Hud {
     this.podEl.classList.toggle('is-autopilot-frantic', mode === 'frantic');
   }
 
-  /**
-   * The player's money, rubles, as calcite balls in the tray's sockets. A ball that comes
-   * pops in and one that goes shrinks away, so ten small balls fusing into a middle one
-   * is seen as it happens: nine small sockets empty and a middle one fills.
-   */
+  /** The player's money, rubles, as calcite balls in the jar: poured in as it comes, out as it goes. */
   setMoney(rubles: number): void {
-    if (rubles === this.moneyShown) return;
-    const first = this.moneyShown < 0;
-    this.moneyShown = rubles;
-    this.trayEl.setAttribute('aria-label', `${rubles} rubles`);
-    const amount = balls(rubles);
-    for (const kind of ['big', 'middle', 'small'] as const) {
-      const { bottom, top } = TRAY[kind];
-      const count = Math.min(amount[kind], bottom + top);
-      const list = this.trayBalls[kind];
-      while (list.length > count) {
-        const ball = list.pop()!;
-        if (first) {
-          ball.remove();
-          continue;
-        }
-        ball.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.2)', opacity: 0 }], {
-          duration: TRAY_POP_MS * 0.7,
-          easing: 'ease-in',
-        }).onfinish = () => ball.remove();
-      }
-      while (list.length < count) {
-        const ball = ballElement(kind);
-        this.placeInTray(ball, kind, list.length);
-        this.trayCells[kind].append(ball);
-        list.push(ball);
-        if (!first) {
-          ball.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.18)', offset: 0.7 }, { transform: 'scale(1)' }], {
-            duration: TRAY_POP_MS,
-            delay: TRAY_POP_MS * 0.45,
-            easing: 'ease-out',
-            fill: 'backwards',
-          });
-        }
-      }
-    }
-    const { bottom, top } = TRAY.big;
-    const over = amount.big - (bottom + top);
-    this.trayOverflowEl.classList.toggle('is-hidden', over <= 0);
-    if (over > 0) this.trayOverflowEl.textContent = `+${over}`;
+    this.jar.set(rubles);
   }
 
   /** Player's dashboard size (Settings.dashboardSize): the whole panel scales with it. */
@@ -643,7 +559,7 @@ export class Hud {
   }
 
 
-  /** The navigator orb: see ui/hudmap.ts. */
+  /** The navigator screen: see ui/hudmap.ts. */
   setMap(view: MapView): void {
     if (this.disposed) return;
     this.map.update(view);
@@ -684,6 +600,7 @@ export class Hud {
     this.toastTimers.clear();
     this.toasts = [];
     this.map.dispose();
+    this.jar.dispose();
     for (const node of this.tops) node.remove();
     this.tops.length = 0;
     this.damageVignetteEl.remove();

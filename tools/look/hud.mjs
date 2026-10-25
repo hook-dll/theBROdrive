@@ -54,9 +54,9 @@ try {
   await money(1599);
   await sleep(800);
   await money(1600);
-  await sleep(200);
+  await sleep(150);
   await shot('pile-mid-change');
-  await sleep(900);
+  await sleep(1600);
   await shot('pile-1600');
   await money(7);
   await sleep(900);
@@ -64,7 +64,12 @@ try {
   await money(0);
   await sleep(900);
   await shot('pile-0');
+  // A pour: 7 → 1347, the balls dropping into the jar.
   await money(1347);
+  await sleep(450);
+  await shot('pour-mid');
+  await sleep(2500);
+  await shot('pour-done');
 
   for (const b of ['green', 'amber', 'blue']) {
     await backlight(b);

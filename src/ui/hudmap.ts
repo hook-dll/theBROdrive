@@ -1,15 +1,14 @@
 import { formatClock } from '../contracts/types';
 
 /**
- * THE NAVIGATOR ORB: the HUD's map, a round glass screen in the top left corner (the
- * health orb of Diablo II, hung from the top), drawn as a car navigator of about 2000.
- * The road as it really bends, heading-up: the nose points to the top of the glass and
- * the car stands below its centre, so most of the circle is the road ahead — about the
- * next one or two settlements. The posts are dots with their names, the one the route
- * goes to (the post that signs the cargo, a race's finish, or with nothing aboard the
- * next post) lit, and the road from the car to it lit as the route. A goal beyond the
- * glass is a notch on the rim pointing to it; a road left far behind is an arrow on
- * the rim, and the plate under the orb says how far.
+ * THE NAVIGATOR: the HUD's map, a faint glass screen in the top left corner, drawn as a
+ * car navigator of about 2000. The road as it really bends, heading-up: the nose points
+ * to the top of the screen and the car stands low on it, so most of the screen is the
+ * road ahead — about the next one or two settlements. The posts are dots with their
+ * names, the one the route goes to (the post that signs the cargo, a race's finish, or
+ * with nothing aboard the next post) lit, and the road from the car to it lit as the
+ * route. A goal beyond the screen is a notch on its edge pointing to it; a road left
+ * far behind is an arrow on the edge, and the plate under the screen says how far.
  *
  * Painted on a canvas, again only when the picture has moved by a fraction of a pixel
  * or a degree.
@@ -30,7 +29,7 @@ export interface MapSource {
   roadPoint(s: number, out: { x: number; z: number }): void;
 }
 
-/** One frame's map, written into by the game loop (`newMapView`) and read by `MapOrb.update`. */
+/** One frame's map, written into by the game loop (`newMapView`) and read by `MapScreen.update`. */
 export interface MapView {
   /** `race`: to a race's finish. `delivery`: to the post that signs the cargo. `idle`: the next post. */
   kind: 'race' | 'delivery' | 'idle';
@@ -60,7 +59,7 @@ export function newMapView(): MapView {
   };
 }
 
-/** The colours the orb paints in: the backlight's (hud.css `.hud-orb`), read when it changes. */
+/** The colours the screen paints in: the backlight's (hud.css `.hud-panel`), read when it changes. */
 interface Palette {
   on: string;
   hot: string;
@@ -71,10 +70,10 @@ interface Palette {
   font: string;
 }
 
-/** Metres from the glass's centre to its rim. */
-const RADIUS_M = 4000;
-/** The car stands this share of the radius below the centre: most of the glass is ahead. */
-const CAR_DROP = 0.45;
+/** Metres from the car to the screen's top edge. */
+const AHEAD_M = 5000;
+/** The car stands this share of the screen's height down it: most of the screen is ahead. */
+const CAR_AT = 0.8;
 /** The road is sampled this finely, over this much either side of where it was last sampled. */
 const SAMPLE_STEP_M = 50;
 const SAMPLE_BEHIND_M = 5000;
@@ -96,7 +95,7 @@ function distanceText(m: number): string {
   return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
-export class MapOrb {
+export class MapScreen {
   readonly el: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly g: CanvasRenderingContext2D | null;
@@ -104,7 +103,8 @@ export class MapOrb {
   private readonly distEl: HTMLElement;
   private readonly observer: ResizeObserver | null = null;
   /** Canvas size, device pixels, and the pixel ratio. */
-  private px = 0;
+  private pw = 0;
+  private ph = 0;
   private dpr = 1;
   private palette: Palette | null = null;
   /** The road sampled around `sampledS`: XZ pairs from `sampleFrom` every `SAMPLE_STEP_M`. */
@@ -120,28 +120,30 @@ export class MapOrb {
   private idle: boolean | null = null;
 
   constructor(private readonly source: MapSource) {
-    this.el = el('div', 'hud-orb hud-orb--map');
+    this.el = el('div', 'hud-navi');
     this.canvas = document.createElement('canvas');
-    this.canvas.className = 'hud-orb-screen';
+    this.canvas.className = 'hud-navi-screen';
     this.g = this.canvas.getContext('2d');
-    const plate = el('div', 'hud-orb-plate');
-    this.placeEl = el('div', 'hud-orb-place');
-    this.distEl = el('div', 'hud-orb-dist');
+    const plate = el('div', 'hud-navi-plate');
+    this.placeEl = el('div', 'hud-navi-place');
+    this.distEl = el('div', 'hud-navi-dist');
     plate.append(this.placeEl, this.distEl);
-    this.el.append(this.canvas, el('div', 'hud-orb-glass'), plate);
+    this.el.append(this.canvas, plate);
     if (typeof ResizeObserver !== 'undefined') {
       this.observer = new ResizeObserver((entries) => {
-        const size = entries[entries.length - 1]!.contentRect.width;
+        const rect = entries[entries.length - 1]!.contentRect;
         this.dpr = Math.min(2, window.devicePixelRatio || 1);
-        this.px = Math.round(size * this.dpr);
-        this.canvas.width = this.canvas.height = this.px;
+        this.pw = Math.round(rect.width * this.dpr);
+        this.ph = Math.round(rect.height * this.dpr);
+        this.canvas.width = this.pw;
+        this.canvas.height = this.ph;
         this.drawnKey = '';
       });
       this.observer.observe(this.canvas);
     }
   }
 
-  /** The backlight changed (hud.ts `setBacklight`): read its colours off the orb. */
+  /** The backlight changed (hud.ts `setBacklight`): read its colours off the screen. */
   refreshPalette(): void {
     const style = getComputedStyle(this.el);
     const read = (name: string): string => style.getPropertyValue(name).trim();
@@ -156,40 +158,35 @@ export class MapOrb {
   update(v: MapView): void {
     this.updatePlate(v);
     const g = this.g;
-    if (g === null || this.px <= 0) return;
+    if (g === null || this.pw <= 0 || this.ph <= 0) return;
     if (this.palette === null) this.refreshPalette();
     if (!(Math.abs(v.s - this.sampledS) < RESAMPLE_M)) this.resample(v.s);
 
-    const px = this.px;
-    const r = px / 2;
-    const scale = r / RADIUS_M;
+    const w = this.pw;
+    const h = this.ph;
+    const carX = w / 2;
+    const carY = h * CAR_AT;
+    const scale = carY / AHEAD_M;
     // Redrawn only when the picture has moved: a quarter pixel, a fifth of a degree.
     let rivalsKey = '';
     for (let i = 0; i < v.rivalCount; i++) rivalsKey += `${Math.round(v.rivals[i]! * scale)},`;
     const key = `${Math.round(v.x * scale * 4)}:${Math.round(v.z * scale * 4)}:${Math.round(v.facing * 286)}:` +
-      `${v.kind}:${v.targetIndex}:${Math.round(v.targetS)}:${Math.abs(v.lateral) > FAR_M}:${rivalsKey}:${px}:${this.sampledS}`;
+      `${v.kind}:${v.targetIndex}:${Math.round(v.targetS)}:${Math.abs(v.lateral) > FAR_M}:${rivalsKey}:${w}x${h}:${this.sampledS}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const pal = this.palette!;
 
-    // Heading-up: the facing direction is the glass's up, the car `CAR_DROP` below centre.
+    // Heading-up: the facing direction is the screen's up, the car `CAR_AT` down it.
     // Right of the facing direction is (-cos, sin) in world XZ (player/player.ts).
     const sin = Math.sin(v.facing);
     const cos = Math.cos(v.facing);
-    const carX = r;
-    const carY = r + r * CAR_DROP;
     const toX = (x: number, z: number): number => carX + (-(x - v.x) * cos + (z - v.z) * sin) * scale;
     const toY = (x: number, z: number): number => carY - ((x - v.x) * sin + (z - v.z) * cos) * scale;
     const unit = this.dpr;
 
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, px, px);
+    g.clearRect(0, 0, w, h);
     g.save();
-    g.beginPath();
-    g.arc(r, r, r, 0, Math.PI * 2);
-    g.clip();
-    g.fillStyle = pal.glass;
-    g.fillRect(0, 0, px, px);
 
     // The range ring round the car, a kilometre out.
     g.strokeStyle = pal.mid;
@@ -234,7 +231,7 @@ export class MapOrb {
     for (let i = 0; i < this.posts.length; i++) {
       const x = toX(this.postXZ[i * 2]!, this.postXZ[i * 2 + 1]!);
       const y = toY(this.postXZ[i * 2]!, this.postXZ[i * 2 + 1]!);
-      if (Math.hypot(x - r, y - r) > r + 20 * unit) continue;
+      if (x < -20 * unit || x > w + 20 * unit || y < -20 * unit || y > h + 20 * unit) continue;
       const goal = this.posts[i]!.index === v.targetIndex;
       g.beginPath();
       g.arc(x, y, (goal ? 5.5 : 4) * unit, 0, Math.PI * 2);
@@ -247,13 +244,12 @@ export class MapOrb {
       if (goal) shown.unshift(i);
       else shown.push(i);
     }
-    // Each name beside its dot, on a side where it stays inside the clear glass and off
-    // the car and the names already placed; a name with no such side is left out — the
-    // goal's too, which the plate under the orb names anyway.
+    // Each name beside its dot, on a side where it stays on the screen and off the car
+    // and the names already placed; a name with no such side is left out — the goal's
+    // too, which the plate under the screen names anyway.
     const placed: number[] = [carX - 9 * unit, carY - 11 * unit, carX + 9 * unit, carY + 9 * unit];
     const lineH = 8 * unit;
-    // The glass darkens toward its rim (hud.css `.hud-orb-glass`): a name fits inside that.
-    const clear = r * 0.88;
+    const pad = 4 * unit;
     for (const i of shown) {
       const post = this.posts[i]!;
       const goal = post.index === v.targetIndex;
@@ -261,12 +257,12 @@ export class MapOrb {
       const y = toY(this.postXZ[i * 2]!, this.postXZ[i * 2 + 1]!);
       const name = post.name.toUpperCase();
       const width = g.measureText(name).width;
-      const half = Math.sqrt(Math.max(0, clear * clear - (y - r) * (y - r)));
+      if (y - lineH < pad || y + lineH > h - pad) continue;
       let side = 0;
-      for (const left of x > r ? [true, false] : [false, true]) {
+      for (const left of x > carX ? [true, false] : [false, true]) {
         const x0 = left ? x - 10 * unit - width : x + 10 * unit;
         const x1 = x0 + width;
-        if (x0 < r - half || x1 > r + half) continue;
+        if (x0 < pad || x1 > w - pad) continue;
         let free = true;
         for (let k = 0; k < placed.length && free; k += 4) {
           free = x1 < placed[k]! || x0 > placed[k + 2]! || y + lineH < placed[k + 1]! || y - lineH > placed[k + 3]!;
@@ -310,16 +306,12 @@ export class MapOrb {
       }
     }
 
-    // The rim: a notch toward a goal beyond the glass; an arrow toward a road left far behind.
+    // The edge: a notch toward a goal beyond the screen; an arrow toward a road left far behind.
     this.source.roadPoint(v.targetS, this.point);
-    const gx = toX(this.point.x, this.point.z);
-    const gy = toY(this.point.x, this.point.z);
-    if (Math.hypot(gx - r, gy - r) > r - 6 * unit) this.rimMark(r, Math.atan2(gy - r, gx - r), 8 * unit, pal.hot);
+    this.edgeMark(toX(this.point.x, this.point.z), toY(this.point.x, this.point.z), 8 * unit, pal.hot);
     if (Math.abs(v.lateral) > FAR_M) {
       this.source.roadPoint(v.s, this.point);
-      const rx = toX(this.point.x, this.point.z);
-      const ry = toY(this.point.x, this.point.z);
-      if (Math.hypot(rx - r, ry - r) > r - 12 * unit) this.rimMark(r, Math.atan2(ry - r, rx - r), 12 * unit, pal.alarm);
+      this.edgeMark(toX(this.point.x, this.point.z), toY(this.point.x, this.point.z), 12 * unit, pal.alarm);
     }
 
     // The car, an arrowhead up the glass.
@@ -339,17 +331,32 @@ export class MapOrb {
     g.restore();
   }
 
-  /** A triangle on the rim at `angle` (screen radians), pointing out. */
-  private rimMark(r: number, angle: number, size: number, colour: string): void {
+  /**
+   * A triangle on the screen's edge where the line from its centre to (x, y) leaves it,
+   * pointing out; none while (x, y) is well inside.
+   */
+  private edgeMark(x: number, y: number, size: number, colour: string): void {
     const g = this.g!;
-    const tip = r - 2 * this.dpr;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
+    const cx = this.pw / 2;
+    const cy = this.ph / 2;
+    const dx = x - cx;
+    const dy = y - cy;
+    const inset = 2 * this.dpr;
+    const t = Math.min(Math.abs(dx) > 1e-6 ? (cx - inset) / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-6 ? (cy - inset) / Math.abs(dy) : Infinity);
+    if (t > 1 + (2 * size) / Math.hypot(this.pw, this.ph)) return;
+    const tipX = cx + dx * Math.min(1, t);
+    const tipY = cy + dy * Math.min(1, t);
+    const len = Math.hypot(dx, dy) || 1;
+    const cos = dx / len;
+    const sin = dy / len;
     g.beginPath();
-    g.moveTo(r + cos * tip, r + sin * tip);
-    g.lineTo(r + cos * (tip - size) - sin * size * 0.7, r + sin * (tip - size) + cos * size * 0.7);
-    g.lineTo(r + cos * (tip - size) + sin * size * 0.7, r + sin * (tip - size) - cos * size * 0.7);
+    g.moveTo(tipX, tipY);
+    g.lineTo(tipX - cos * size - sin * size * 0.7, tipY - sin * size + cos * size * 0.7);
+    g.lineTo(tipX - cos * size + sin * size * 0.7, tipY - sin * size - cos * size * 0.7);
     g.closePath();
+    g.lineWidth = 2 * this.dpr;
+    g.strokeStyle = '#000';
+    g.stroke();
     g.fillStyle = colour;
     g.fill();
   }
@@ -373,7 +380,7 @@ export class MapOrb {
     }
   }
 
-  /** The plate under the orb: where the route goes and how far, or the way back to the road. */
+  /** The plate under the screen: where the route goes and how far, or the way back to the road. */
   private updatePlate(v: MapView): void {
     const place = v.kind === 'race' ? `race · ${v.place}` : v.place;
     if (place !== this.placeShown) {
