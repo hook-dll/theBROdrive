@@ -177,6 +177,11 @@ const TRAILER_TYRE = tyreCurve({ construction: 'crossply', aspect: 0.8 }, HANDLI
 const TRAILER_TYRE_GRIP = 0.5;
 /** Tread width, metres: a 155/80 R13. The contact's profile (vehicle/tyrecontact.ts). */
 const TYRE_WIDTH = 0.155;
+/**
+ * The trailer's half width over its tyres, m: half the track plus half a tread, 0.81 m.
+ * The widest thing on it (the mudguards cover the tyres; the box is 0.631 m).
+ */
+export const TRAILER_HALF_WIDTH = TRACK_HALF + TYRE_WIDTH / 2;
 /** One road wheel's spin inertia, kg·m²: the car's wheel (vehicletuning.ts) at this radius. */
 const WHEEL_INERTIA =
   0.5 * WHEEL_MASS_KG * (WHEEL_RADIUS / WHEEL_REFERENCE_RADIUS) ** 2 * WHEEL_RADIUS * WHEEL_RADIUS;
@@ -1542,36 +1547,10 @@ export class TrailerField {
   }
 
   /**
-   * Rebuilds every trailer from a loaded save, then restores the couplings. The
-   * caller supplies the vehicle lookup because `Vehicle` instances are owned by the
-   * composition root, not here.
-   */
-  restoreFromState(vehicleFor: (carId: string) => Vehicle | null): void {
-    this.dispose();
-    // `dispose` took the warm-up node with it, so put it back before anything can
-    // draw: a restored save may hold no trailer at all.
-    this.mountWarmup();
-
-    for (const state of Object.values(this.world.state.trailers)) {
-      this.materialise(state);
-    }
-    // Second pass: a coupling needs both ends to exist.
-    for (const trailer of this.trailers.values()) {
-      const carId = trailer.hitchedTo;
-      if (carId === null) continue;
-      const vehicle = vehicleFor(carId);
-      // A save whose towing car has gone leaves the trailer standing where it is
-      // rather than refusing to load.
-      if (vehicle) trailer.restoreHitch(vehicle, carId);
-      else trailer.unhitch();
-    }
-  }
-
-  /**
    * Reconciles the runtime set with saved trailers around an absolute position.
-   * Coupled trailers follow their live towing vehicle rather than the player so a
-   * car cannot out-run its own drawbar. Standing trailers use separate radii to
-   * avoid repeatedly rebuilding at one boundary.
+   * Coupled trailers follow their towing car rather than the player so a car cannot
+   * out-run its own drawbar: live with it, asleep with it (`sleepWith`). Standing
+   * trailers use separate radii to avoid repeatedly rebuilding at one boundary.
    */
   updateActive(
     absoluteX: number,
@@ -1598,12 +1577,19 @@ export class TrailerField {
         if (!trailer.coupled) trailer.restoreHitch(vehicle, carId);
         continue;
       }
+      // Coupled in state to a car that is in state but has no live body: the car is
+      // asleep (out of the active set, or its model still loading), and the trailer
+      // sleeps with it, coupling kept, until the car is live again. See `sleepWith`.
+      if (carId !== null && this.world.state.cars[carId]) {
+        if (trailer) this.dematerialise(trailer);
+        continue;
+      }
 
-      // Authoritative state says this trailer is not towed by a live car, so a
+      // Authoritative state says this trailer is not towed by a car at all, so a
       // surviving joint is stale: the towing body may already be gone, and the
       // `coupled` guard below would otherwise pin the trailer alive forever.
-      // `unhitch` only records a delta when state still claims a coupling, so this
-      // is silent when state is what changed.
+      // `unhitch` only records a delta when state still claims a coupling (a car that
+      // left state), and is silent when state is what changed.
       if (trailer?.coupled) trailer.unhitch();
 
       // A live standing trailer's body may have moved since its last state snapshot.
@@ -1663,6 +1649,17 @@ export class TrailerField {
       if (trailer.hitchedTo === carId) return trailer;
     }
     return null;
+  }
+
+  /**
+   * Puts the trailer coupled to `carId` back into state, coupling and all, because
+   * that car is going dormant: called BEFORE the car's body is disposed, since a joint
+   * that names a removed body traps the wasm on the next step. `updateActive` keeps it
+   * asleep until the car is live again and then couples it back.
+   */
+  sleepWith(carId: string): void {
+    const trailer = this.hitchedTo(carId);
+    if (trailer) this.dematerialise(trailer);
   }
 
   /** Suspension and tyre step for every live trailer, towed or standing. */

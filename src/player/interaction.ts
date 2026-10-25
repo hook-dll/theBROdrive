@@ -2937,7 +2937,12 @@ export class Interaction {
     // Silent, as getting in is: the door he leaves by was opened and is shut with F.
     if (this.player) {
       this.player.setEnabled(true);
-      if (exit) this.player.teleport(exit.x, exit.y, exit.z, roadS);
+      // Into state at once: the exit's autosave runs on the next microtask, and the
+      // position in state is otherwise the one he got in at, a whole drive back.
+      if (exit) {
+        this.player.teleport(exit.x, exit.y, exit.z, roadS);
+        this.player.pushState();
+      }
     }
   }
 

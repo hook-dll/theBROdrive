@@ -9,7 +9,7 @@ import type { CarState, GameWorld, WorldState } from '../game/state';
 import type { Item } from '../items/items';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { carModel, hasCarModel } from '../vehicle/carmodels';
-import { TRAILER_BALL_Z } from '../vehicle/trailer';
+import { TRAILER_BALL_Z, TRAILER_HALF_WIDTH } from '../vehicle/trailer';
 import { trunkCellCount } from '../vehicle/trunk';
 import { buildCardMachine, CardMachine, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
@@ -54,8 +54,6 @@ const REFUSED_BAND = '#7a3a2a';
 
 /** Clear ground kept round the taken-out car on the haul place, m. */
 const SPOT_MARGIN_M = 0.4;
-/** A trailer's half width with its wheels, m: the bed is narrower than a car. */
-const TRAILER_HALF_WIDTH_M = 1.0;
 
 /**
  * True when `car` carries an active contract thing (`isContractClosed` false), in its boot
@@ -251,7 +249,7 @@ class ToyBox extends CardMachine {
     }
     for (const trailerId of Object.keys(state.trailers)) {
       const at = probe.trailerPosition(trailerId);
-      if (at && blocks(at.x, at.z, TRAILER_BALL_Z, Math.max(TRAILER_HALF_WIDTH_M, TRAILER_BALL_Z))) {
+      if (at && blocks(at.x, at.z, TRAILER_BALL_Z, Math.max(TRAILER_HALF_WIDTH, TRAILER_BALL_Z))) {
         return 'the lay-by is taken: a trailer stands on it';
       }
     }

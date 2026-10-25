@@ -883,46 +883,100 @@ async function boot(): Promise<void> {
       z - origin.z,
       STATE_GROUND_PROBE_UP_M + STATE_GROUND_PROBE_DOWN_M,
     );
+  /**
+   * A COUPLED RIG LIVES AND SLEEPS WHOLE. The cars on one tow bar, and a car with a
+   * trailer on its ball, are a rig keyed by its front car (`rigRoot`, rebuilt each
+   * reconcile from the couplings in state). A rig is held live while the player drives
+   * any car of it or any of its cars is in range on fixed ground; then every car of it
+   * is materialised, so the bar always has both bodies. Otherwise every car of it goes
+   * back into state together, coupling and all: `carTowField.syncFromState` and
+   * `TrailerField.updateActive` put the joints back when the rig is live again.
+   *
+   * Holding a coupled car live whatever its distance, which this replaced, kept a rig
+   * the player had walked or driven away from on bodies whose ground streamed out from
+   * under it: measured in game, a UAZ-469 and its towed GAZ-24 resumed from a save 1.5
+   * km from the player were falling through y = -2480 m five seconds later.
+   */
+  const rigRoot = new Map<string, string>();
+  const heldRigs = new Set<string>();
+  const rigPosition = { x: 0, y: 0, z: 0 };
+  const markCoupledRigs = (): void => {
+    const cars = world.state.cars;
+    const trailers = world.state.trailers;
+    rigRoot.clear();
+    // The front of a rig: up the bars, guarded against a malformed loop.
+    const rootOf = (id: string): string => {
+      let at = id;
+      for (let hop = 0; hop < 8; hop++) {
+        const up = cars[at]?.towedBy ?? null;
+        if (up === null || !cars[up]) break;
+        at = up;
+      }
+      return at;
+    };
+    for (const id in trailers) {
+      const carId = trailers[id]!.hitchedTo;
+      if (carId !== null && cars[carId]) rigRoot.set(carId, rootOf(carId));
+    }
+    for (const id in cars) {
+      const towerId = cars[id]!.towedBy ?? null;
+      if (towerId === null || !cars[towerId]) continue;
+      const root = rootOf(id);
+      rigRoot.set(id, root);
+      rigRoot.set(towerId, root);
+    }
+  };
+  /** A live car still belongs in the active set: within the unload radius, on fixed ground. */
+  const liveCarInRange = (vehicle: Vehicle, anchorX: number, anchorZ: number): boolean => {
+    const position = vehicle.absoluteTranslation(rigPosition);
+    return (
+      withinRadius(position.x, position.z, anchorX, anchorZ, ACTIVE_UNLOAD_RADIUS_SQUARED) &&
+      groundUnder(position.x, position.y, position.z)
+    );
+  };
+  /** A dormant car may join the active set: within the load radius, on fixed ground. */
+  const savedCarInRange = (car: CarState, anchorX: number, anchorZ: number): boolean =>
+    withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED) && groundUnder(car.x, car.y, car.z);
+  /**
+   * A car out of the active set: back into state where it stands. Its couplings go
+   * first, unrecorded — a joint that names a removed body traps the wasm (see the
+   * `car_remove` listener), and the coupling itself stays in state for the wake.
+   */
+  const sleepCar = (id: string, vehicle: Vehicle): void => {
+    trailerField.sleepWith(id);
+    carTowField.remove(id);
+    vehicle.pushState();
+    vehicle.dispose();
+    vehicles.delete(id);
+  };
   const reconcileActiveWorld = (anchorX: number, anchorZ: number): void => {
     const drivingId = world.state.player.drivingCarId;
     const cars = world.state.cars;
-    // Couplings are authoritative state, not derived runtime links. Materialise every
-    // towing body before TrailerField runs so no hitch can outlive its car.
-    const towingCarIds = new Set<string>();
-    for (const trailer of Object.values(world.state.trailers)) {
-      if (trailer.hitchedTo !== null) towingCarIds.add(trailer.hitchedTo);
-    }
-    // A tow bar holds BOTH cars: the towed one must be materialised to be dragged,
-    // and its tower must stay so the bar has something to pull from.
-    for (const id in cars) {
-      const towerId = cars[id]!.towedBy ?? null;
-      if (towerId === null) continue;
-      towingCarIds.add(id);
-      towingCarIds.add(towerId);
-    }
-    for (const id in cars) {
-      const car = cars[id];
+    markCoupledRigs();
+    heldRigs.clear();
+    for (const [id, root] of rigRoot) {
+      if (heldRigs.has(root)) continue;
       const vehicle = vehicles.get(id);
-      const isTowingCar = towingCarIds.has(id);
+      if (
+        id === drivingId ||
+        (vehicle ? liveCarInRange(vehicle, anchorX, anchorZ) : savedCarInRange(cars[id]!, anchorX, anchorZ))
+      ) {
+        heldRigs.add(root);
+      }
+    }
+    for (const id in cars) {
+      const car = cars[id]!;
+      const vehicle = vehicles.get(id);
+      const root = rigRoot.get(id);
+      const held = root !== undefined && heldRigs.has(root);
       if (vehicle) {
-        if (id === drivingId || isTowingCar) continue;
-        const position = vehicle.absoluteTranslation(originAnchor);
+        if (id === drivingId || held) continue;
         // Out of range, or the ground under it has been taken away (a desert tile
         // demoted behind the player): back into state where it stands, rather than
-        // falling out of the world with nobody watching.
-        if (
-          !withinRadius(position.x, position.z, anchorX, anchorZ, ACTIVE_UNLOAD_RADIUS_SQUARED) ||
-          !groundUnder(position.x, position.y, position.z)
-        ) {
-          vehicle.pushState();
-          vehicle.dispose();
-          vehicles.delete(id);
-        }
-      } else if (
-        id === drivingId ||
-        isTowingCar ||
-        (withinRadius(car.x, car.z, anchorX, anchorZ, ACTIVE_LOAD_RADIUS_SQUARED) && groundUnder(car.x, car.y, car.z))
-      ) {
+        // falling out of the world with nobody watching. A rig that is not held goes
+        // whole, whatever this one car's own distance.
+        if (root !== undefined || !liveCarInRange(vehicle, anchorX, anchorZ)) sleepCar(id, vehicle);
+      } else if (id === drivingId || held || (root === undefined && savedCarInRange(car, anchorX, anchorZ))) {
         void materializeVehicle(car).catch((error: unknown) => {
           console.error(`failed to load car model "${car.modelId}"`, error);
           hud.setToast(`could not load ${carModel(car.modelId).label}`);
@@ -1060,29 +1114,24 @@ async function boot(): Promise<void> {
   });
   const initialActiveAnchor = activeWorldAnchor();
   const initialDrivingId = world.state.player.drivingCarId;
-  const initialTowingIds = new Set(
-    Object.values(world.state.trailers)
-      .filter((trailer) => trailer.hitchedTo !== null)
-      .map((trailer) => trailer.hitchedTo as string),
-  );
-  for (const car of Object.values(world.state.cars)) {
-    const towerId = car.towedBy ?? null;
-    if (towerId === null) continue;
-    initialTowingIds.add(car.id);
-    initialTowingIds.add(towerId);
+  // The same rule as `reconcileActiveWorld`, read from state: a rig comes in whole when
+  // it is driven or any car of it is in range, and not at all otherwise.
+  markCoupledRigs();
+  heldRigs.clear();
+  for (const [id, root] of rigRoot) {
+    if (id === initialDrivingId || savedCarInRange(world.state.cars[id]!, initialActiveAnchor.x, initialActiveAnchor.z)) {
+      heldRigs.add(root);
+    }
   }
-  const initialCars = Object.values(world.state.cars).filter(
-    (car) =>
+  const initialCars = Object.values(world.state.cars).filter((car) => {
+    const root = rigRoot.get(car.id);
+    return (
       car.id === initialDrivingId ||
-      initialTowingIds.has(car.id) ||
-      withinRadius(
-        car.x,
-        car.z,
-        initialActiveAnchor.x,
-        initialActiveAnchor.z,
-        ACTIVE_LOAD_RADIUS_SQUARED,
-      ),
-  );
+      (root !== undefined
+        ? heldRigs.has(root)
+        : savedCarInRange(car, initialActiveAnchor.x, initialActiveAnchor.z))
+    );
+  });
   await Promise.all(initialCars.map(materializeVehicle));
   reconcileActiveWorld(initialActiveAnchor.x, initialActiveAnchor.z);
 

@@ -216,6 +216,23 @@
 
 ### Fixed
 
+- A coupled rig (two cars on a tow bar, or a car with a trailer on its ball) was held
+  live at any distance from the player, so one left more than a kilometre behind stood
+  on bodies whose ground streamed out from under it: a UAZ-469 towing a GAZ-24, resumed
+  1.5 km from the player, was falling through y = -2480 m five seconds later. A rig now
+  lives and sleeps whole (`main.ts` `reconcileActiveWorld`): live while driven or while
+  any car of it is in range on fixed ground, otherwise back into state with its coupling,
+  which `CarTowField.syncFromState` and `TrailerField.updateActive` put back on waking;
+  a trailer sleeps with its car (`TrailerField.sleepWith`) instead of being unhitched.
+  The unused `TrailerField.restoreFromState` is gone.
+- Getting out of a car left the player's saved position where he got in, and the exit's
+  own autosave wrote it: a reload put him back at the start of the drive, a whole road
+  away from his car (`player/interaction.ts` `tryExit` now pushes the exit into state).
+- A tower teleported with the bar on (the fall-out-of-world rescue, a dev jump) snapped
+  the bar: the bar's re-seat above `TOW_MAX_CORRECTION` sat behind the 1.2 m break and
+  could not be reached. It is checked first now and re-seats the pair (`vehicle/cartow.ts`).
+- The toy box's lay-by check took a trailer as 1.0 m half-wide; it uses the KMZ's
+  `TRAILER_HALF_WIDTH` (0.81 m, half the track plus half a tread).
 - A post showed the green HAND IN card ("PUT THE CARPET IN THE TRAY") for a thing it
   would refuse, its own cargo among them; the card now says THE TRAY WILL NOT TAKE IT
   with the reason, as the tray already did (`world/post.ts` `handInCard`).

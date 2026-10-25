@@ -103,9 +103,11 @@ const A_FRAME_HALF_SPAN = 0.32;
  */
 const TOW_TOLERANCE = 0.002;
 /**
- * Above this the coupling is not drifting, something was teleported — a save
- * loading, the fall-out-of-world rescue, a dev spawn. The correction stands down
- * and `hitch` re-seats the pair instead of yanking a car across the world.
+ * Above this the coupling is not drifting, something was teleported — the
+ * fall-out-of-world rescue, a dev jump. No snag gets here: a held towed car stretches
+ * the eye a few centimetres a step and the bar snaps at TOW_BREAK_M on the way, while a
+ * teleport opens the whole gap in one step. The correction stands down and `hitch`
+ * re-seats the pair instead of yanking a car across the world or dropping the bar.
  */
 const TOW_MAX_CORRECTION = 1.6;
 /**
@@ -300,6 +302,9 @@ export class CarTowField {
   private readonly barGeometry: THREE.CylinderGeometry;
   private readonly eyeGeometry: THREE.SphereGeometry;
   private readonly qScratch = new THREE.Quaternion();
+  /** Per-step receivers for `postStep`'s snapped and teleported bars. */
+  private readonly refused: string[] = [];
+  private readonly reseat: string[] = [];
   private readonly aScratch = new THREE.Vector3();
   private readonly bScratch = new THREE.Vector3();
 
@@ -558,7 +563,10 @@ export class CarTowField {
    * instead of being teleported along at full strength.
    */
   postStep(dt: number): void {
-    const refused: string[] = [];
+    const refused = this.refused;
+    const reseat = this.reseat;
+    refused.length = 0;
+    reseat.length = 0;
     const maxMove = TOW_CORRECTION_SPEED * Math.max(dt, 0);
     const maxDeltaV = TOW_CORRECTION_ACCEL * Math.max(dt, 0);
     for (const link of this.links.values()) {
@@ -582,6 +590,10 @@ export class CarTowField {
         link.loadFor = 0;
         continue;
       }
+      if (err > TOW_MAX_CORRECTION) {
+        reseat.push(link.towedId);
+        continue;
+      }
       if (err > TOW_BREAK_M) {
         refused.push(link.towedId);
         continue;
@@ -594,8 +606,6 @@ export class CarTowField {
         refused.push(link.towedId);
         continue;
       }
-      if (err > TOW_MAX_CORRECTION) continue;
-
       // Cancel the drift: remove the towed car's velocity along the error, then move
       // the TOWED car alone back onto the eye, both at a bounded rate. The tower is
       // never moved — it is the car the camera is locked to and is simultaneously
@@ -633,6 +643,13 @@ export class CarTowField {
       if (!link) continue;
       this.onBreak(towedId, link.towerId);
       this.drop(towedId, true);
+    }
+    for (const towedId of reseat) {
+      const link = this.links.get(towedId);
+      if (!link) continue;
+      const tower = this.vehicleFor(link.towerId);
+      const towed = this.vehicleFor(towedId);
+      if (tower && towed) this.hitch(tower, link.towerId, towed, towedId);
     }
   }
 
