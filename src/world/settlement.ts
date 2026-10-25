@@ -10,7 +10,7 @@ import type { Road } from './road';
  * THE ROADSIDE STOP'S PLAN: where its buildings stand, how long and how wide its lay-by
  * is, and where the services go. Every courier/post stop is a SETTLEMENT (game-design2.md
  * §6): four to seven houses of the stop's one dwelling type on both sides of the road,
- * and on the lay-by's side one long pad with the post, a parking place, the shop and
+ * and on the lay-by's side one long pad with the post, the toy box, a parking place, the shop and
  * sometimes a barrel stand, a car for sale or a trailer. Every other roadside stop is one
  * house in front of its own short lay-by.
  *
@@ -66,6 +66,8 @@ export interface SettlementLayout {
   readonly post: SettlementSpot | null;
   /** Ditto. Settlements only. */
   readonly shop: SettlementSpot | null;
+  /** The toy box (world/toybox.ts), beside the post toward the lay-by's middle. Settlements only. */
+  readonly toybox: SettlementSpot | null;
   /** Half the settlements and a fifth of the lone houses; faces the road. */
   readonly barrels: SettlementSpot | null;
   /**
@@ -101,8 +103,8 @@ export interface RoadsideStop {
 /** Arclength of a lone house's pad at full width either side of the stop, metres. */
 export const PAD_HALF_LENGTH_M = 22;
 /**
- * A settlement's pad, either side of the stop, metres: the service strip (post, parking,
- * shop, barrels, car for sale, trailer) and the signpost at its start.
+ * A settlement's pad, either side of the stop, metres: the service strip (post, toy box,
+ * parking, shop, barrels, car for sale, trailer) and the signpost at its start.
  */
 export const SETTLEMENT_PAD_HALF_M = 30;
 /** Length of each slip: road edge to full pad width, metres. */
@@ -151,6 +153,8 @@ const LOT_ALONG_M = -16;
 const LOT_OUT_M = 4.3;
 const POST_ALONG_M = -6;
 const POST_OUT_M = 1.2;
+const TOYBOX_ALONG_M = -2.8;
+const TOYBOX_OUT_M = 1.2;
 const SHOP_ALONG_M = 6;
 const SHOP_OUT_M = 1.2;
 const BARRELS_ALONG_M = 14;
@@ -180,11 +184,12 @@ const BARRELS_SIGN_CLEAR_M = 1;
  * placement bench (tools/poi-placement.ts) measures houses, the lay-by and one another
  * against these.
  */
-export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'barrels' | 'lot' | 'trailer', readonly [number, number]>> = {
+export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'barrels' | 'lot' | 'trailer', readonly [number, number]>> = {
   // The card machines (world/cardmachine.ts): the crank's knob past one flank, the tray
   // standing out of the front.
   post: [0.75, 0.8],
   shop: [0.75, 0.8],
+  toybox: [0.75, 0.8],
   barrels: [1.8, 1.0],
   // The car and, on its road-side flank, its board and key box.
   lot: [2.7, 2.6],
@@ -304,6 +309,7 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       houses: [house],
       post: null,
       shop: null,
+      toybox: null,
       barrels,
       lot: null,
       trailer: null,
@@ -427,6 +433,7 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       houses,
       post: spot(s0 + POST_ALONG_M, side, padOuter + POST_OUT_M, face),
       shop: spot(s0 + SHOP_ALONG_M, side, padOuter + SHOP_OUT_M, face),
+      toybox: spot(s0 + TOYBOX_ALONG_M, side, padOuter + TOYBOX_OUT_M, face),
       barrels,
       lot,
       trailer,

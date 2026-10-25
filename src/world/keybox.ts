@@ -10,6 +10,7 @@ import { rayBox, type FixtureContext, type FixtureField, type FixtureFocus, type
 import { SIGN_PLANE, signMaterial, type MarketField } from './market';
 import { box, C, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
+import { boxRefusal } from './toybox';
 
 /**
  * The key box beside a lot car (world/carlot.ts): how a car is bought, by hand.
@@ -22,7 +23,9 @@ import { addStatic, yawRotation } from './props/scatter';
  *    goes all the way down, a key on its tag drops inside and the drawer slides out.
  *  - the KEY DRAWER: a click takes the key: the car is bought (`car_buy`), its price
  *    board comes down (`MarketField.carSold`), the drawer slides shut again, empty, and
- *    the box lets go of the player.
+ *    the box lets go of the player. The car he had (`oldCar`) goes into the toy box at
+ *    once (world/toybox.ts) unless it may not (`boxRefusal`: contract cargo, a trailer or
+ *    a tow bar); then it waits where it stands until he boxes it at a post.
  *
  * The price is painted on the plate on its face. The key on its tag is only seen, never
  * carried: taking it IS the purchase. Whether the key has dropped is the box's own
@@ -301,11 +304,47 @@ class KeyBox implements WorldFixture {
         this.phase = 'taken';
         this.clock = 0;
         this.key.visible = false;
+        this.boxOldCar(ctx);
         ctx.stepBack();
         return 'pickup';
       default:
         return null;
     }
+  }
+
+  /**
+   * The car the player had before this one: the one he last drove, else his car standing
+   * nearest the box; null when he has none out.
+   */
+  private oldCar(): string | null {
+    const cars = this.world.state.cars;
+    const last = this.world.lastDrivenCarId;
+    if (last && last !== this.carId && cars[last]?.papers) return last;
+    let best: string | null = null;
+    let bestD2 = Infinity;
+    for (const [carId, car] of Object.entries(cars)) {
+      if (carId === this.carId || !car.papers) continue;
+      const d2 = (car.x - this.x) ** 2 + (car.z - this.z) ** 2;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = carId;
+      }
+    }
+    return best;
+  }
+
+  /** The old car into the toy box, or, when it may not go, left where it stands. */
+  private boxOldCar(ctx: FixtureContext): void {
+    const old = this.oldCar();
+    const car = old ? this.world.state.cars[old] : undefined;
+    if (!old || !car) return;
+    const label = carModel(car.modelId).label;
+    if (boxRefusal(this.world.state, old) !== null) {
+      ctx.toast(`your ${label} waits where it stands: box it at a post`);
+      return;
+    }
+    ctx.boxCar(old);
+    ctx.toast(`your ${label} went into the toy box`);
   }
 
   cursor(): 'pointer' | null {

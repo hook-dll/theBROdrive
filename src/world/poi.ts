@@ -31,6 +31,7 @@ import { roadsideSlot, roadsideSlotOfIndex, roadsideSlotsBetween, rollStructure,
 import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout, type SettlementSpot } from './settlement';
 import type { FixtureField } from './fixturefield';
 import { buildPost } from './post';
+import { buildToyBox } from './toybox';
 import { buildBarrelStand } from './barrels';
 import { buildKeyBox } from './keybox';
 import { newRegionMix, regionAt } from './regions';
@@ -583,8 +584,8 @@ function buildLot(
     );
   };
 
-  // A car made at a lot lives in world state from then on, sold or not.
-  const existing = ctx.world.state.cars[carId];
+  // A car made at a lot lives in world state from then on, sold or not, boxed or out.
+  const existing = ctx.world.state.cars[carId] ?? ctx.world.state.toyBox[carId];
   if (existing) {
     if (existing.lotPrice !== undefined) priceBoard(existing.lotPrice);
     return;
@@ -659,8 +660,8 @@ function spawnTrailer(ctx: ChunkContext, poi: Poi, at: SettlementSpot, trailers:
 /**
  * One stop. Out in the desert: its building, facing wherever it was left facing. At the
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
- * sides, its «ПОЧТА» machine (world/post.ts), the shop's machine, the car for sale with
- * its key box, a barrel stand, and sometimes a trailer.
+ * sides, its «ПОЧТА» machine (world/post.ts) and toy box (world/toybox.ts), the shop's
+ * machine, the car for sale with its key box, a barrel stand, and sometimes a trailer.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -693,6 +694,10 @@ function buildPoi(
     const stop = postStop(ctx.world.seed, slotPost(roadsideSlotOfIndex(poi.index)));
     const pose = spotPose(ctx.road, layout.post);
     buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    if (layout.toybox) {
+      const box = spotPose(ctx.road, layout.toybox);
+      buildToyBox(ctx, stop, box.x, box.z, box.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    }
   }
   if (layout.shop) {
     const pose = spotPose(ctx.road, layout.shop);

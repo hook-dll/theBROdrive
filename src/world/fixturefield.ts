@@ -50,6 +50,12 @@ export interface FixtureContext {
   probe(postIndex: number, x: number, z: number): DeliveryProbe;
   /** Kopecks a race win adds for handing contract `contractId` in now (contracts/race.ts). */
   racePay(contractId: string): number;
+  /**
+   * Puts the player's car `carId` into the toy box (`car_box`), its live body's fuel,
+   * wear and pose written to its `CarState` first. The caller has checked it may go
+   * (world/toybox.ts `boxRefusal`).
+   */
+  boxCar(carId: string): void;
   /** A one-line message on the HUD. */
   toast(text: string): void;
 }

@@ -1015,7 +1015,8 @@ async function boot(): Promise<void> {
     // A delivered contract car or trailer leaves state and must leave the scene and
     // the collider maps with it: the streaming reconcile walks the cars and trailers
     // that ARE in state, so a removed one would otherwise stand there for the session.
-    if (delta.t === 'car_remove') {
+    // A car put into the toy box (world/toybox.ts) leaves the world the same way.
+    if (delta.t === 'car_remove' || (delta.t === 'car_box' && !world.state.cars[delta.carId])) {
       // ORDER MATTERS. A trailer still coupled to the car holds that body in a rapier
       // impulse joint, and `enforceHitch` reads the car's body every step: removing the
       // body first traps the wasm on the next step ("Unreachable code should not be
@@ -1037,21 +1038,23 @@ async function boot(): Promise<void> {
       trailerField.remove(delta.trailerId);
       return;
     }
-    if (delta.t !== 'car_add') return;
+    // A car made, or taken out of the toy box onto a post's lay-by.
+    const car = delta.t === 'car_add' ? delta.car : delta.t === 'car_unbox' ? world.state.cars[delta.carId] : undefined;
+    if (!car) return;
     const anchor = activeWorldAnchor();
     if (
-      delta.car.id === world.state.player.drivingCarId ||
+      car.id === world.state.player.drivingCarId ||
       withinRadius(
-        delta.car.x,
-        delta.car.z,
+        car.x,
+        car.z,
         anchor.x,
         anchor.z,
         ACTIVE_LOAD_RADIUS_SQUARED,
       )
     ) {
-      void materializeVehicle(delta.car).catch((error: unknown) => {
-        console.error(`failed to load car model "${delta.car.modelId}"`, error);
-        hud.setToast(`could not load ${carModel(delta.car.modelId).label}`);
+      void materializeVehicle(car).catch((error: unknown) => {
+        console.error(`failed to load car model "${car.modelId}"`, error);
+        hud.setToast(`could not load ${carModel(car.modelId).label}`);
       });
     }
   });

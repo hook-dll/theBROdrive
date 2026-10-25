@@ -733,6 +733,11 @@ export class Interaction {
         return probe;
       },
       racePay: (contractId: string) => self.racePay(contractId),
+      boxCar: (carId: string) => {
+        // The body's throttled counters into its state before the state leaves the world.
+        self.carLookup.vehicle(carId)?.pushState();
+        self.world.apply({ t: 'car_box', carId });
+      },
       toast: (text: string) => self.hooks.toast(text),
     };
   })();

@@ -109,8 +109,8 @@ const HAND_IN_BAND: Readonly<Record<HandInCard['mode'], string>> = {
 const LIMIT_TEXT = 'three jobs already out — hand one in or return it';
 registerCardMachineSigns(POST_LOOK);
 
-/** A car counts as standing on the post's lay-by inside this radius of its haul place, m. */
-const LAYBY_CAR_RANGE_M = 20;
+/** A car counts as standing on the post's lay-by inside this radius of its haul place, m (the toy box's too). */
+export const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
 

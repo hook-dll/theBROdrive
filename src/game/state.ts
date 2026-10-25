@@ -164,7 +164,9 @@ export interface CarState {
   towedBy?: string | null;
   /**
    * The player holds this car's papers: he bought it at a lot (`car_buy`), or it is the
-   * car the drive started in. Absent or false: somebody else's car.
+   * car the drive started in. Absent or false: somebody else's car. The player's cars are
+   * exactly the ones with papers, in `WorldState.cars` (out in the world) or in
+   * `WorldState.toyBox` (boxed); a haul's car and a lot car never have them.
    */
   papers?: boolean;
   /**
@@ -307,6 +309,12 @@ export interface WorldState {
   settings: Settings;
   player: PlayerState;
   cars: Record<string, CarState>;
+  /**
+   * The player's boxed cars (game-design2.md §13.4, world/toybox.ts), keyed by car id:
+   * out of the world, each `CarState` kept whole (fuel, wear, stickers, parts, what its
+   * boot holds), never with contract cargo. A car is in `cars` or here, never both.
+   */
+  toyBox: Record<string, CarState>;
   /** Trailers standing in the world or coupled to a car, keyed by trailer id. */
   trailers: Record<string, TrailerState>;
   /** Parts lying loose in the world, keyed by part id. */
@@ -370,6 +378,10 @@ export type WorldDelta =
   | { t: 'exit_car' }
   | { t: 'car_add'; car: CarState }
   | { t: 'car_remove'; carId: string }
+  /** An owned car out of the world into the toy box (world/toybox.ts): `cars` → `toyBox`. */
+  | { t: 'car_box'; carId: string }
+  /** A boxed car back into the world, standing at the given pose: `toyBox` → `cars`. */
+  | { t: 'car_unbox'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
   /** `carId` is the TOWED car; `towerId` null drops the bar. */
   | { t: 'car_tow'; carId: string; towerId: string | null }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
@@ -474,6 +486,7 @@ export function newWorldState(seed: number): WorldState {
       money: 0,
     },
     cars: {},
+    toyBox: {},
     courierStorage: {},
     completedContractIds: [],
     deliveriesByKind: {},
@@ -556,10 +569,10 @@ export class GameWorld {
   private readonly listeners = new Set<(delta: WorldDelta) => void>();
   private partCounter = 0;
   /**
-   * The car the player last sat in at the wheel this session, or null: the car he
-   * arrived in, which a post pays the uniqueness bonus by when none stands on its
-   * lay-by (world/post.ts). Session memory, not saved: a reload starts from the car he
-   * sits in.
+   * The car the player last sat in at the wheel this session, or took out of the toy box,
+   * or null (boxed away): the car he arrived in, which a post pays the uniqueness bonus
+   * by when none stands on its lay-by (world/post.ts), and the old car a purchase boxes
+   * (world/keybox.ts). Session memory, not saved: a reload starts from the car he sits in.
    */
   lastDrivenCarId: string | null;
 
@@ -580,7 +593,7 @@ export class GameWorld {
     for (const id of Object.keys(state.looseItems)) bump(id);
     for (const item of state.player.carried) bump(item.id);
     if (state.player.wornSunShades) bump(state.player.wornSunShades.id);
-    for (const car of Object.values(state.cars)) {
+    for (const car of [...Object.values(state.cars), ...Object.values(state.toyBox)]) {
       bump(car.id);
       for (const item of car.storage) {
         if (item) bump(item.id);
@@ -647,6 +660,33 @@ export class GameWorld {
       case 'car_remove':
         delete s.cars[delta.carId];
         break;
+      case 'car_box': {
+        // Only the player's own car, and not the one he sits in: the box takes it as it
+        // stands, off any bar (world/toybox.ts refuses a coupled one first).
+        const car = s.cars[delta.carId];
+        if (!car?.papers || s.player.drivingCarId === delta.carId) break;
+        delete s.cars[delta.carId];
+        car.towedBy = null;
+        s.toyBox[delta.carId] = car;
+        if (this.lastDrivenCarId === delta.carId) this.lastDrivenCarId = null;
+        break;
+      }
+      case 'car_unbox': {
+        const car = s.toyBox[delta.carId];
+        if (!car) break;
+        delete s.toyBox[delta.carId];
+        car.x = delta.x;
+        car.y = delta.y;
+        car.z = delta.z;
+        car.qx = delta.qx;
+        car.qy = delta.qy;
+        car.qz = delta.qz;
+        car.qw = delta.qw;
+        s.cars[delta.carId] = car;
+        // Taken out to be driven: the car a post reads when none stands on its lay-by.
+        this.lastDrivenCarId = delta.carId;
+        break;
+      }
       case 'car_tow': {
         // A coupling to a car that is not there is not a coupling; the tower side
         // is derived from this field, so a dangling id would keep a ghost alive.

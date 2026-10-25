@@ -222,7 +222,7 @@ const MAX_VERGE_M = 22;
       name: structureDef(house.structure).id,
       rect: houseRect(seedRoad, house),
     }));
-    for (const name of ['post', 'shop', 'barrels', 'lot', 'trailer'] as const) {
+    for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'trailer'] as const) {
       const at = stop.layout[name];
       if (!at) continue;
       const pose = spotPose(seedRoad, at);
@@ -652,7 +652,7 @@ const MAX_VERGE_M = 22;
           rect: { ...pose, halfX: alongRoad ? across : along, halfZ: alongRoad ? along : across },
         });
       };
-      for (const name of ['post', 'shop', 'barrels', 'lot', 'trailer'] as const) {
+      for (const name of ['post', 'shop', 'toybox', 'barrels', 'lot', 'trailer'] as const) {
         addSpot(name, layout[name], SERVICE_HALF[name][0], SERVICE_HALF[name][1]);
       }
       if (own) {

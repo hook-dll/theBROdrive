@@ -173,6 +173,9 @@ export function installVehicleAutosave(
       case 'vend_sold':
       case 'lot_pay':
       case 'car_buy':
+      // A car into or out of the toy box (world/toybox.ts).
+      case 'car_box':
+      case 'car_unbox':
         if (world.state.player.drivingCarId) return;
         break;
       default:
@@ -547,6 +550,14 @@ export function migrateState(raw: unknown): WorldState {
     if (towerId !== null && towedIds.has(towerId)) car.towedBy = null;
     else if (towerId !== null) towedIds.add(towerId);
   }
+  // The boxed cars (world/toybox.ts): the player's own, out of the world, off any bar.
+  const toyBox: Record<string, CarState> = {};
+  for (const [id, value] of Object.entries(recordField(obj.toyBox, 'toyBox'))) {
+    const car = migrateCar(asRecord(value, `boxed car "${id}"`), version);
+    if (!car.papers || cars[id]) continue;
+    car.towedBy = null;
+    toyBox[id] = car;
+  }
 
   const trailers: Record<string, TrailerState> = {};
   for (const [id, value] of Object.entries(trailersRaw)) {
@@ -623,6 +634,7 @@ export function migrateState(raw: unknown): WorldState {
     settings: sanitizeSettings(obj.settings, false),
     player,
     cars,
+    toyBox,
     courierStorage,
     completedContractIds,
     deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind),

@@ -10,8 +10,8 @@ import { box, C, cylinder, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
 /**
- * THE CARD MACHINE: the one cabinet the POST (world/post.ts) and the SHOP
- * (world/vending.ts) are built as, worked by hand up close (player/machinefocus.ts).
+ * THE CARD MACHINE: the one cabinet the POST (world/post.ts), the SHOP
+ * (world/vending.ts) and the TOY BOX (world/toybox.ts) are built as, worked by hand up close (player/machinefocus.ts).
  *
  * F on it frames it in the camera and frees the cursor; from then on nothing is written
  * on the screen, the machine itself is the text. Then:

@@ -128,6 +128,29 @@
 - `__bro.stickers(n, carId?)`: the given (else driven, else last driven) car has exactly
   `n` dev stickers. `__bro.stickerSheet` shares its placement, which now bounds the car
   without the skinned body mesh (its bounds came out NaN, so every sticker landed at NaN).
+- THE TOY BOX (game-design2.md §13.1, §13.4; `world/toybox.ts` `buildToyBox`,
+  `boxRefusal`, `carHoldsContract`; `WorldState.toyBox`; deltas `car_box`, `car_unbox`;
+  `FixtureContext.boxCar`). The player's cars are the ones with papers (`CarState.papers`:
+  the start car, every bought car; never a haul's car or a lot car), each either out in
+  the world (`cars`) or boxed (`toyBox`): out of the world, nothing streams or draws it,
+  its `CarState` kept whole — fuel, wear, stickers, parts and its boot's own things.
+  A third card machine, TOY BOX (TAKE OUT), stands beside every post, 2.8 m from the
+  stop toward the lay-by's middle (`SettlementLayout.toybox`). Its cards are the boxed
+  cars: model, comfort, boot cells, stickers, fuel; the footer says what TAKE OUT will
+  do. TAKE OUT boxes the player's car standing within 20 m of the post's haul place (the
+  last driven, else the nearest) and stands the card's car on the haul place, on its
+  wheels, heading along the road; with none there it only takes the car out. Refused,
+  with the reason on the card and in a toast, while the lay-by car holds any contract
+  thing ("take the jobs out of the … first"), a trailer or a tow bar ("unhitch the …
+  first"), the player sits in a car, or another car or a trailer stands on the haul
+  place. The car taken out is the one the post reads as last driven.
+- BUYING A CAR BOXES THE OLD ONE (`world/keybox.ts`): taking the key puts the car the
+  player had (the last driven, else his car nearest the lot) into the toy box at once,
+  unless it holds contract cargo or is coupled; then it waits where it stands as his car
+  until he boxes it at a post. A rebuilt lot does not stand a fresh car where a bought,
+  boxed one came from.
+- Saves keep the toy box; boxing or taking out on foot autosaves. `__bro.standAtPost(i,
+  'toybox')` stands the player at a post's toy box.
 
 ### Fixed
 

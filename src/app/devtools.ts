@@ -528,10 +528,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   /**
    * Like `jumpTo`, but to post stop `index`, ending on foot 1.7 m in front of its machine
-   * (`machine`: the «ПОЧТА», or the settlement's «МАГАЗИН») and facing it: the shortest
-   * way to a machine for a scripted session.
+   * (`machine`: the «ПОЧТА», the toy box beside it, or the settlement's «МАГАЗИН») and
+   * facing it: the shortest way to a machine for a scripted session.
    */
-  const devStandAtPost = (index: number, machine: 'post' | 'shop' = 'post'): boolean => {
+  const devStandAtPost = (index: number, machine: 'post' | 'toybox' | 'shop' = 'post'): boolean => {
     if (ctx.world.state.player.drivingCarId) {
       ctx.hud.setToast('step out of the car first');
       return false;
@@ -604,9 +604,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     fixtures: ctx.fixtures,
     // `postAt(i)`: post stop i ({ index, s }); `standAtPost(i)` jumps there and stands
     // the player on foot a step in front of its «ПОЧТА» machine, facing it, or of its
-    // «МАГАЗИН» with `standAtPost(i, 'shop')`.
+    // toy box or «МАГАЗИН» with `standAtPost(i, 'toybox' | 'shop')`.
     postAt: (index: number) => postStop(ctx.world.seed, index),
-    standAtPost: (index: number, machine: 'post' | 'shop' = 'post') => devStandAtPost(index, machine),
+    standAtPost: (index: number, machine: 'post' | 'toybox' | 'shop' = 'post') => devStandAtPost(index, machine),
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,
