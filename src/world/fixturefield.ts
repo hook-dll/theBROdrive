@@ -108,7 +108,7 @@ export interface WorldFixture {
   setFocused?(focused: boolean, ctx: FixtureContext): void;
   /**
    * Mouse down while framed, with the cursor ray (as `aim`'s). True when a part takes
-   * the hand (a crank's knob): the drag then goes to `drag`, and the click is not a press.
+   * the hand (a card machine's wheel): the drag then goes to `drag`, and the click is not a press.
    */
   grab?(originX: number, originZ: number, eyeX: number, eyeY: number, eyeZ: number, dx: number, dy: number, dz: number): boolean;
   /** The axle the held part turns round, ABSOLUTE metres: the drag is read round it on screen. */

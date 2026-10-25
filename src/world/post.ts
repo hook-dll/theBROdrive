@@ -44,7 +44,7 @@ import { postParkingSlot } from './haulbay';
  * lay-by has `SPECIAL_CARD_STICKERS` stickers or more (§12); hidden, its slot keeps its
  * round. A card prints the thing, where it goes and how far, the pay, its tags, a haul's
  * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
- * that car. The crank turns through them for as long as the player likes; TAKE gives the
+ * that car. The wheel turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing falls into the
  * tray and the machine lets go of the player so he
  * picks it up. A HAUL gives nothing (§7.8): its load already waits in the first slot of

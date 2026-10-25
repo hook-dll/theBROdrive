@@ -102,7 +102,8 @@ import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
 import { TerminusPadProvider } from './world/terminuspad';
 import { LaybyMeshProvider } from './world/laybymesh';
-import { PoiProvider } from './world/poi';
+import { PoiProvider, poiReceivesShadows, setPoiReceiveShadows } from './world/poi';
+import { cycleDevLook, devLook } from './world/devlook';
 import { DebrisField, type Impactor } from './world/debris';
 import { GroundCoverField } from './world/props/groundcover';
 import { hasEscapedWorld } from './world/landscape';
@@ -1105,7 +1106,7 @@ async function boot(): Promise<void> {
       trailerField.remove(delta.trailerId);
       return;
     }
-    // A car made, or taken out of the toy box onto a post's lay-by.
+    // A car made, or taken out of the toy box into its bay on a post's lay-by.
     const car = delta.t === 'car_add' ? delta.car : delta.t === 'car_unbox' ? world.state.cars[delta.carId] : undefined;
     if (!car) return;
     const anchor = activeWorldAnchor();
@@ -1708,7 +1709,7 @@ async function boot(): Promise<void> {
       // naturally without leaving any player control alive.
       Object.assign(f, deathInput);
     }
-    // A machine worked up close: the player stands, a click is F, a drag turns its crank.
+    // A machine worked up close: the player stands, a click is F, a drag turns its wheel.
     const focusSound = machineFocus.tick(f, world.state.player.drivingCarId !== null);
     if (focusSound) audio.foley(focusSound);
     lastInput = f;
@@ -2481,6 +2482,8 @@ async function boot(): Promise<void> {
 
   const render = (alpha: number, frameDt: number): void => {
     frameId++;
+    // The dev switch off: what streamed in since the last pass is caught here.
+    if (import.meta.env.DEV && !poiReceivesShadows() && frameId % 60 === 0) setPoiReceiveShadows(renderer.scene, false);
     const s = world.state;
     frameProfiler?.beginFrame();
     const drivingId = s.player.drivingCarId;
@@ -3266,6 +3269,30 @@ async function boot(): Promise<void> {
       world.apply({ t: 'settings', settings });
       storeSettings(settings);
       window.location.reload();
+    poiShadows: import.meta.env.DEV
+      ? {
+          get enabled() {
+            return poiReceivesShadows();
+          },
+          setEnabled: (on: boolean) => setPoiReceiveShadows(renderer.scene, on),
+        }
+      : undefined,
+    devLook: import.meta.env.DEV
+      ? {
+          machine: devLook.machine,
+          stand: devLook.stand,
+          cycle: (which: 'machine' | 'stand') => {
+            cycleDevLook(which);
+            // Saved and marked for resume first, as a profile reload is: back where he stood.
+            const state = stateForSave();
+            const slot = `slot-${state.seed}`;
+            void saves.save(slot, saveName(state), state)
+              .then(() => markResumeTarget(slot))
+              .catch((error: unknown) => console.error('save before the dev look reload failed', error))
+              .finally(() => window.location.reload());
+          },
+        }
+      : undefined,
     },
     applySettings: (next) => {
       world.apply({ t: 'settings', settings: next });

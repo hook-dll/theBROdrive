@@ -17,8 +17,8 @@ import { box, C, mergeKitStatics } from './poi/kit';
 /**
  * The SHOP machines: where the small things a driver needs are bought.
  *
- * A card machine (world/cardmachine.ts), the post's twin: the crank turns through a card
- * for each thing still in it, the showcase beside the button holds the one the card
+ * A card machine (world/cardmachine.ts), the post's twin: the wheel turns through a card
+ * for each thing still in it, the showcase under the window holds the one the card
  * names, and BUY takes its price from the player's money and drops
  * it into the tray. Short, the button springs back with a rattle, nothing drops, and the
  * card says the money is short.

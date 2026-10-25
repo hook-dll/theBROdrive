@@ -627,7 +627,7 @@ export interface KitMergeOptions {
  * or three of each.
  *
  * By default each node's own mesh children are merged into that node, so a moving part
- * built as a group of boxes (a crank, a flap, a drawer) becomes one mesh that still moves
+ * built as a group of boxes (a wheel, a flap, a drawer) becomes one mesh that still moves
  * with its group; `deep` bakes the whole tree into the root. Left alone: roof panels (the
  * viewer hides them), door obstacles (clearance metadata), hidden meshes, anything tagged
  * `userData.kitKeep` (a part that is shown, hidden, moved or repainted on its own), and

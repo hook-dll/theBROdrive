@@ -16,8 +16,8 @@ const WHEEL_NOTCH = 1;
  * pointer lock is let go so the cursor is the hand, and the player stands still:
  *  - the cursor's ray is the eye ray the interaction picks with (`ray`), so what is under
  *    the cursor is what the prompt names and a click works it, as F would;
- *  - a press on a part that takes the hand (`WorldFixture.grab`, the crank) drags it
- *    instead, until the button is let go; the wheel turns it a click at a time;
+ *  - a press on a part that takes the hand (`WorldFixture.grab`, the wheel) drags it
+ *    instead, until the button is let go; the mouse wheel turns it a detent at a time;
  *  - Escape, the right button or a step away (a movement key) let go of it, and the
  *    camera eases back to the eyes; so does the machine itself once it has dropped
  *    something into its tray (`FixtureContext.stepBack`).

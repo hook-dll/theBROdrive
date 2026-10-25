@@ -4,6 +4,68 @@
 
 ### Changed
 
+- THE TOY BOX IS A STAND WITH A TURNTABLE, AND CARS ARE SWAPPED ONLY IN ITS MARKED BAY
+  (`world/toybox.ts`, `world/toystand.ts`, `ui/diecastshop.ts`, `world/settlement.ts`,
+  `app/devtools.ts`, `tools/toybox-check.ts`). The owner wanted "a nice pedestal where
+  the current car spins and you turn a handle to choose another", and the car never to
+  land on the player's head (2026-10-26). The toy box is no longer a card machine.
+  `devLook.stand` picks one of three trial stands, all inside 1.6 x 1.9 m: `dome`, a
+  maroon pedestal with brass trim, waist high, a brass turntable on it under a bell of
+  brass hoops (a cage: no see-through material is linked at boot to share), the model
+  about 1:10; `carousel`, a red fairground drum with cream pilasters, its floor, pole and
+  coned roof turning as one under a scalloped valance and a ring of bulbs, the model
+  riding round the pole at about 1:6, the controls on a striped ticket booth under a
+  TOY BOX board; `podium`, a low white showroom podium 1.44 m across on a graphite ring,
+  the model about 1:3.5 to 1:4, the controls on a graphite lectern at its corner. Each
+  carries a brass plaque (model, comfort, boot cells, stickers, fuel, n/N, and what TAKE
+  OUT will do or why not; with the box empty, what it is for), a six-spoke handwheel on
+  the front turning about the axis facing the viewer (dragged round, scrolled or
+  clicked: a car per sixth of a turn) and the TAKE OUT button. The selected car stands on
+  the turntable as a die-cast in its visible paint, built in the title room's worker
+  (`DieCastShop` and `dieCastGeometry` moved out of `ui/roomscene.ts`; the world's shop
+  has no main-thread fallback) and drawn in the POI kit's palette material, so no
+  program links mid-drive; a new selection sinks it into the stand and brings the next
+  up with a spin. A yellow bay, 5.4 x 2.6 m along the lay-by, is painted in front of
+  the post and the stand between them and the parking line, 0.5 m short of the service
+  band, from −6.7 to −1.3 along the pad (`toyBay`). TAKE OUT works only when the player
+  is on foot and 0.5 m outside its paint ("step out of the bay"), his car is in it (by its middle;
+  `boxRefusal` as before) or it is empty, and nothing else, his second car or a trailer
+  included, reaches into it (each taken as its rectangle); the going car goes into the
+  box and the chosen one appears in the bay's middle in the same press. The 20 m radius
+  round the old spot on the parking line is gone. The stand stands at −2.6 (was −2.7),
+  1.35 m in from the pad's edge, its clearance 0.8 x 0.95 m (was 0.75 x 0.8).
+  `standAtPost(i, 'toybox')` stands the player in front of the variant's controls; the
+  placement bench measures the bay against the parking row and the services.
+- THE CARD MACHINES ARE ROOMIER, WORKED BY A WHEEL ON THE FRONT, IN THREE TRIAL DESIGNS
+  (`world/cardmachine.ts`, `world/settlement.ts`). The owner wanted the post's and the
+  shop's machines prettier and roomier, and did not like the crank on the flank
+  (2026-10-26). The cabinet is 1.36 x 2.1 x 1.0 m (was 1.0 x 2.0 x 0.8); the card window
+  stands left of centre as the viewer sees it, and right of it, at hand height, a wheel
+  turns about its axle facing him: dragged round, scrolled, or clicked, one card per
+  detent; the button is under the wheel, the plate or showcase under the window, the
+  tray and chute as before. The camera frames the front from just right of straight on.
+  `devLook.machine` picks the design: `soda`, a soda fountain with chamfered enamel,
+  chrome mouldings, a visor over the title and a six-spoke chrome ship's wheel (a card
+  per 60°); `arcade`, an arcade cabinet with striped black cheeks, a marquee with a row
+  of bulbs, and a sloped control pod carrying a knurled dial over tick marks and the
+  button (a card per 45°); `safe`, a riveted safe with hinges, brass trim and a
+  four-handle handwheel over a numbered dial ring (a card per quarter turn). The post and
+  the shop stand 1.3 m in from the pad's edge (was 1.2), backs on the same line; their
+  clearance is 0.75 x 0.9 m.
+- THE TEDDY IS REDRAWN, A FIFTH BIGGER, AND SITS NEARER THE BENCH'S MIDDLE
+  (`render/thingmesh.ts`, `world/shelter.ts`). "The teddies sit at the very edge of the
+  bench; the teddy itself is ugly and could be a bit bigger" (owner, 2026-10-26). The
+  model is a plump pear of a body with a pale belly patch, a round head with a pale
+  muzzle, dark nose, stitched smile and glinting eyes, round ears with pale insides,
+  stubby arms and legs with pale paw pads, and a red ribbon and bow at the neck; its
+  parts are merged into one geometry per colour, five draws (was sixteen meshes). It is
+  0.31 x 0.48 x 0.26 m (was 0.26 x 0.40 x 0.22), still sitting up on every kit car's
+  passenger seats: the lowest room is 0.493 m, the narrowest the Oka's bench halves at
+  0.38 m. On the shelter's bench the waiting party sits left of the middle at x −0.3,
+  −0.7, −1.1 m, its first place nearest, and the arrivals right of it at +0.3, +0.7,
+  +1.1 (were −1.45, −0.87, −0.29 and +0.29, +0.87, +1.45, the outer ones past the
+  posts); a teddy's pick box is its measured model and 2 cm (was a fixed 0.32 x 0.4 x
+  0.32 m).
 - THE HAUL PEN IS GONE: A PARKING ROW ON THE LAY-BY (`world/haulbay.ts`,
   `world/settlement.ts`, `contracts/haulbays.ts`, `contracts/world.ts`, `world/poi.ts`).
   The walled pen on the sand past the lay-by's edge looked like no part of the place

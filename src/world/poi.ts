@@ -616,6 +616,8 @@ function buildLot(
   );
   const addPreview = (): void => {
     const preview = createStaticCarModel(def.id, carId);
+    // A car, not scenery: `setPoiReceiveShadows` leaves it as it is.
+    preview.userData.poiCar = true;
     setFromMatrix(preview, matrix);
     group.add(preview);
   };
@@ -701,6 +703,34 @@ function buildPoi(
     buildPumpStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
   return layout.pumps !== null;
+}
+
+/** POI scenery receives shadows (the shipping look); off, it only casts them. Dev only. */
+let poiReceive = true;
+
+export function poiReceivesShadows(): boolean {
+  return poiReceive;
+}
+
+/**
+ * Sets whether the POI chunks' scenery (every `poi` group under `scene`) receives
+ * shadows; it casts them either way. Cars standing in it (`userData.poiCar`) keep their
+ * own flags. `receiveShadow` is a per-draw uniform, so this changes no program on the
+ * Mac (dev menu, for an A/B by eye). Called again with the same value it catches what
+ * streamed in since: main calls it now and then while the switch is off.
+ */
+export function setPoiReceiveShadows(scene: THREE.Object3D, on: boolean): void {
+  poiReceive = on;
+  const walk = (node: THREE.Object3D): void => {
+    if (node.userData.poiCar === true) return;
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh) {
+      if (mesh.userData.poiReceiveOwn === undefined) mesh.userData.poiReceiveOwn = mesh.receiveShadow;
+      mesh.receiveShadow = on && mesh.userData.poiReceiveOwn === true;
+    }
+    for (const child of node.children) walk(child);
+  };
+  for (const child of scene.children) if (child.name === 'poi') walk(child);
 }
 
 /**

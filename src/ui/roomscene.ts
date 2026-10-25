@@ -3,7 +3,8 @@ import { compileAsyncSafe } from '../render/compileasync';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../vehicle/carmodels';
 import { factoryPaintHex } from '../vehicle/carpaint';
-import { dieCastArrays, type DieCastArrays, type DieCastRequest, type DieCastResponse } from './diecast';
+import type { DieCastArrays } from './diecast';
+import { DieCastShop, dieCastGeometry } from './diecastshop';
 import {
   calendarPage,
   clockFace,
@@ -211,110 +212,6 @@ function extrudeKey(k: Kit, shape: THREE.Shape, thickness: number, material: THR
   const geometry = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 16 });
   geometry.translate(0, 0, -thickness / 2);
   return k.mesh(geometry, material);
-}
-
-/** One kit car to be built, and what becomes of it. */
-interface DieCastOrder extends DieCastRequest {
-  readonly done: (arrays: DieCastArrays) => void;
-}
-
-/**
- * The die-cast models' workshop: each kit car is built, flattened and painted in a
- * worker (ui/diecastworker.ts), one at a time and in the order asked, and handed back
- * as arrays. A kit car is 100-300 ms of building, 28 of them in the room, and on the
- * main thread every one was a frozen frame of the title screen.
- *
- * A worker that cannot start or load leaves the rest of the orders to the main thread,
- * one per pause between frames: the case still fills, only less smoothly.
- */
-class DieCastShop {
-  private worker: Worker | null = null;
-  private readonly queue: DieCastOrder[] = [];
-  private current: DieCastOrder | null = null;
-  private timer = 0;
-  private closed = false;
-
-  constructor() {
-    try {
-      const worker = new Worker(new URL('./diecastworker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = (event: MessageEvent<DieCastResponse>) => this.receive(event.data);
-      worker.onerror = (event) => {
-        event.preventDefault();
-        console.error('title room: die-cast worker failed, building on the main thread', event.message);
-        this.dropWorker();
-      };
-      this.worker = worker;
-    } catch (error) {
-      console.error('title room: no die-cast worker, building on the main thread', error);
-    }
-  }
-
-  order(order: DieCastOrder): void {
-    this.queue.push(order);
-    this.pump();
-  }
-
-  /** Move the order for `modelId` to the front of the queue, if it is still waiting. */
-  hurry(modelId: string): void {
-    const i = this.queue.findIndex((order) => order.modelId === modelId);
-    if (i > 0) this.queue.unshift(...this.queue.splice(i, 1));
-  }
-
-  close(): void {
-    this.closed = true;
-    this.queue.length = 0;
-    this.current = null;
-    window.clearTimeout(this.timer);
-    this.worker?.terminate();
-    this.worker = null;
-  }
-
-  private pump(): void {
-    if (this.closed || this.current || this.queue.length === 0) return;
-    const order = this.queue.shift()!;
-    this.current = order;
-    if (this.worker) {
-      const request: DieCastRequest = { modelId: order.modelId, color: order.color, scale: order.scale };
-      this.worker.postMessage(request);
-      return;
-    }
-    this.timer = window.setTimeout(() => {
-      if (this.closed) return;
-      this.current = null;
-      try {
-        order.done(dieCastArrays(order));
-      } catch (error) {
-        console.error(`title room: die-cast ${order.modelId} failed`, error);
-      }
-      this.pump();
-    }, 60);
-  }
-
-  private receive(response: DieCastResponse): void {
-    const order = this.current;
-    if (this.closed || !order) return;
-    this.current = null;
-    if ('error' in response) console.error(`title room: die-cast ${order.modelId} failed`, response.error);
-    else order.done({ position: new Float32Array(response.position), normal: new Float32Array(response.normal), color: new Float32Array(response.color) });
-    this.pump();
-  }
-
-  private dropWorker(): void {
-    this.worker?.terminate();
-    this.worker = null;
-    if (this.current) this.queue.unshift(this.current);
-    this.current = null;
-    this.pump();
-  }
-}
-
-function dieCastGeometry(arrays: DieCastArrays): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(arrays.position, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(arrays.normal, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(arrays.color, 3));
-  geometry.computeBoundingSphere();
-  return geometry;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1182,7 +1079,7 @@ export function buildRoomScene(lowDetail: boolean): RoomScene {
     mesh.frustumCulled = false;
     scene.add(mesh);
   }
-  const shop = new DieCastShop();
+  const shop = new DieCastShop('title room', true);
   let photoTarget: THREE.WebGLRenderTarget | null = null;
   let disposed = false;
 

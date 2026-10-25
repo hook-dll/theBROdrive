@@ -5,7 +5,8 @@
  * Built like every other carried item (render/meshbuilder.ts): unit boxes, cylinders and
  * spheres stretched by their transform, so a whole catalogue shares a handful of cached
  * geometries, on the shared flat materials (and the medicine bottle's glass for the
- * aquarium and the medal case). No new material shape, so no new shader program.
+ * aquarium and the medal case). No new material shape, so no new shader program. The
+ * teddy, many small soft parts, is merged into one cached geometry per colour.
  *
  * Each model is laid out from its foot (y = 0) in metres, x across, z forward (its face:
  * the TV's screen, the radio's dial), and centred on its bounds afterwards: a loose thing's
@@ -15,6 +16,7 @@
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { ThingDef, ThingId } from '../items/things';
 import {
   AXIS_X,
@@ -25,6 +27,7 @@ import {
   buildGroup,
   flat,
   glass,
+  type Instruction,
   type MaterialSpec,
   type Vec3,
 } from './meshbuilder';
@@ -807,23 +810,110 @@ function firstToyCar(b: MeshBuilder, broken: boolean): void {
   }
 }
 
-/** A teddy sitting up: a round body and head, a pale belly and muzzle, round ears, paws, a red bow. */
-function teddy(b: MeshBuilder): void {
-  const fur = flat(0x8a5a32, 0.97);
-  const pale = flat(0xc9a27a, 0.97);
-  const dark = flat(0x1c1410, 0.5);
-  ball(b, fur, [0.1, 0.115, 0.09], [0, 0, 0], ZERO, 16);
-  ball(b, pale, [0.06, 0.072, 0.03], [0, -0.01, 0.058]);
-  ball(b, fur, [0.075, 0.075, 0.075], [0, 0.17, 0.01], ZERO, 16);
-  ball(b, pale, [0.032, 0.032, 0.032], [0, 0.155, 0.075]);
-  ball(b, dark, [0.011, 0.011, 0.011], [0, 0.165, 0.105], ZERO, 8);
-  for (const sx of [-1, 1]) {
-    ball(b, dark, [0.01, 0.01, 0.01], [sx * 0.028, 0.19, 0.068], ZERO, 8);
-    ball(b, fur, [0.028, 0.028, 0.017], [sx * 0.055, 0.235, 0], ZERO, 10);
-    ball(b, fur, [0.028, 0.056, 0.028], [sx * 0.1, 0.03, 0.03], ZERO, 10);
-    ball(b, fur, [0.038, 0.038, 0.059], [sx * 0.055, -0.1, 0.07], ZERO, 10);
+/** Where `offset` in a part's own frame lands once the part sits at `at`, turned `rot`. */
+function turned(at: Vec3, rot: Vec3, offset: Vec3): Vec3 {
+  const v = _dir.set(offset[0], offset[1], offset[2]).applyEuler(_euler.set(rot[0], rot[1], rot[2]));
+  return [at[0] + v.x, at[1] + v.y, at[2] + v.z];
+}
+
+/**
+ * Draws every part `parts` holds as one mesh per material: each colour's parts merged
+ * once into a geometry cached under `key`, the whole scaled by `scale` about the origin.
+ * A model of many small soft parts (the teddy) then costs a draw call per colour, not
+ * one per part.
+ */
+function mergedByColour(b: MeshBuilder, parts: MeshBuilder, key: string, scale: number): void {
+  const groups = new Map<string, Instruction[]>();
+  for (const ins of parts.instructions) {
+    const colour = `${ins.material.kind}_${ins.material.color.toString(16)}_${ins.material.roughness}`;
+    const group = groups.get(colour);
+    if (group) group.push(ins);
+    else groups.set(colour, [ins]);
   }
-  box(b, flat(0xb3262a, 0.8), [0.06, 0.03, 0.02], [0, 0.105, 0.075]);
+  const matrix = new THREE.Matrix4();
+  const at = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  for (const [colour, group] of groups) {
+    b.push(
+      `${key}_${colour}`,
+      () => {
+        const pieces = group.map((ins) => {
+          _quat.setFromEuler(_euler.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]));
+          matrix.compose(at.set(ins.position[0], ins.position[1], ins.position[2]), _quat, size.set(ins.scale[0], ins.scale[1], ins.scale[2]));
+          return ins.geometry.clone().applyMatrix4(matrix);
+        });
+        const merged = mergeGeometries(pieces, false);
+        for (const piece of pieces) piece.dispose();
+        if (!merged) throw new Error(`${key}: the ${colour} parts failed to merge`);
+        return merged;
+      },
+      group[0]!.material,
+      ZERO,
+      ZERO,
+      [scale, scale, scale],
+    );
+  }
+}
+
+/**
+ * The teddy is laid out at this size and drawn this much larger: 0.48 m from the seat
+ * to its ear tops and 0.31 m across the arms, a fifth up on the first teddy's 0.40 by
+ * 0.26 ("could be a bit bigger", owner, 2026-10-26). The height is what holds it: the
+ * lowest passenger room of the kit cars is 0.493 m (vehicle/cabin.ts `layFit`; the
+ * narrowest, the Oka's bench halves, 0.38 m). The hand draws it at its own size cap
+ * (render/held.ts).
+ */
+const TEDDY_SCALE = 1.094;
+
+/**
+ * A teddy sitting up, facing +z: a plump pear of a body with a pale belly patch, a round
+ * head with a pale muzzle, a dark nose and a stitched smile, shiny eyes with a glint,
+ * round ears with pale insides, stubby arms reaching forward and stubby legs stuck out
+ * in front, every paw with a pale pad, and a red ribbon tied in a bow round the neck.
+ * Five colours, so five draws however many parts (`mergedByColour`).
+ */
+function teddy(b: MeshBuilder): void {
+  const fur = flat(0x9a6638, 0.97);
+  const pale = flat(0xdcbd94, 0.97);
+  const dark = flat(0x1a120d, 0.35);
+  const glint = flat(0xffffff, 0.3);
+  const red = flat(0xb3262a, 0.8);
+  const p = new MeshBuilder();
+  // The body and its plump seat; the belly patch on its front.
+  ball(p, fur, [0.104, 0.12, 0.09], [0, 0.15, 0], ZERO, 20);
+  ball(p, fur, [0.114, 0.07, 0.095], [0, 0.075, -0.005], ZERO, 18);
+  ball(p, pale, [0.07, 0.08, 0.035], [0, 0.145, 0.062], ZERO, 16);
+  // The head, its muzzle, nose, smile and eyes.
+  ball(p, fur, [0.102, 0.092, 0.09], [0, 0.335, 0.005], ZERO, 20);
+  ball(p, pale, [0.048, 0.036, 0.034], [0, 0.31, 0.072], ZERO, 16);
+  ball(p, dark, [0.022, 0.015, 0.013], [0, 0.325, 0.102], ZERO, 12);
+  ball(p, dark, [0.003, 0.009, 0.003], [0, 0.305, 0.105], ZERO, 6);
+  // The ribbon round the neck, and its bow at the front.
+  p.push('thing_teddy_ribbon', () => new THREE.TorusGeometry(0.053, 0.008, 8, 28), red, [0, 0.255, 0.002], [Math.PI / 2, 0, 0]);
+  ball(p, red, [0.014, 0.013, 0.01], [0, 0.255, 0.062], ZERO, 10);
+  for (const sx of [-1, 1]) {
+    ball(p, dark, [0.0028, 0.008, 0.0028], [sx * 0.008, 0.299, 0.103], [0, 0, -sx * 1.1], 6);
+    ball(p, dark, [0.012, 0.014, 0.01], [sx * 0.038, 0.358, 0.082], ZERO, 12);
+    // The glint upper left on both eyes: one light falls on them.
+    ball(p, glint, [0.0035, 0.0035, 0.0025], [sx * 0.038 - 0.004, 0.363, 0.0905], ZERO, 6);
+    // A round ear, tipped out, its pale inside to the front.
+    const earTilt: Vec3 = [0, 0, -sx * 0.4];
+    ball(p, fur, [0.034, 0.034, 0.017], [sx * 0.074, 0.41, -0.005], earTilt, 14);
+    ball(p, pale, [0.021, 0.021, 0.008], [sx * 0.074, 0.407, 0.007], earTilt, 12);
+    // A stubby arm reaching down, forward and a little out; the pad on its paw's end.
+    const arm: Vec3 = [sx * 0.104, 0.165, 0.03];
+    const armTurn: Vec3 = [-0.55, 0, sx * 0.3];
+    ball(p, fur, [0.034, 0.068, 0.036], arm, armTurn, 14);
+    ball(p, pale, [0.02, 0.012, 0.02], turned(arm, armTurn, [0, -0.058, 0]), armTurn, 12);
+    // A stubby leg stuck out in front, toes a little out; the pad on its sole.
+    const leg: Vec3 = [sx * 0.061, 0.045, 0.07];
+    const legTurn: Vec3 = [0, sx * 0.15, 0];
+    ball(p, fur, [0.044, 0.04, 0.072], leg, legTurn, 14);
+    ball(p, pale, [0.026, 0.024, 0.014], turned(leg, legTurn, [0, -0.004, 0.06]), legTurn, 12);
+    // The bow's loop on this side, swept back round the neck and up.
+    ball(p, red, [0.03, 0.019, 0.01], [sx * 0.028, 0.258, 0.054], [0, sx * 0.3, sx * 0.25], 10);
+  }
+  mergedByColour(b, p, 'thing_teddy', TEDDY_SCALE);
 }
 
 /**

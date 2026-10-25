@@ -68,7 +68,7 @@ export interface SettlementLayout {
   readonly post: SettlementSpot | null;
   /** Ditto. Settlements only. */
   readonly shop: SettlementSpot | null;
-  /** The toy box (world/toybox.ts), between the post and the stop; its car comes out on the pad in front of it. Settlements only. */
+  /** The toy box's stand (world/toybox.ts), between the post and the stop; its car comes out in the marked bay in front of it. Settlements only. */
   readonly toybox: SettlementSpot | null;
   /**
    * The teddy shelter (world/shelter.ts, game-design2.md §10), its open front to the pad.
@@ -165,22 +165,24 @@ const LOT_CHANCE = 0.3;
  *
  * `s` is the road's arclength, so on the inside of a curve the band is shorter than the
  * numbers: measured over 1 174 settlements, two spots 2.5 m apart come up to 12% closer.
- * The post and the toy box stand 2.9 m apart so the two machines keep a metre between
- * them everywhere. The parking row is laid straight along the road's tangent at its
- * middle (world/haulbay.ts), 17 m of it, so the toy box before it and the shop after it
- * stand 12 m from its middle: 2.9 m clear on a straight, still 1.4 m on the tightest
- * inside of a curve.
+ * The post and the toy box's stand are 3.0 m apart so the two keep a metre between
+ * them everywhere. The toy box's marked bay (world/toybox.ts `toyBay`) lies in front of
+ * the post and the stand, between them and the parking line, −6.7…−1.3. The parking row
+ * is laid straight along the road's tangent at its middle (world/haulbay.ts), 17 m of
+ * it, so the toy box before it and the shop after it stand 12 m from its middle; the
+ * bay's end is 2.3 m short of the row's first slot on a straight, and the row's straight
+ * ends come up to 1.1 m nearer it on the tightest curves.
  */
 const SHELTER_ALONG_M = -9.8;
 const SHELTER_IN_M = 1.05;
 const POST_ALONG_M = -5.6;
-const POST_IN_M = 1.2;
-const TOYBOX_ALONG_M = -2.7;
-const TOYBOX_IN_M = 1.2;
+const POST_IN_M = 1.3;
+const TOYBOX_ALONG_M = -2.6;
+const TOYBOX_IN_M = 1.35;
 /** The parking row's middle slot, along the road: the row spans about +1…+18. */
 const PARKING_ALONG_M = 9.5;
 const SHOP_ALONG_M = 21.5;
-const SHOP_IN_M = 1.2;
+const SHOP_IN_M = 1.3;
 /** The pumps' island, +24…+28. */
 const PUMPS_ALONG_M = 26;
 const PUMPS_IN_M = 1.0;
@@ -225,11 +227,15 @@ export const SIGNPOST_OUT_M = 1.0;
  * against these.
  */
 export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
-  // The card machines (world/cardmachine.ts): the crank's knob past one flank, the tray
-  // standing out of the front.
-  post: [0.75, 0.8],
-  shop: [0.75, 0.8],
-  toybox: [0.75, 0.8],
+  // The card machines (world/cardmachine.ts), 1.36 x 1.0 m: the safe's hinges on one
+  // flank, the tray 0.38 m out of the front. They stand 1.3 m in (1.2 when they were
+  // 0.8 m deep), so their backs keep to the same line.
+  post: [0.75, 0.9],
+  shop: [0.75, 0.9],
+  // The toy box's stand (world/toybox.ts), its largest variant: the podium or the
+  // carousel, 1.44 m across, and the lectern at its front corner with the handwheel
+  // standing out of it. Its back 0.4 m in from the asphalt's edge.
+  toybox: [0.8, 0.95],
   // The island under the three pumps (world/pumps.ts).
   pumps: [2.0, 0.6],
   // The teddy shelter's canopy, 3.5 x 1.3 m (world/shelter.ts): a bench under a lean-to

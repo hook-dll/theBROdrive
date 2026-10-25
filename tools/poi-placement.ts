@@ -49,6 +49,7 @@ import {
   type SettlementSpot,
 } from '../src/world/settlement';
 import { postParkingSlots } from '../src/world/haulbay';
+import { toyBay } from '../src/world/toybox';
 import { createVariantInstance, variantCount, variantDef } from '../src/world/poivariantbuild';
 import {
   POI_STRUCTURES,
@@ -674,6 +675,17 @@ const MAX_VERGE_M = 22;
             onPad: true,
             slot: true,
           });
+        });
+      }
+      if (layout.toybox) {
+        // The toy box's marked bay (world/toybox.ts): a car comes out in it.
+        const bay = toyBay(seed, seedRoad, slotPost(slot));
+        spots.push({
+          name: 'toy box bay',
+          s: bay.s,
+          rect: { x: bay.x, z: bay.z, yaw: bay.yaw, halfX: bay.halfWidth, halfZ: bay.halfDepth },
+          onPad: true,
+          slot: false,
         });
       }
       if (own) {

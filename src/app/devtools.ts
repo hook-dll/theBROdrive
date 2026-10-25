@@ -55,6 +55,7 @@ import type { FixtureField } from '../world/fixturefield';
 import { poisBetween } from '../world/poi';
 import { postBracket, postStop } from '../world/poststops';
 import { settlementLayout, spotPose } from '../world/settlement';
+import { toyBoxApproach } from '../world/toybox';
 import type { DebrisField } from '../world/debris';
 import type { DesertTileStreamer } from '../world/deserttiles';
 import type { WorldOrigin } from '../world/origin';
@@ -542,9 +543,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const pose = spotPose(ctx.road, spot);
     // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world. The shelter's
     // spot is its canopy's centre, the bench's front 0.07 m ahead of it and the canopy's
-    // edge 0.65 m: stand 1.83 m off the bench, under the sky.
-    const away = machine === 'shelter' ? 1.9 : 1.7;
-    const stand = { x: pose.x - Math.sin(pose.yaw) * away, z: pose.z - Math.cos(pose.yaw) * away, yaw: pose.yaw };
+    // edge 0.65 m: stand 1.83 m off the bench, under the sky. The toy box's controls are on
+    // its stand's pedestal or lectern, wherever the variant has them.
+    const [sideways, ahead] = machine === 'toybox' ? toyBoxApproach() : [0, machine === 'shelter' ? 1.9 : 1.7];
+    const c = Math.cos(pose.yaw);
+    const sn = Math.sin(pose.yaw);
+    const stand = { x: pose.x + c * sideways - sn * ahead, z: pose.z - sn * sideways - c * ahead, yaw: pose.yaw };
     jumpHold = { s: stop.s, frames: 0, stand };
     placeAtJump(stop.s, stand);
     return true;

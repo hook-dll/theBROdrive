@@ -792,6 +792,13 @@ export interface PauseHooks {
   perfOverlay?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /** The drawn outlines in the finishing pass (core/renderer.ts `ink`), for an A/B by eye. Dev only. */
   ink?: { readonly enabled: boolean; setEnabled(on: boolean): void };
+  /** POI scenery receiving shadows (world/poi.ts `setPoiReceiveShadows`): off, it only casts them. Dev only. */
+  poiShadows?: { readonly enabled: boolean; setEnabled(on: boolean): void };
+  /**
+   * The trial designs of the card machines and the toy box's stand (world/devlook.ts):
+   * `cycle` saves the drive, writes the next one and reloads. Dev only.
+   */
+  devLook?: { readonly machine: string; readonly stand: string; cycle(which: 'machine' | 'stand'): void };
   /**
    * The traffic stream's two knobs (world/traffic.ts `cap`, `floor`): the ceiling in cars
    * and the quiet end of the density draw as a share of it. `null` hands either back to
@@ -2835,6 +2842,22 @@ export class MainMenu {
             hooks.jumpToLake?.(nextLake++);
             finish('resume');
           });
+        }
+        if (import.meta.env.DEV && hooks.poiShadows) {
+          const shadows = hooks.poiShadows;
+          const label = (): string => `POI receive shadows: ${shadows.enabled ? 'on' : 'off'}`;
+          const index = devTools.length;
+          devButton(label(), () => {
+            shadows.setEnabled(!shadows.enabled);
+            const btn = devTools[index];
+            if (btn) btn.textContent = label();
+          });
+        }
+        // A reload each: the stops are built as their chunks stream in.
+        if (import.meta.env.DEV && hooks.devLook) {
+          const look = hooks.devLook;
+          devButton(`Machine style: ${look.machine} (next, reloads)`, () => look.cycle('machine'));
+          devButton(`Toy box stand: ${look.stand} (next, reloads)`, () => look.cycle('stand'));
         }
         if (import.meta.env.DEV && hooks.giveMoney) {
           devButton('Get 100р', () => {

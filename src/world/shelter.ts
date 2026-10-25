@@ -34,12 +34,13 @@ import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
  * goes and how far, how many wait, what each pays (the lay-by car's sticker bonus in it,
  * as the post's cards print it), and the urgent clock or the race.
  *
- * The party's teddies sit on the bench (the teddy item's own model); who is still there
- * is read from the world (contracts/shelters.ts `shelterBench`), so a teddy taken here or
- * put back shows at once. F on a teddy takes it into the hands; F at the shelter with a
- * teddy in hand seats it (`teddySeating`): delivered and paid, put back at its source, or
- * refused with where it rides on to. Delivered teddies sit on the far half of the bench
- * until the chunk is streamed out with the player long gone; they are not saved.
+ * The party's teddies sit on the bench (the teddy item's own model), left of its middle;
+ * who is still there is read from the world (contracts/shelters.ts `shelterBench`), so a
+ * teddy taken here or put back shows at once. F on a teddy takes it into the hands; F at
+ * the shelter with a teddy in hand seats it (`teddySeating`): delivered and paid, put
+ * back at its source, or refused with where it rides on to. Delivered teddies sit right
+ * of the middle until the chunk is streamed out with the player long gone; they are not
+ * saved.
  *
  * Shared kit materials, merged; only the timetable has its own painted board.
  */
@@ -71,12 +72,21 @@ const BENCH_HALF_L = 1.6;
 /** The backrest's two slats, bolted to the posts' fronts: their heights and their z. */
 const BACK_SLATS = [0.66, 0.84] as const;
 const BACK_Z = POST_Z - POST_W / 2 - 0.015;
-/** Places along the bench, viewer's left to right: the waiting party's first, the arrivals' after. */
+/**
+ * Places along the bench, round its middle: the waiting party's to the viewer's left of
+ * it, its first place nearest, and the arrivals' as far to the right, so a party of one
+ * sits near the middle and the two lots are told apart by the gap between them. They
+ * were spread from end to end, and a lone teddy sat at the very end of the bench ("they
+ * could sit closer to the centre", owner, 2026-10-26).
+ */
 const PLACES = 6;
-const PLACE_STEP = (2 * BENCH_HALF_L - 0.3) / (PLACES - 1);
 const WAITING_PLACES = 3;
-/** A teddy's pick box about its middle, half sizes. */
-const TEDDY_HALF: readonly [number, number, number] = [0.16, 0.2, 0.16];
+/** The nearest places' middles either side of the bench's, and the step out to the next. */
+const PLACE_INNER = 0.3;
+const PLACE_STEP = 0.4;
+/** A teddy's middle across the seat, and how far its pick box reaches past its model all round. */
+const TEDDY_Z = SEAT_Z + 0.02;
+const TEDDY_PICK_MARGIN = 0.02;
 /** The timetable: its board on the front of the post at the waiting places' end, over the backrest. */
 const BOARD_W = 0.8;
 const BOARD_H = 0.75;
@@ -105,22 +115,27 @@ function timetable(world: GameWorld, stop: PostStop, bench: ShelterBench, sticke
 
 /** Bench place `place`'s middle along the bench, local x. */
 function placeX(place: number): number {
-  return -BENCH_HALF_L + 0.15 + place * PLACE_STEP;
+  const waiting = place < WAITING_PLACES;
+  const out = PLACE_INNER + (waiting ? place : place - WAITING_PLACES) * PLACE_STEP;
+  return waiting ? -out : out;
 }
 
-/** How far a teddy's model reaches below its middle, metres: it sits that high over the seat. */
-let teddyLift: number | null = null;
+/**
+ * A teddy's model, half its size (it is centred on its bounds), measured from the first
+ * one built: it sits that high over the seat, and its pick box is it and the margin.
+ */
+let teddyHalf: THREE.Vector3 | null = null;
 
 /** A teddy sitting on bench place `place`, facing the pad, hidden until shown. */
 function seatedTeddy(root: THREE.Object3D, party: ContractCargoItem, place: number): THREE.Object3D {
   const mesh = createItemMesh(party);
-  if (teddyLift === null) teddyLift = -new THREE.Box3().setFromObject(mesh).min.y;
+  teddyHalf ??= new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3()).multiplyScalar(0.5);
   // As on a car seat (vehicle/cabincargo.ts): it receives shadows, it casts none.
   mesh.traverse((node) => {
     node.castShadow = false;
   });
   mesh.userData.kitKeep = true;
-  mesh.position.set(placeX(place), SEAT_Y + teddyLift, SEAT_Z + 0.02);
+  mesh.position.set(placeX(place), SEAT_Y + teddyHalf.y, TEDDY_Z);
   mesh.rotation.y = Math.PI;
   mesh.visible = false;
   root.add(mesh);
@@ -318,12 +333,17 @@ class Shelter implements WorldFixture {
     const oz = s * rx + c * rz;
     const lx = c * dx - s * dz;
     const lz = s * dx + c * dz;
-    // A waiting teddy wins over the shelter round it.
+    // A waiting teddy wins over the shelter round it. Its model was measured as the
+    // bench was built, before this fixture.
     let best = Infinity;
     let part: Part = null;
+    const half = teddyHalf;
     this.bench.waiting.forEach((waits, seat) => {
-      if (!waits) return;
-      const hit = rayBox(ox, oy, oz, lx, dy, lz, placeX(seat), SEAT_Y + TEDDY_HALF[1], SEAT_Z, ...TEDDY_HALF);
+      if (!waits || !half) return;
+      const hx = half.x + TEDDY_PICK_MARGIN;
+      const hy = half.y + TEDDY_PICK_MARGIN;
+      const hz = half.z + TEDDY_PICK_MARGIN;
+      const hit = rayBox(ox, oy, oz, lx, dy, lz, placeX(seat), SEAT_Y + half.y, TEDDY_Z, hx, hy, hz);
       if (hit < best) {
         best = hit;
         part = { kind: 'teddy', seat };

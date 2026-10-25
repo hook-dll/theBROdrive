@@ -1,8 +1,9 @@
 import { dieCastArrays, type DieCastRequest, type DieCastResponse } from './diecast';
 
 /**
- * Worker entry for the title room's die-cast models (ui/diecast.ts): one kit car per
- * message, built where the title screen cannot feel it. The arrays go back as
+ * Worker entry for the die-cast models (ui/diecast.ts, ui/diecastshop.ts): the title
+ * room's and the toy box stands' (world/toybox.ts). One kit car per message, built where
+ * neither the title screen nor the drive can feel it. The arrays go back as
  * transferable buffers, so they are moved rather than cloned.
  */
 

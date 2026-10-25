@@ -3,7 +3,8 @@ import { buildKitCar } from '../carkit/kit';
 import { CAR_SURFACE_ATTRIBUTE } from '../render/materials';
 
 /**
- * A die-cast model of a kit car for the title room (ui/roomscene.ts): the built car
+ * A die-cast model of a kit car for the title room (ui/roomscene.ts) and the toy box
+ * stands' turntables (world/toybox.ts): the built car
  * flattened into one non-indexed triangle soup in room space, its paint in one colour,
  * at a scale. Plain typed arrays, so the build can run in ui/diecastworker.ts and the
  * arrays move to the main thread without a copy.
