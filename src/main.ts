@@ -121,14 +121,14 @@ import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainm
 import { WeatherParticles } from './render/weatherparticles';
 import { setDesertDustArclength } from './render/desertdust';
 import { setGroundFadeWindow } from './render/groundfade';
-import { nextPostIndex, postStop } from './world/poststops';
+import { nextPostIndex, postStop, postStopsBetween } from './world/poststops';
 import { placeNameAt } from './world/placenames';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
 import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
-import { Hud } from './ui/hud';
+import { Hud, newMapView } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
 import {
   autosaveNow,
@@ -411,8 +411,13 @@ async function boot(): Promise<void> {
   const pads = gamepads();
   pads.setDeadzone(world.state.settings.controllerDeadzone);
   pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
-  const hud = new Hud(uiRoot);
+  // The map ribbon's posts, named, asked for as the window moves on.
+  const hud = new Hud(uiRoot, {
+    postsBetween: (fromS, toS) =>
+      postStopsBetween(world.seed, fromS, toS).map((stop) => ({ index: stop.index, s: stop.s, name: placeNameAt(world.seed, stop.s) })),
+  });
   hud.setDashboardScale(world.state.settings.dashboardSize);
+  hud.setBacklight(world.state.settings.hudBacklight);
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -872,7 +877,7 @@ async function boot(): Promise<void> {
   const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
   /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
   const raceProgress = newRaceProgress();
-  const NO_RIVALS: readonly number[] = [];
+  const mapView = newMapView();
   /** How far past a receiving post's arclength it stays the delivery target, m. */
   const DELIVERY_PAST_POST_M = 40;
   /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
@@ -1060,7 +1065,7 @@ async function boot(): Promise<void> {
   } else {
     spawnStartingItems(world, loose, road, terrain);
     // The player starts with a little money.
-    world.apply({ t: 'money', kopecks: START_MONEY });
+    world.apply({ t: 'money', rubles: START_MONEY });
   }
 
   // POI working cars enter state when their chunk reaches the physics band. A new
@@ -1733,24 +1738,42 @@ async function boot(): Promise<void> {
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
     race.fixedUpdate(dt, activeS);
-    if (race.progress(activeS, raceProgress)) {
-      hud.setRouteProgress('race', raceProgress.player, raceProgress.rivals, 0, '', urgentLeft);
-    } else if (deliveryMinIndex !== Infinity) {
-      // No race: the bead line runs from the last post behind to the nearest one
-      // ahead that will sign for the cargo, named. It stays the target until the car is
-      // past its stand, so stopping alongside does not flip it to the next one.
-      const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, deliveryMinIndex);
-      const targetS = postStop(world.seed, target).s;
-      const fromS = target > 0 ? Math.min(activeS, postStop(world.seed, target - 1).s) : 0;
-      const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
-      hud.setRouteProgress('delivery', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS), urgentLeft);
-    } else {
-      // No contract: the same line to the next post ahead, drawn idle.
-      const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, 0);
-      const targetS = postStop(world.seed, target).s;
-      const fromS = target > 0 ? Math.min(activeS, postStop(world.seed, target - 1).s) : 0;
-      const player = Math.min(1, Math.max(0, (activeS - fromS) / Math.max(1, targetS - fromS)));
-      hud.setRouteProgress('idle', player, NO_RIVALS, Math.max(0, targetS - activeS), placeNameAt(world.seed, targetS));
+    // THE MAP RIBBON (ui/hudmap.ts): where the player is to the road, and where the
+    // route goes — a race's finish, the nearest post ahead that will sign the cargo (it
+    // stays the target until the car is past its stand, so stopping alongside does not
+    // flip it to the next one), or with nothing aboard the next post.
+    {
+      mapView.s = activeS;
+      mapView.lateral = activeLateral;
+      const facing = driving !== null ? driving.heading : camera.yaw;
+      const turn = facing - road.headingAt(activeS);
+      mapView.relHeading = Math.atan2(Math.sin(turn), Math.cos(turn));
+      mapView.urgentS = urgentLeft;
+      if (race.progress(activeS, raceProgress)) {
+        mapView.kind = 'race';
+        mapView.targetIndex = -1;
+        mapView.targetS = raceProgress.finishS;
+        mapView.place = placeNameAt(world.seed, raceProgress.finishS);
+        const span = raceProgress.finishS - raceProgress.startS;
+        let rank = 1;
+        for (let i = 0; i < raceProgress.rivals.length; i++) {
+          const p = raceProgress.rivals[i]!;
+          mapView.rivals[i] = raceProgress.startS + p * span;
+          if (p > raceProgress.player) rank++;
+        }
+        mapView.rivalCount = raceProgress.rivals.length;
+        mapView.rank = rank;
+      } else {
+        const delivering = deliveryMinIndex !== Infinity;
+        const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, delivering ? deliveryMinIndex : 0);
+        mapView.kind = delivering ? 'delivery' : 'idle';
+        mapView.targetIndex = target;
+        mapView.targetS = postStop(world.seed, target).s;
+        mapView.place = placeNameAt(world.seed, mapView.targetS);
+        mapView.rivalCount = 0;
+        if (!delivering) mapView.urgentS = null;
+      }
+      hud.setMap(mapView);
     }
     frameProfiler?.end('traffic');
 
@@ -3209,6 +3232,7 @@ async function boot(): Promise<void> {
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);
       hud.setDashboardScale(world.state.settings.dashboardSize);
+      hud.setBacklight(world.state.settings.hudBacklight);
       // The tier owns four things that apply in place: the pixel ceiling, the shadow
       // pass, the sky's star depth and the presentation cap. The fifth — the visible-
       // light count — cannot, because it is compiled into every lit material as an

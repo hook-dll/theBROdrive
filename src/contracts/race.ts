@@ -44,7 +44,7 @@
  * after `FINISHING_MAX_S` whatever is left goes back to the stream as it is.
  */
 import { hash, hash01 } from '../core/rng';
-import { formatMoney, RUB } from '../economy/economy';
+import { formatMoney } from '../economy/economy';
 import { shouldShelter } from '../vehicle/weatherpace';
 import { contractIdOf, contractThing, type ContractCargoItem } from '../items/items';
 import { AUTOPILOT_MODES, roadPaceCeiling } from '../vehicle/autopilot';
@@ -59,6 +59,8 @@ import type { ContractPlace } from './types';
 
 
 const RIVAL_COUNT = 3;
+/** Rubles a won race adds to the pay per leg: one middle ball. */
+const WIN_PAY_PER_LEG = 10;
 const AHEAD_FAR_M = 1500;
 const AHEAD_NEAR_M = 560;
 /** The third rival leaves the source once the player is this far up the road. */
@@ -142,10 +144,13 @@ const GHOST_HELD_SHARE = 0.75;
 export interface RaceProgress {
   player: number;
   readonly rivals: number[];
+  /** The race's start and finish arclengths: a progress `p` stands at `startS + p · (finishS - startS)`. */
+  startS: number;
+  finishS: number;
 }
 
 export function newRaceProgress(): RaceProgress {
-  return { player: 0, rivals: new Array<number>(RIVAL_COUNT).fill(0) };
+  return { player: 0, rivals: new Array<number>(RIVAL_COUNT).fill(0), startS: 0, finishS: 0 };
 }
 
 /**
@@ -282,12 +287,12 @@ export class RivalRace {
   }
 
   /**
-   * Kopecks the player wins by handing `itemId` in now: a ruble per leg of the race while
+   * Rubles the player wins by handing `itemId` in now: `WIN_PAY_PER_LEG` per leg of the race while
    * no rival has handed in, else 0. Asked by the delivery before `playerDelivered` ends it.
    */
   winPay(itemId: string): number {
     const race = this.race;
-    return race !== null && race.itemId === itemId && race.delivered === 0 ? race.legs * RUB : 0;
+    return race !== null && race.itemId === itemId && race.delivered === 0 ? race.legs * WIN_PAY_PER_LEG : 0;
   }
 
   /** The player handed `itemId` in: the race is decided by how many rivals already did. */
@@ -298,7 +303,7 @@ export class RivalRace {
     race.finishers++;
     this.end(
       place === 1
-        ? `race won — ${formatMoney(race.legs * RUB)} more in the pay`
+        ? `race won — ${formatMoney(race.legs * WIN_PAY_PER_LEG)} more in the pay`
         : `race lost — you delivered ${ordinal(place)}`,
     );
   }
@@ -412,6 +417,8 @@ export class RivalRace {
     if (race === null) return false;
     const finishS = race.stopS - STOP_PAST_POST_M;
     const span = Math.max(1, finishS - race.sourceS);
+    out.startS = race.sourceS;
+    out.finishS = finishS;
     out.player = Math.min(1, Math.max(0, (playerS - race.sourceS) / span));
     for (let i = 0; i < RIVAL_COUNT; i++) {
       const rival = race.rivals[i]!;

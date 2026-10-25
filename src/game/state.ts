@@ -171,12 +171,12 @@ export interface CarState {
    */
   papers?: boolean;
   /**
-   * Kopecks a car standing on a lot asks (world/carlot.ts), flat across the road. Present
+   * Rubles a car standing on a lot asks (world/carlot.ts), flat across the road. Present
    * only while it is for sale: nobody drives it off before `car_buy` clears it.
    */
   lotPrice?: number;
   /**
-   * Kopecks already paid into this lot car's key box (world/keybox.ts), toward
+   * Rubles already paid into this lot car's key box (world/keybox.ts), toward
    * `lotPrice`: the whole price once its lever has taken it from the player's money, or what a
    * save from the coin days had fed in. Kept so a reload never eats it; `car_buy` clears
    * it with the price.
@@ -223,7 +223,7 @@ export interface PlayerState {
   /** Shades currently on the player's face; absent from the carried pack while worn. */
   wornSunShades: SunShadesItem | null;
   /**
-   * The player's balance, KOPECKS (economy/economy.ts). Not an item: money machines
+   * The player's balance, whole RUBLES (economy/economy.ts). Not an item: money machines
    * debit or pay it directly while they are worked.
    */
   money: number;
@@ -287,8 +287,10 @@ export interface TrailerLoad {
  *    filter), where a version 1 bonnet had the tank fourth and the filter fifth.
  *  - 3: money is kopecks in the purse (`PlayerState.money`); before it, coin items
  *    were the money and lot prices were coins.
+ *  - 4: money is whole rubles, ten to the ruble of version 3 (economy/money.ts): the
+ *    purse and the lot prices are a tenth of their kopecks.
  */
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface WorldState {
   readonly seed: number;
@@ -455,10 +457,10 @@ export type WorldDelta =
   | { t: 'barrel_litres'; barrelId: string; litres: number }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
-  /** Kopecks paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `kopecks`. */
-  | { t: 'lot_pay'; carId: string; kopecks: number }
-  /** The player's balance is now `kopecks` (economy/economy.ts `debit`, `credit`). */
-  | { t: 'money'; kopecks: number };
+  /** Rubles paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `rubles`. */
+  | { t: 'lot_pay'; carId: string; rubles: number }
+  /** The player's balance is now `rubles` (economy/economy.ts `debit`, `credit`). */
+  | { t: 'money'; rubles: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
@@ -921,11 +923,11 @@ export class GameWorld {
       }
       case 'lot_pay': {
         const car = s.cars[delta.carId];
-        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.kopecks);
+        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.rubles);
         break;
       }
       case 'money': {
-        s.player.money = Math.max(0, Math.round(delta.kopecks));
+        s.player.money = Math.max(0, Math.round(delta.rubles));
         break;
       }
       case 'courier_storage':

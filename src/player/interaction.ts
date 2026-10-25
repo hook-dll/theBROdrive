@@ -716,8 +716,8 @@ export class Interaction {
       get world() { return self.world; },
       get inventory() { return self.inventory; },
       get held() { return self.inventory.held; },
-      debit: (kopecks: number) => self.focusedFixture !== null && debit(self.world, kopecks),
-      credit: (kopecks: number) => credit(self.world, kopecks),
+      debit: (rubles: number) => self.focusedFixture !== null && debit(self.world, rubles),
+      credit: (rubles: number) => credit(self.world, rubles),
       give: (itemId: string) => self.inventory.remove(itemId),
       drop: (item: Item, x: number, y: number, z: number) => {
         if (item.type === 'part') self.loose.spawn(item.part, x, y, z);
@@ -786,7 +786,7 @@ export class Interaction {
     private readonly origin: WorldOrigin,
     /** Colliders that mean "this is the parked plane"; boarding is offered here. */
     private readonly boardable: BoardableField,
-    /** Kopecks a race win pays for handing this contract in now; see `RivalRace.winPay`. */
+    /** Rubles a race win pays for handing this contract in now; see `RivalRace.winPay`. */
     private readonly racePay: (contractId: string) => number,
     /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
     private readonly worldFixtures: FixtureField,

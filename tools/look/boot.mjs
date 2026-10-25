@@ -108,6 +108,9 @@ export async function bootIntoCar(browser, { URL, W, H, DPR = 1, SEED = 'flick',
       if (d < bestD) { bestD = d; best = id; }
     }
     if (best) b.world.apply({ t: 'enter_car', carId: best, seat: 'driver' });
+    // A start with no car about (the player's cars may all be in the toy box): one is
+    // put down ahead and driven.
+    else b.driveModel('kit_vaz2106');
   });
 
   return page;

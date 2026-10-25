@@ -14,7 +14,7 @@ import type {
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
-import { carPrice, RUB } from '../economy/economy';
+import { carPrice } from '../economy/economy';
 import {
   CAMERA_FRAME_LIMIT,
   SPONGE_CAPACITY_MAX,
@@ -519,10 +519,11 @@ export function migrateState(raw: unknown): WorldState {
       Math.max(0, carried.length - 1),
     ),
     wornSunShades: wornItem,
-    // A save from the coin days carries its coins instead (`legacyCoinKopecks`).
+    // A save from the coin days carries its coins instead (`legacyCoinRubles`); one
+    // from the kopeck days, kopecks.
     money: version < 3
-      ? legacyCoinKopecks(carriedRaw, looseItemsRaw, carsRaw, courierStorageRaw)
-      : Math.max(0, Math.round(numOr(playerRaw.money, 0))),
+      ? legacyCoinRubles(carriedRaw, looseItemsRaw, carsRaw, courierStorageRaw)
+      : legacyRubles(numOr(playerRaw.money, 0), version),
   };
 
   const cars: Record<string, CarState> = {};
@@ -922,13 +923,14 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // Bought or started in: the player's papers. A lot car still for sale keeps its price.
   if (raw.papers === true) car.papers = true;
   if (typeof raw.lotPrice === 'number' && Number.isFinite(raw.lotPrice) && raw.lotPrice > 0) {
-    // A save from the coin days priced in coins: the lot asks the model's price in
-    // kopecks now, and what was fed into its box counts a ruble a coin.
+    // A save from the coin days priced in coins: the lot asks the model's price now,
+    // and what was fed into its box counts `RUBLES_PER_COIN` a coin. One from the kopeck
+    // days priced in kopecks.
     const coins = version < 3;
-    car.lotPrice = coins ? carPrice(car.modelId) : Math.round(raw.lotPrice);
+    car.lotPrice = coins ? carPrice(car.modelId) : legacyRubles(raw.lotPrice, version);
     // Already in its key box; a save from before the key boxes has none.
     if (typeof raw.lotPaid === 'number' && Number.isFinite(raw.lotPaid) && raw.lotPaid > 0) {
-      car.lotPaid = Math.min(car.lotPrice, Math.round(raw.lotPaid * (coins ? RUB : 1)));
+      car.lotPaid = Math.min(car.lotPrice, coins ? Math.round(raw.lotPaid) * RUBLES_PER_COIN : legacyRubles(raw.lotPaid, version));
     }
   }
   // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
@@ -1016,7 +1018,7 @@ function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
   const obj = raw as Record<string, unknown>;
   // The coin item went with the purse: its value is counted into the balance first
-  // (`legacyCoinKopecks`).
+  // (`legacyCoinRubles`).
   if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter' || obj.type === 'coin') return true;
   if (obj.type === 'tool' && obj.tool === 'wrench') return true;
   if ((obj.type === 'fluid_can' && obj.fluid === 'diesel') || (obj.type === 'fuel_can' && obj.fuel === 'diesel')) {
@@ -1029,12 +1031,22 @@ function isRemovedLegacyItem(raw: unknown): boolean {
   return false;
 }
 
+/** A coin of the coin days in today's rubles: it was a ruble of the kopeck days. */
+const RUBLES_PER_COIN = 10;
+/** Kopecks of a version 3 save in one of today's rubles: money went ×10 and lost its kopecks. */
+const V3_KOPECKS_PER_RUBLE = 10;
+
+/** A saved amount in today's whole rubles: a version 3 save wrote kopecks. */
+function legacyRubles(amount: number, version: number): number {
+  return Math.max(0, Math.round(version < 4 ? amount / V3_KOPECKS_PER_RUBLE : amount));
+}
+
 /**
- * The coin days' money, kopecks: every coin item of a version 2 save, wherever it lay —
- * the pack, the ground, a boot, a cabin, a post's stock — at a ruble a coin, for the
- * purse. The coins themselves are then dropped (`isRemovedLegacyItem`).
+ * The coin days' money, rubles: every coin item of a version 2 save, wherever it lay —
+ * the pack, the ground, a boot, a cabin, a post's stock — at `RUBLES_PER_COIN` a coin,
+ * for the purse. The coins themselves are then dropped (`isRemovedLegacyItem`).
  */
-function legacyCoinKopecks(
+function legacyCoinRubles(
   carried: readonly unknown[],
   looseItems: Record<string, unknown>,
   cars: Record<string, unknown>,
@@ -1059,7 +1071,7 @@ function legacyCoinKopecks(
     countAll((car as Record<string, unknown>).cabin);
   }
   for (const cells of Object.values(courierStorage)) countAll(cells);
-  return coins * RUB;
+  return coins * RUBLES_PER_COIN;
 }
 
 /**

@@ -626,6 +626,8 @@ export interface Settings {
    * phone differ), so the same number means "a bit bigger" on both.
    */
   dashboardSize: number;
+  /** The colour the HUD strip's glass is lit in (ui/hud.ts `HudBacklight`). */
+  hudBacklight: 'blue' | 'green' | 'amber';
   /** How far the desert is drawn; see `viewDistanceFor`. */
   viewDistance: ComputeLevel;
   /** How many ambient cars the stream holds; see `TRAFFIC_CAPS`. */
@@ -737,6 +739,7 @@ export const DEFAULT_SETTINGS: Settings = {
   abs: false,
   tractionControl: false,
   dashboardSize: 1,
+  hudBacklight: 'blue',
   // 16 km of desert and a 24-car stream; High is for a processor with room beyond them.
   viewDistance: 'medium',
   trafficDensity: 'medium',
@@ -1021,6 +1024,7 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
         DASHBOARD_SIZE_STEP
       );
     })(),
+    hudBacklight: obj.hudBacklight === 'green' || obj.hudBacklight === 'amber' ? obj.hudBacklight : 'blue',
     // A save from before the split had one `cpuLoad` for both; it seeds each.
     viewDistance: computeLevel(obj.viewDistance) ?? computeLevel(obj.cpuLoad) ?? 'medium',
     trafficDensity: computeLevel(obj.trafficDensity) ?? computeLevel(obj.cpuLoad) ?? 'medium',

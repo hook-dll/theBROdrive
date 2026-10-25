@@ -25,7 +25,7 @@ import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
 import { CAMERA_FRAME_LIMIT, Inventory, itemLabel, type Item } from '../items/items';
-import { credit, formatMoney, RUB } from '../economy/economy';
+import { credit, formatMoney } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
 import type { Interaction } from '../player/interaction';
@@ -322,9 +322,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);
   };
 
-  /** The dev money behind `PauseHooks.giveMoney`: 100 rubles added. */
+  /** The dev money behind `PauseHooks.giveMoney`: 1000 rubles added, ten big balls. */
   const devGiveMoney = (): void => {
-    const amount = 100 * RUB;
+    const amount = 1000;
     credit(ctx.world, amount);
     ctx.hud.setToast(`+${formatMoney(amount)}`);
   };

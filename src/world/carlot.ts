@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
 import type { CarState } from '../game/state';
-import { carPrice, formatMoney, RUB } from '../economy/economy';
+import { carPrice, formatMoney } from '../economy/economy';
 import { oilCapacity, variant } from '../parts/registry';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import { trunkCellCount } from '../vehicle/trunk';
@@ -33,9 +33,9 @@ const LOT_DOMAIN = 0x4c4f5431; // 'LOT1'
 
 /** Kilometres per lot band: the model on a lot is drawn per band. */
 const LOT_BAND_KM = 50;
-/** The dearest car a lot at home asks, kopecks, and how that ceiling rises per km. */
-const LOT_PRICE_BASE = 50 * RUB;
-const LOT_PRICE_PER_KM = 62.5;
+/** The dearest car a lot at home asks, rubles, and how that ceiling rises per km. */
+const LOT_PRICE_BASE = 500;
+const LOT_PRICE_PER_KM = 6.25;
 /** The foreign cars stand on lots only this far from home. */
 const FOREIGN_FROM_KM = 300;
 const FOREIGN: Readonly<Record<string, true>> = { kit_nexia: true, kit_espero: true, kit_astraf: true, kit_vectraa: true };

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeFlatPaletteMaterial } from '../render/materials';
 import { maxAnisotropy } from '../render/texturequality';
+import { fillGameText } from '../ui/balls';
 import { box, C } from './poi/kit';
 
 /**
@@ -105,7 +106,7 @@ function drawSign(
     // The first line is the headline; the rest are smaller.
     const size = Math.round(rowH * (i === 0 ? 0.72 : 0.6));
     g.font = `bold ${size}px sans-serif`;
-    g.fillText(lines[i]!, x + width * 0.5, y + border * 2 + rowH * (i + 0.5), width - border * 6);
+    fillGameText(g, lines[i]!, x + width * 0.5, y + border * 2 + rowH * (i + 0.5), width - border * 6);
   }
 }
 

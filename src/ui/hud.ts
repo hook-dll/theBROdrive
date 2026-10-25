@@ -4,8 +4,15 @@ import type { EngineTempReadout } from '../vehicle/cooling';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
 import { RIDE_EASY_MPS2, RIDE_HARSH_MPS2 } from '../trip/ride';
-import { formatMoney } from '../economy/economy';
-import { formatClock } from '../contracts/types';
+import { balls } from '../economy/money';
+import { installBallStyle, ballElement, setGameText, type BallKind } from './balls';
+import { MapRibbon, type MapSource, type MapView } from './hudmap';
+
+export type { MapPost, MapSource, MapView } from './hudmap';
+export { newMapView } from './hudmap';
+
+/** The strip's backlight (Settings.hudBacklight): the colour its glass is lit in. */
+export type HudBacklight = 'blue' | 'green' | 'amber';
 
 /**
  * HUD overlay. Plain DOM, no framework. Every element is created once and cached;
@@ -122,8 +129,6 @@ const MASS_ALARM_FRACTION = 0.9;
 const TOAST_DURATION_MS = 3200;
 const TOAST_LEAVE_MS = 300;
 const MAX_TOASTS = 4;
-/** Length of the mini-map's bead line, px: the segment display's width less the end marks' overhang (hud.css `.hud-race-track`). */
-const RACE_LINE_PX = 242;
 /**
  * The crosshair fades this long after the view was last turned: long enough to read
  * what the aim settled on, short enough that a still view is clean (owner: 3-5 s).
@@ -138,6 +143,16 @@ const CROSSHAIR_IDLE_MS = 4000;
  */
 const RIDE_R = 26;
 const RIDE_FULL_MPS2 = 5;
+
+/**
+ * THE MONEY PILE on the strip: each kind of ball heaped in two rows, the second in the
+ * first's hollows, big balls then middle then small. Diameters in strip units (em of the
+ * strip's font), the pile's floor at `PILE_FLOOR` from its top.
+ */
+const PILE_BALL: Readonly<Record<BallKind, number>> = { big: 1.7, middle: 1.26, small: 0.9 };
+const PILE_FLOOR = 3.5;
+const PILE_KIND_GAP = 0.45;
+const PILE_POP_MS = 320;
 
 function el(tag: string, cls?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -187,25 +202,25 @@ export class Hud {
   /** When the view was last turned, ms (`noteLook`); the crosshair fades after it. */
   private lastLookMs = -Infinity;
   private readonly promptEl: HTMLElement;
-  private readonly drivingCluster: HTMLElement;
+  /**
+   * THE STRIP: the whole HUD panel, one line along the top edge of the screen, on foot
+   * and driving alike. Left to right: the money, the map ribbon, and the instruments
+   * (the segment display, the G-force widget, the pedal lever), which go dark on foot.
+   */
+  private readonly stripEl: HTMLElement;
+  private readonly instrumentsEl: HTMLElement;
   private readonly invMassEl: HTMLElement;
   private readonly invSlotsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
-  /** The mini-map's bead line under the panel; see `setRouteProgress`. */
-  private readonly raceEl: HTMLElement;
-  private readonly raceTrackEl: HTMLElement;
-  private readonly raceLabelEl: HTMLElement;
-  /** Player's bead first, then the rivals'. */
-  private readonly raceBeads: HTMLElement[] = [];
-  /** Last written x per bead, px; NaN forces a write. */
-  private readonly raceBeadX: number[] = [];
-  private raceKind: 'race' | 'delivery' | 'idle' | null = null;
-  private readonly lcdEl: SVGSVGElement;
-  /** The money readout (`setMoney`): on the panel while driving, by the pack on foot. */
-  private readonly moneyEl: HTMLElement;
-  private readonly moneySlot: HTMLElement;
   private readonly inventoryEl: HTMLElement;
+  private readonly lcdEl: SVGSVGElement;
+  /** The money pile (`setMoney`): calcite balls, a list per kind in pile order. */
+  private readonly pileEl: HTMLElement;
+  private readonly pileBalls: Record<BallKind, HTMLElement[]> = { big: [], middle: [], small: [] };
+  private readonly pileEmptyEl: HTMLElement;
   private moneyShown = -1;
+  /** The map ribbon (`setMap`). */
+  private readonly map: MapRibbon;
   /** The pedal lever scale (`DrivingReadout.pedalLever`): the svg, the notch frame, the fills. */
   private readonly leverEl: SVGSVGElement;
   private readonly leverNotch: SVGRectElement;
@@ -230,13 +245,9 @@ export class Hud {
   private damageStrength = -1;
   private deathFade = -1;
   private gumBubbleProgress = -1;
-  /** Delivery distance in tens of metres last written to the route label. */
-  private raceLabelKey = Number.NaN;
-  /** The destination post's place name last written to the route label. */
-  private raceLabelPlace = '';
-  /** The urgent clock last appended to the route label, '' with none. */
-  private raceLabelClock = '';
   private warningsSignature = '';
+  /** Whether the instruments are lit: the player is in a car. */
+  private driving: boolean | null = null;
   /**
    * The mode the faces are currently painted for, so the class writes happen on a
    * mode CHANGE rather than on every frame the autopilot is engaged.
@@ -262,13 +273,12 @@ export class Hud {
   private toastTimers = new Set<number>();
   private disposed = false;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, mapSource: MapSource) {
     this.root = root;
+    installBallStyle();
     this.crosshairEl = el('div', 'hud-crosshair');
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
-
-    this.drivingCluster = el('div', 'hud-driving is-hidden');
 
     const display = this.buildSegmentDisplay();
     this.lcdEl = display.svg;
@@ -282,33 +292,25 @@ export class Hud {
     this.rideEl = ride.svg;
     this.rideDot = ride.dot;
     this.ridePulse = ride.pulse;
-    this.moneyEl = el('div', 'hud-money');
-    this.moneySlot = el('div', 'hud-money-slot');
 
-    // THE MINI-MAP: the route bead line, from the post behind to the one ahead (or a
-    // race's start to its finish), under the display and as long as it, its words a
-    // line further down.
-    this.raceEl = el('div', 'hud-race is-idle');
-    this.raceTrackEl = el('div', 'hud-race-track');
-    this.raceTrackEl.append(el('div', 'hud-race-line'), el('div', 'hud-race-start'), el('div', 'hud-race-finish'));
-    this.raceLabelEl = el('div', 'hud-race-label');
-    this.raceEl.append(this.raceTrackEl, this.raceLabelEl);
+    this.pileEl = el('div', 'hud-pile');
+    this.pileEmptyEl = el('div', 'hud-pile-empty');
+    this.pileEl.append(this.pileEmptyEl);
+    const money = el('div', 'hud-strip-money');
+    money.append(this.pileEl);
 
-    // THE PANEL, the segment display at its centre with the mini-map under it; the money
-    // to its left, the G-force widget and the pedal lever to its right. The car's own
-    // instruments are in the car.
-    const centre = el('div', 'hud-panel-centre');
-    centre.append(this.lcdEl, this.raceEl);
-    const row = el('div', 'hud-panel-row');
-    row.append(this.moneySlot, centre, this.rideEl, this.leverEl);
-    const dashboard = el('div', 'hud-dashboard-shell');
-    dashboard.append(row);
-    this.drivingCluster.append(dashboard);
+    this.map = new MapRibbon(mapSource);
+
+    this.instrumentsEl = el('div', 'hud-strip-instruments');
+    this.instrumentsEl.append(this.lcdEl, this.rideEl, this.leverEl);
+
+    this.stripEl = el('div', 'hud-strip');
+    this.stripEl.append(money, this.map.el, this.instrumentsEl);
 
     this.invMassEl = el('div', 'hud-inv-mass');
     this.invSlotsEl = el('div', 'hud-inv-items');
     this.inventoryEl = el('div', 'hud-inventory');
-    this.inventoryEl.append(this.moneyEl, this.invSlotsEl);
+    this.inventoryEl.append(this.invSlotsEl);
 
     this.toastEl = el('div', 'hud-toasts');
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
@@ -318,7 +320,7 @@ export class Hud {
     this.tops = [
       this.crosshairEl,
       this.promptEl,
-      this.drivingCluster,
+      this.stripEl,
       this.inventoryEl,
       this.toastEl,
       this.gumBubbleEl,
@@ -326,6 +328,7 @@ export class Hud {
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
     root.append(...this.tops, this.damageVignetteEl, this.deathFadeEl);
+    this.setBacklight('blue');
   }
 
   private buildRideWidget(): { svg: SVGSVGElement; dot: SVGCircleElement; pulse: SVGCircleElement } {
@@ -425,25 +428,30 @@ export class Hud {
     this.root.classList.toggle('is-death-sequence', dying);
   }
 
+  /**
+   * The car's readout while the player is in one, or null on foot: the instruments then
+   * go dark — the display blank, the G-force and the lever empty — and the strip stays.
+   */
   setDriving(readout: DrivingReadout | null): void {
-    // The money sits on the panel while driving and beside the pack on foot.
-    const moneyHome = readout === null ? this.inventoryEl : this.moneySlot;
-    if (this.moneyEl.parentElement !== moneyHome) moneyHome.prepend(this.moneyEl);
+    const driving = readout !== null;
+    if (driving !== this.driving) {
+      this.driving = driving;
+      this.stripEl.classList.toggle('is-driving', driving);
+      if (!driving) {
+        this.warningsSignature = '';
+        this.engineOff = false;
+        this.refreshSegmentDisplay();
+        this.updatePedalLever(null);
+      }
+    }
     if (readout === null) {
-      this.setVisible(this.drivingCluster, false);
+      if (this.autopilotFaces !== null) this.setAutopilotFaces(null);
       return;
     }
-    this.setVisible(this.drivingCluster, true);
 
     // WHOSE CAR THIS IS, said by the panel's frame: plain while the player drives, the
     // mode's own colour while the autopilot does.
-    const mode = readout.autopilotMode;
-    if (mode !== this.autopilotFaces) {
-      this.autopilotFaces = mode;
-      this.drivingCluster.classList.toggle('is-autopilot-sleeper', mode === 'sleeper');
-      this.drivingCluster.classList.toggle('is-autopilot-hurried', mode === 'hurried');
-      this.drivingCluster.classList.toggle('is-autopilot-frantic', mode === 'frantic');
-    }
+    if (readout.autopilotMode !== this.autopilotFaces) this.setAutopilotFaces(readout.autopilotMode);
 
     // Faults own the display until the car is healthy; radio never trails them.
     const fuelFraction = readout.tankCapacity > 0 ? readout.fuelLitres / readout.tankCapacity : 0;
@@ -469,25 +477,82 @@ export class Hud {
     this.updatePedalLever(readout.pedalLever);
   }
 
-  /**
-   * The player's money, kopecks: rubles over kopecks on the panel while driving, on one
-   * line by the pack on foot.
-   */
-  setMoney(kopecks: number): void {
-    if (kopecks === this.moneyShown) return;
-    this.moneyShown = kopecks;
-    // Rubles and kopecks as separate parts, so the panel can stack them.
-    const parts = formatMoney(kopecks).split(' ').map((text) => {
-      const part = el('span', 'hud-money-part');
-      part.textContent = text;
-      return part;
-    });
-    this.moneyEl.replaceChildren(...parts);
+  private setAutopilotFaces(mode: AutopilotMode | null): void {
+    this.autopilotFaces = mode;
+    this.instrumentsEl.classList.toggle('is-autopilot-sleeper', mode === 'sleeper');
+    this.instrumentsEl.classList.toggle('is-autopilot-hurried', mode === 'hurried');
+    this.instrumentsEl.classList.toggle('is-autopilot-frantic', mode === 'frantic');
   }
 
-  /** Player's dashboard size (Settings.dashboardSize), on top of the presentation's own. */
+  /**
+   * The player's money, rubles, as the pile of calcite balls at the strip's left end.
+   * A ball that comes pops in and one that goes shrinks away; the ones that stay roll
+   * to their new places (hud.css `.hud-pile .ball`), so ten small balls fusing into a
+   * middle one is seen as it happens.
+   */
+  setMoney(rubles: number): void {
+    if (rubles === this.moneyShown) return;
+    const first = this.moneyShown < 0;
+    this.moneyShown = rubles;
+    this.pileEl.setAttribute('aria-label', `${rubles} rubles`);
+    const amount = balls(rubles);
+    this.pileEmptyEl.classList.toggle('is-hidden', rubles > 0);
+    let left = 0;
+    let placed = false;
+    for (const kind of ['big', 'middle', 'small'] as const) {
+      const count = amount[kind];
+      const list = this.pileBalls[kind];
+      while (list.length > count) {
+        const ball = list.pop()!;
+        if (first) {
+          ball.remove();
+          continue;
+        }
+        ball.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(0.2)', opacity: 0 }], {
+          duration: PILE_POP_MS * 0.7,
+          easing: 'ease-in',
+        }).onfinish = () => ball.remove();
+      }
+      while (list.length < count) {
+        const ball = ballElement(kind);
+        this.pileEl.append(ball);
+        list.push(ball);
+        if (!first) {
+          ball.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.18)', offset: 0.7 }, { transform: 'scale(1)' }], {
+            duration: PILE_POP_MS,
+            delay: PILE_POP_MS * 0.45,
+            easing: 'ease-out',
+            fill: 'backwards',
+          });
+        }
+      }
+      if (count === 0) continue;
+      if (placed) left += PILE_KIND_GAP;
+      placed = true;
+      // The heap: the bottom row takes the larger half, the top row sits in its hollows.
+      const d = PILE_BALL[kind];
+      const bottom = Math.ceil((count + 1) / 2);
+      for (let i = 0; i < count; i++) {
+        const top = i >= bottom;
+        const x = left + (top ? (i - bottom + 0.5) * d : i * d);
+        const y = PILE_FLOOR - d - (top ? d * 0.86 : 0);
+        const ball = list[i]!;
+        ball.style.left = `${x.toFixed(3)}em`;
+        ball.style.top = `${y.toFixed(3)}em`;
+      }
+      left += bottom * d;
+    }
+    this.pileEl.style.width = `${Math.max(PILE_BALL.small, left).toFixed(3)}em`;
+  }
+
+  /** Player's dashboard size (Settings.dashboardSize): the strip's height scales with it. */
   setDashboardScale(scale: number): void {
-    this.drivingCluster.style.setProperty('--hud-dash-scale', String(scale));
+    this.root.style.setProperty('--hud-dash-scale', String(scale));
+  }
+
+  /** The strip's backlight colour (Settings.hudBacklight). */
+  setBacklight(backlight: HudBacklight): void {
+    this.setAttr(this.stripEl, 'data-backlight', backlight);
   }
 
   /**
@@ -574,7 +639,8 @@ export class Hud {
     const radioMessage = this.radioText === RADIO_OFF_MESSAGE && now >= this.radioOffUntil
       ? ''
       : (this.radioText ?? '');
-    const rawMessage = hasProblems ? problemMessage : radioMessage;
+    // On foot the display is dark.
+    const rawMessage = !this.driving ? '' : hasProblems ? problemMessage : radioMessage;
     // This runs every frame while driving, and the message changes about as often as
     // a station does. Sanitising it per frame was five string allocations a frame for
     // an answer that had not moved.
@@ -696,7 +762,7 @@ export class Hud {
     this.crosshairEl.classList.toggle('is-idle', idle);
     this.crosshairEl.classList.toggle('is-actionable', actionable);
     this.crosshairEl.classList.toggle('is-dim', !actionable && text === null);
-    if (text !== null) this.setText(this.promptEl, text);
+    if (text !== null) setGameText(this.promptEl, text);
   }
 
   /** Called every rendered frame: whether the view was turned since the last one. */
@@ -776,66 +842,16 @@ export class Hud {
   }
 
 
-  /**
-   * The mini-map: the bead line under the panel. `race`: the player and each rival as 0
-   * (source post) .. 1 (finish). `delivery`: the player alone, 0 at the last post behind
-   * and 1 at the nearest one ahead that will sign for the cargo, `remainingM` away;
-   * `place` is that post's place name (world/placenames.ts). `idle`: the same line to the
-   * next post with no contract to take there, drawn grey and faint, there to be watched
-   * rather than followed. `urgentS`: seconds left on the most pressing urgent contract
-   * aboard (negative once late), appended to the label as a clock; null with none. A bead
-   * is moved only when it shifts half a pixel.
-   */
-  setRouteProgress(
-    kind: 'race' | 'delivery' | 'idle',
-    player: number,
-    rivals: readonly number[],
-    remainingM: number,
-    place = '',
-    urgentS: number | null = null,
-  ): void {
+  /** The map ribbon on the strip: see ui/hudmap.ts. */
+  setMap(view: MapView): void {
     if (this.disposed) return;
-    if (kind !== this.raceKind) {
-      this.raceKind = kind;
-      this.raceEl.classList.toggle('is-race', kind === 'race');
-      this.raceEl.classList.toggle('is-delivery', kind === 'delivery');
-      this.raceEl.classList.toggle('is-idle', kind === 'idle');
-      this.raceLabelKey = Number.NaN;
-    }
-    // Tenths of a kilometre out, tens of metres within one: the label is rebuilt only
-    // when that reading, the clock's second or the place changes, not every tick.
-    const near = remainingM < 1000;
-    const key = kind === 'race' ? -1 : near ? Math.round(remainingM / 10) : 1e6 + Math.round(remainingM / 100);
-    const clock = urgentS === null ? '' : ` · ⏱ ${formatClock(urgentS)}`;
-    if (key !== this.raceLabelKey || place !== this.raceLabelPlace || clock !== this.raceLabelClock) {
-      this.raceLabelKey = key;
-      this.raceLabelPlace = place;
-      this.raceLabelClock = clock;
-      const to = place ? `POST · ${place}` : 'POST';
-      this.raceLabelEl.textContent = (kind === 'race'
-        ? 'RACE'
-        : near ? `${to} ${key * 10} m` : `${to} ${((key - 1e6) / 10).toFixed(1)} km`) + clock;
-    }
-    const count = kind === 'race' ? rivals.length + 1 : 1;
-    while (this.raceBeads.length < count) {
-      const bead = el('div', this.raceBeads.length === 0 ? 'hud-race-bead is-player' : 'hud-race-bead');
-      this.raceTrackEl.append(bead);
-      this.raceBeads.push(bead);
-      this.raceBeadX.push(Number.NaN);
-    }
-    for (let i = 0; i < this.raceBeads.length; i++) this.setVisible(this.raceBeads[i]!, i < count);
-    for (let i = 0; i < count; i++) {
-      const x = Math.round((i === 0 ? player : rivals[i - 1]!) * RACE_LINE_PX * 2) / 2;
-      if (x === this.raceBeadX[i]) continue;
-      this.raceBeadX[i] = x;
-      this.raceBeads[i]!.style.transform = `translateX(${x}px)`;
-    }
+    this.map.update(view);
   }
 
   setToast(text: string): void {
     if (this.disposed) return;
     const toast = el('div', 'hud-toast');
-    toast.textContent = text;
+    setGameText(toast, text);
     this.toastEl.appendChild(toast);
     this.toasts.push(toast);
     // Cap the visible stack so a burst of toasts cannot flood the screen.
@@ -866,6 +882,7 @@ export class Hud {
     for (const id of this.toastTimers) window.clearTimeout(id);
     this.toastTimers.clear();
     this.toasts = [];
+    this.map.dispose();
     for (const node of this.tops) node.remove();
     this.tops.length = 0;
     this.damageVignetteEl.remove();

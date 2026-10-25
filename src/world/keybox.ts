@@ -77,7 +77,7 @@ type Phase = 'idle' | 'dropping' | 'ready' | 'taken';
 /**
  * Builds the key box for lot car `carId` on a post at ABSOLUTE (`x`, `y`, `z`), `y` the
  * ground under it, its face turned by `yaw` (the face is local +Z: face the buyer's
- * side). `price` (kopecks) is painted on the box; what counts is `CarState.lotPrice`.
+ * side). `price` (rubles) is painted on the box; what counts is `CarState.lotPrice`.
  * In the physics band it is solid and registered as a world fixture (its id pushed to
  * `registered`, for the chunk to `fixtures.forget`); beyond it, it is only seen.
  */
@@ -291,7 +291,7 @@ class KeyBox implements WorldFixture {
             this.jam = JAM_S;
             return 'refused';
           }
-          this.world.apply({ t: 'lot_pay', carId: this.carId, kopecks: owed });
+          this.world.apply({ t: 'lot_pay', carId: this.carId, rubles: owed });
         }
         this.phase = 'dropping';
         this.clock = 0;

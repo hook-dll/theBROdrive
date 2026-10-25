@@ -6,6 +6,7 @@ import type { Item } from '../items/items';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureFocus, type WorldFixture } from './fixturefield';
 import { paintSign, registerAtlasSign, signMesh } from './market';
+import { fillGameText } from '../ui/balls';
 import { box, C, cylinder, mergeKitStatics } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
@@ -664,14 +665,14 @@ export function paintCardFace(
   g.fillStyle = CARD_INK;
   g.textAlign = 'left';
   g.font = `bold ${Math.round(h * 0.13)}px sans-serif`;
-  g.fillText(card.headline, w * 0.04, h * 0.285, w * 0.92);
+  fillGameText(g, card.headline, w * 0.04, h * 0.285, w * 0.92);
   // Clear of the hinge across the middle: one line over it, the rest under it.
   g.font = `${Math.round(h * 0.085)}px sans-serif`;
-  card.lines.slice(0, 4).forEach((line, i) => g.fillText(line, w * 0.04, h * [0.41, 0.6, 0.72, 0.84][i]!, w * 0.92));
+  card.lines.slice(0, 4).forEach((line, i) => fillGameText(g, line, w * 0.04, h * [0.41, 0.6, 0.72, 0.84][i]!, w * 0.92));
   g.fillStyle = '#7d7464';
   g.font = `${Math.round(h * 0.055)}px sans-serif`;
   g.textAlign = 'center';
-  g.fillText(card.footer, w / 2, h * 0.945, w * 0.92);
+  fillGameText(g, card.footer, w / 2, h * 0.945, w * 0.92);
   g.strokeStyle = '#b9ae95';
   g.lineWidth = 4;
   g.strokeRect(2, 2, w - 4, h - 4);

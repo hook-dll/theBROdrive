@@ -25,12 +25,12 @@ export interface FixtureContext {
   /** The item in the hands, or null. */
   readonly held: Item | null;
   /**
-   * Takes `kopecks` from the player's money while a machine is being worked; false, and
+   * Takes `rubles` from the player's money while a machine is being worked; false, and
    * nothing taken, when none is or the money is short.
    */
-  debit(kopecks: number): boolean;
-  /** Pays `kopecks` into the player's money (economy/economy.ts `credit`). */
-  credit(kopecks: number): void;
+  debit(rubles: number): boolean;
+  /** Pays `rubles` into the player's money (economy/economy.ts `credit`). */
+  credit(rubles: number): void;
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;
   /**
@@ -48,7 +48,7 @@ export interface FixtureContext {
    * (contracts/types.ts). Reused in place: valid only for the call that asked.
    */
   probe(postIndex: number, x: number, z: number): DeliveryProbe;
-  /** Kopecks a race win adds for handing contract `contractId` in now (contracts/race.ts). */
+  /** Rubles a race win adds for handing contract `contractId` in now (contracts/race.ts). */
   racePay(contractId: string): number;
   /**
    * Puts the player's car `carId` into the toy box (`car_box`), its live body's fuel,
