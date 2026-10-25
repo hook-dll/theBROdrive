@@ -2,10 +2,11 @@ import type { FoleyContinuous, FoleyEvent } from '../audio/foley';
 import type { DeliveryProbe } from '../contracts/types';
 import type { GameWorld } from '../game/state';
 import type { Inventory, Item } from '../items/items';
+import type { PumpNozzle } from './pumps';
 
 /**
  * WORLD FIXTURES: the mechanical things the world stands in reach — a post machine's
- * selector wheel and lever, a fluid barrel's tap, a car lot's key box. Each one aims,
+ * selector wheel and lever, a pump and its nozzle, a car lot's key box. Each one aims,
  * prompts and acts through itself, so `Interaction` (player/interaction.ts) knows
  * nothing about what it is: it casts the eye ray at every registered fixture, keeps
  * the nearest hit like any other target, asks it for its prompt, and hands it the F
@@ -56,6 +57,10 @@ export interface FixtureContext {
    * (world/toybox.ts `boxRefusal`).
    */
   boxCar(carId: string): void;
+  /** The pump nozzle in the player's hand (world/pumps.ts), or null. */
+  readonly nozzle: PumpNozzle | null;
+  /** Puts `nozzle` in the player's hand, hanging any other back first; null hangs it back. */
+  takeNozzle(nozzle: PumpNozzle | null): void;
   /** A one-line message on the HUD. */
   toast(text: string): void;
 }

@@ -73,7 +73,7 @@ export interface InputFrame {
    */
   interact: boolean;
   /**
-   * The same key while it is held down: a world fixture held on (a barrel's tap) works,
+   * The same key while it is held down: a world fixture held on (a pump filling a can) works,
    * and a hand-aimed kit part (the inside mirror) turns, while it is.
    */
   interactDown: boolean;

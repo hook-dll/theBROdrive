@@ -622,7 +622,6 @@ export function migrateState(raw: unknown): WorldState {
     looseItems,
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
-    barrelLitres: migrateBarrelLitres(obj.barrelLitres),
   };
 }
 
@@ -647,20 +646,6 @@ function migrateVendingSold(value: unknown): Record<string, number[]> {
   for (const [id, slots] of Object.entries(value as Record<string, unknown>)) {
     const sold = migrateNumberArray(slots).filter((slot) => Number.isInteger(slot) && slot >= 0);
     if (sold.length > 0) out[id] = sold;
-  }
-  return out;
-}
-
-/**
- * Litres left in the barrels drawn from, by barrel id. Absent on every save from before
- * the barrels: none touched. A malformed entry drops that barrel's record, which only
- * gives it back its first contents.
- */
-function migrateBarrelLitres(value: unknown): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
-  for (const [id, litres] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof litres === 'number' && Number.isFinite(litres)) out[id] = Math.max(0, litres);
   }
   return out;
 }

@@ -75,7 +75,7 @@ export interface PartItem {
 
 /**
  * A can of any size. A bought can is empty and holds no fluid yet: the first fluid
- * poured in (at a barrel, from another can) decides what it is, and pouring out the
+ * poured in (at a pump, from another can) decides what it is, and pouring out the
  * last of it leaves it empty and free for any fluid again. `fluid` is null exactly when
  * `litres` is 0; `fillCan` and `drainCan` keep the two together.
  */

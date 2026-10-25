@@ -12,7 +12,7 @@ import type { Road } from './road';
  * §6): four to seven houses of the stop's one dwelling type on both sides of the road,
  * and on the lay-by's side one long pad with its service strip (§6.3): the signpost,
  * sometimes a car for sale, the teddy shelter's place, the post, the toy box, the haul bay
- * reversed into off the pad, the shop and sometimes a barrel stand. Every other roadside
+ * reversed into off the pad, the shop and sometimes the pumps. Every other roadside
  * stop is one house in front of its own short lay-by.
  *
  * PURE: a function of the seed and the slot, with no road or terrain sampling beyond
@@ -80,10 +80,10 @@ export interface SettlementLayout {
    */
   readonly bay: SettlementSpot | null;
   /**
-   * A fifth of the lone houses; half the settlements, on the place the fuel pumps will
-   * take (§6.3, +17…+21). Faces the road.
+   * The pumps' island (world/pumps.ts) at half the settlements, +17…+21 (§6.3, §9):
+   * petrol, oil and water in a row along the pad. Faces the road. Settlements only.
    */
-  readonly barrels: SettlementSpot | null;
+  readonly pumps: SettlementSpot | null;
   /**
    * The car for sale's centre, parked along the road; about 2.3 m of sand between the pad
    * edge and its road-side flank is kept for its price board and key box. Settlements only.
@@ -149,12 +149,8 @@ const VERGE_SPAN_M = 12;
 /** Largest yaw wobble a house is turned off square to the road, radians either way. */
 const HOUSE_WOBBLE = 0.08;
 
-/**
- * Fraction of settlements with a barrel stand, and of lone houses. A settlement's stands
- * where its fuel pumps will (§6.3, §9), on the same roll, until the pumps replace it.
- */
-const SETTLEMENT_BARRELS_CHANCE = 0.5;
-const LONE_BARRELS_CHANCE = 0.2;
+/** Fraction of settlements with pumps. */
+const PUMPS_CHANCE = 0.5;
 /** Fraction of settlements with a car for sale. */
 const LOT_CHANCE = 0.3;
 
@@ -181,9 +177,9 @@ const TOYBOX_OUT_M = 1.2;
 const BAY_ALONG_M = 5.5;
 const SHOP_ALONG_M = 13;
 const SHOP_OUT_M = 1.2;
-/** The pumps' place, +17…+21. */
-const BARRELS_ALONG_M = 19;
-const BARRELS_OUT_M = 1.4;
+/** The pumps' island, +17…+21. */
+const PUMPS_ALONG_M = 19;
+const PUMPS_OUT_M = 1.0;
 
 /**
  * THE HAUL BAY (§7.8): inside, half its width along the road and half its depth across
@@ -198,35 +194,25 @@ export const HAUL_BAY_WALL_M = 0.15;
 const BAY_OPENING_GAP_M = 0.5;
 
 /**
- * A lone house's barrel stand: clear sand between it and the end of the front wall,
- * metres. More than the 1.5 m the placement bench keeps every house off a spot by, so
- * a house whose built walls reach a few centimetres past its authored size still
- * clears it.
- */
-const LONE_BARRELS_GAP_M = 2.5;
-const LONE_BARRELS_OUT_M = 1.4;
-/**
  * The signpost (world/signposts.ts) on every pad: along from the pad's start and out
- * past its outer edge, to the board's centre, and the half length it is kept clear by.
+ * past its outer edge, to the board's centre.
  */
 export const SIGNPOST_ALONG_M = 4;
 export const SIGNPOST_OUT_M = 1.0;
-const SIGNPOST_HALF_ALONG_M = 1.4;
-/** Clear ground kept between a lone house's barrels and the signpost, metres. */
-const BARRELS_SIGN_CLEAR_M = 1;
 
 /**
  * Half sizes (along the road, across it) each service is kept clear by, metres. The
  * placement bench (tools/poi-placement.ts) measures houses, the lay-by and one another
  * against these.
  */
-export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'barrels' | 'lot' | 'shelter' | 'bay', readonly [number, number]>> = {
+export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'pumps' | 'lot' | 'shelter' | 'bay', readonly [number, number]>> = {
   // The card machines (world/cardmachine.ts): the crank's knob past one flank, the tray
   // standing out of the front.
   post: [0.75, 0.8],
   shop: [0.75, 0.8],
   toybox: [0.75, 0.8],
-  barrels: [1.8, 1.0],
+  // The island under the three pumps (world/pumps.ts).
+  pumps: [2.0, 0.6],
   // The car and, on its road-side flank, its board and key box.
   lot: [2.7, 2.6],
   // The teddy shelter's ~4 x 2 m (§6.3): 3.8 m along, so it keeps a metre off the post
@@ -308,7 +294,6 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
   };
   const mast = structureIsMast(roll.structure);
   let pad: StopPad | null = null;
-  let barrels: SettlementSpot | null = null;
   if (!mast) {
     const sEntry = roll.s - PAD_HALF_LENGTH_M - LAYBY_TAPER_M;
     const sExit = roll.s + PAD_HALF_LENGTH_M + LAYBY_TAPER_M;
@@ -325,18 +310,6 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       siteOuter: front + 2 * authoredHalf,
       siteHalfAlong: authoredHalf,
     };
-    if (hash01(roll.variantSeed, DOMAIN, 1) < LONE_BARRELS_CHANCE) {
-      // Past one end of the front wall, on the sand between the pad and the wall line.
-      // Towards the pad's start only if they clear the signpost standing there: a long
-      // house (the butterfly roof's 25 m) pushes them onto its board.
-      const along = roadHalf(halfX, halfZ, HOUSE_WOBBLE).along;
-      const reach = along + LONE_BARRELS_GAP_M + SERVICE_HALF.barrels[0];
-      const signClear =
-        PAD_HALF_LENGTH_M - SIGNPOST_ALONG_M - SIGNPOST_HALF_ALONG_M - BARRELS_SIGN_CLEAR_M;
-      const dir = hash01(roll.variantSeed, DOMAIN, 2) < 0.5 && reach + SERVICE_HALF.barrels[0] <= signClear ? -1 : 1;
-      const s = roll.s + dir * reach;
-      barrels = spot(s, roll.side, padOuter + LONE_BARRELS_OUT_M, faceRoad(roll.side, 0));
-    }
   }
   return {
     roll,
@@ -352,7 +325,7 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       toybox: null,
       shelter: null,
       bay: null,
-      barrels,
+      pumps: null,
       lot: null,
     },
   };
@@ -453,7 +426,7 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
   // The services, along the strip in the order a driver reaches them.
   const face = faceRoad(side, 0);
   const lot = roll01(5) < LOT_CHANCE ? spot(s0 + LOT_ALONG_M, side, padOuter + LOT_OUT_M, 0) : null;
-  const barrels = roll01(6) < SETTLEMENT_BARRELS_CHANCE ? spot(s0 + BARRELS_ALONG_M, side, padOuter + BARRELS_OUT_M, face) : null;
+  const pumps = roll01(6) < PUMPS_CHANCE ? spot(s0 + PUMPS_ALONG_M, side, padOuter + PUMPS_OUT_M, face) : null;
 
   let siteOuter = stripOuter;
   let siteHalfAlong = SETTLEMENT_PAD_HALF_M;
@@ -476,7 +449,7 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       toybox: spot(s0 + TOYBOX_ALONG_M, side, padOuter + TOYBOX_OUT_M, face),
       shelter: spot(s0 + SHELTER_ALONG_M, side, padOuter + SHELTER_OUT_M, face),
       bay: spot(s0 + BAY_ALONG_M, side, padOuter + BAY_OPENING_GAP_M + HAUL_BAY_HALF_DEPTH_M, face),
-      barrels,
+      pumps,
       lot,
     },
   };

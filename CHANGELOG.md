@@ -230,13 +230,33 @@
 - THE LAY-BY'S SERVICE STRIP IS LAID OUT TO game-design2.md §6.3 (`world/settlement.ts`).
   Along the pad from the stop: signpost −26, car for sale −16 (sometimes), the teddy
   shelter's place −9 (`SettlementLayout.shelter`, 3.8 × 2 m kept clear; nothing stands on
-  it yet), POST −4.8, toy box −1.9, the haul bay +4…+7, shop +13, and the barrel stand,
-  on its old 50% roll, at the pumps' place +19 until the pumps replace it. The post and
-  the toy box are 0.3 and 0.1 m off the table's −4.5 and −2: on the inside of a curve
+  it yet), POST −4.8, toy box −1.9, the haul bay +4…+7, shop +13, and the pumps +17…+21
+  at half the settlements. The post and the toy box are 0.3 and 0.1 m off the table's
+  −4.5 and −2: on the inside of a curve
   the strip comes up to 12% shorter than its arclength, and the machines keep a metre
   apart. The strip is 7.5 m deep (was 6) for the bay; houses on the lay-by's side stand
   past its ends as before, and `tools/poi-placement.ts` holds every house, service and
   the bay clear of one another and of the asphalt.
+- PUMPS REPLACE THE BARRELS (game-design2.md §9; `world/pumps.ts` `buildPumpStand`,
+  `SettlementLayout.pumps`, economy `pumpTenLitres`). At half the settlements three pumps
+  stand in a row on a 3.9 × 1.1 m concrete island at +19, 1 m out past the pad's edge:
+  red PETROL, amber OIL, blue WATER, white reflector chips on each front lit with the
+  delineators at dusk. Each has a 4.4 m hose (4 m reach from its outlet) and a nozzle in a
+  holster. F with empty hands takes the nozzle; the hose follows the hand as a sagging
+  tube and lies on the ground where it would go under it. Held [LMB] pours 2 L/s into
+  what a can pours into: the open fuel flap, the engine or radiator under an open bonnet,
+  a loose engine or radiator, a can on the ground (`Interaction.pumpPour`, sharing
+  `fillReservoir` with the can's pour). Out of reach, with something else taken into the
+  hands, on getting into a car or on the drop key, the nozzle springs back; F on the pump
+  hangs it back. A can in the hands is filled at the pump itself by holding F. Pumps never
+  run dry and are paid by the litre: litre price × `kmIndex(km)` (petrol 0.40, oil 1.20,
+  water 0.10 rubles at home). Money is whole rubles, so the board on each pump and the
+  prompts price TEN litres (petrol 4 balls at home, 11 at 300 km), and the pump takes each
+  ruble as it is used up. No money: it does not pour and the prompt says so.
+  - Removed: the barrel stands everywhere, the lone houses' 20% included
+    (`world/barrels.ts`, `LONE_BARRELS_*`, `BARRELS_SIGN_CLEAR_M`), `WorldState.barrelLitres`,
+    the `barrel_litres` delta and its save field. CONTROLS.md and the cans' shop cards
+    say pump.
 - THE HAUL BAY (`world/haulbay.ts` `buildHaulBay`, `postHaulBay`; `SettlementLayout.bay`).
   A pen at right angles to the road, 3.2 m along it by 6.6 m deep inside, open to the
   pad half a metre off its edge: a concrete floor with yellow side lines and a white

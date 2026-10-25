@@ -30,8 +30,8 @@ import { box, C, mergeKitStatics } from './poi/kit';
  * Every machine draws from one short list (game-design2.md §8): one or two spray cans of
  * a random paint (the colour is on the card), sun shades of a random tint, an air
  * filter, a turbine, empty cans of 5, 10 or 20 litres, bubble gum and four or five
- * envelopes of random stickers. Not every machine has every kind. No fluid is sold: an
- * empty can is filled at a stop's barrels (world/barrels.ts) or from another can.
+ * envelopes of random stickers. Not every machine has every kind. No fluid is sold here:
+ * an empty can is filled at a settlement's pumps (world/pumps.ts) or from another can.
  *
  * Prices are not set here: the economy prices each item where the machine stands
  * (`itemPrice`, economy/economy.ts), so further down the road the same can costs more.
@@ -157,9 +157,9 @@ const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: s
   shades: { band: '#6e5a2a', kind: 'SHADES', line: 'sun shades for the drive' },
   air_filter: { band: '#2f4f7a', kind: 'PART', line: 'a new air filter for the engine' },
   turbine: { band: '#2f4f7a', kind: 'PART', line: 'a standard turbine' },
-  can5: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
-  can10: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
-  can20: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a barrel' },
+  can5: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
+  can10: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
+  can20: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
   gum: { band: '#a2457a', kind: 'GUM', line: 'five chews — a bubble rights a car' },
   sticker: { band: '#b0702a', kind: 'STICKER', line: 'sealed — a sticker you see once it is open' },
 };

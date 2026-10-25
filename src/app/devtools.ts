@@ -99,7 +99,7 @@ export interface DevToolsContext {
   readonly input: InputReader;
   readonly loose: LoosePartField;
   readonly debris: DebrisField;
-  /** The streamed world fixtures: post machines, barrels, key boxes. */
+  /** The streamed world fixtures: post machines, pumps, key boxes. */
   readonly fixtures: FixtureField;
   readonly sky: Sky;
   readonly trailers: TrailerField;

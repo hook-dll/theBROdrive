@@ -33,7 +33,7 @@ import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout
 import type { FixtureField } from './fixturefield';
 import { buildPost } from './post';
 import { buildToyBox } from './toybox';
-import { buildBarrelStand } from './barrels';
+import { buildPumpStand } from './pumps';
 import { buildKeyBox } from './keybox';
 import { newRegionMix, regionAt } from './regions';
 
@@ -637,8 +637,9 @@ function buildLot(
  * One stop. Out in the desert: its building, facing wherever it was left facing. At the
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
  * sides, its «ПОЧТА» machine (world/post.ts), toy box (world/toybox.ts) and haul bay
- * (world/haulbay.ts), the shop's machine, the car for sale with its key box, a barrel
- * stand. True when it built a haul bay, whose reflectors follow the night.
+ * (world/haulbay.ts), the shop's machine, the car for sale with its key box, the pumps
+ * (world/pumps.ts). True when it built reflectors (a haul bay's, the pumps'), which
+ * follow the night.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -681,9 +682,9 @@ function buildPoi(
     const pose = spotPose(ctx.road, layout.shop);
     buildShop(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
-  if (layout.barrels) {
-    const pose = spotPose(ctx.road, layout.barrels);
-    buildBarrelStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures);
+  if (layout.pumps) {
+    const pose = spotPose(ctx.road, layout.pumps);
+    buildPumpStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
   if (layout.lot) {
     buildLot(
@@ -691,7 +692,7 @@ function buildPoi(
       market, registeredMarket, fixtures, registeredFixtures,
     );
   }
-  return bay;
+  return bay || layout.pumps !== null;
 }
 
 /**
@@ -706,7 +707,7 @@ export class PoiProvider implements ChunkProvider {
     private readonly roadDistance: RoadDistance,
     /** The vending machines and lot cars' registry (world/market.ts). */
     private readonly market: MarketField,
-    /** The streamed mechanical fixtures (world/fixturefield.ts): post, barrels, key boxes. */
+    /** The streamed mechanical fixtures (world/fixturefield.ts): post, pumps, key boxes. */
     private readonly fixtures: FixtureField,
   ) {}
 
@@ -760,7 +761,7 @@ export class PoiProvider implements ChunkProvider {
         this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();
       },
-      // The haul bays' reflector chips share the delineators' material.
+      // The haul bays' and the pumps' reflector chips share the delineators' material.
       ...(bays ? { setLamps: setReflectorEmission } : {}),
     };
   }

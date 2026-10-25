@@ -3,7 +3,7 @@
  *
  * Close shots of named scenery in the real game: boots into the car, jumps to each km,
  * waits for the world, finds the nearest object of each asked-for name (a node's `name`,
- * e.g. `card-machine`, `barrel-stand`, `key-box`, `lot-sign`, `poi-a-frame`), freezes the
+ * e.g. `card-machine`, `pump-stand`, `key-box`, `lot-sign`, `poi-a-frame`), freezes the
  * simulation and draws it from its front three-quarter and its back three-quarter, near
  * enough to read its parts. Run it before and after a change to the object's build to
  * compare the two sets of pictures.

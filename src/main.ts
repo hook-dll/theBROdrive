@@ -468,7 +468,7 @@ async function boot(): Promise<void> {
   const trailerField = new TrailerField(physics, world, renderer.scene, origin);
   /** The lot cars' price signs in the physics band (world/market.ts). */
   const market = new MarketField();
-  /** The streamed mechanical fixtures: post machines, barrels, key boxes (world/fixturefield.ts). */
+  /** The streamed mechanical fixtures: post machines, pumps, key boxes (world/fixturefield.ts). */
   const fixtures = new FixtureField();
   /** The parked plane's colliders, so the eye ray can tell the plane from scenery. */
   const boardable = new BoardableField();
@@ -501,7 +501,7 @@ async function boot(): Promise<void> {
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
   // The 20 km marks, the sidetracks, the loose items, the market's machines and lot signs
-  // and the post machines, barrels and key boxes (POI kit boxes and sign boards) are built
+  // and the post machines, pumps and key boxes (POI kit boxes and sign boards) are built
   // only where they stand; their hidden program anchors are in the scene from boot so the
   // first one in view links nothing. Telegraph poles are drawn per chunk as
   // InstancedMeshes: their program is linked here too.
@@ -2436,8 +2436,8 @@ async function boot(): Promise<void> {
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
     debris.syncVisuals();
-    // The post machines' wheels, levers, doors and flaps, the barrels' taps and the key
-    // boxes ease on the rendered frame.
+    // The post machines' wheels, levers, doors and flaps, the pumps' nozzles and hoses and
+    // the key boxes ease on the rendered frame.
     fixtures.update(frameDt);
     // The camera has moved for this frame: the ground cover's pages take their range.
     streamer.syncLod(renderer.camera.position.x, renderer.camera.position.z);

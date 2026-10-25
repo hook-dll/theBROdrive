@@ -17,7 +17,7 @@
 import type { CarState, GameWorld } from '../game/state';
 import { passengerQuality } from '../contracts/kinds/teddyPassengers';
 import { isLate, URGENT_BONUS } from '../contracts/types';
-import { contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { contractThing, type ContractCargoItem, type FluidKind, type Item } from '../items/items';
 import { variant, type PartKind } from '../parts/registry';
 import { postStop } from '../world/poststops';
 import { moneyToken } from './money';
@@ -111,12 +111,14 @@ export function contractPay(seed: number, item: ContractCargoItem, stickers: num
  * stand (`itemPrice`); cars are priced flat (`carPrice`).
  */
 export const PRICE_TABLE = {
-  /**
-   * A can: five rubles for the can and four for every litre it holds, the price of the
-   * petrol it is for. Fluids are not sold: it is filled at a barrel.
-   */
+  /** A can: five rubles for the can and four for every litre it holds. It is filled at a pump. */
   can: 5,
   canPerLitre: 4,
+  /**
+   * A litre at a pump (world/pumps.ts), rubles at home: petrol 40 kopecks, oil three
+   * times that, water a quarter of it. The pump sells by the ten litres (`pumpTenLitres`).
+   */
+  pumpLitre: { petrol: 0.4, oil: 1.2, water: 0.1 } as Readonly<Record<FluidKind, number>>,
   /** Parts by kind, new. A worn part sells for less (`itemPrice`). */
   part: {
     engine: 350,
@@ -174,6 +176,16 @@ export function itemPrice(item: Item, km: number): number {
   const base = itemBasePrice(item);
   if (base <= 0) return 0;
   return Math.max(1, Math.round(base * kmIndex(km)));
+}
+
+/**
+ * What ten litres of `fluid` cost at a pump at `km`: the litre price × ten × the km
+ * index, rounded to the ruble, never under one. Money is whole rubles and a litre at
+ * home is a fraction of one, so the pump's board and the prompt price ten litres, and
+ * a litre poured costs exactly a tenth of that.
+ */
+export function pumpTenLitres(fluid: FluidKind, km: number): number {
+  return Math.max(1, Math.round(PRICE_TABLE.pumpLitre[fluid] * 10 * kmIndex(km)));
 }
 
 function itemBasePrice(item: Item): number {

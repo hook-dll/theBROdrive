@@ -366,12 +366,6 @@ export interface WorldState {
    * given out, so an emptied slot stays empty. Machines never restock.
    */
   vendingSold: Record<string, number[]>;
-  /**
-   * Litres left in each fluid barrel the player has drawn from, by barrel id
-   * (world/barrels.ts). A barrel's first contents are a pure function of the seed and
-   * its id; an entry here is what the taps have left of them. Barrels never refill.
-   */
-  barrelLitres: Record<string, number>;
 }
 
 export type WorldDelta =
@@ -445,8 +439,6 @@ export type WorldDelta =
   | { t: 'weather_begin'; playedSeconds: number }
   /** A vending machine slot paid for and dispensed (world/vending.ts). */
   | { t: 'vend_sold'; machineId: string; slot: number }
-  /** A barrel's tap ran into a can (world/barrels.ts): what is left in the barrel. */
-  | { t: 'barrel_litres'; barrelId: string; litres: number }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
   /** Rubles paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `rubles`. */
@@ -501,7 +493,6 @@ export function newWorldState(seed: number): WorldState {
     looseItems: {},
     flattenedProps: [],
     vendingSold: {},
-    barrelLitres: {},
   };
 }
 
@@ -897,9 +888,6 @@ export class GameWorld {
         if (!sold.includes(delta.slot)) sold.push(delta.slot);
         break;
       }
-      case 'barrel_litres':
-        s.barrelLitres[delta.barrelId] = Math.max(0, delta.litres);
-        break;
       case 'car_buy': {
         const car = s.cars[delta.carId];
         if (car) {

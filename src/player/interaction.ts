@@ -66,6 +66,7 @@ import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
 import { credit, debit, formatMoney } from '../economy/economy';
 import type { FixtureContext, FixtureField } from '../world/fixturefield';
+import { PUMP_RATE, type PumpNozzle } from '../world/pumps';
 
 /** How far the eye ray reaches for picking. */
 const RAY_RANGE = 2.6;
@@ -203,6 +204,9 @@ export interface InteractionResult {
 const FLUID_POUR_RATE = 1.2;
 /** Within this many litres of capacity a reservoir reads as full. */
 const FLUID_FULL_EPSILON = 0.05;
+/** The pump nozzle in hand: ahead of the eye and below it, metres. */
+const NOZZLE_HAND_M = 0.5;
+const NOZZLE_HAND_DROP_M = 0.3;
 /**
  * Maximum eye-to-grid distance. Halved from 3.2 m so the trunk only opens when the
  * player has deliberately walked up to the rear of the car.
@@ -649,6 +653,12 @@ export class Interaction {
   private continuous: FoleyContinuous = null;
   /** A sponge that wore out this tick, to be let fall from the hand. */
   private spentSponge: string | null = null;
+  /**
+   * The pump nozzle in the hands (world/pumps.ts), or null. Taken with empty hands at its
+   * pump; it springs back to the pump when the hose stops reaching, something else is
+   * taken into the hands, the player sits in a car or its pump leaves the physics band.
+   */
+  private nozzle: PumpNozzle | null = null;
   /** Scene-graph raycaster and scratch, for picking real bodywork. */
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayOrigin = new THREE.Vector3();
@@ -738,6 +748,11 @@ export class Interaction {
         self.carLookup.vehicle(carId)?.pushState();
         self.world.apply({ t: 'car_box', carId });
       },
+      get nozzle() { return self.nozzle; },
+      takeNozzle: (nozzle: PumpNozzle | null) => {
+        self.hangUpNozzle();
+        self.nozzle = nozzle;
+      },
       toast: (text: string) => self.hooks.toast(text),
     };
   })();
@@ -788,7 +803,7 @@ export class Interaction {
     private readonly boardable: BoardableField,
     /** Rubles a race win pays for handing this contract in now; see `RivalRace.winPay`. */
     private readonly racePay: (contractId: string) => number,
-    /** The streamed mechanical fixtures: post machines, barrels, key boxes. */
+    /** The streamed mechanical fixtures: post machines, pumps, key boxes. */
     private readonly worldFixtures: FixtureField,
     /** What the composition root does for a fixture: a HUD toast, the machine focus. */
     private readonly hooks: InteractionHooks,
@@ -865,6 +880,8 @@ export class Interaction {
     }
 
     if (this.world.state.player.drivingCarId) {
+      // Nobody drives off with the nozzle in hand.
+      this.hangUpNozzle();
       // Sitting down closes whatever was open: the grid belongs to a player standing
       // at the car, and a driver cannot reach into it.
       this.openStorage = null;
@@ -906,6 +923,7 @@ export class Interaction {
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
     this.followLids(resolved, eyeX, eyeY, eyeZ);
+    if (this.nozzle) this.followNozzle(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
     // The bar action is settled before the prompt is built from it. A storage cell,
     // a loose item or a trailer in the aim keeps its own action: the bar is what is
     // offered when the player is simply standing at the join with nothing to aim at.
@@ -947,7 +965,7 @@ export class Interaction {
     const stickerBlocksCar = envelope !== null && this.isClosedCarTarget(resolved.target);
     const prompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
       ? STICKER_HINT
-      : this.promptFor(resolved);
+      : (this.nozzle ? this.nozzlePrompt(resolved) : null) ?? this.promptFor(resolved);
     // A kit car's part in the aim is unnamed: the crosshair lights on it. A sticker in hand
     // makes the car a surface, not a set of doors.
     const kitRig = resolved.vehicle?.kit ?? null;
@@ -955,7 +973,7 @@ export class Interaction {
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const aimedAt = resolved.target;
-    // F held on a world fixture (a barrel's tap, a wheel being turned); a machine worked
+    // F held on a world fixture (a pump filling a can, a wheel being turned); a machine worked
     // up close takes it only once it is framed.
     if (aimedAt.kind === 'world-fixture' && input.interactDown) {
       const fixture = this.worldFixtures.get(aimedAt.id);
@@ -975,7 +993,8 @@ export class Interaction {
     // A refused seat says why (the prompt), so it does not also light the crosshair.
     const actionable = kitPart !== null
       || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
-      || (aimedAt.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null);
+      || (aimedAt.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null)
+      || (this.nozzle !== null && this.aimedReservoir(resolved) !== null);
     // ONE F, ON FOOT. It belongs to the aim when the aim shows it something: a named world
     // target (the tow bar, a fixture, a loose thing, a trailer, a compartment), a prompt,
     // a lit crosshair, or a kit car's body within reach (`kitHit`: the car is what the
@@ -1010,7 +1029,12 @@ export class Interaction {
     }
     // Deliberately after the driving early-return above: dropping while seated is a
     // no-op, the item stays in the inventory.
-    if (dropPressed) this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    if (dropPressed && this.nozzle) {
+      this.hangUpNozzle();
+      this.sound = 'drop';
+    } else if (dropPressed) {
+      this.drop(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    }
 
     // Resolved AFTER the actions above, so stowing or taking is reflected in the
     // same frame the player sees rather than one behind.
@@ -2458,7 +2482,10 @@ export class Interaction {
 
   private usePrimary(dt: number, resolved: Resolved): void {
     const held = this.inventory.held;
-    if (!held) return;
+    if (!held) {
+      if (this.nozzle) this.pumpPour(dt, this.nozzle, resolved);
+      return;
+    }
     if (held.type === 'tool') this.scrub(dt, held, resolved);
     else if (held.type === 'fluid_can') this.pourFluid(dt, held, resolved);
     else if (held.type === 'spray_can') this.spray(dt, held, resolved);
@@ -2586,14 +2613,24 @@ export class Interaction {
     if (poured <= 0) return;
 
     const level = reservoir.level + poured;
+    if (!this.fillReservoir(reservoir, fluid, level)) return;
+    drainCan(can, poured);
+    this.continuous = 'pour';
+  }
 
+  /**
+   * Writes the aimed reservoir's new level: the car's fuel or fluid, a loose part's, or a
+   * can on the ground (which takes the fluid if it was empty). False when what held it is
+   * gone.
+   */
+  private fillReservoir(reservoir: AimedReservoir, fluid: FluidKind, level: number): boolean {
     switch (reservoir.sink) {
       case 'car': {
-        if (!this.world.state.cars[reservoir.carId]) return;
+        if (!this.world.state.cars[reservoir.carId]) return false;
         if (fluid === 'petrol') {
           this.world.apply({ t: 'car_fuel', carId: reservoir.carId, litres: level });
         } else {
-          // Oil and water accept nothing but themselves, so the can names the channel.
+          // Oil and water accept nothing but themselves, so the fluid names the channel.
           this.world.apply({
             t: 'car_fluid',
             carId: reservoir.carId,
@@ -2601,20 +2638,77 @@ export class Interaction {
             litres: level,
           });
         }
-        break;
+        return true;
       }
       case 'loose-part': {
-        if (!this.world.state.looseParts[reservoir.partId]) return;
+        if (!this.world.state.looseParts[reservoir.partId]) return false;
         this.world.apply({ t: 'loose_part_fluid', partId: reservoir.partId, litres: level });
-        break;
+        return true;
       }
       case 'loose-can': {
         this.world.apply({ t: 'loose_item_fluid', itemId: reservoir.itemId, fluid, litres: level });
-        break;
+        return true;
       }
     }
-    drainCan(can, poured);
+  }
+
+  /**
+   * Pours from the pump nozzle in hand into the reservoir the crosshair is on — the same
+   * ones a can pours into — paying the pump for every litre (world/pumps.ts). With no
+   * money left it does not pour.
+   */
+  private pumpPour(dt: number, nozzle: PumpNozzle, resolved: Resolved): void {
+    const reservoir = this.aimedReservoir(resolved);
+    if (!reservoir || !reservoirAccepts(reservoir, nozzle.fluid)) return;
+    const room = reservoir.capacity - reservoir.level;
+    if (room <= FLUID_FULL_EPSILON) return;
+    const litres = nozzle.dispense(this.world, Math.min(PUMP_RATE * dt, room));
+    if (litres <= 0) return;
+    this.fillReservoir(reservoir, nozzle.fluid, reservoir.level + litres);
     this.continuous = 'pour';
+  }
+
+  /**
+   * What the nozzle in hand offers at the aim: the pour into a reservoir, or why not;
+   * with nothing in the aim, what it is for. Null leaves the aim's own prompt.
+   */
+  private nozzlePrompt(resolved: Resolved): string | null {
+    const nozzle = this.nozzle!;
+    const price = `10 L ${formatMoney(nozzle.tenLitres)}`;
+    const reservoir = this.aimedReservoir(resolved);
+    if (!reservoir) {
+      return resolved.target.kind === 'none' ? `${nozzle.fluid} nozzle — ${price} · aim at a filler or a can` : null;
+    }
+    if (!reservoirAccepts(reservoir, nozzle.fluid)) {
+      return `${fillReadout(reservoir)} — ${nozzle.fluid} does not go in there`;
+    }
+    if (reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) return fillReadout(reservoir);
+    if (nozzle.affordable(this.world) <= FLUID_FULL_EPSILON) {
+      return `${fillReadout(reservoir)} — no money, the pump does not pour`;
+    }
+    return `[LMB] pour ${nozzle.fluid} — ${fillReadout(reservoir)} · ${price}`;
+  }
+
+  /**
+   * Moves the nozzle in hand to the hand, a little ahead of the eye and below it. It
+   * springs back to its pump instead when the hose does not reach, the hands have taken
+   * something else, or its pump has left the physics band.
+   */
+  private followNozzle(eyeX: number, eyeY: number, eyeZ: number, dirX: number, dirY: number, dirZ: number): void {
+    const nozzle = this.nozzle!;
+    const live = this.inventory.held === null && this.worldFixtures.get(nozzle.id) === nozzle;
+    const x = eyeX + dirX * NOZZLE_HAND_M + this.origin.x;
+    const y = eyeY + dirY * NOZZLE_HAND_M - NOZZLE_HAND_DROP_M;
+    const z = eyeZ + dirZ * NOZZLE_HAND_M + this.origin.z;
+    if (live && nozzle.follow(x, y, z, dirX, dirZ)) return;
+    this.hangUpNozzle();
+    this.sound = 'drop';
+  }
+
+  /** The nozzle in hand, if any, back into its pump's holster. */
+  private hangUpNozzle(): void {
+    this.nozzle?.hangUp();
+    this.nozzle = null;
   }
 
   private mount(resolved: Resolved): void {

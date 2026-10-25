@@ -26,7 +26,7 @@ there is; `E` is bound to nothing. One press means one thing, decided by the aim
 (`Interaction.fixedUpdate`, `src/player/interaction.ts`).
 
 **On foot** the press belongs to the aim when the aim shows something: a named world
-target (the tow bar between two cars, a machine, a barrel, a key box, a loose part or
+target (the tow bar between two cars, a machine, a pump, a key box, a loose part or
 item, a trailer, a compartment's cell), a prompt, a lit crosshair, or a kit car's body
 within reach (3.5 m), even where nothing on it answers. Then, first match wins:
 
@@ -54,7 +54,11 @@ four hours on, sun shades go on. A held item is never used from a seat.
 the hazard button, the radio knob, a mirror), another seat in the aim (cabin view only),
 out of the car.
 
-Held down, F works a barrel's tap and turns the inside or a door mirror with the mouse.
+Held down, F fills a can in the hands at a pump and turns the inside or a door mirror with
+the mouse. F with empty hands at a pump takes its nozzle; held, the left button pours it
+into an open fuel flap, an engine or radiator under an open bonnet, or a can on the
+ground, paid by the litre. F on the pump, the drop key, getting into a car or walking out
+of the hose's 4 m hangs it back.
 A sticker being tried on is mirrored with the middle mouse button (the pad's B, the touch
 strip's MIRROR); the wheel turns it, Shift+wheel sizes it, the right button resets it.
 
