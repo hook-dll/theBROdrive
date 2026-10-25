@@ -194,10 +194,11 @@ const PUMPS_IN_M = 1.0;
 export const PARKING_SLOT_HALF_WIDTH_M = 1.75;
 export const PARKING_SLOT_HALF_DEPTH_M = 3.3;
 /**
- * The slots' angle to the road, radians: a herringbone row `\ \ \` leaning with the
- * lay-by's direction of travel. A car arriving drives past a slot, stops and reverses
- * into it at 45°, and leaves nose first the way it was going: the way a haul is handed
- * in (reversed in, §7.8) and its waiting load is hitched (its drawbar to the opening).
+ * The slots' angle to the road, radians: a herringbone row `/ / /` (seen from the road)
+ * leaning with the lay-by's direction of travel, so a car arriving turns in nose first
+ * at 45° without stopping. A haul's load is handed in reversed in (§7.8): the trailer
+ * backs in against the travel, its drawbar to the opening, and leaves nose first; its
+ * waiting load stands the same way, ready to hitch.
  */
 export const PARKING_SLOT_ANGLE = Math.PI / 4;
 /** Between neighbouring slots' middles along the row, metres: their sides touch. */
@@ -441,8 +442,8 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
   // The services along the pad's service band (the `*_ALONG_M` table above).
   const face = faceRoad(side, 0);
   const pumps = roll01(6) < PUMPS_CHANCE ? spot(s0 + PUMPS_ALONG_M, side, padOuter - PUMPS_IN_M, face) : null;
-  // Nose out of a slot: with the lay-by's traffic (+s on side -1) and in toward the road.
-  const noseOut = Math.atan2(-side * Math.sin(PARKING_SLOT_ANGLE), -side * Math.cos(PARKING_SLOT_ANGLE));
+  // Nose out of a slot: against the lay-by's traffic (-s on side -1) and in toward the road.
+  const noseOut = Math.atan2(-side * Math.sin(PARKING_SLOT_ANGLE), side * Math.cos(PARKING_SLOT_ANGLE));
 
   // Everything of the stop's own stands on the pad; the houses on this side reach past it.
   let siteOuter = padOuter;

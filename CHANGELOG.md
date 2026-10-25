@@ -12,8 +12,8 @@
   furniture on the asphalt, backs 0.4 m in from the edge: shelter −9.8, POST −5.6, toy
   box −2.7, shop +21.5, pumps +26 (was −9, −4.8, −1.9, +13, +19 on the sand). Between the
   toy box and the shop, +1…+18, a herringbone row of three slots painted in white, each
-  3.5 x 6.6 m at 45° to the road and leaning with the lay-by's traffic, numbered at the
-  opening: a car drives past, reverses in and leaves nose first the way it was going.
+  3.5 x 6.6 m at 45° to the road and leaning with the lay-by's traffic, `/ / /` seen
+  from the road: a car turns in nose first; a load is reversed in against the traffic.
   Slot 1 is where a haul's load waits (`postParkingSlot(…, 'pickup')`), slot 2 where
   hauls are handed in and returned (`'handIn'`; the reverse-in, footprint, still and
   nose-out checks are unchanged, against 3.5 m instead of 3.2 m of width), slot 3 holds
