@@ -44,8 +44,31 @@
   (`contracts/runtime.ts`) and the G-force widget (`rideSensitive`) follow the fragile tag.
 - Trailer loads: the thing's mass on the bed; the bed is the long load overhanging the
   trailer (`TrailerLoad` is now just a box, the pipes/beams variants are gone).
-- Placeholder meshes: a box of the thing's size in its tag's colour; carpet, teddy, lamp
-  and tool box (crate) keep their meshes; haul papers are the parcel.
+- THE THINGS DRAWN (`render/thingmesh.ts`; the builder kit moved to
+  `render/meshbuilder.ts`): a low-poly model for every thing, from the shared flat
+  materials and the medicine bottle's glass, so no new shader program. Pencils in a tin,
+  a globe on its meridian, two cushions, the lamp, a tea service on a tray, a portable
+  record player, dad's red steel tool box, three rods with a reel, a slatted sledge, the
+  rolled carpet, a valve TV on legs, an aquarium with water, sand, weed and two goldfish,
+  the teddy; grandpa's radio, the stamp album, mum's music box with its dancer, a
+  rangefinder camera, a shut chess board, a model plane, the medals in a glazed case, the
+  photo album and his first tin car. A haul's papers are the parcel. Each model is
+  centred on its bounds, so a loose thing's collider, the boot's span and the hand fit it.
+- Each thing breaks its own way: snapped pencils and rods, a globe off its axis, a split
+  cushion, the lamp knocked over with its shade off, toppled cups and shards, a record in
+  two and the tone arm torn off, the tool box sprung open with its tools out, a runner
+  snapped off the sledge, the carpet half unrolled, the TV screen stove in, the aquarium
+  drained with its front pane smashed out, a torn radio grille, stamps and photographs
+  spilled, the music box lid off, the camera's lens out, the chess men spilled, a wing
+  off the plane, the medal case's glass in shards, a wheel off the tin car. Every colour
+  darkens as before.
+- A contract trailer carries the thing itself on its bed (`TrailerState.loadThing`,
+  saved; `createTrailerLoadMesh`): a wardrobe on its back, an upright piano, a sofa, the
+  bed with its mattress and pillows overhanging both ends, strapped down. The bed's plain
+  box is gone; its collider stays.
+- A held thing is turned to show its face and is at most 0.15 m across in the hand
+  (`render/held.ts` `THING_HELD_MAX`, `THING_FACE_YAW`): the old TV filled half the
+  screen. The boot grid shows a thing face on (`render/trunkview.ts` `POSE_FLAT`).
 - Dev: `__bro.thing(id, size?)` drops a catalogue contract from the nearest post
   (replaces `__bro.teddies`); its contract id is a runtime `rt:` id, so a reloaded save
   resumes past it instead of handing the next spawn the same id. `tools/trunk-grid.ts`
@@ -76,9 +99,8 @@
   - it no longer wears, no longer counts towards the delivery hint or the G-force widget,
     and is labelled "broken old TV set";
   - it stays a normal item that can be carried, stowed and dropped;
-  - its stand-in mesh is darkened, and box looks get a black zig-zag crack across the
-    front and the top. The hand, boot, cabin and ground views redraw a thing the moment it
-    breaks.
+  - its model shows its own damage, every colour darkened (see THE THINGS DRAWN). The
+    hand, boot, cabin and ground views redraw a thing the moment it breaks.
 - THREE JOBS AT ONCE (game-design2.md §7.4; `contracts/registry.ts`
   `activeContractIds`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`). An active contract
   is a contract item out of a post's stock — in the hands or the pack, any car's boot or
@@ -172,6 +194,8 @@
 - The parcel, heavy crate, fragile radio and oversize kinds, `CARGO_SHAPES`,
   `cargoName`/`massKg`/`shape` on cargo, `contractTier`, `isHaulKind`,
   `DELIVERY_BASE_PAY`, the radio mesh, the ledger rebuild from old ids.
+- `ThingDef.look`/`size`, the tag-coloured stand-in box and the crate tool box: every
+  thing has its model.
 - Registered parcels and the PIN dial (`registeredPin`, `ui/dial.ts`, the `dial` hook).
 - `contracts.md` (the old prototype doc).
 

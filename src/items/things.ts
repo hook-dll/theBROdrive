@@ -64,9 +64,7 @@ export interface BootFootprint {
   readonly rows: number;
 }
 
-/** The mesh a thing is drawn with (render/partmesh.ts); absent: a box of `size` in its tag's colour. */
-export type ThingLook = 'carpet' | 'teddy' | 'lamp' | 'crate';
-
+/** One of the boy's things. Its model is drawn by its id (render/thingmesh.ts), whole and broken. */
 export interface ThingDef {
   readonly id: ThingId;
   /** What the card, the prompts and the HUD call it. */
@@ -81,9 +79,6 @@ export interface ThingDef {
   readonly boot?: BootFootprint;
   /** A `cells` thing that may lie on a seat instead (the cushions). */
   readonly seat?: true;
-  readonly look?: ThingLook;
-  /** The stand-in box, metres (x across, y up, z along), for a thing without a `look`. */
-  readonly size?: readonly [number, number, number];
 }
 
 const RUB = 100;
@@ -93,18 +88,18 @@ const STRIP: BootFootprint = { columns: 4, rows: 1 };
 const SQUARE: BootFootprint = { columns: 2, rows: 2 };
 
 export const THINGS: readonly ThingDef[] = [
-  { id: 'pencils', name: 'box of pencils', tags: ['ordinary'], massKg: 0.5, payKopecks: 2 * RUB, place: 'cells', boot: ONE, size: [0.24, 0.06, 0.18] },
-  { id: 'globe', name: 'school globe', tags: ['fragile'], massKg: 1.5, payKopecks: 4 * RUB, place: 'cells', boot: ONE, size: [0.3, 0.36, 0.3] },
-  { id: 'cushions', name: 'sofa cushions', tags: ['ordinary'], massKg: 2, payKopecks: 3 * RUB, place: 'cells', boot: TWO, seat: true, size: [0.4, 0.22, 0.38] },
-  { id: 'table_lamp', name: 'table lamp', tags: ['fragile'], massKg: 2.5, payKopecks: 5 * RUB, place: 'cells', boot: TWO, look: 'lamp' },
-  { id: 'tea_service', name: 'tea service', tags: ['fragile'], massKg: 7, payKopecks: 6 * RUB, place: 'cells', boot: TWO, size: [0.5, 0.22, 0.34] },
-  { id: 'record_player', name: 'record player', tags: ['fragile'], massKg: 6, payKopecks: 6 * RUB, place: 'cells', boot: TWO, size: [0.46, 0.16, 0.36] },
-  { id: 'tool_box', name: "dad's tool box", tags: ['ordinary'], massKg: 30, payKopecks: 5 * RUB, place: 'cells', boot: TWO, look: 'crate' },
-  { id: 'fishing_rods', name: 'fishing rods', tags: ['bulky'], massKg: 3, payKopecks: 4 * RUB, place: 'cells', boot: STRIP, size: [1.3, 0.08, 0.12] },
-  { id: 'sledge', name: 'sledge', tags: ['bulky'], massKg: 5, payKopecks: 4 * RUB, place: 'cells', boot: STRIP, size: [1.0, 0.18, 0.38] },
-  { id: 'carpet', name: 'carpet', tags: ['bulky'], massKg: 12, payKopecks: 5 * RUB, place: 'bench', look: 'carpet' },
-  { id: 'tv_set', name: 'old TV set', tags: ['bulky', 'fragile'], massKg: 25, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE, size: [0.56, 0.48, 0.46] },
-  { id: 'aquarium', name: 'aquarium', tags: ['bulky', 'fragile'], massKg: 18, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE, size: [0.6, 0.42, 0.34] },
+  { id: 'pencils', name: 'box of pencils', tags: ['ordinary'], massKg: 0.5, payKopecks: 2 * RUB, place: 'cells', boot: ONE },
+  { id: 'globe', name: 'school globe', tags: ['fragile'], massKg: 1.5, payKopecks: 4 * RUB, place: 'cells', boot: ONE },
+  { id: 'cushions', name: 'sofa cushions', tags: ['ordinary'], massKg: 2, payKopecks: 3 * RUB, place: 'cells', boot: TWO, seat: true },
+  { id: 'table_lamp', name: 'table lamp', tags: ['fragile'], massKg: 2.5, payKopecks: 5 * RUB, place: 'cells', boot: TWO },
+  { id: 'tea_service', name: 'tea service', tags: ['fragile'], massKg: 7, payKopecks: 6 * RUB, place: 'cells', boot: TWO },
+  { id: 'record_player', name: 'record player', tags: ['fragile'], massKg: 6, payKopecks: 6 * RUB, place: 'cells', boot: TWO },
+  { id: 'tool_box', name: "dad's tool box", tags: ['ordinary'], massKg: 30, payKopecks: 5 * RUB, place: 'cells', boot: TWO },
+  { id: 'fishing_rods', name: 'fishing rods', tags: ['bulky'], massKg: 3, payKopecks: 4 * RUB, place: 'cells', boot: STRIP },
+  { id: 'sledge', name: 'sledge', tags: ['bulky'], massKg: 5, payKopecks: 4 * RUB, place: 'cells', boot: STRIP },
+  { id: 'carpet', name: 'carpet', tags: ['bulky'], massKg: 12, payKopecks: 5 * RUB, place: 'bench' },
+  { id: 'tv_set', name: 'old TV set', tags: ['bulky', 'fragile'], massKg: 25, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE },
+  { id: 'aquarium', name: 'aquarium', tags: ['bulky', 'fragile'], massKg: 18, payKopecks: 9 * RUB, place: 'cells', boot: SQUARE },
   { id: 'wardrobe', name: 'wardrobe', tags: ['bulky'], massKg: 110, payKopecks: 9 * RUB, place: 'trailer' },
   { id: 'piano', name: 'piano', tags: ['bulky'], massKg: 230, payKopecks: 11 * RUB, place: 'trailer' },
   { id: 'sofa', name: 'sofa', tags: ['bulky'], massKg: 70, payKopecks: 9 * RUB, place: 'trailer' },
@@ -113,17 +108,17 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'broken_toy_car', name: 'broken toy car', tags: [], massKg: 0, payKopecks: 9 * RUB, place: 'tow' },
   { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, payKopecks: 9 * RUB, place: 'transfer' },
   // Per teddy: a party is one teddy item each.
-  { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, payKopecks: 3 * RUB, place: 'seats', look: 'teddy' },
+  { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, payKopecks: 3 * RUB, place: 'seats' },
   // The fifth card's (§12): about twice an ordinary thing's pay, relics twice that again.
-  { id: 'grandpa_radio', name: "grandpa's radio", tags: ['fragile', 'special'], massKg: 6, payKopecks: 14 * RUB, place: 'cells', boot: TWO, size: [0.44, 0.26, 0.2] },
-  { id: 'stamp_album', name: 'stamp album', tags: ['ordinary', 'special'], massKg: 1.2, payKopecks: 11 * RUB, place: 'cells', boot: ONE, size: [0.32, 0.06, 0.24] },
-  { id: 'music_box', name: "mum's music box", tags: ['fragile', 'special'], massKg: 1, payKopecks: 13 * RUB, place: 'cells', boot: ONE, size: [0.2, 0.12, 0.14] },
-  { id: 'old_camera', name: 'old camera', tags: ['fragile', 'special'], massKg: 1.2, payKopecks: 13 * RUB, place: 'cells', boot: ONE, size: [0.16, 0.12, 0.1] },
-  { id: 'chess_set', name: 'chess set', tags: ['ordinary', 'special'], massKg: 2, payKopecks: 11 * RUB, place: 'cells', boot: ONE, size: [0.4, 0.08, 0.2] },
-  { id: 'model_plane', name: 'model plane', tags: ['fragile', 'special'], massKg: 0.8, payKopecks: 14 * RUB, place: 'cells', boot: TWO, size: [0.6, 0.14, 0.5] },
-  { id: 'grandpa_medals', name: "grandpa's medals", tags: ['fragile', 'relic'], massKg: 0.6, payKopecks: 24 * RUB, place: 'cells', boot: ONE, size: [0.26, 0.05, 0.2] },
-  { id: 'photo_album', name: 'family photo album', tags: ['fragile', 'relic'], massKg: 2, payKopecks: 22 * RUB, place: 'cells', boot: ONE, size: [0.34, 0.08, 0.28] },
-  { id: 'first_toy_car', name: 'his first toy car', tags: ['fragile', 'relic'], massKg: 0.4, payKopecks: 26 * RUB, place: 'cells', boot: ONE, size: [0.18, 0.08, 0.1] },
+  { id: 'grandpa_radio', name: "grandpa's radio", tags: ['fragile', 'special'], massKg: 6, payKopecks: 14 * RUB, place: 'cells', boot: TWO },
+  { id: 'stamp_album', name: 'stamp album', tags: ['ordinary', 'special'], massKg: 1.2, payKopecks: 11 * RUB, place: 'cells', boot: ONE },
+  { id: 'music_box', name: "mum's music box", tags: ['fragile', 'special'], massKg: 1, payKopecks: 13 * RUB, place: 'cells', boot: ONE },
+  { id: 'old_camera', name: 'old camera', tags: ['fragile', 'special'], massKg: 1.2, payKopecks: 13 * RUB, place: 'cells', boot: ONE },
+  { id: 'chess_set', name: 'chess set', tags: ['ordinary', 'special'], massKg: 2, payKopecks: 11 * RUB, place: 'cells', boot: ONE },
+  { id: 'model_plane', name: 'model plane', tags: ['fragile', 'special'], massKg: 0.8, payKopecks: 14 * RUB, place: 'cells', boot: TWO },
+  { id: 'grandpa_medals', name: "grandpa's medals", tags: ['fragile', 'relic'], massKg: 0.6, payKopecks: 24 * RUB, place: 'cells', boot: ONE },
+  { id: 'photo_album', name: 'family photo album', tags: ['fragile', 'relic'], massKg: 2, payKopecks: 22 * RUB, place: 'cells', boot: ONE },
+  { id: 'first_toy_car', name: 'his first toy car', tags: ['fragile', 'relic'], massKg: 0.4, payKopecks: 26 * RUB, place: 'cells', boot: ONE },
 ];
 
 const BY_ID = new Map<string, ThingDef>(THINGS.map((def) => [def.id, def]));

@@ -144,8 +144,9 @@ function spawnContractTrailer(
   const trailer: TrailerState = {
     id,
     hitchedTo: null,
-    // The thing itself is the load: its own mass on the bed.
+    // The thing itself is the load: its own mass on the bed, drawn as itself.
     cargoKg: contractThing(item).massKg,
+    loadThing: item.thing,
     x,
     // Clear of the ground so it drops onto its own suspension rather than starting
     // inside the terrain, exactly as a POI's spare trailer does.

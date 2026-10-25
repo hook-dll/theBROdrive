@@ -712,6 +712,7 @@ function migrateTrailer(raw: Record<string, unknown>): TrailerState {
   }
   const load = migrateTrailerLoad(raw.load);
   if (load !== null) trailer.load = load;
+  if (isThingId(raw.loadThing)) trailer.loadThing = raw.loadThing;
   return trailer;
 }
 

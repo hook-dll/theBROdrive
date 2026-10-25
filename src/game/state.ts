@@ -1,5 +1,6 @@
 import { hash } from '../core/rng';
 import type { FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
+import type { ThingId } from '../items/things';
 import type { PartInstance } from '../parts/registry';
 import type { ContractKind } from '../contracts/types';
 import { AIR_FILTER_CELL, bonnetAccepts, bonnetSlotFluid, BONNET_SLOT_COUNT } from '../vehicle/bonnet';
@@ -244,6 +245,8 @@ export interface TrailerState {
   cargoZ?: number;
   /** A load longer than the bed (the bed, contracts/world.ts), or absent for an ordinary flatbed. */
   load?: TrailerLoad;
+  /** The contract thing on the bed (contracts/world.ts), drawn as itself instead of the crate. */
+  loadThing?: ThingId;
   x: number;
   y: number;
   z: number;

@@ -32,6 +32,7 @@ import {
 } from './vehicletuning';
 import { weather, weatherGrip } from '../world/weather';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
+import { createTrailerLoadMesh } from '../render/thingmesh';
 import { TyreContacts, type TyreContact } from './tyrecontact';
 
 /**
@@ -239,20 +240,6 @@ const CRATE_CENTRE_Y = BED_HALF[1] + CRATE_HALF[1];
  */
 const CARGO_Z_LIMIT = BED_HALF[2] - CRATE_HALF[2];
 
-/**
- * The long load (contracts/world.ts): a box that overhangs BOTH ends of the 2.8 m bed.
- * Only a contract trailer carries one.
- *
- * The load is a real collider rather than decoration: the overhang can take a traffic
- * car or a rock. Its own mass rides the existing bed payload path (`cargoKg`), so the
- * car in front feels it through the tow ball exactly like any other load.
- *
- * Its look: varnished wood against the dark bed, so the overhang reads from the
- * driver's seat. Same shader features as the crate and the steel, so it links the
- * program the trailer warm-up already compiles.
- */
-const matLoad = new THREE.MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.7, metalness: 0.05 });
-
 /** Wheel spin is kept inside one turn, so a long haul cannot lose float precision. */
 const TWO_PI = Math.PI * 2;
 
@@ -395,6 +382,8 @@ export class Trailer implements Rebasable {
   private readonly wheelMeshes: THREE.Mesh[] = [];
   private readonly drawbar: THREE.Mesh;
   private readonly crate: THREE.Mesh;
+  /** A contract thing on the bed (render/thingmesh.ts), drawn where the crate would ride. */
+  private readonly thingMesh: THREE.Object3D | null;
   /**
    * Unexplained speed loss of the trailer this step, m/s, and the two numbers it
    * needs: the horizontal speed at the end of the previous step and what this
@@ -578,26 +567,28 @@ export class Trailer implements Rebasable {
     this.crate.castShadow = true;
     this.root.add(this.crate);
 
-    // A long load (contracts/world.ts): a real collider on the overhang plus the box
-    // that shows it. The crate above is drawn for ordinary cargo only.
+    // A contract trailer carries the thing itself, its foot on the bed. Its geometry and
+    // materials are the shared item caches, so nothing of it is disposed here.
+    this.thingMesh = state.loadThing === undefined ? null : createTrailerLoadMesh(state.loadThing);
+    if (this.thingMesh) {
+      this.thingMesh.position.set(0, BED_HALF[1], this.cargoZ);
+      this.root.add(this.thingMesh);
+    }
+
+    // A long load (contracts/world.ts), a box overhanging both ends of the bed: a real
+    // collider rather than decoration, so the overhang can take a traffic car or a rock.
+    // Its mass is the bed's `cargoKg` like any load; the thing above shows it.
     const load = state.load;
     if (load) {
       const [lx, ly, lz] = load.halfExtents;
-      const centreY = BED_HALF[1] + ly;
       physics.world.createCollider(
         RAPIER.ColliderDesc.cuboid(lx, ly, lz)
-          .setTranslation(0, centreY, this.cargoZ)
+          .setTranslation(0, BED_HALF[1] + ly, this.cargoZ)
           .setDensity(0)
           .setFriction(0.6)
           .setRestitution(0.02),
         this.body,
       );
-      const geo = new THREE.BoxGeometry(lx * 2, ly * 2, lz * 2);
-      this.disposables.push(geo);
-      const mesh = new THREE.Mesh(geo, matLoad);
-      mesh.position.set(0, centreY, this.cargoZ);
-      mesh.castShadow = true;
-      this.root.add(mesh);
     }
 
     // The prop stand's leg and foot, matching the collider above.
@@ -1316,7 +1307,9 @@ export class Trailer implements Rebasable {
       mesh.rotation.x = this.wheels[i].drawnRad;
     }
 
-    this.crate.visible = this.state.cargoKg > 0 && this.state.load === undefined;
+    const loaded = this.state.cargoKg > 0;
+    this.crate.visible = loaded && this.thingMesh === null && this.state.load === undefined;
+    if (this.thingMesh) this.thingMesh.visible = loaded;
   }
 
   /** Pushes the current pose into state, so a save puts the trailer back here. */
@@ -1489,10 +1482,11 @@ export class TrailerField {
       mesh.visible = false;
       this.warmup.add(mesh);
     }
-    // The long load's material shares the crate's shader features, but a contract
-    // trailer is spawned long after boot, so its one instance is compiled here with the
-    // rest rather than the first time a bed is drawn.
-    const load = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), matLoad);
+    // The crate's material is the bed's own plain one, and a trailer with cargo may first
+    // appear long after boot, so one instance is compiled here with the rest rather than
+    // the first time a crate is drawn. A contract thing on the bed draws with the items'
+    // flat materials, which `itemProgramAnchor` holds.
+    const load = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), matCrate);
     load.castShadow = false;
     load.receiveShadow = false;
     load.visible = false;

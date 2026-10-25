@@ -49,6 +49,14 @@ const TILT_ROLL = -0.18;
 /* ---- scale, derived from the item's bounding box ---- */
 const TARGET_MAX = 0.28;
 const TARGET_TAU = 0.32;
+/**
+ * The most a held contract thing's longest side spans in the hand, m. A TV or an
+ * aquarium is carried in both arms, not held up to the face: at the saturating target
+ * it filled half the screen. Small things stay at their natural size.
+ */
+const THING_HELD_MAX = 0.15;
+/** Turns a held thing so its face (+z: the TV's screen, the radio's dial) looks back at the player. */
+const THING_FACE_YAW = 1.9;
 
 /* ---- heaviness (log mass -> 0..1) ---- */
 const MASS_LOG_MIN = Math.log(1);
@@ -238,7 +246,7 @@ export class HeldItemView {
     let oz = 0;
     let pitch = Math.sin(t * 1.1 + 2.0) * SWAY_PITCH;
     let roll = Math.sin(t * 0.6) * SWAY_ROLL;
-    let yaw = 0;
+    let yaw = item?.type === 'contract_cargo' ? THING_FACE_YAW : 0;
 
     // Walking bob, frozen at rest.
     const mag = opts.moveMag > 0 ? (opts.moveMag > 1 ? 1 : opts.moveMag) : 0;
@@ -434,7 +442,8 @@ export class HeldItemView {
     _box.setFromObject(mesh);
     const size = _box.getSize(_size);
     const maxDim = Math.max(size.x, size.y, size.z);
-    const target = maxDim > 0 ? TARGET_MAX * (1 - Math.exp(-maxDim / TARGET_TAU)) : TARGET_MAX * 0.5;
+    const saturating = maxDim > 0 ? TARGET_MAX * (1 - Math.exp(-maxDim / TARGET_TAU)) : TARGET_MAX * 0.5;
+    const target = item.type === 'contract_cargo' ? Math.min(saturating, THING_HELD_MAX) : saturating;
     const scale = maxDim > 0 ? target / maxDim : 1;
     const centre = _box.getCenter(_centre);
     // Three.js applies scale before the object's position, so the centring

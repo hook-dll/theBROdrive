@@ -26,177 +26,24 @@ import type {
   WeaponKind,
 } from '../items/items';
 import { contractThing, isBrokenThing, spongeSpent } from '../items/items';
-import { hasTag, isHaulThing, type ThingDef } from '../items/things';
-import { makeConditionMaterial, makeFlatMaterial } from './materials';
+import { makeFlatMaterial } from './materials';
 import { applyComicShading } from './comic';
-
-// ---------------------------------------------------------------------------
-// Geometry cache
-// ---------------------------------------------------------------------------
-
-const geometryCache = new Map<string, THREE.BufferGeometry>();
-
-function cachedGeo(key: string, build: () => THREE.BufferGeometry): THREE.BufferGeometry {
-  let geometry = geometryCache.get(key);
-  if (geometry === undefined) {
-    geometry = build();
-    geometryCache.set(key, geometry);
-  }
-  return geometry;
-}
-
-// ---------------------------------------------------------------------------
-// Material specs (resolved lazily per instance)
-// ---------------------------------------------------------------------------
-
-type MaterialSpec =
-  | { kind: 'cond'; color: number; metalness: number; roughness: number }
-  | { kind: 'flat'; color: number; roughness: number }
-  | { kind: 'glass'; color: number; roughness: number };
-
-const cond = (color: number, metalness = 0.85, roughness = 0.4): MaterialSpec => ({
-  kind: 'cond', color, metalness, roughness,
-});
-const flat = (color: number, roughness = 0.6): MaterialSpec => ({ kind: 'flat', color, roughness });
-const glass = (color: number, roughness = 0.06): MaterialSpec => ({ kind: 'glass', color, roughness });
-
-function resolveMaterial(spec: MaterialSpec): THREE.Material {
-  switch (spec.kind) {
-    case 'cond':
-      return makeConditionMaterial(spec.color, spec.metalness, spec.roughness);
-    case 'flat':
-      return makeFlatMaterial(spec.color, spec.roughness);
-    case 'glass': {
-      // High transmission, low opacity: the tint must read as clean glass, never
-      // a dark slab. DoubleSide means both faces of a thin box contribute, so the
-      // per-face opacity is kept low to leave the road clearly visible.
-      const material = makeFlatMaterial(spec.color, spec.roughness);
-      material.transparent = true;
-      material.opacity = 0.12;
-      material.side = THREE.DoubleSide;
-      material.depthWrite = false;
-      return material;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Instructions: geometry + material + transform, replayed per instance
-// ---------------------------------------------------------------------------
-
-type Vec3 = readonly [number, number, number];
-
-interface Instruction {
-  readonly name: string;
-  readonly geometry: THREE.BufferGeometry;
-  readonly material: MaterialSpec;
-  readonly position: Vec3;
-  readonly rotation: Vec3;
-  readonly scale: Vec3;
-}
-
-const ZERO: Vec3 = [0, 0, 0];
-const ONE: Vec3 = [1, 1, 1];
-// Cylinders are built along +Y; these Euler angles re-point that axis.
-const AXIS_X: Vec3 = [0, 0, -Math.PI / 2]; // +Y -> +X
-const AXIS_Z: Vec3 = [Math.PI / 2, 0, 0]; // +Y -> +Z
-
-class MeshBuilder {
-  readonly instructions: Instruction[] = [];
-
-  push(
-    key: string,
-    build: () => THREE.BufferGeometry,
-    material: MaterialSpec,
-    position: Vec3,
-    rotation: Vec3 = ZERO,
-    scale: Vec3 = ONE,
-  ): void {
-    this.instructions.push({ name: key, geometry: cachedGeo(key, build), material, position, rotation, scale });
-  }
-
-  box(key: string, w: number, h: number, d: number, material: MaterialSpec, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE): void {
-    this.push(key, () => new THREE.BoxGeometry(w, h, d), material, position, rotation, scale);
-  }
-
-  cylinder(
-    key: string,
-    radiusTop: number,
-    radiusBottom: number,
-    height: number,
-    radialSegments: number,
-    material: MaterialSpec,
-    position: Vec3,
-    rotation: Vec3 = ZERO,
-    scale: Vec3 = ONE,
-    openEnded = false,
-  ): void {
-    this.push(
-      key,
-      () => new THREE.CylinderGeometry(radiusTop, radiusBottom, height, radialSegments, 1, openEnded),
-      material,
-      position,
-      rotation,
-      scale,
-    );
-  }
-
-  torus(key: string, radius: number, tube: number, radialSegments: number, tubularSegments: number, material: MaterialSpec, position: Vec3, rotation: Vec3 = ZERO, scale: Vec3 = ONE, arc = Math.PI * 2): void {
-    this.push(key, () => new THREE.TorusGeometry(radius, tube, radialSegments, tubularSegments, arc), material, position, rotation, scale);
-  }
-
-  sphere(key: string, radius: number, widthSegments: number, heightSegments: number, material: MaterialSpec, position: Vec3, scale: Vec3 = ONE): void {
-    this.push(key, () => new THREE.SphereGeometry(radius, widthSegments, heightSegments), material, position, ZERO, scale);
-  }
-}
-
-function buildGroup(instructions: readonly Instruction[]): THREE.Group {
-  const group = new THREE.Group();
-  for (const ins of instructions) {
-    const mesh = new THREE.Mesh(ins.geometry, resolveMaterial(ins.material));
-    mesh.name = ins.name;
-    mesh.position.set(ins.position[0], ins.position[1], ins.position[2]);
-    mesh.rotation.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]);
-    mesh.scale.set(ins.scale[0], ins.scale[1], ins.scale[2]);
-    if (ins.material.kind === 'glass') {
-      // Glass must never be shadowed into a black slab.
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-    }
-    group.add(mesh);
-  }
-  return group;
-}
-
-/** Bounding box of a set of instructions, honouring their transforms. */
-function boundsOf(instructions: readonly Instruction[]): THREE.Box3 {
-  const total = new THREE.Box3();
-  const tmp = new THREE.Box3();
-  const euler = new THREE.Euler();
-  const quat = new THREE.Quaternion();
-  const pos = new THREE.Vector3();
-  const scl = new THREE.Vector3();
-  const matrix = new THREE.Matrix4();
-
-  for (const ins of instructions) {
-    if (ins.geometry.boundingBox === null) ins.geometry.computeBoundingBox();
-    tmp.copy(ins.geometry.boundingBox as THREE.Box3);
-    pos.set(ins.position[0], ins.position[1], ins.position[2]);
-    euler.set(ins.rotation[0], ins.rotation[1], ins.rotation[2]);
-    quat.setFromEuler(euler);
-    scl.set(ins.scale[0], ins.scale[1], ins.scale[2]);
-    matrix.compose(pos, quat, scl);
-    tmp.applyMatrix4(matrix);
-    total.union(tmp);
-  }
-  return total;
-}
-
-/** Bounding-box half-extents of a set of instructions, honouring their transforms. */
-function halfExtentsOf(instructions: readonly Instruction[]): { x: number; y: number; z: number } {
-  const size = boundsOf(instructions).getSize(new THREE.Vector3());
-  return { x: size.x / 2, y: size.y / 2, z: size.z / 2 };
-}
+import {
+  AXIS_X,
+  AXIS_Z,
+  MeshBuilder,
+  ONE,
+  ZERO,
+  buildGroup,
+  cachedGeo,
+  clearGeometryCache,
+  cond,
+  flat,
+  glass,
+  halfExtentsOf,
+  type Instruction,
+} from './meshbuilder';
+import { buildThingInto, thingModelKey } from './thingmesh';
 
 // ---------------------------------------------------------------------------
 // Part blueprints
@@ -1224,158 +1071,6 @@ function createPhotographMesh(imageDataUrl: string): THREE.Group {
   return root;
 }
 
-/** A parcel tied with string: what a haul's papers come in. */
-function buildContractParcelInto(b: MeshBuilder): void {
-  const paper = flat(0x8f6847, 0.92);
-  const string = flat(0x3a281c, 0.96);
-  const label = flat(0xd9c8a5, 0.9);
-  b.box('contract_parcel', 0.32, 0.2, 0.17, paper, [0, 0, 0]);
-  b.box('contract_parcel_string_x', 0.018, 0.205, 0.176, string, [0, 0, 0]);
-  b.box('contract_parcel_string_y', 0.325, 0.018, 0.176, string, [0, 0, 0]);
-  b.box('contract_parcel_label', 0.15, 0.075, 0.006, label, [0.045, 0.025, 0.088]);
-}
-
-/** A tool box: a wooden box with corner slats and a paper label. */
-function buildContractCrateInto(b: MeshBuilder): void {
-  const wood = flat(0x7a5533, 0.94);
-  const slat = flat(0x5e4028, 0.94);
-  const paper = flat(0xd9c8a5, 0.9);
-  b.box('contract_crate_body', 0.46, 0.36, 0.36, wood, [0, 0, 0]);
-  b.box('contract_crate_slat_v', 0.03, 0.38, 0.38, slat, [-0.205, 0, 0]);
-  b.box('contract_crate_slat_v', 0.03, 0.38, 0.38, slat, [0.205, 0, 0]);
-  b.box('contract_crate_slat_h', 0.48, 0.03, 0.38, slat, [0, -0.145, 0]);
-  b.box('contract_crate_label', 0.18, 0.1, 0.006, paper, [0.06, 0.06, 0.181]);
-}
-
-/**
- * The stand-in for a thing without a model of its own yet (items/things.ts `size`): a
- * box wrapped in paper of its tag's colour — a relic plum, a special thing gold, fragile
- * pale blue, bulky green, ordinary brown — tied with string, a label on its face. Flat
- * materials only, like the parcel.
- */
-function buildContractThingBoxInto(b: MeshBuilder, thing: ThingDef): void {
-  const [x, y, z] = thing.size ?? [0.3, 0.2, 0.2];
-  const colour = hasTag(thing, 'relic')
-    ? 0x7a3f6a
-    : hasTag(thing, 'special')
-      ? 0xc9a24a
-      : hasTag(thing, 'fragile') ? 0xa9bfcc : hasTag(thing, 'bulky') ? 0x5d7a52 : 0x8f6847;
-  const paper = flat(colour, 0.92);
-  const string = flat(0x3a281c, 0.96);
-  const label = flat(0xd9c8a5, 0.9);
-  b.box(`contract_thing_${thing.id}`, x, y, z, paper, [0, 0, 0]);
-  b.box(`contract_thing_${thing.id}_string_x`, 0.018, y + 0.005, z + 0.006, string, [0, 0, 0]);
-  b.box(`contract_thing_${thing.id}_string_y`, x + 0.005, 0.018, z + 0.006, string, [0, 0, 0]);
-  b.box(`contract_thing_${thing.id}_label`, Math.min(0.15, x * 0.4), Math.min(0.075, y * 0.5), 0.006, label, [x * 0.18, y * 0.15, z / 2 + 0.003]);
-}
-
-/**
- * A rug rolled up and tied: a red roll across x, its rolled ends darker, two string ties.
- * Flat materials only, so it draws with the parcel's programs.
- */
-function buildContractCarpetInto(b: MeshBuilder): void {
-  const pile = flat(0x8c2b24, 0.95);
-  const end = flat(0x5a1d19, 0.95);
-  const string = flat(0xd9c8a5, 0.9);
-  b.cylinder('contract_carpet_roll', 0.1, 0.1, 0.84, 14, pile, [0, 0, 0], AXIS_X);
-  b.cylinder('contract_carpet_end', 0.094, 0.094, 0.844, 14, end, [0, 0, 0], AXIS_X);
-  for (const x of [-0.26, 0.26]) b.cylinder('contract_carpet_tie', 0.104, 0.104, 0.018, 14, string, [x, 0, 0], AXIS_X);
-}
-
-/**
- * A stuffed bear sitting up: a round body and head, a pale belly and muzzle, round ears,
- * paws and a red bow at the neck. Flat materials only, like the parcel.
- */
-function buildContractTeddyInto(b: MeshBuilder): void {
-  const fur = flat(0x8a5a32, 0.97);
-  const pale = flat(0xc9a27a, 0.97);
-  const dark = flat(0x1c1410, 0.5);
-  const bow = flat(0xb3262a, 0.8);
-  b.sphere('contract_teddy_body', 0.1, 16, 12, fur, [0, 0, 0], [1, 1.15, 0.9]);
-  b.sphere('contract_teddy_belly', 0.06, 12, 8, pale, [0, -0.01, 0.058], [1, 1.2, 0.5]);
-  b.sphere('contract_teddy_head', 0.075, 16, 12, fur, [0, 0.17, 0.01]);
-  b.sphere('contract_teddy_muzzle', 0.032, 12, 8, pale, [0, 0.155, 0.075]);
-  b.sphere('contract_teddy_nose', 0.011, 8, 6, dark, [0, 0.165, 0.105]);
-  for (const sx of [-1, 1]) {
-    b.sphere('contract_teddy_eye', 0.01, 8, 6, dark, [sx * 0.028, 0.19, 0.068]);
-    b.sphere('contract_teddy_ear', 0.028, 10, 8, fur, [sx * 0.055, 0.235, 0], [1, 1, 0.6]);
-    b.sphere('contract_teddy_arm', 0.035, 10, 8, fur, [sx * 0.1, 0.03, 0.03], [0.8, 1.6, 0.8]);
-    b.sphere('contract_teddy_leg', 0.042, 10, 8, fur, [sx * 0.055, -0.1, 0.07], [0.9, 0.9, 1.4]);
-  }
-  b.box('contract_teddy_bow', 0.06, 0.03, 0.02, bow, [0, 0.105, 0.075]);
-}
-
-/** A table lamp: a brass foot and stem under a milk-glass shade, drawn opaque. */
-function buildContractLampInto(b: MeshBuilder): void {
-  const brass = flat(0xa8843f, 0.5);
-  const glass = flat(0xf1e8d4, 0.35);
-  b.cylinder('contract_lamp_foot', 0.08, 0.09, 0.03, 20, brass, [0, -0.17, 0]);
-  b.cylinder('contract_lamp_stem', 0.012, 0.012, 0.22, 10, brass, [0, -0.05, 0]);
-  b.cylinder('contract_lamp_shade', 0.07, 0.13, 0.15, 20, glass, [0, 0.12, 0]);
-  b.sphere('contract_lamp_finial', 0.016, 10, 8, brass, [0, 0.205, 0]);
-}
-
-/** The blueprint key and builder a thing is drawn with: a haul's papers, its own model, or its stand-in box. */
-function contractThingLook(thing: ThingDef): readonly [string, (b: MeshBuilder) => void] {
-  if (isHaulThing(thing)) return ['contract_parcel', buildContractParcelInto];
-  switch (thing.look) {
-    case 'carpet':
-      return ['contract_carpet', buildContractCarpetInto];
-    case 'teddy':
-      return ['contract_teddy', buildContractTeddyInto];
-    case 'lamp':
-      return ['contract_lamp', buildContractLampInto];
-    case 'crate':
-      return ['contract_crate', buildContractCrateInto];
-    case undefined:
-      return [`contract_thing_${thing.id}`, (b) => buildContractThingBoxInto(b, thing)];
-  }
-}
-
-/** A broken thing's colours are this share of the whole thing's: soot and dust. */
-const BROKEN_SHADE = 0.6;
-
-function brokenColour(colour: number): number {
-  const r = Math.round(((colour >> 16) & 0xff) * BROKEN_SHADE);
-  const g = Math.round(((colour >> 8) & 0xff) * BROKEN_SHADE);
-  const b = Math.round((colour & 0xff) * BROKEN_SHADE);
-  return (r << 16) | (g << 8) | b;
-}
-
-/** Slope of each leg of a crack's zig-zag, radians. */
-const CRACK_SLOPE = 0.6;
-
-/**
- * The stand-in for a broken thing (contracts/runtime.ts, below 30%) until each thing has
- * a broken model of its own: the whole thing darkened and, on a box (`faces`: the stand-in
- * and the crate fill their bounds), a black crack zig-zagging across its front and its
- * top. The crack's legs are sized to the face, so it fits wherever the whole one did.
- */
-function breakInto(b: MeshBuilder, faces: boolean): void {
-  const box = boundsOf(b.instructions);
-  for (let i = 0; i < b.instructions.length; i++) {
-    const ins = b.instructions[i]!;
-    b.instructions[i] = { ...ins, material: { ...ins.material, color: brokenColour(ins.material.color), roughness: 0.97 } };
-  }
-  if (!faces) return;
-  const crack = flat(0x0b0908, 0.98);
-  const size = box.getSize(new THREE.Vector3());
-  const c = box.getCenter(new THREE.Vector3());
-  const width = 0.01;
-  // Across the front (+z) and along the top (+y), each a run of unit boxes stretched into legs.
-  for (const onTop of [false, true]) {
-    const leg = Math.min(size.x, onTop ? size.z : size.y) * 0.4;
-    const run = leg * Math.cos(CRACK_SLOPE);
-    const legs = Math.max(2, Math.min(8, Math.floor((size.x * 0.7) / run)));
-    for (let i = 0; i < legs; i++) {
-      const x = c.x + run * (i + 0.5 - legs / 2);
-      const slope = i % 2 === 0 ? CRACK_SLOPE : -CRACK_SLOPE;
-      if (onTop) b.box('contract_crack', 1, 1, 1, crack, [x, box.max.y + 0.002, c.z], [0, slope, 0], [leg, 0.004, width]);
-      else b.box('contract_crack', 1, 1, 1, crack, [x, c.y, box.max.z + 0.002], [0, 0, slope], [leg, width, 0.004]);
-    }
-  }
-}
-
 function buildStickerEnvelopeInto(b: MeshBuilder): void {
   const paper = flat(0xd8c8ad, 0.9);
   const fold = flat(0xb9a78c, 0.92);
@@ -1572,15 +1267,11 @@ export function createItemMesh(item: Item): THREE.Object3D {
     case 'pocket_watch':
       return createPocketWatchMesh();
     case 'contract_cargo': {
-      // A haul is carried as its papers; a thing with a model of its own is drawn with
-      // it; every other thing is a box of its size in its tag's colour.
+      // A haul is carried as its papers; every other thing is drawn with its own model,
+      // whole or broken (render/thingmesh.ts).
       const thing = contractThing(item);
-      const [key, build] = contractThingLook(thing);
-      if (!isBrokenThing(item)) return buildGroup(itemBlueprint(key, build).instructions);
-      return buildGroup(itemBlueprint(`${key}_broken`, (b) => {
-        build(b);
-        breakInto(b, thing.look === undefined || thing.look === 'crate');
-      }).instructions);
+      const broken = isBrokenThing(item);
+      return buildGroup(itemBlueprint(thingModelKey(thing, broken), (b) => buildThingInto(b, thing, broken)).instructions);
     }
     case 'sticker_envelope':
       return buildGroup(itemBlueprint('sticker_envelope', buildStickerEnvelopeInto).instructions);
@@ -1616,8 +1307,7 @@ export function disposeItemMeshResources(root: THREE.Object3D): void {
 
 /** Releases every cached BufferGeometry. Call on teardown. */
 export function disposeMeshCache(): void {
-  for (const geometry of geometryCache.values()) geometry.dispose();
-  geometryCache.clear();
+  clearGeometryCache();
   blueprintCache.clear();
   itemBlueprintCache.clear();
 }
