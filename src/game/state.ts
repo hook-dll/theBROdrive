@@ -360,7 +360,7 @@ export interface WorldState {
    * days, kept.
    */
   courierStorage: Record<string, (Item | null)[]>;
-  /** Contract cargo ids already exchanged for signed envelopes. */
+  /** Contract ids completed or returned at a post: closed, no longer active. */
   completedContractIds: string[];
   /**
    * The delivery ledger: completed deliveries counted by contract kind, written with

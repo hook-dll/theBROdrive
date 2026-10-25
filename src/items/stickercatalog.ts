@@ -69,12 +69,3 @@ export function isStickerKind(value: unknown): value is StickerKind {
 export function stickerDef(kind: StickerKind): StickerDef {
   return BY_KIND.get(kind)!;
 }
-
-/** The design a contract pays out, fixed by the contract's own seed. */
-export function stickerKindForSeed(seed: number): StickerKind {
-  let h = (seed ^ 0x5bd1e995) >>> 0;
-  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
-  h = Math.imul(h ^ (h >>> 12), 0x297a2d39) >>> 0;
-  h = (h ^ (h >>> 15)) >>> 0;
-  return STICKERS[h % STICKERS.length]!.kind;
-}

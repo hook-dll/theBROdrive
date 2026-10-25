@@ -92,7 +92,7 @@ try {
   const give = (kind) => page.evaluate((kind) => {
     const b = window.__bro;
     const id = `test:${kind}:${Math.random()}`;
-    b.inventory.add({ type: 'sticker_envelope', id, stickerKind: kind, completedContractId: id });
+    b.inventory.add({ type: 'sticker_envelope', id, stickerKind: kind });
     b.inventory.select(id);
   }, kind);
   const wheel = async (notches, shift = false) => {

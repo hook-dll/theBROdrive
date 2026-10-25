@@ -593,31 +593,6 @@ export function migrateState(raw: unknown): WorldState {
     looseItems[id] = migrateLooseItem(raw);
   }
 
-  // Retired abstract rewards become physical envelopes. Preserve the documented
-  // preference for the first car's boot, then materialise overflow beside the player.
-  const legacyEnvelopeCount = Math.max(0, Math.trunc(numOr(obj.stickersUnplaced, 0)));
-  const firstCar = Object.values(cars)[0];
-  for (let index = 0; index < legacyEnvelopeCount; index++) {
-    const id = `legacy:sticker-envelope:${index}`;
-    const item: Item = {
-      type: 'sticker_envelope',
-      id,
-      stickerKind: 'star',
-      completedContractId: `legacy:delivery:${index}`,
-    };
-    const cell = firstCar ? bootFreeAnchor(firstCar.storage, carModel(firstCar.modelId).trunkGrid, { columns: 1, rows: 1 }) : -1;
-    if (firstCar && cell >= 0) {
-      firstCar.storage[cell] = item;
-    } else {
-      looseItems[id] = {
-        item,
-        x: player.x + (index % 4) * 0.18,
-        y: player.y,
-        z: player.z + Math.floor(index / 4) * 0.18,
-      };
-    }
-  }
-
   const completedContractIds = migrateStringArray(obj.completedContractIds);
 
   return {
@@ -1234,7 +1209,7 @@ function migrateItem(raw: unknown, where: string): Item {
       return { type: 'pocket_watch', id: obj.id };
     case 'contract_cargo': {
       const sourceCourierIndex = Math.trunc(numOr(obj.sourceCourierIndex, -1));
-      if (sourceCourierIndex < 0 || !isThingId(obj.thing) || !isStickerKind(obj.rewardStickerKind)) {
+      if (sourceCourierIndex < 0 || !isThingId(obj.thing)) {
         throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
       }
       const item: ContractCargoItem = {
@@ -1242,7 +1217,6 @@ function migrateItem(raw: unknown, where: string): Item {
         id: obj.id,
         sourceCourierIndex,
         thing: obj.thing,
-        rewardStickerKind: obj.rewardStickerKind,
         generatedSeed: numOr(obj.generatedSeed, 0) >>> 0,
         progress: sanitizeContractProgress(obj.progress),
         ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
@@ -1259,14 +1233,13 @@ function migrateItem(raw: unknown, where: string): Item {
       return item;
     }
     case 'sticker_envelope':
-      if (!isStickerKind(obj.stickerKind) || typeof obj.completedContractId !== 'string') {
+      if (!isStickerKind(obj.stickerKind)) {
         throw new Error(`Save data is malformed: sticker envelope at ${where} is invalid`);
       }
       return {
         type: 'sticker_envelope',
         id: obj.id,
         stickerKind: obj.stickerKind,
-        completedContractId: obj.completedContractId,
       };
     default:
       throw new Error(`Save data is malformed: item at ${where} has an unknown type`);

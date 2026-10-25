@@ -6,17 +6,19 @@
  */
 
 import type { WorldState } from '../game/state';
-import { contractIdOf, contractKindOf, contractThing, isBrokenThing, type ContractCargoItem, type Item } from '../items/items';
-import type { StickerKind } from '../items/stickercatalog';
+import { contractIdOf, contractKindOf, contractThing, isBrokenThing, isHaul, type ContractCargoItem, type Item } from '../items/items';
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
-import { teddyPartyIds, passengerQuality, teddyPassengersKind } from './kinds/teddyPassengers';
+import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
 import { trailerKind } from './kinds/trailer';
-import { CONTRACT_KIND_IDS, isLate, STICKER_QUALITY, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
+import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryEffect, type DeliveryProbe } from './types';
 
 /** At most this many contracts are active at once, anywhere (game-design2.md §7.4). */
 export const ACTIVE_CONTRACT_LIMIT = 3;
+
+/** At most this many of the active contracts are hauls (trailer, towing, car transfer; §7.4). */
+export const ACTIVE_HAUL_LIMIT = 1;
 
 /**
  * A contract item whose contract is closed: broken (`isBrokenThing`), or its contract
@@ -33,13 +35,17 @@ export function isContractClosed(item: ContractCargoItem, completedIds: readonly
  * hands or the pack, in any car's boot or cabin, or lying loose — that is not closed
  * (`isContractClosed`). A haul is its papers, wherever they are; a teddy party is one
  * contract however many of its teddies are out. Returns the active contracts' ids
- * (`contractIdOf`); its size is what `ACTIVE_CONTRACT_LIMIT` caps.
+ * (`contractIdOf`), all of them and the hauls among them: their sizes are what
+ * `ACTIVE_CONTRACT_LIMIT` and `ACTIVE_HAUL_LIMIT` cap.
  */
-export function activeContractIds(state: WorldState): Set<string> {
-  const ids = new Set<string>();
+export function activeContracts(state: WorldState): { all: Set<string>; hauls: Set<string> } {
+  const all = new Set<string>();
+  const hauls = new Set<string>();
   const consider = (item: Item | null | undefined): void => {
     if (item?.type !== 'contract_cargo' || isContractClosed(item, state.completedContractIds)) return;
-    ids.add(contractIdOf(item));
+    const id = contractIdOf(item);
+    all.add(id);
+    if (isHaul(item)) hauls.add(id);
   };
   state.player.carried.forEach(consider);
   for (const car of Object.values(state.cars)) {
@@ -47,21 +53,7 @@ export function activeContractIds(state: WorldState): Set<string> {
     car.cabin.forEach(consider);
   }
   for (const loose of Object.values(state.looseItems)) consider(loose.item);
-  return ids;
-}
-
-/** The delivery's quality, 0..1: a thing's condition, a passenger party's ride. */
-export function deliveryQuality(item: ContractCargoItem): number {
-  return item.party ? passengerQuality(item) : item.progress.condition ?? 1;
-}
-
-/**
- * Whether the delivery of `item` earns its sticker envelope (§7.7): handled with care
- * (`deliveryQuality` at least `STICKER_QUALITY`) and, when urgent, on time. Money is
- * paid either way.
- */
-export function earnsSticker(item: ContractCargoItem): boolean {
-  return deliveryQuality(item) >= STICKER_QUALITY && !isLate(item);
+  return { all, hauls };
 }
 
 const CONTRACT_KINDS: readonly ContractKindDef[] = [
@@ -156,7 +148,7 @@ export function contractAcceptRefusal(
 /**
  * Why this post's tray may not take `item` back as a RETURN TO SENDER, or null. Asked
  * only when the post will not sign for it as a delivery (`contractAcceptRefusal`): a
- * valid delivery always wins. A return pays nothing and earns no sticker; it closes the
+ * valid delivery always wins. A return pays nothing; it closes the
  * contract and frees its place under `ACTIVE_CONTRACT_LIMIT`. Any post takes a thing back
  * from the hand, and a closed one (`isContractClosed`: broken, or the leftover teddy of
  * a returned party) to be rid of it. A haul goes back as a delivery does: its papers in
@@ -173,17 +165,9 @@ export function contractReturnRefusal(
 }
 
 /**
- * The sticker a delivery pays: the kind's signature sticker, or the offer's
- * seed-random reward for a kind without one. Nothing on the way is scored.
- */
-export function contractRewardSticker(item: ContractCargoItem): StickerKind {
-  return contractKindDef(item).signatureSticker ?? item.rewardStickerKind;
-}
-
-/**
  * The world change a delivery also performs: consuming the trailer, the car or the
  * part the contract is about. The interaction code applies this AFTER the
- * `courier_storage` delta that writes the envelope and the completed id, so a crash
+ * `courier_storage` delta that writes the completed id, so a crash
  * between the two halves leaves the cargo delivered and cannot pay twice.
  */
 export function contractDeliveryEffect(item: ContractCargoItem, probe: DeliveryProbe): DeliveryEffect | null {

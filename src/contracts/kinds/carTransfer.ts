@@ -9,8 +9,7 @@
  * boot — and the delivery refuses while you are sitting in it or while it stands
  * more than `DELIVERY_RANGE_M` away.
  *
- * Its state on arrival is not judged: delivered is delivered, and it always pays its
- * signature sticker.
+ * Its state on arrival is not judged: delivered is delivered.
  *
  * The delivery consumes the car, so it also refuses while the boot holds anything —
  * handing a car over must not delete whatever the player left in it.
@@ -24,7 +23,6 @@ const DELIVERY_RANGE_M = 20;
 
 export const carTransferKind: ContractKindDef = {
   kind: 'car_transfer',
-  signatureSticker: 'number-07',
   acceptRefusal: (item, probe) => {
     const carId = contractCarId(item);
     const car = probe.car(carId);

@@ -19,7 +19,6 @@
 
 import type { CarState, WorldDelta } from '../game/state';
 import type { ContractCargoItem } from '../items/items';
-import type { StickerKind } from '../items/stickercatalog';
 
 /**
  * The machinery a thing rides on: a thing carried by hand (boot, seat, bench), a
@@ -77,12 +76,6 @@ export interface ContractProgress {
 /** Below this condition a thing is broken (game-design2.md §11.1). */
 export const BROKEN_BELOW = 0.3;
 
-/**
- * A delivery earns its sticker envelope only at this quality or better (a thing's
- * condition, a party's `passengerQuality`), and only on time (game-design2.md §7.7).
- */
-export const STICKER_QUALITY = 0.9;
-
 /** An urgent delivery on time pays this share of its pay on top (§7.5). */
 export const URGENT_BONUS = 0.5;
 
@@ -92,7 +85,7 @@ export function urgentRemainingS(item: { readonly urgentS?: number; readonly pro
   return item.urgentS - (item.progress?.elapsedS ?? 0);
 }
 
-/** An urgent contract whose clock has run out: no urgent bonus, no sticker, base pay. */
+/** An urgent contract whose clock has run out: no urgent bonus, base pay. */
 export function isLate(item: { readonly urgentS?: number; readonly progress: ContractProgress }): boolean {
   const left = urgentRemainingS(item);
   return left !== null && left < 0;
@@ -143,7 +136,7 @@ export interface DeliveryProbe {
 /**
  * The world changes a kind makes on a successful delivery, applied by the
  * interaction code in the same transaction as `courier_storage` (which writes the
- * envelope and the completed id FIRST, so a crash between the two halves cannot
+ * completed id FIRST, so a crash between the two halves cannot
  * pay twice).
  */
 export interface DeliveryEffect {
@@ -155,11 +148,6 @@ export interface DeliveryEffect {
 export interface ContractKindDef {
   readonly kind: ContractKind;
   /**
-   * The sticker every delivery of this kind pays. `null` means the kind has no
-   * signature and pays the offer's seed-random reward.
-   */
-  readonly signatureSticker: StickerKind | null;
-  /**
    * Why this post may not accept the cargo, or null. Called after the base rule
    * (a post never signs cargo from itself or further down the road).
    */
@@ -167,7 +155,7 @@ export interface ContractKindDef {
   /**
    * The world change this delivery also performs: consuming the trailer, car or
    * part the contract is about. Applied only after the post accepted the cargo,
-   * in the same transaction as the envelope.
+   * in the same transaction as the completed id.
    */
   readonly onDelivered?: (item: ContractCargoItem, probe: DeliveryProbe) => DeliveryEffect | null;
   /**

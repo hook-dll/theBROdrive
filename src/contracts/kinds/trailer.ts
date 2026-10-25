@@ -10,8 +10,7 @@
  * only signs when the trailer stands within `DELIVERY_RANGE_M` of its lay-by, and the
  * delivery consumes it.
  *
- * How it got there is not judged yet: a hit or tipped trailer still counts, and every
- * delivery pays its signature sticker.
+ * How it got there is not judged yet: a hit or tipped trailer still counts.
  */
 
 import { contractTrailerId } from '../world';
@@ -22,7 +21,6 @@ const DELIVERY_RANGE_M = 25;
 
 export const trailerKind: ContractKindDef = {
   kind: 'trailer',
-  signatureSticker: 'su-oval',
   acceptRefusal: (item, probe) => {
     const at = probe.trailerPosition(contractTrailerId(item));
     if (!at) return 'its trailer is not here';

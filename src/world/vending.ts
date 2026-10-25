@@ -94,7 +94,6 @@ function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
         type: 'sticker_envelope',
         id,
         stickerKind: pick(STICKERS, seed, VENDING_DOMAIN, slot, 47).kind,
-        completedContractId: id,
       };
   }
 }

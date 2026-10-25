@@ -8,8 +8,8 @@
  * asked; the post shows it only to a car with stickers (world/post.ts), and its round
  * is kept while it is hidden.
  *
- * The offer is a plain `contract_cargo` item with its thing, destination, seed-random
- * reward (paid by kinds without a signature sticker) and fresh progress already on it.
+ * The offer is a plain `contract_cargo` item with its thing, destination, seed and fresh
+ * progress already on it.
  * RACE is a modifier on top: an ordinary, fragile, bulky or teddy offer, or a trailer
  * haul, is a race to the next post or the one after with `RACE_SHARE` chance, drawn per
  * offer (contracts/race.ts); the rivals carry the cargo as its weight, so footprint
@@ -31,7 +31,6 @@
 import { hash, hash01 } from '../core/rng';
 import type { WorldState } from '../game/state';
 import type { ContractCargoItem, Item } from '../items/items';
-import { stickerKindForSeed } from '../items/stickercatalog';
 import { cardThings, POST_CARDS, specialThings, type ThingId } from '../items/things';
 import { placeNameAt } from '../world/placenames';
 import { postId, postStop } from '../world/poststops';
@@ -111,7 +110,6 @@ export function makeContract(
     id,
     sourceCourierIndex: courierIndex,
     thing,
-    rewardStickerKind: stickerKindForSeed(generatedSeed),
     generatedSeed,
     destination: placeNameAt(seed, postStop(seed, courierIndex + (raceLegs ?? 1)).s),
     progress: defaultProgress(),

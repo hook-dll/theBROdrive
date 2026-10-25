@@ -847,7 +847,6 @@ check(
       id: `bench-race-${side}`,
       sourceCourierIndex: courier.index - 1,
       thing: 'pencils',
-      rewardStickerKind: 'star',
       raceLegs: 1,
       generatedSeed: 7 + side,
       progress: { started: false },

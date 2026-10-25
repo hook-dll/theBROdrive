@@ -137,15 +137,18 @@
   - it stays a normal item that can be carried, stowed and dropped;
   - its model shows its own damage, every colour darkened (see THE THINGS DRAWN). The
     hand, boot, cabin and ground views redraw a thing the moment it breaks.
-- THREE JOBS AT ONCE (game-design2.md §7.4; `contracts/registry.ts`
-  `activeContractIds`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`). An active contract
-  is a contract item out of a post's stock — in the hands or the pack, any car's boot or
-  cabin, or lying loose — that is neither broken nor completed/returned; a teddy party is
-  one, a haul is its papers. With three out, TAKE refuses with "three jobs already out —
-  hand one in or return it" and every offer card says so.
+- THREE JOBS AT ONCE, ONE HAUL (game-design2.md §7.4; `contracts/registry.ts`
+  `activeContracts`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`, `ACTIVE_HAUL_LIMIT`). An
+  active contract is a contract item out of a post's stock — in the hands or the pack, any
+  car's boot or cabin, or lying loose — that is neither broken nor completed/returned; a
+  teddy party is one, a haul is its papers. With three out, TAKE refuses with "three jobs
+  already out — hand one in or return it" and every offer card says so. With a haul
+  (trailer, towing, car transfer) out, TAKE of a second haul refuses with "one haul
+  already out — hand it in or return it first" and every haul card says "one haul out:
+  hand it in or return it".
 - RETURN TO SENDER (`contracts/registry.ts` `contractReturnRefusal`; `world/post.ts`
   `takeBack`). Any post's tray takes back a thing in hand that it will not sign for as a
-  delivery: no pay, no sticker, the contract is closed (recorded in
+  delivery: no pay, the contract is closed (recorded in
   `completedContractIds` without a kind, so the delivery ledger does not count it) and
   frees its place. The hand-in card reads RETURN — NO PAY. A valid delivery always wins.
   A haul goes back as it is delivered: papers in hand and its trailer or car on that
@@ -161,12 +164,15 @@
   not during the pocket watch's fast-forward. It is saved on the item; a party's teddies
   share it. Shown on the card's band (URGENT 6:00), the item label (· 5:12, · LATE) and
   the HUD route label (⏱ 5:12) while an urgent thing is in hand or in the driven car. On
-  time pays +50% of the pay; late pays the plain pay and no sticker.
-- STICKER ONLY FOR CAREFUL DELIVERY (game-design2.md §7.7; `contracts/registry.ts`
-  `earnsSticker`, `deliveryQuality`; `STICKER_QUALITY`). Money always; the envelope only
-  at condition ≥ 90% (teddies: their ride quality ≥ 90%) and not late. The hand-in card
-  says which: "a sticker envelope comes with it", "85%: no sticker (needs 90%)", "late:
-  no sticker"; its band reads HAND IN · ON TIME / · LATE for an urgent one.
+  time pays +50% of the pay; late pays the plain pay.
+- DELIVERIES PAY MONEY ONLY (game-design2.md §7.7, §12; `world/post.ts`). The tray pays
+  straight into the player's money and never drops a sticker envelope; stickers are only
+  bought (the vending machine's envelopes). Gone: `contractRewardSticker`, the kinds'
+  `signatureSticker`, `ContractCargoItem.rewardStickerKind`, `stickerKindForSeed`, the
+  ≥90%-and-on-time rule (`earnsSticker`, `deliveryQuality`, `STICKER_QUALITY`) and the
+  hand-in card's sticker line, `StickerEnvelopeItem.completedContractId`, and the old-save
+  `stickersUnplaced` envelope migration. The hand-in band still reads HAND IN · ON TIME /
+  · LATE for an urgent one.
 - `__bro.thing(id, size?, urgent?, raceLegs?)` can spawn an urgent thing or a race.
 - UNIQUENESS (game-design2.md §12; `economy/economy.ts` `SPECIAL_CARD_STICKERS`,
   `RELIC_STICKERS`, `uniquenessBonus`, `uniquenessBonusText`; `contracts/offers.ts`

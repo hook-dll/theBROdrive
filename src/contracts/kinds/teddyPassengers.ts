@@ -100,7 +100,6 @@ export function isPassenger(item: Item | null | undefined): boolean {
 
 export const teddyPassengersKind: ContractKindDef = {
   kind: 'teddy_passengers',
-  signatureSticker: null,
   dressOffer(offer) {
     offer.party = { id: offer.id, size: teddyPartySize(offer.generatedSeed) };
   },

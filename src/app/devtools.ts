@@ -308,13 +308,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
         item = { type: 'pocket_watch', id: ctx.world.runtimePartId() };
         break;
       case 'sticker_envelope':
-        // Not earned: the `dev:` id says so in a save, where every other envelope
-        // names the contract cargo it was signed for.
         item = {
           type: 'sticker_envelope',
           id: ctx.world.runtimePartId(),
           stickerKind: request.stickerKind,
-          completedContractId: `dev:${request.stickerKind}`,
         };
         break;
     }

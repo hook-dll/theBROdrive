@@ -222,11 +222,6 @@ export interface ContractCargoItem {
   readonly sourceCourierIndex: number;
   /** The catalogue thing it is (items/things.ts); its machinery is `contractKindOf`. */
   readonly thing: ThingId;
-  /**
-   * The ordinary sticker a delivery pays. Kinds with a signature reward pay that
-   * instead, so this is the fallback for every kind.
-   */
-  readonly rewardStickerKind: StickerKind;
   readonly generatedSeed: number;
   /**
    * A race offer: how many posts on its destination is, 1 or 2. The cargo is
@@ -237,7 +232,7 @@ export interface ContractCargoItem {
   /**
    * An urgent offer (contracts/offers.ts `urgentDeadlineS`): the seconds of simulation it
    * has from TAKE, against `progress.elapsedS`. On time it pays `URGENT_BONUS` on top;
-   * late it pays the base and earns no sticker. Absent on an ordinary offer.
+   * late it pays the base. Absent on an ordinary offer.
    */
   urgentS?: number;
   /**
@@ -293,12 +288,11 @@ export function isBrokenThing(item: Item | null | undefined): boolean {
   return item?.type === 'contract_cargo' && item.progress?.broken === true;
 }
 
-/** Signed physical reward, consumed only when its sticker is confirmed on a car. */
+/** A sticker bought at a shop, consumed only when its sticker is confirmed on a car. */
 export interface StickerEnvelopeItem {
   readonly type: 'sticker_envelope';
   readonly id: string;
   readonly stickerKind: StickerKind;
-  readonly completedContractId: string;
 }
 
 export type Item =

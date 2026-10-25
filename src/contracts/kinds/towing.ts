@@ -9,7 +9,7 @@
  * the car-to-car tow bar of kind 17's subsystem (`vehicle/cartow.ts`).
  *
  * How it got there is not judged: the bar may come off on the way and the car may
- * arrive battered. Delivered is delivered, and it always pays its signature sticker.
+ * arrive battered. Delivered is delivered.
  *
  * The delivery consumes the car, so it also refuses while the car's boot holds
  * anything: handing over a car must not delete whatever the player left in it.
@@ -23,7 +23,6 @@ const DELIVERY_RANGE_M = 20;
 
 export const towingKind: ContractKindDef = {
   kind: 'towing',
-  signatureSticker: 'learner',
   acceptRefusal: (item, probe) => {
     const carId = contractCarId(item);
     const car = probe.car(carId);
