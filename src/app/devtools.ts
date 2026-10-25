@@ -13,7 +13,8 @@ import * as THREE from 'three';
 import type { BirdFlock } from '../agents/birds';
 import { STICKERS } from '../items/stickercatalog';
 import { makeContract } from '../contracts/offers';
-import { contractRelease } from '../contracts/registry';
+import { shelterBench } from '../contracts/shelters';
+import { teddyItem } from '../contracts/kinds/teddyPassengers';
 import { haulLoadId, spawnHaulLoad } from '../contracts/world';
 import { isThingId, THINGS } from '../items/things';
 import { uprightStickerRoll } from '../render/stickers';
@@ -526,10 +527,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   /**
    * Like `jumpTo`, but to post stop `index`, ending on foot 1.7 m in front of its machine
-   * (`machine`: the «ПОЧТА», the toy box beside it, or the settlement's «МАГАЗИН») and
-   * facing it: the shortest way to a machine for a scripted session.
+   * (`machine`: the «ПОЧТА», the toy box beside it, the settlement's «МАГАЗИН», or the
+   * teddy shelter) and facing it: the shortest way to a machine for a scripted session.
    */
-  const devStandAtPost = (index: number, machine: 'post' | 'toybox' | 'shop' = 'post'): boolean => {
+  const devStandAtPost = (index: number, machine: 'post' | 'toybox' | 'shop' | 'shelter' = 'post'): boolean => {
     if (ctx.world.state.player.drivingCarId) {
       ctx.hud.setToast('step out of the car first');
       return false;
@@ -539,8 +540,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const spot = poi ? settlementLayout(ctx.world.seed, poi)[machine] : null;
     if (!spot) return false;
     const pose = spotPose(ctx.road, spot);
-    // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world.
-    const stand = { x: pose.x - Math.sin(pose.yaw) * 1.7, z: pose.z - Math.cos(pose.yaw) * 1.7, yaw: pose.yaw };
+    // The machine's front is its local -Z: (-sin yaw, -cos yaw) in the world. The shelter
+    // is a metre deep: stand clear of its front.
+    const away = machine === 'shelter' ? 2.6 : 1.7;
+    const stand = { x: pose.x - Math.sin(pose.yaw) * away, z: pose.z - Math.cos(pose.yaw) * away, yaw: pose.yaw };
     jumpHold = { s: stop.s, frames: 0, stand };
     placeAtJump(stop.s, stand);
     return true;
@@ -602,9 +605,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     fixtures: ctx.fixtures,
     // `postAt(i)`: post stop i ({ index, s }); `standAtPost(i)` jumps there and stands
     // the player on foot a step in front of its «ПОЧТА» machine, facing it, or of its
-    // toy box or «МАГАЗИН» with `standAtPost(i, 'toybox' | 'shop')`.
+    // toy box, «МАГАЗИН» or teddy shelter with `standAtPost(i, 'toybox' | 'shop' | 'shelter')`.
     postAt: (index: number) => postStop(ctx.world.seed, index),
-    standAtPost: (index: number, machine: 'post' | 'toybox' | 'shop' = 'post') => devStandAtPost(index, machine),
+    standAtPost: (index: number, machine: 'post' | 'toybox' | 'shop' | 'shelter' = 'post') => devStandAtPost(index, machine),
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,
@@ -646,37 +649,20 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
 
   const dev = (window as unknown as Record<string, Record<string, unknown>>)['__bro'];
-  /**
-   * `thing(id, size?, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
-   * 'tv_set', 'carpet', 'piano', 'teddies') signed out at the post nearest the player
-   * and bound for the next, dropped in front of him as the post machine's tray would
-   * release it: a teddy party as `size` teddies (1–3; the seed's roll when omitted). A
-   * haul is taken there and then: its load stood in that post's haul bay (whatever stands
-   * there already) and bound to it, as TAKE does (contracts/world.ts). `urgent` gives it
-   * the urgent clock; `raceLegs` (1 or 2) makes it a race to the post that many on,
-   * started when it is picked up (a haul's, at once). Returns the contract id.
-   */
-  dev['thing'] = (id: string, size?: number, urgent = false, raceLegs?: 1 | 2): string => {
-    if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
+  /** The post stop nearest the player: the one a dev contract is signed out at. */
+  const nearestPost = (): number => {
     const seed = ctx.world.seed;
-    const { before, after } = postBracket(seed, ctx.world.state.player.s);
     const playerS = ctx.world.state.player.s;
-    const source = before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
-    // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
-    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, raceLegs, urgent);
-    if (offer.party && size !== undefined) offer.party = { id: offer.id, size: Math.max(1, Math.min(3, Math.trunc(size))) };
-    if (isHaul(offer)) {
-      spawnHaulLoad({ world: ctx.world, road: ctx.road, terrain: ctx.terrain }, offer);
-      ctx.world.apply({ t: 'haul_take', haul: { contract: offer, loadId: haulLoadId(offer) } });
-      ctx.hud.setToast(`took the ${offer.thing} haul at post ${source}: its load is in the bay`);
-      return offer.id;
-    }
+    const { before, after } = postBracket(seed, playerS);
+    return before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
+  };
+  /** Drops `items` on the ground in a row in front of the player. */
+  const dropInFront = (items: readonly Item[]): void => {
     const eye = ctx.camera.eyePosition;
     const dir = ctx.camera.eyeDirection;
     const flat = Math.hypot(dir.x, dir.z) || 1;
     const fx = dir.x / flat;
     const fz = dir.z / flat;
-    const items = contractRelease(offer);
     items.forEach((item, k) => {
       const side = (k - (items.length - 1) / 2) * 0.45;
       const x = eye.x + fx * 1.2 - fz * side;
@@ -684,8 +670,49 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       const ground = ctx.physics.raycast({ x, y: eye.y + SPAWN_PROBE_HEIGHT, z }, { x: 0, y: -1, z: 0 }, SPAWN_PROBE_HEIGHT + 12, ctx.player.rigidBody);
       ctx.loose.spawnItem(item, x + ctx.origin.x, (ground ? ground.point.y : eye.y) + 0.3, z + ctx.origin.z);
     });
-    ctx.hud.setToast(`spawned ${itemLabel(items[0]!)}${items.length > 1 ? ` ×${items.length}` : ''} from post ${source}`);
+  };
+  /**
+   * `thing(id, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts,
+   * e.g. 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound
+   * for the next, dropped in front of him as the post machine's tray would release it. A
+   * haul is taken there and then: its load stood in that post's haul bay (whatever stands
+   * there already) and bound to it, as TAKE does (contracts/world.ts). `urgent` gives it
+   * the urgent clock; `raceLegs` (1 or 2) makes it a race to the post that many on,
+   * started when it is picked up (a haul's, at once). The teddies wait in a shelter: see
+   * `teddies`. Returns the contract id.
+   */
+  dev['thing'] = (id: string, urgent = false, raceLegs?: 1 | 2): string => {
+    if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
+    if (id === 'teddies') throw new Error('the teddies wait in a shelter: __bro.teddies(count?)');
+    const seed = ctx.world.seed;
+    const source = nearestPost();
+    // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
+    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, raceLegs, urgent);
+    if (isHaul(offer)) {
+      spawnHaulLoad({ world: ctx.world, road: ctx.road, terrain: ctx.terrain }, offer);
+      ctx.world.apply({ t: 'haul_take', haul: { contract: offer, loadId: haulLoadId(offer) } });
+      ctx.hud.setToast(`took the ${offer.thing} haul at post ${source}: its load is in the bay`);
+      return offer.id;
+    }
+    dropInFront([offer]);
+    ctx.hud.setToast(`spawned ${itemLabel(offer)} from post ${source}`);
     return offer.id;
+  };
+  /**
+   * `teddies(count?)`: takes up to `count` (all when omitted) of the teddies waiting in the
+   * shelter of the post nearest the player (contracts/shelters.ts), as F on the bench
+   * would, past the limit, and drops them in front of him. Returns the party's contract id.
+   */
+  dev['teddies'] = (count?: number): string => {
+    const source = nearestPost();
+    const bench = shelterBench(ctx.world.state, ctx.world.seed, source);
+    const items: Item[] = [];
+    bench.waiting.forEach((waits, seat) => {
+      if (waits && (count === undefined || items.length < count)) items.push(teddyItem(bench.party, seat));
+    });
+    dropInFront(items);
+    ctx.hud.setToast(`took ${items.length} ${items.length === 1 ? 'teddy' : 'teddies'} → ${bench.party.destination} from the shelter at post ${source}`);
+    return bench.party.id;
   };
   /**
    * Sticks `count` stickers on car `id` (the catalog's kinds in turn), replacing what it

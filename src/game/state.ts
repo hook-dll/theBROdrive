@@ -381,6 +381,11 @@ export interface WorldState {
    */
   handedInLoads: Record<string, number>;
   /**
+   * The round of the teddy party each post's shelter is at (contracts/shelters.ts), by
+   * post index; absent, round 0. It moves on when that round's contract closes.
+   */
+  shelterRounds: Record<string, number>;
+  /**
    * Vending machine slots already sold, by machine id (world/vending.ts). A machine's
    * stock is a pure function of the seed and where it stands; this is what it has
    * given out, so an emptied slot stays empty. Machines never restock.
@@ -437,6 +442,22 @@ export type WorldDelta =
    * (null: returned to the sender), and the load stays there locked.
    */
   | { t: 'haul_close'; contractId: string; postIndex: number; deliveredKind: ContractKind | null }
+  /**
+   * A teddy in hand seated on a shelter's bench (contracts/shelters.ts): `delivered` at a
+   * destination (its own id recorded among the completed, with no kind: the ledger counts
+   * the party once), else put back at its source. `close` when it was the last of its
+   * party out: the party's contract closes, counted into `deliveriesByKind` when any of
+   * it was delivered, and shelter `sourcePost` moves past round `round`.
+   */
+  | {
+      t: 'teddy_seat';
+      teddyId: string;
+      partyId: string;
+      sourcePost: number;
+      round: number;
+      delivered: boolean;
+      close: 'delivered' | 'returned' | null;
+    }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_remove'; trailerId: string }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
@@ -518,6 +539,7 @@ export function newWorldState(seed: number): WorldState {
     deliveriesByKind: {},
     hauls: {},
     handedInLoads: {},
+    shelterRounds: {},
     trailers: {},
     looseParts: {},
     looseItems: {},
@@ -971,6 +993,19 @@ export class GameWorld {
           s.deliveriesByKind[delta.deliveredKind] = (s.deliveriesByKind[delta.deliveredKind] ?? 0) + 1;
         }
         s.handedInLoads[haul.loadId] = delta.postIndex;
+        break;
+      }
+      case 'teddy_seat': {
+        if (s.completedContractIds.includes(delta.partyId)) break;
+        const carried = s.player.carried.findIndex((item) => item.id === delta.teddyId);
+        if (carried >= 0) s.player.carried.splice(carried, 1);
+        if (delta.delivered) s.completedContractIds.push(delta.teddyId);
+        if (delta.close) {
+          s.completedContractIds.push(delta.partyId);
+          if (delta.close === 'delivered') s.deliveriesByKind.teddy_passengers = (s.deliveriesByKind.teddy_passengers ?? 0) + 1;
+          const key = String(delta.sourcePost);
+          if ((s.shelterRounds[key] ?? 0) === delta.round) s.shelterRounds[key] = delta.round + 1;
+        }
         break;
       }
       case 'sticker_place': {

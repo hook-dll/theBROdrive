@@ -59,7 +59,7 @@ const SPOT_MARGIN_M = 0.4;
 
 /**
  * True when `car` carries an active contract thing (`isContractClosed` false), in its boot
- * or its cabin. A closed one — a broken souvenir, a teddy left from a returned party — is
+ * or its cabin. A closed one — a broken souvenir — is
  * the car's own thing now and goes into the box with it.
  */
 export function carHoldsContract(car: CarState, completedIds: readonly string[]): boolean {

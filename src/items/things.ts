@@ -185,18 +185,19 @@ export function thingBootFootprint(def: ThingDef): BootFootprint | null {
 }
 
 /**
- * The four cards of a post (§7.2), one per property: an ordinary thing, a fragile
- * thing, a bulky thing or a haul, the teddies. A bulky thing that is fragile too (the
- * TV, the aquarium) is a bulky card's. The fifth card, `special`, offers the special
- * things and relics, and only to a car with stickers (§12, contracts/offers.ts
- * `SPECIAL_SLOT`).
+ * The three cards of a post (§7.2), one per property: an ordinary thing, a fragile
+ * thing, a bulky thing or a haul. A bulky thing that is fragile too (the TV, the
+ * aquarium) is a bulky card's. The fourth card, `special`, offers the special things and
+ * relics, and only to a car with stickers (§12, contracts/offers.ts `SPECIAL_SLOT`). The
+ * teddies are no card's: they wait in the teddy shelter (§10, contracts/shelters.ts).
  */
-export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'teddies' | 'special';
-export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky', 'teddies'];
+export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'special';
+export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky'];
 
-export function thingCard(def: ThingDef): PostCard {
+/** The card that offers `def`, or null for the teddies, who wait in the shelter. */
+export function thingCard(def: ThingDef): PostCard | null {
+  if (def.place === 'seats') return null;
   if (hasTag(def, 'special') || hasTag(def, 'relic')) return 'special';
-  if (def.place === 'seats') return 'teddies';
   if (isHaulThing(def) || hasTag(def, 'bulky')) return 'bulky';
   if (hasTag(def, 'fragile')) return 'fragile';
   return 'ordinary';
@@ -206,7 +207,6 @@ const CARD_THINGS: Readonly<Record<PostCard, readonly ThingDef[]>> = {
   ordinary: THINGS.filter((def) => thingCard(def) === 'ordinary'),
   fragile: THINGS.filter((def) => thingCard(def) === 'fragile'),
   bulky: THINGS.filter((def) => thingCard(def) === 'bulky'),
-  teddies: THINGS.filter((def) => thingCard(def) === 'teddies'),
   special: THINGS.filter((def) => hasTag(def, 'special')),
 };
 const SPECIAL_AND_RELICS = THINGS.filter((def) => thingCard(def) === 'special');

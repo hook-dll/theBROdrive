@@ -79,13 +79,13 @@
 - Cabin rule (`vehicle/cabin.ts` `cabinRule`, `CabinRule`): the carpet lies only across
   the whole rear bench, cushions on any seat they fit, teddies on passenger seats, every
   other thing only in a boot.
-- THE POST'S FOUR CARDS by property: ordinary, fragile, bulky-or-haul, teddies. A card
-  prints the thing, destination, km, pay, tags (and mass from 20 kg), a haul's note, a
-  race note and "won't fit your <model>" when the car on the lay-by has too small a boot
-  grid; TAKE always gives. Race is a 30 % seeded modifier per ordinary/fragile/bulky/teddy
-  offer and per trailer haul (1 or 2 stops); a tow or a car to drive over never races
-  (one car in the job, no rival copy of it), nor does the drive's first offer, a plain
-  ordinary thing.
+- THE POST'S THREE CARDS by property: ordinary, fragile, bulky-or-haul (the teddies wait
+  in the shelter, see THE TEDDY SHELTER). A card prints the thing, destination, km, pay,
+  tags (and mass from 20 kg), a haul's note, a race note and "won't fit your <model>" when
+  the car on the lay-by has too small a boot grid; TAKE always gives. Race is a 30 %
+  seeded modifier per ordinary/fragile/bulky offer, per shelter party and per trailer
+  haul (1 or 2 stops); a tow or a car to drive over never races (one car in the job, no
+  rival copy of it), nor does the drive's first offer, a plain ordinary thing.
 - RIVALS CARRY THE RACE CARGO AS ITS WEIGHT (`contracts/race.ts` `Race.cargoKg`;
   `world/traffic.ts` `RivalSpawn.cargoKg`): no copy in a boot cell, so a TV, a carpet or
   a trailer's piano races like a parcel. A live rival carries the thing's mass (a whole
@@ -119,10 +119,10 @@
 - A held thing is turned to show its face and is at most 0.15 m across in the hand
   (`render/held.ts` `THING_HELD_MAX`, `THING_FACE_YAW`): the old TV filled half the
   screen. The boot grid shows a thing face on (`render/trunkview.ts` `POSE_FLAT`).
-- Dev: `__bro.thing(id, size?)` drops a catalogue contract from the nearest post
-  (replaces `__bro.teddies`); its contract id is a runtime `rt:` id, so a reloaded save
-  resumes past it instead of handing the next spawn the same id. `tools/trunk-grid.ts`
-  checks footprints and save/load.
+- Dev: `__bro.thing(id, urgent?, raceLegs?)` drops a catalogue contract from the nearest
+  post; its contract id is a runtime `rt:` id, so a reloaded save resumes past it instead
+  of handing the next spawn the same id. `tools/trunk-grid.ts` checks footprints and
+  save/load.
 - CONDITION AND BREAKAGE (game-design2.md §11.1–§11.2; `contracts/runtime.ts`
   `carBorneWear`, `wearThing`; `items/things.ts` `thingWears`, `thingWearShare`). Every
   thing has a condition from 100% down. Three things wear it: knocks to the car it rides
@@ -156,8 +156,8 @@
   `activeContracts`, `isContractClosed`, `ACTIVE_CONTRACT_LIMIT`, `ACTIVE_HAUL_LIMIT`). An
   active contract is a contract item out of a post's stock — in the hands or the pack, any
   car's boot or cabin, or lying loose — that is neither broken nor completed/returned, and
-  every haul taken (`WorldState.hauls`); a teddy party is one. With three out, TAKE
-  refuses with "three jobs
+  every haul taken (`WorldState.hauls`); the teddies taken from one shelter party are
+  one. With three out, TAKE refuses with "three jobs
   already out — hand one in or return it" and every offer card says so. With a haul
   (trailer, towing, car transfer) out, TAKE of a second haul refuses with "one haul
   already out — hand it in or return it first" and every haul card says "one haul out:
@@ -168,9 +168,8 @@
   `completedContractIds` without a kind, so the delivery ledger does not count it) and
   frees its place. The hand-in card reads RETURN — NO PAY. A valid delivery always wins.
   A haul goes back as it is delivered, by reversing its load into a bay (see HAULS WAIT IN
-  THE BAY). Returning one teddy closes
-  its party; the other teddies become leftovers any tray takes. Returning the raced thing
-  calls the race off at once ("race off — the … went back to the sender",
+  THE BAY), a teddy by seating it back on its own shelter's bench. Returning the raced
+  thing calls the race off at once ("race off — the … went back to the sender",
   `RivalRace.playerReturned`): no win, the rivals leave the race as for a broken thing.
 - URGENT CONTRACTS (game-design2.md §7.5; `contracts/offers.ts` `urgentDeadlineS`,
   `ContractCargoItem.urgentS`, `ContractProgress.elapsedS`). A quarter of the offers on
@@ -314,6 +313,42 @@
     it there and then.
   - Saves keep `hauls` and `handedInLoads`, dropping one whose load is gone; haul papers
     in an old save are dropped (old saves are not supported).
+- THE TEDDY SHELTER (game-design2.md §6.3, §10; `world/shelter.ts` `buildShelter`;
+  `contracts/shelters.ts` `shelterBench`, `teddySeating`; `contracts/offers.ts`
+  `shelterParty`; `WorldState.shelterRounds`; delta `teddy_seat`). It replaces the post's
+  teddy card.
+  - At every settlement's reserved spot (−9 m, 3.8 × 2 m): a concrete floor, a bench of
+    three slats on iron legs with a two-slat back, blue plaster walls at the back and both
+    sides with red bands on their front edges, a tin roof falling to the back, open to the
+    pad, all kit materials merged; solid in the physics band.
+  - A timetable over the bench: where the party goes, the km, how many wait (or "nobody
+    waiting"), the pay per teddy with the lay-by car's sticker bonus, and RACE n STOPS or
+    URGENT m:ss. Repainted when the bench, the round or the lay-by car's stickers change.
+  - The waiting party is round `WorldState.shelterRounds[post]` of the post's shelter,
+    drawn from the seed like the cards: 1–3 teddies, the next post or a race's finish,
+    urgent at the cards' share; the drive's first party is plain. The teddies sit on the
+    bench (the teddy item's model). Who is still there is read from the world: a teddy is
+    on the bench while its item is in no hand, car or ground and not delivered.
+  - F on a teddy takes it into the hands ("[F] take the teddy → <place>"). The first one
+    taken makes the party's contract active, refused at three jobs out; more of the same
+    party add nothing. One, two or all may be taken; the others keep waiting and may be
+    taken while the contract is open.
+  - F at a shelter with a teddy in hand seats it. At a post that may sign for it (past its
+    source, a race's from its finish on) it is DELIVERED: `contractPay` for that teddy (its
+    own ride, the lay-by car's stickers, urgent +50% on its own clock from its take) and,
+    for the first one delivered, the race win, straight into the money; it sits on the far
+    half of the bench until the chunk is streamed out (not saved). At its own shelter it is
+    PUT BACK, no pay, and waits again. Anywhere else: "this one rides on to <place>" ("races
+    on" for a race). At a destination any aim at the shelter seats; at a teddy on the bench
+    elsewhere F takes that one.
+  - The party's contract closes when the last of its teddies out is seated: delivered when
+    any was delivered (counted once in the ledger), else returned (race called off). The
+    source shelter then moves to its next round and the bench fills with the next party.
+  - The post's tray no longer takes teddies ("teddies get off at a shelter — seat it on
+    the bench"). Pay is per teddy (the catalogue's 30 rubles at home); a teddy's ride is
+    accounted under its own id.
+  - `__bro.teddies(count?)` takes the nearest post's waiting teddies onto the ground in
+    front of the player; `__bro.standAtPost(i, 'shelter')` stands him at its shelter.
 - BUYING A CAR BOXES THE OLD ONE (`world/keybox.ts`): taking the key puts the car the
   player had (the last driven, else his car nearest the lot) into the toy box at once,
   unless it holds contract cargo or is coupled; then it waits where it stands as his car
@@ -384,6 +419,10 @@
   `ensureContractWorldObjects` (a load spawned on its papers' first pickup),
   `contractTrailerId`/`contractCarId` (now `haulLoadId`), `thingItemMass` and the
   trailer's and cars' 20–25 m delivery range from the bay's middle.
+- THE TEDDY CARD: `POST_CARDS`' `teddies`, the post releasing a party into its tray
+  (`ContractKindDef.release`, `contractRelease`), handing teddies in one by one at the tray
+  (`contractPosting`, `ContractPosting`, `teddyPartyIds`), the party pay bonus
+  (`EXTRA_PASSENGER_SHARE`, `deliveryPay`'s `passengers`) and `__bro.thing`'s `size`.
 
 ## 0.24.0 — 2026-10-24
 

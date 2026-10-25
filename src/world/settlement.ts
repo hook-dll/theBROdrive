@@ -70,8 +70,8 @@ export interface SettlementLayout {
   /** The toy box (world/toybox.ts), between the post and the stop; its car comes out on the pad in front of it. Settlements only. */
   readonly toybox: SettlementSpot | null;
   /**
-   * Where the teddy shelter (game-design2.md §10) will stand, open to the pad: kept clear
-   * now, nothing is built on it yet. Settlements only.
+   * The teddy shelter (world/shelter.ts, game-design2.md §10), its open front to the pad.
+   * Settlements only.
    */
   readonly shelter: SettlementSpot | null;
   /**

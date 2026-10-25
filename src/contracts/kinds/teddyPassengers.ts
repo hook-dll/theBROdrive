@@ -2,28 +2,26 @@
  * Teddy-bear passengers (game-design2.md §10, §11). Not people and not NPCs: stuffed
  * bears the boy imagines as passengers, with no lines and no voices.
  *
- * Each offer rolls its party from its seed, 1, 2 or 3 teddies, and the player cannot
- * change it. The post machine releases the party as that many physical teddies
- * (`release`), each its own item with its own id and the party's id and size on it
- * (`ContractCargoItem.party`). The party is ONE contract: one delivery in the ledger
- * and one pay.
+ * A party waits on the bench of a post's teddy shelter (contracts/shelters.ts,
+ * world/shelter.ts): 1, 2 or 3 teddies rolled from the party's seed (`dressOffer`),
+ * which the player cannot change. Each teddy taken off the bench is its own item
+ * (`teddyItem`) with its own id and the party's id and size on it
+ * (`ContractCargoItem.party`). The party is ONE contract however many of it are taken;
+ * each teddy is paid on its own when it is seated on a bench at its destination.
  *
  * Teddies ride only on passenger seats — the front passenger's and either half of the
  * rear bench (vehicle/cabin.ts `layPlace`) — never in the boot, under the bonnet, on the
  * floor or in the driver's seat. Nothing makes them fall off a seat: hard driving costs
- * the ride, never their place. While the party rides in the car the player drives, the
- * ride meter accounts it under the party's id (`trackPassengerRide`), softened by that
- * car's comfort (§11.2, `comfortFactor`), and the comfort and harsh moments are kept on
- * each teddy, so a reload mid-trip keeps the ride so far.
- *
- * Delivery is one teddy at a time through the destination post's slot
- * (registry.ts `contractPosting`): the last one in completes the party and pays
- * `contractPay` scaled by the ride (`passengerQuality`).
+ * the ride, never their place. While a teddy rides in the car the player drives, the
+ * ride meter accounts it under its own id (`trackPassengerRide`), softened by that car's
+ * comfort (§11.2, `comfortFactor`), and the comfort and harsh moments are kept on the
+ * teddy, so a reload mid-trip keeps the ride so far. Its pay is `contractPay` scaled by
+ * that ride (`passengerQuality`).
  */
 
 import { hash01 } from '../../core/rng';
 import type { CarState } from '../../game/state';
-import type { CargoParty, ContractCargoItem, Item } from '../../items/items';
+import type { ContractCargoItem, Item } from '../../items/items';
 import type { RideMeter } from '../../trip/ride';
 import { carModel, comfortFactor } from '../../vehicle/carmodels';
 import { defaultProgress, type ContractKindDef } from '../types';
@@ -33,19 +31,22 @@ const PARTY_DOMAIN = 0x54444231; // 'TDB1'
 
 /** Each harsh moment costs this share of the pay. */
 const HARSH_PAY_SHARE = 0.1;
-/** However the passengers were driven, a delivered party pays at least this share. */
+/** However a passenger was driven, a delivered teddy pays at least this share. */
 const PASSENGER_PAY_FLOOR = 0.4;
 
-/** How many teddies ride on this offer: 1, 2 or 3, fixed by its seed. */
+/** How many teddies wait in this party: 1, 2 or 3, fixed by its seed. */
 export function teddyPartySize(seed: number): number {
   return 1 + Math.min(2, Math.floor(hash01(seed, PARTY_DOMAIN) * 3));
 }
 
-/** The ids of every teddy of a party, in the order the post machine releases them. */
-export function teddyPartyIds(party: CargoParty): string[] {
-  const ids: string[] = [];
-  for (let k = 0; k < party.size; k++) ids.push(`${party.id}:teddy:${k}`);
-  return ids;
+/** The id of the teddy on bench place `seat` of party `partyId`. Saved: never changed. */
+export function teddyId(partyId: string, seat: number): string {
+  return `${partyId}:teddy:${seat}`;
+}
+
+/** The teddy on bench place `seat` of `party` (a shelter's offer) as an item, its ride not begun. */
+export function teddyItem(party: ContractCargoItem, seat: number): ContractCargoItem {
+  return { ...party, id: teddyId(party.id, seat), progress: defaultProgress() };
 }
 
 /**
@@ -58,30 +59,28 @@ export function passengerQuality(item: ContractCargoItem): number {
   return Math.max(PASSENGER_PAY_FLOOR, Math.min(1, comfort - HARSH_PAY_SHARE * harsh));
 }
 
-/** Party ids the ride meter accounts for at the moment (`trackPassengerRide`). */
+/** Teddy ids the ride meter accounts for at the moment (`trackPassengerRide`). */
 const tracked = new Set<string>();
-/** Party ids aboard the driven car this step, reused. */
+/** Teddy ids aboard the driven car this step, reused. */
 const aboard = new Set<string>();
 
 /**
- * One fixed step while the player drives `car`, after `ride.step`: every party with a
- * teddy on its seats is accounted under its id, starting from the ride already saved
- * on it and scaled by the car's comfort factor, and the ride so far is written back onto
- * each of its teddies aboard. A party that left this car (handed in, taken out, or the
- * player drives another) stops being accounted; what it rode is kept on its teddies.
+ * One fixed step while the player drives `car`, after `ride.step`: every teddy on its
+ * seats is accounted under its own id, starting from the ride already saved on it and
+ * scaled by the car's comfort factor, and the ride so far is written back onto it. A
+ * teddy that left this car (seated, taken out, or the player drives another) stops
+ * being accounted; what it rode is kept on it.
  */
 export function trackPassengerRide(ride: RideMeter, car: CarState): void {
   aboard.clear();
   for (const item of car.cabin) {
-    if (item?.type !== 'contract_cargo' || !item.party) continue;
-    const key = item.party.id;
-    if (!aboard.has(key)) {
-      aboard.add(key);
-      if (!tracked.has(key)) {
-        const scale = comfortFactor(carModel(car.modelId).comfort);
-        ride.track(key, item.progress.comfort ?? 1, item.progress.harsh ?? 0, scale);
-        tracked.add(key);
-      }
+    if (item?.type !== 'contract_cargo' || item.thing !== 'teddies') continue;
+    const key = item.id;
+    aboard.add(key);
+    if (!tracked.has(key)) {
+      const scale = comfortFactor(carModel(car.modelId).comfort);
+      ride.track(key, item.progress.comfort ?? 1, item.progress.harsh ?? 0, scale);
+      tracked.add(key);
     }
     item.progress.comfort = ride.comfort(key);
     item.progress.harsh = ride.harsh(key);
@@ -102,15 +101,5 @@ export const teddyPassengersKind: ContractKindDef = {
   kind: 'teddy_passengers',
   dressOffer(offer) {
     offer.party = { id: offer.id, size: teddyPartySize(offer.generatedSeed) };
-  },
-  release(offer) {
-    // Each teddy is the offer itself (destination, race legs, reward) under its own id.
-    const party = offer.party ?? { id: offer.id, size: teddyPartySize(offer.generatedSeed) };
-    return teddyPartyIds(party).map((id): ContractCargoItem => ({
-      ...offer,
-      id,
-      party,
-      progress: defaultProgress(),
-    }));
   },
 };

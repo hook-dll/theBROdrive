@@ -61,18 +61,18 @@ export interface ContractProgress {
   broken?: true;
   /**
    * A passenger's ride so far (trip/ride.ts): comfort 1 (calm) down to 0, and the harsh
-   * moments counted (each scaled by the carrying car's comfort factor), while its party
-   * rode in the car the player drove. Written by `trackPassengerRide`
-   * (kinds/teddyPassengers.ts); absent before the first drive.
+   * moments counted (each scaled by the carrying car's comfort factor), while it rode in
+   * the car the player drove. Written by `trackPassengerRide` (kinds/teddyPassengers.ts);
+   * absent before the first drive.
    */
   comfort?: number;
   harsh?: number;
   /**
    * An urgent contract's clock: simulation seconds since TAKE (`ContractRuntime.tick`).
    * It runs only in the fixed step while the game runs — never while paused, in a menu,
-   * or under the watch's fast-forward — and is saved here so a reload keeps it. Every
-   * teddy of a party is released at the same TAKE and ticked alike, so a party shares one
-   * clock. Absent on a contract that is not urgent or not yet taken.
+   * or under the watch's fast-forward — and is saved here so a reload keeps it. A teddy's
+   * runs from the moment it was taken off the bench, each teddy its own. Absent on a
+   * contract that is not urgent or not yet taken.
    */
   elapsedS?: number;
 }
@@ -148,13 +148,8 @@ export interface ContractKindDef {
    */
   readonly acceptRefusal?: (item: ContractCargoItem, probe: DeliveryProbe) => string | null;
   /**
-   * Finishes a freshly generated offer of this kind: a passenger contract's `party`.
-   * Called last by `generateContractOffer`.
+   * Finishes a freshly generated offer of this kind: a passenger party's `party`.
+   * Called last by `makeContract`.
    */
   readonly dressOffer?: (offer: ContractCargoItem) => void;
-  /**
-   * The physical items the post machine releases for this offer: a passenger party is
-   * one teddy per passenger. Omitted = the offer item itself.
-   */
-  readonly release?: (offer: ContractCargoItem) => readonly ContractCargoItem[];
 }

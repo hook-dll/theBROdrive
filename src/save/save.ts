@@ -181,6 +181,8 @@ export function installVehicleAutosave(
       // A haul card taken at a post, or its load handed in (contracts/haulbays.ts).
       case 'haul_take':
       case 'haul_close':
+      // A teddy seated on a shelter's bench (contracts/shelters.ts).
+      case 'teddy_seat':
         if (world.state.player.drivingCarId) return;
         break;
       default:
@@ -624,6 +626,7 @@ export function migrateState(raw: unknown): WorldState {
     deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind),
     hauls: migrateHauls(obj.hauls, cars, trailers),
     handedInLoads: migrateHandedInLoads(obj.handedInLoads, cars, trailers),
+    shelterRounds: migrateShelterRounds(obj.shelterRounds),
     trailers,
     looseParts,
     looseItems,
@@ -668,6 +671,15 @@ function migrateHandedInLoads(
   const out: Record<string, number> = {};
   for (const [id, index] of Object.entries(recordField(raw, 'handedInLoads'))) {
     if (typeof index === 'number' && Number.isInteger(index) && index >= 0 && (cars[id] || trailers[id])) out[id] = index;
+  }
+  return out;
+}
+
+/** The teddy shelters' rounds, by post index: whole numbers from 0, anything else dropped. */
+function migrateShelterRounds(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [index, round] of Object.entries(recordField(raw, 'shelterRounds'))) {
+    if (/^\d+$/.test(index) && typeof round === 'number' && Number.isInteger(round) && round >= 0) out[index] = round;
   }
   return out;
 }

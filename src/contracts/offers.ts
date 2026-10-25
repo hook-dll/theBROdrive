@@ -1,21 +1,22 @@
 /**
- * Post offer generation: four per post stop, drawn deterministically from the world
+ * Post offer generation: three per post stop, drawn deterministically from the world
  * seed, ONE CARD PER PROPERTY by slot (game-design2.md §7.2, items/things.ts
  * `POST_CARDS`): slot 0 an ordinary thing, slot 1 a fragile thing, slot 2 a bulky thing
- * or a haul (a trailer, a towed car, a car to drive over), slot 3 teddy passengers. The
- * thing is drawn evenly among the things its card offers. A fifth slot, `SPECIAL_SLOT`,
- * holds a special thing (§12, items/things.ts `specialThings`), relics among them when
- * asked; the post shows it only to a car with stickers (world/post.ts), and its round
- * is kept while it is hidden.
+ * or a haul (a trailer, a towed car, a car to drive over). The thing is drawn evenly
+ * among the things its card offers. A fourth slot, `SPECIAL_SLOT`, holds a special
+ * thing (§12, items/things.ts `specialThings`), relics among them when asked; the post
+ * shows it only to a car with stickers (world/post.ts), and its round is kept while it
+ * is hidden. The teddies are no card's: they wait in the shelter (contracts/shelters.ts),
+ * whose party is made here too (`makeContract`).
  *
  * The offer is a plain `contract_cargo` item with its thing, destination, seed and fresh
  * progress already on it.
- * RACE is a modifier on top: an ordinary, fragile, bulky or teddy offer, or a trailer
- * haul, is a race to the next post or the one after with `RACE_SHARE` chance, drawn per
- * offer (contracts/race.ts); the rivals carry the cargo as its weight, so footprint
- * does not matter. A tow or a car to drive over never races: there is one car in the
- * job, and no rival can bring its own copy of it. The drive's very first offer is a
- * plain ordinary thing, never a race.
+ * RACE is a modifier on top: an ordinary, fragile or bulky offer, or a trailer haul, is a
+ * race to the next post or the one after with `RACE_SHARE` chance, drawn per offer
+ * (contracts/race.ts); the rivals carry the cargo as its weight, so footprint does not
+ * matter. A tow or a car to drive over never races: there is one car in the job, and no
+ * rival can bring its own copy of it. The drive's very first offer is a plain ordinary
+ * thing, never a race.
  * URGENT is the other modifier, on any card: `URGENT_SHARE` of the offers (never the
  * drive's first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
  *
@@ -57,9 +58,9 @@ const URGENT_SLACK_S = 120;
 export const POST_OFFER_COUNT = POST_CARDS.length;
 /** The bulky card's slot: its offer may be a haul, whose load waits in the bay (§7.8). */
 export const HAUL_SLOT = POST_CARDS.indexOf('bulky');
-/** The fifth slot, after the four: the special thing (§12). */
+/** The slot after the three: the special thing (§12). */
 export const SPECIAL_SLOT = POST_OFFER_COUNT;
-/** Slots a post's stock keeps a round for: the four and the special one. */
+/** Slots a post's stock keeps a round for: the three and the special one. */
 const POST_SLOT_COUNT = POST_OFFER_COUNT + 1;
 
 /** The draw key of round `round` of `slot`. */
@@ -172,10 +173,48 @@ export function redrawOffer(seed: number, offer: ContractCargoItem, relics: bool
   return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round, relics);
 }
 
+/** The shelter's party draws, apart from every card's. */
+const SHELTER_DOMAIN = 0x53484c31; // 'SHL1'
+
+/**
+ * The contract id of round `round` of post `index`'s teddy shelter party: every teddy of
+ * it carries it (`CargoParty.id`). Saved: never changed.
+ */
+export function shelterPartyId(index: number, round: number): string {
+  return `shelter:${index}:${round}`;
+}
+
+/** The (post, round) a shelter party's id names, or null for any other id. */
+export function parseShelterPartyId(id: string): { index: number; round: number } | null {
+  const match = /^shelter:(\d+):(\d+)$/.exec(id);
+  return match ? { index: Number(match[1]), round: Number(match[2]) } : null;
+}
+
+/**
+ * Round `round` of the teddy party waiting in post `courierIndex`'s shelter (§10): 1–3
+ * teddies (kinds/teddyPassengers.ts `dressOffer`), bound for the next post or a race's
+ * finish, urgent or not, at the cards' shares. The drive's very first party is plain.
+ */
+export function shelterParty(seed: number, courierIndex: number, round: number): ContractCargoItem {
+  const first = courierIndex === 0 && round === 0;
+  const raceRoll = hash01(seed, RACE_DOMAIN, SHELTER_DOMAIN, courierIndex, round);
+  const raceLegs = first || raceRoll >= RACE_SHARE ? undefined : raceRoll < RACE_SHARE / 2 ? 1 : 2;
+  const urgent = !first && hash01(seed, URGENT_DOMAIN, SHELTER_DOMAIN, courierIndex, round) < URGENT_SHARE;
+  return makeContract(
+    seed,
+    shelterPartyId(courierIndex, round),
+    courierIndex,
+    'teddies',
+    hash(seed, OFFER_DOMAIN, SHELTER_DOMAIN, courierIndex, round),
+    raceLegs,
+    urgent,
+  );
+}
+
 /** A post's stock as the machine reads it: its offers by slot, and anything else left in it. */
 export interface PostStock {
   /**
-   * The offer standing in each slot, whichever round it is at: the four, then the
+   * The offer standing in each slot, whichever round it is at: the three, then the
    * special one (`SPECIAL_SLOT`).
    */
   readonly offers: readonly ContractCargoItem[];

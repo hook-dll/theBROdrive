@@ -68,37 +68,32 @@ export function credit(world: GameWorld, rubles: number): void {
 // Delivery pay
 // ---------------------------------------------------------------------------
 
-/** Each passenger of a party past the first adds this share of the base pay. */
-const EXTRA_PASSENGER_SHARE = 0.5;
-
 /**
  * Rubles one delivery pays: the thing's base pay at home (items/things.ts `pay`; a
  * nine-kilometre hop burns about half a litre in the Oka, 2 rubles of petrol, so a
  * thirty-ruble thing leaves most of it towards oil, filters and the next car)
  * × the SOURCE post stop's km index × the delivery's quality (0..1; a thing's condition,
- * a passenger party's ride, 1 for a haul), and for a party of
- * `passengers` teddies half the base again for each past the first. Never below one
- * ruble: a delivered contract always pays something.
+ * a teddy's ride, 1 for a haul). Never below one ruble: a delivered contract always
+ * pays something.
  */
-export function deliveryPay(baseRubles: number, sourceKm: number, quality: number, passengers = 1): number {
+export function deliveryPay(baseRubles: number, sourceKm: number, quality: number): number {
   const q = Math.min(1, Math.max(0, quality));
-  const party = 1 + EXTRA_PASSENGER_SHARE * Math.max(0, passengers - 1);
-  return Math.max(1, Math.round(baseRubles * party * kmIndex(sourceKm) * q));
+  return Math.max(1, Math.round(baseRubles * kmIndex(sourceKm) * q));
 }
 
 /**
- * What this cargo pays when a post signs it: `deliveryPay` at its source stop's
- * distance, with the thing's condition (contracts/runtime.ts) or a passenger party's ride
- * (contracts/kinds/teddyPassengers.ts `passengerQuality`, read off the teddy handed in
- * last) as the quality, × the uniqueness bonus of the delivering car with `stickers`
- * (`uniquenessBonus`), and an urgent contract on time `URGENT_BONUS` more (late, the
- * plain pay).
+ * What this cargo pays when it is handed in: `deliveryPay` at its source stop's
+ * distance, with the thing's condition (contracts/runtime.ts) or a teddy's ride
+ * (contracts/kinds/teddyPassengers.ts `passengerQuality`; each teddy is paid on its own,
+ * the catalogue's pay is per teddy) as the quality, × the uniqueness bonus of the
+ * delivering car with `stickers` (`uniquenessBonus`), and an urgent contract on time
+ * `URGENT_BONUS` more (late, the plain pay).
  */
 export function contractPay(seed: number, item: ContractCargoItem, stickers: number): number {
   const thing = contractThing(item);
   const sourceKm = postStop(seed, item.sourceCourierIndex).s / 1000;
   const quality = item.party ? passengerQuality(item) : item.progress.condition ?? 1;
-  const pay = Math.round(deliveryPay(thing.pay, sourceKm, quality, item.party?.size ?? 1) * (1 + uniquenessBonus(stickers)));
+  const pay = Math.round(deliveryPay(thing.pay, sourceKm, quality) * (1 + uniquenessBonus(stickers)));
   return item.urgentS !== undefined && !isLate(item) ? Math.round(pay * (1 + URGENT_BONUS)) : pay;
 }
 

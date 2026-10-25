@@ -243,8 +243,8 @@ export interface ContractCargoItem {
   readonly destination?: string;
   /**
    * A passenger contract's party (contracts/kinds/teddyPassengers.ts): the contract's id,
-   * shared by every teddy of it, and how many teddies it is. The offer carries it too, so
-   * the post machine can say how many ride. Absent on every other contract.
+   * shared by every teddy of it, and how many teddies wait on the shelter's bench for it
+   * (contracts/shelters.ts). Absent on every other contract.
    */
   party?: CargoParty;
   /**
@@ -403,7 +403,7 @@ export function itemLabel(item: Item): string {
       const race = item.raceLegs ? ' · race' : '';
       const left = urgentRemainingS(item);
       const clock = left === null ? '' : ` · ${formatClock(left)}`;
-      const name = item.party ? `teddy passenger · party of ${item.party.size}` : thing.name;
+      const name = item.party ? 'teddy passenger' : thing.name;
       return `${name}${to}${race}${clock}${worn}`;
     }
     case 'sticker_envelope':

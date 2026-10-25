@@ -7,14 +7,13 @@ import {
   ACTIVE_HAUL_LIMIT,
   activeContracts,
   contractAcceptRefusal,
-  contractPosting,
-  contractRelease,
   isContractClosed,
 } from '../contracts/registry';
+import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { formatClock, urgentRemainingS, type ContractKind, type DeliveryProbe } from '../contracts/types';
 import { haulLoadId, isContractCarId } from '../contracts/world';
 import { carUniqueness, contractPay, formatMoney, RELIC_STICKERS, SPECIAL_CARD_STICKERS, uniquenessBonusText } from '../economy/economy';
-import type { GameWorld } from '../game/state';
+import type { GameWorld, WorldState } from '../game/state';
 import {
   contractIdOf,
   contractKindOf,
@@ -39,15 +38,15 @@ import { postHaulBay } from './haulbay';
  * hand. One stands at every settlement's `post` spot (world/settlement.ts), the physical
  * face of the post network (world/poststops.ts) and its offers (contracts/offers.ts).
  *
- * A card machine (world/cardmachine.ts): its four cards are the post's four offers, one
- * per property of a thing (§7.2) — ordinary, fragile, bulky or a haul, teddies — and a
- * fifth, a SPECIAL thing (relics among them from `RELIC_STICKERS`), while the car on the
+ * A card machine (world/cardmachine.ts): its three cards are the post's three offers, one
+ * per property of a thing (§7.2) — ordinary, fragile, bulky or a haul — and a fourth, a
+ * SPECIAL thing (relics among them from `RELIC_STICKERS`), while the car on the
  * lay-by has `SPECIAL_CARD_STICKERS` stickers or more (§12); hidden, its slot keeps its
  * round. A card prints the thing, where it goes and how far, the pay, its tags, a haul's
  * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
  * that car. The crank turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing falls into the
- * tray (a passenger party is one teddy each) and the machine lets go of the player so he
+ * tray and the machine lets go of the player so he
  * picks it up. A HAUL gives nothing (§7.8): its load already waits in the post's haul bay
  * (contracts/haulbays.ts), and TAKE binds the contract to it (`haul_take`), which lifts
  * its lock; with no load in the bay (the bay is taken) TAKE refuses. The card it was on
@@ -88,7 +87,6 @@ const CARD_BAND: Readonly<Record<PostCard, string>> = {
   ordinary: '#4f7a4a',
   fragile: '#3f6f8f',
   bulky: '#2f4f7a',
-  teddies: '#a2602f',
   special: '#8a6a1f',
 };
 /** A relic's band, on the special card. */
@@ -115,16 +113,16 @@ const HEAVY_KG = 20;
 
 /** What the card's band calls the offer: its property, a haul's kind, a race, an urgent clock. */
 function bandText(offer: ContractCargoItem, thing: ThingDef): string {
-  const card = thingCard(thing);
+  // A post's offer is never the teddies, who wait in the shelter (world/shelter.ts).
+  const card = thingCard(thing) ?? 'ordinary';
   const property = isHaul(offer) ? 'HAUL' : hasTag(thing, 'relic') ? 'RELIC' : card.toUpperCase();
   const urgent = offer.urgentS === undefined ? '' : ` · URGENT ${formatClock(offer.urgentS)}`;
   if (offer.raceLegs) return urgent ? `${property} · RACE ${offer.raceLegs}${urgent}` : `${property} · RACE ${offer.raceLegs} STOP${offer.raceLegs > 1 ? 'S' : ''}`;
   return `${property}${urgent}`;
 }
 
-/** The card's second line after the pay: the tags, a party, a heavy thing's mass. */
+/** The card's second line after the pay: the tags, a heavy thing's mass. */
 function tagText(offer: ContractCargoItem, thing: ThingDef): string {
-  if (offer.party) return 'passengers';
   const tags = thing.tags.length > 0 ? thing.tags.join(', ') : 'haul';
   return thing.massKg >= HEAVY_KG && !isHaul(offer) ? `${tags}, ${thing.massKg} kg` : tags;
 }
@@ -158,8 +156,7 @@ function haulTakenText(thing: ThingDef): string {
 /**
  * True when `thing` can never ride in `model` (§7.2): a thing of the boot whose cells
  * the car's grid has not, or a seat thing that can lie on a seat instead never. The
- * carpet, the teddies and the hauls fit every car: each has a rear bench, three seats
- * and a tow ball.
+ * carpet and the hauls fit every car: each has a rear bench and a tow ball.
  */
 function wontFit(thing: ThingDef, model: CarModelDef): boolean {
   if (thing.place !== 'cells' || thing.seat) return false;
@@ -169,7 +166,6 @@ function wontFit(thing: ThingDef, model: CarModelDef): boolean {
 
 /** What the hand-in card calls the thing to put in the tray, with its article: none before a possessive ("dad's tool box"). */
 function cargoNoun(item: ContractCargoItem): string {
-  if (item.party) return 'THE TEDDY';
   const name = contractThing(item).name;
   return (name.includes("'s ") ? name : `the ${name}`).toUpperCase();
 }
@@ -185,6 +181,44 @@ interface HandInCard {
   readonly headline: string;
   readonly lines: readonly string[];
   readonly footer: string;
+}
+
+/**
+ * The LAY-BY CAR of the post whose haul bay's middle is (`haulX`, `haulZ`), ABSOLUTE: the
+ * player's car standing within `LAYBY_CAR_RANGE_M` of it, the one he last drove when it
+ * is there, else the nearest; none, null. A haul's own car is not one to load, and a car
+ * for sale is nobody's. `position`: where a car stands, absolute.
+ */
+export function laybyCarId(
+  state: WorldState,
+  haulX: number,
+  haulZ: number,
+  position: (carId: string) => { readonly x: number; readonly z: number } | null,
+): string | null {
+  let best: string | null = null;
+  let bestD2 = LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M;
+  for (const [carId, car] of Object.entries(state.cars)) {
+    if (isContractCarId(carId) || car.lotPrice !== undefined || !hasCarModel(car.modelId)) continue;
+    const at = position(carId);
+    if (!at) continue;
+    const d2 = (at.x - haulX) ** 2 + (at.z - haulZ) ** 2;
+    if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
+    if (carId === state.player.lastDrivenCarId) return carId;
+    if (d2 > bestD2) continue;
+    bestD2 = d2;
+    best = carId;
+  }
+  return best;
+}
+
+/**
+ * The stickers a delivery is paid by: the lay-by car's (`laybyCarId`); with no car on
+ * the lay-by, the car the player last drove, wherever it stands.
+ */
+export function deliveryStickers(state: WorldState, laybyCar: string | null): number {
+  const id = laybyCar ?? state.player.lastDrivenCarId;
+  const car = id ? state.cars[id] : undefined;
+  return car ? carUniqueness(car) : 0;
 }
 
 /**
@@ -280,28 +314,11 @@ class PostMachine extends CardMachine {
   }
 
   /**
-   * Finds the lay-by car (`position`: where a car stands, absolute): within
-   * `LAYBY_CAR_RANGE_M` of the post's haul bay, the car the player last drove, else
-   * the nearest; none, null. A haul's own car is not one to load, and a car for sale is
-   * nobody's. True when what the cards print of it (its model, its stickers) changed.
+   * Finds the lay-by car (`laybyCarId`; `position`: where a car stands, absolute). True
+   * when what the cards print of it (its model, its stickers) changed.
    */
   private findLaybyCar(position: (carId: string) => { readonly x: number; readonly z: number } | null): boolean {
-    let best: string | null = null;
-    let bestD2 = LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M;
-    for (const [carId, car] of Object.entries(this.world.state.cars)) {
-      if (isContractCarId(carId) || car.lotPrice !== undefined || !hasCarModel(car.modelId)) continue;
-      const at = position(carId);
-      if (!at) continue;
-      const d2 = (at.x - this.haulX) ** 2 + (at.z - this.haulZ) ** 2;
-      if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
-      if (carId === this.world.state.player.lastDrivenCarId) {
-        best = carId;
-        break;
-      }
-      if (d2 > bestD2) continue;
-      bestD2 = d2;
-      best = carId;
-    }
+    const best = laybyCarId(this.world.state, this.haulX, this.haulZ, position);
     const car = best ? this.world.state.cars[best]! : null;
     const model = car ? carModel(car.modelId) : null;
     const stickers = car ? carUniqueness(car) : 0;
@@ -312,16 +329,10 @@ class PostMachine extends CardMachine {
     return changed;
   }
 
-  /**
-   * The stickers a delivery here is paid by: the lay-by car's, live; with none there,
-   * the car the player last drove, wherever it stands.
-   */
+  /** The stickers a delivery here is paid by (`deliveryStickers`), the lay-by read live. */
   private deliveryStickers(ctx: FixtureContext): number {
     this.refreshLayby(ctx);
-    if (this.laybyCarId) return this.laybyStickers;
-    const last = this.world.state.player.lastDrivenCarId;
-    const car = last ? this.world.state.cars[last] : undefined;
-    return car ? carUniqueness(car) : 0;
+    return deliveryStickers(this.world.state, this.laybyCarId);
   }
 
   /**
@@ -378,10 +389,10 @@ class PostMachine extends CardMachine {
     if (offer.raceLegs) lines.push('three rivals race you to it');
     if (this.laybyModel && wontFit(thing, this.laybyModel)) lines.push(`won't fit your ${this.laybyModel.label}`);
     paintCardFace(g, w, h, {
-      band: offer.raceLegs ? RACE_BAND : hasTag(thing, 'relic') ? RELIC_BAND : CARD_BAND[thingCard(thing)],
+      band: offer.raceLegs ? RACE_BAND : hasTag(thing, 'relic') ? RELIC_BAND : CARD_BAND[thingCard(thing) ?? 'ordinary'],
       bandText: bandText(offer, thing),
       corner: `${index + 1}/${count}`,
-      headline: offer.party ? `${thing.name} ×${offer.party.size}` : thing.name,
+      headline: thing.name,
       lines,
       footer: `from ${placeNameAt(this.world.seed, this.stop.s)}`,
     });
@@ -436,8 +447,8 @@ class PostMachine extends CardMachine {
     this.offers[slot] = nextOffer(this.world.seed, offer, this.relics);
     this.saveStock();
     this.cardsChanged();
-    // The thing falls into the tray (`contractRelease`: a teddy party is one teddy each).
-    this.give(ctx, contractRelease(offer));
+    // The thing falls into the tray.
+    this.give(ctx, [offer]);
     this.refreshLimit();
     return 'mount';
   }
@@ -466,7 +477,7 @@ class PostMachine extends CardMachine {
     const posting = this.posting(ctx);
     if (!posting) return null;
     const item = posting.item;
-    const name = item.party ? 'teddy passenger' : contractThing(item).name;
+    const name = contractThing(item).name;
     const headline = `PUT ${cargoNoun(item)} IN THE TRAY`;
     let card: Omit<HandInCard, 'key'>;
     if (posting.mode === 'return') {
@@ -481,16 +492,11 @@ class PostMachine extends CardMachine {
         footer: closed ? '' : 'the job is closed and off your list',
       };
     } else {
-      const completes = contractPosting(item, this.world.state.completedContractIds).completes;
       const left = urgentRemainingS(item);
-      const lines = [name];
-      if (!completes) lines.push('paid with the last of the party');
-      else {
-        const stickers = this.deliveryStickers(ctx);
-        lines.push(`pays ${formatMoney(contractPay(this.world.seed, item, stickers))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`);
-        const bonus = uniquenessBonusText(stickers);
-        if (bonus) lines.push(bonus);
-      }
+      const stickers = this.deliveryStickers(ctx);
+      const lines = [name, `pays ${formatMoney(contractPay(this.world.seed, item, stickers))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`];
+      const bonus = uniquenessBonusText(stickers);
+      if (bonus) lines.push(bonus);
       card = { mode: 'deliver', band: left === null ? 'HAND IN' : left < 0 ? 'HAND IN · LATE' : 'HAND IN · ON TIME', headline, lines, footer: 'the pay goes into your money' };
     }
     return { ...card, key: `${card.mode}:${item.id}:${card.headline}:${card.lines.join('|')}` };
@@ -514,35 +520,31 @@ class PostMachine extends CardMachine {
   /**
    * What the tray would take: the thing in hand, delivered when this post signs for it
    * (`contractAcceptRefusal`), else taken back as a return to sender — any tray takes any
-   * thing back, and a delivery always wins over a return.
+   * thing back, and a delivery always wins over a return. Never a teddy: teddies get off
+   * on a shelter's bench (world/shelter.ts).
    */
   private posting(ctx: FixtureContext): Posting | null {
     const held = ctx.held;
-    if (held?.type !== 'contract_cargo') return null;
+    if (held?.type !== 'contract_cargo' || isPassenger(held)) return null;
     const deliver = !isContractClosed(held, this.world.state.completedContractIds)
       && contractAcceptRefusal(held, this.probe(ctx)) === null;
     return { item: held, mode: deliver ? 'deliver' : 'return' };
   }
 
   protected override useTray(ctx: FixtureContext): FoleyEvent | null {
+    if (isPassenger(ctx.held)) {
+      ctx.toast('teddies get off at a shelter — seat it on the bench');
+      return this.refuse();
+    }
     const posting = this.posting(ctx);
     if (!posting) return null;
     const item = posting.item;
     if (posting.mode === 'return') return this.takeBack(ctx, item);
     const stickers = this.deliveryStickers(ctx);
-    const result = contractPosting(item, this.world.state.completedContractIds);
     this.swingChute(true);
-    if (!result.completes) {
-      // One of a party: taken in, counted, paid with the last of them.
-      this.saveStock({ consumedItemId: item.id, completedContractId: item.id });
-      ctx.give(item.id);
-      this.showHandIn(this.handInCard(ctx));
-      return 'drop';
-    }
-    const contractId = result.contractId;
-    const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(contractId);
+    const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(item.id);
     // The completed id and the ledger first, then the pay, so a crash between cannot pay twice.
-    this.saveStock({ consumedItemId: item.id, completedContractId: contractId, completedContractKind: contractKindOf(item) });
+    this.saveStock({ consumedItemId: item.id, completedContractId: item.id, completedContractKind: contractKindOf(item) });
     ctx.give(item.id);
     ctx.credit(pay);
     this.refreshLimit();
@@ -553,8 +555,7 @@ class PostMachine extends CardMachine {
   /**
    * RETURN TO SENDER: the tray takes `item` back with no pay, and its
    * contract is closed — recorded in `completedContractIds` without a kind, so the ledger
-   * does not count it and it no longer counts against the limit. A teddy closes its whole
-   * party: the rest of it are leftovers any tray takes.
+   * does not count it and it no longer counts against the limit.
    */
   private takeBack(ctx: FixtureContext, item: ContractCargoItem): FoleyEvent {
     const contractId = contractIdOf(item);

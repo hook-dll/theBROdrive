@@ -78,6 +78,20 @@ export function paintSign(lines: readonly string[], bg: string, fg: string, widt
   return boardMaterial(canvas);
 }
 
+/**
+ * Paints `lines` again over a board `paintSign` made, on its own canvas: a board whose
+ * text changes while it stands (a shelter's timetable). Headless, nothing to paint.
+ */
+export function repaintSign(material: THREE.MeshStandardMaterial, lines: readonly string[], bg: string, fg: string): void {
+  const texture = material.map;
+  const canvas = texture?.image as HTMLCanvasElement | undefined;
+  if (typeof document === 'undefined' || !texture || !(canvas instanceof HTMLCanvasElement)) return;
+  const g = canvas.getContext('2d');
+  if (!g) return;
+  drawSign(g, 0, 0, canvas.width, canvas.height, lines, bg, fg);
+  texture.needsUpdate = true;
+}
+
 /** A board's material over a painted canvas: the shape `marketProgramAnchor` links. */
 function boardMaterial(canvas: HTMLCanvasElement): THREE.MeshStandardMaterial {
   const texture = new THREE.CanvasTexture(canvas);

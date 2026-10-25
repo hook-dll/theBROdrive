@@ -2,7 +2,8 @@
  * The contract kind registry. One entry per kind, from its own module under
  * `kinds/`; adding a kind means importing its definition here and nowhere else. The
  * helper functions are what the post machine (world/post.ts), the haul bays
- * (contracts/haulbays.ts), the interaction prompts and the runtime call.
+ * (contracts/haulbays.ts), the teddy shelters (contracts/shelters.ts), the interaction
+ * prompts and the runtime call.
  */
 
 import type { WorldState } from '../game/state';
@@ -10,7 +11,7 @@ import { contractIdOf, contractKindOf, contractThing, isBrokenThing, type Contra
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
-import { teddyPartyIds, teddyPassengersKind } from './kinds/teddyPassengers';
+import { teddyPassengersKind } from './kinds/teddyPassengers';
 import { trailerKind } from './kinds/trailer';
 import { CONTRACT_KIND_IDS, type ContractKind, type ContractKindDef, type DeliveryProbe } from './types';
 
@@ -22,9 +23,9 @@ export const ACTIVE_HAUL_LIMIT = 1;
 
 /**
  * A contract item whose contract is closed: broken (`isBrokenThing`), or its contract
- * (`contractIdOf`) already completed or returned (`completedContractIds`) — a teddy left
- * over from a party returned at a post. It is only a souvenir: no post pays for it, it is
- * not counted against the limit, and any post's tray takes it to be rid of it.
+ * (`contractIdOf`) already completed or returned (`completedContractIds`). It is only a
+ * souvenir: no post pays for it, it is not counted against the limit, and any post's
+ * tray takes it to be rid of it.
  */
 export function isContractClosed(item: ContractCargoItem, completedIds: readonly string[]): boolean {
   return isBrokenThing(item) || completedIds.includes(contractIdOf(item));
@@ -79,43 +80,9 @@ function contractKindDef(item: ContractCargoItem): ContractKindDef {
   return BY_KIND[contractKindOf(item)] ?? thingKind;
 }
 
-/**
- * The physical items the post machine releases for `offer`: one teddy per passenger
- * of a party, else the offer item itself. All of them go into the tray together.
- */
-export function contractRelease(offer: ContractCargoItem): readonly ContractCargoItem[] {
-  return contractKindDef(offer).release?.(offer) ?? [offer];
-}
-
 /** Finishes a freshly generated offer with what its kind adds (a passenger party). */
 export function dressContractOffer(offer: ContractCargoItem): void {
   contractKindDef(offer).dressOffer?.(offer);
-}
-
-/** What posting one item does to its contract; see `contractPosting`. */
-export interface ContractPosting {
-  /** The contract the item belongs to (`contractIdOf`): what completes, pays and is raced. */
-  readonly contractId: string;
-  /** This item is the last of its contract still out: the contract completes and pays now. */
-  readonly completes: boolean;
-  /** Items of the contract still out after this one. */
-  readonly left: number;
-}
-
-/**
- * Posting `item` at a post's slot, given the saved `completedContractIds`. An ordinary
- * contract completes with its one item. A passenger party is posted one teddy at a
- * time: each posted teddy's own id is recorded (without a kind, so the ledger does not
- * count it), and the teddy that finds every other one of its party already recorded
- * completes the party's contract.
- */
-export function contractPosting(item: ContractCargoItem, completedIds: readonly string[]): ContractPosting {
-  if (!item.party) return { contractId: item.id, completes: true, left: 0 };
-  let left = 0;
-  for (const id of teddyPartyIds(item.party)) {
-    if (id !== item.id && !completedIds.includes(id)) left++;
-  }
-  return { contractId: item.party.id, completes: left === 0, left };
 }
 
 /** True for every declared kind id, so a saved item's kind can be validated. */
