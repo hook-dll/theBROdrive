@@ -3253,22 +3253,6 @@ async function boot(): Promise<void> {
           },
         }
       : undefined,
-    viewport: () => renderer.viewport(),
-    /**
-     * Throw away the recorded verdict and measure this machine again.
-     *
-     * A RELOAD rather than a live walk, because the measurement is a launch phase by
-     * construction: it needs the loading cover to hide thirty discarded frames and up
-     * to twenty seconds of settling, and it needs to step the rung with nobody driving.
-     * Running it from a pause menu would walk the resolution under a player who is
-     * parked in the middle of the road. The source is written first, so the launch this
-     * reload lands in is the one that asks the question.
-     */
-    remeasureGraphics: () => {
-      const settings = withRemeasure(world.state.settings, mobilePresentation);
-      world.apply({ t: 'settings', settings });
-      storeSettings(settings);
-      window.location.reload();
     poiShadows: import.meta.env.DEV
       ? {
           get enabled() {
@@ -3293,6 +3277,22 @@ async function boot(): Promise<void> {
           },
         }
       : undefined,
+    viewport: () => renderer.viewport(),
+    /**
+     * Throw away the recorded verdict and measure this machine again.
+     *
+     * A RELOAD rather than a live walk, because the measurement is a launch phase by
+     * construction: it needs the loading cover to hide thirty discarded frames and up
+     * to twenty seconds of settling, and it needs to step the rung with nobody driving.
+     * Running it from a pause menu would walk the resolution under a player who is
+     * parked in the middle of the road. The source is written first, so the launch this
+     * reload lands in is the one that asks the question.
+     */
+    remeasureGraphics: () => {
+      const settings = withRemeasure(world.state.settings, mobilePresentation);
+      world.apply({ t: 'settings', settings });
+      storeSettings(settings);
+      window.location.reload();
     },
     applySettings: (next) => {
       world.apply({ t: 'settings', settings: next });
