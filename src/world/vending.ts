@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { hash01, pick } from '../core/rng';
-import { formatMoney, itemPrice } from '../economy/economy';
+import { formatPrice, itemPrice } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { STICKERS } from '../items/stickercatalog';
@@ -19,10 +19,10 @@ import { box, C } from './poi/kit';
  *
  * A card machine (world/cardmachine.ts), the post's twin: the wheel turns through a card
  * for each thing still in it, the showcase beside the window holds the one the card
- * names, and BUY takes its price from the player's money and lays the thing in the
+ * names, and BUY takes its price out of the player's jar and lays the thing in the
  * machine's grid, where he takes it as from a boot. Short, the button springs back with
- * a rattle, nothing is given, and the card says the money is short; with the grid's one
- * cell taken (a thing bought and not taken), it refuses before taking any money.
+ * a rattle, nothing is given, and the card says the shells are short; with the grid's one
+ * cell taken (a thing bought and not taken), it refuses before taking any shells.
  * What lies in the grid is saved (`WorldState.machineGrids`), so a thing paid for and
  * left there waits for him.
  *
@@ -36,8 +36,9 @@ import { box, C } from './poi/kit';
  * envelopes of random stickers. Not every machine has every kind. No fluid is sold here:
  * an empty can is filled at a settlement's pumps (world/pumps.ts) or from another can.
  *
- * Prices are not set here: the economy prices each item where the machine stands
- * (`itemPrice`, economy/economy.ts), so further down the road the same can costs more.
+ * Prices are not set here: the economy prices each item (`itemPrice`,
+ * economy/economy.ts), the same count of shells down the whole road, and every price a
+ * machine asks is in the one kind of shell it takes (`machineShellKind` of its id).
  */
 
 /** Most things one machine is stocked with. */
@@ -207,7 +208,7 @@ export function buildShop(
     products[slot] = product;
   }
 
-  const machine = new ShopMachine(ctx.world, id, poi.s / 1000, items, wares, products, parts);
+  const machine = new ShopMachine(ctx.world, id, items, wares, products, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
@@ -219,14 +220,12 @@ function shopId(poiIndex: number): string {
 class ShopMachine extends CardMachine {
   /** The slots still for sale, in window order: the cards. */
   private readonly available: number[];
-  /** The slot whose BUY the money was too short for, painted on its card until it turns. */
+  /** The slot whose BUY the jar was too short for, painted on its card until it turns. */
   private short: number | null = null;
 
   constructor(
     world: GameWorld,
     id: string,
-    /** Kilometres from home: the price's argument. */
-    private readonly km: number,
     private readonly items: readonly (Item | null)[],
     private readonly wares: readonly (Ware | null)[],
     private readonly products: readonly (THREE.Object3D | null)[],
@@ -269,15 +268,15 @@ class ShopMachine extends CardMachine {
       return;
     }
     const card = WARE_CARD[ware];
-    const price = itemPrice(item, this.km);
+    const price = itemPrice(this.world.seed, this.id, item);
     paintCardFace(g, w, h, {
       band: card.band,
       bandText: card.kind,
       corner: `${index + 1}/${this.available.length}`,
       headline: itemLabel(item),
       lines: [
-        formatMoney(price),
-        slot === this.short ? 'NOT ENOUGH MONEY' : card.line,
+        formatPrice(price),
+        slot === this.short ? `NOT ENOUGH ${price.kind.toUpperCase()} SHELLS` : card.line,
       ],
       footer: '',
     });
@@ -305,7 +304,7 @@ class ShopMachine extends CardMachine {
       ctx.toast('take out what lies in the grid first');
       return this.refuse();
     }
-    const price = itemPrice(at.item, this.km);
+    const price = itemPrice(this.world.seed, this.id, at.item);
     if (!ctx.debit(price)) {
       // The card says why, painted afresh in place.
       this.short = at.slot;

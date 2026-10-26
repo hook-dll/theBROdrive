@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
-import { formatMoney } from '../economy/economy';
+import { carShellKind, formatPrice } from '../economy/economy';
+import type { ShellPrice } from '../economy/shells';
 import type { CarState, GameWorld } from '../game/state';
 import { carModel } from '../vehicle/carmodels';
 import type { ChunkContext } from './chunks';
@@ -17,10 +18,11 @@ import { boxRefusal } from './toybox';
  *
  * A painted steel box on a post, its face to the buyer, worked up close like the card
  * machines (player/machinefocus.ts): F frames it. Then:
- *  - the LEVER: a click pulls it. It takes what is still owed of the car's price out of
- *    the player's money at once (`lot_pay`, kept in `CarState.lotPaid`, so a reload never eats
- *    it). Short of it, it jams, rattles and springs back, and nothing is taken. Paid, it
- *    goes all the way down, a key on its tag drops inside and the drawer slides out.
+ *  - the LEVER: a click pulls it. It takes the car's price out of the player's jar at
+ *    once — `lotPrice` shells of the one kind this box takes (`carShellKind`) — and marks
+ *    the car paid (`lot_pay`, `CarState.lotPaid`, so a reload never eats it). Short of
+ *    that kind, it jams, rattles and springs back, and nothing is taken. Paid, it goes
+ *    all the way down, a key on its tag drops inside and the drawer slides out.
  *  - the KEY DRAWER: a click takes the key: the car is bought (`car_buy`), its price
  *    board comes down (`MarketField.carSold`), the drawer slides shut again, empty, and
  *    the box lets go of the player. The car he had (`oldCar`) goes into the toy box at
@@ -77,14 +79,15 @@ type Phase = 'idle' | 'dropping' | 'ready' | 'taken';
 /**
  * Builds the key box for lot car `carId` on a post at ABSOLUTE (`x`, `y`, `z`), `y` the
  * ground under it, its face turned by `yaw` (the face is local +Z: face the buyer's
- * side). `price` (rubles) is painted on the box; what counts is `CarState.lotPrice`.
- * In the physics band it is solid and registered as a world fixture (its id pushed to
- * `registered`, for the chunk to `fixtures.forget`); beyond it, it is only seen.
+ * side). `price` is painted on the box; what counts is `CarState.lotPrice` in the kind
+ * `carShellKind` draws for the car. In the physics band it is solid and registered as a
+ * world fixture (its id pushed to `registered`, for the chunk to `fixtures.forget`);
+ * beyond it, it is only seen.
  */
 export function buildKeyBox(
   ctx: ChunkContext,
   carId: string,
-  price: number,
+  price: ShellPrice,
   x: number,
   y: number,
   z: number,
@@ -106,7 +109,7 @@ export function buildKeyBox(
   box(root, [BODY_W, BODY_H, BODY_D], [0, BODY_Y, 0], C.fadedGreen);
   box(root, [BODY_W + 0.04, 0.03, BODY_D + 0.04], [0, BODY_Y + BODY_H / 2 + 0.015, 0], C.darkMetal);
   // The plate over the slot, with the price.
-  const plate = new THREE.Mesh(SIGN_PLANE, signMaterial(['CAR KEY', formatMoney(price)], '#f2e6c4', '#26221c', 256, 128));
+  const plate = new THREE.Mesh(SIGN_PLANE, signMaterial(['CAR KEY', formatPrice(price)], '#f2e6c4', '#26221c', 256, 128));
   plate.scale.set(0.24, 0.075, 1);
   plate.position.set(0, BODY_Y + BODY_H / 2 - 0.05, FRONT + 0.002);
   root.add(plate);
@@ -284,18 +287,18 @@ class KeyBox implements WorldFixture {
           this.jam = JAM_S;
           return 'refused';
         }
-        // What is still owed comes out of the player's money in one go, or nothing does.
-        const owed = car.lotPrice - (car.lotPaid ?? 0);
-        if (owed > 0) {
-          if (!ctx.debit(owed)) {
+        // The price comes out of the player's jar in one go, or nothing does.
+        const owed = car.lotPaid !== true && car.lotPrice > 0;
+        if (owed) {
+          if (!ctx.debit({ kind: carShellKind(this.world.seed, this.carId), count: car.lotPrice })) {
             this.jam = JAM_S;
             return 'refused';
           }
-          this.world.apply({ t: 'lot_pay', carId: this.carId, rubles: owed });
+          this.world.apply({ t: 'lot_pay', carId: this.carId });
         }
         this.phase = 'dropping';
         this.clock = 0;
-        return owed > 0 ? 'coin' : 'mount';
+        return owed ? 'coin' : 'mount';
       }
       case 'drawer':
         if (this.phase !== 'ready') return 'refused';

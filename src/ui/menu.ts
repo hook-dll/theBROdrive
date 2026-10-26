@@ -868,8 +868,8 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
-  /** Adds 100 rubles to the player's money. Dev only, absent in a production build. */
-  giveMoney?: () => void;
+  /** Pays ten shells of random kinds into the player's jar. Dev only, absent in a production build. */
+  giveShells?: () => void;
   /** Puts the player and the driven car on the road at a kilometre. Dev only. */
   jumpToKm?: (km: number) => void;
 }
@@ -2867,9 +2867,9 @@ export class MainMenu {
             finish('resume');
           });
         }
-        if (import.meta.env.DEV && hooks.giveMoney) {
-          devButton('Get 100р', () => {
-            hooks.giveMoney?.();
+        if (import.meta.env.DEV && hooks.giveShells) {
+          devButton('Get 10 shells', () => {
+            hooks.giveShells?.();
             finish('resume');
           });
         }

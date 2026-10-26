@@ -94,18 +94,11 @@ export function isContractKind(value: unknown): value is ContractKind {
 
 /**
  * Why post `postIndex` is not the cargo's destination, or null when it is: a post never
- * signs for cargo from itself or one further down the road, and a race is signed for only
- * from its finish on. The one rule of where a thing or a haul is handed in; anywhere
- * else it goes back as a return to sender.
+ * signs for cargo from itself or one further down the road. The one rule of where a
+ * thing or a haul is handed in; anywhere else it goes back as a return to sender.
  */
 export function contractDestinationRefusal(item: ContractCargoItem, postIndex: number): string | null {
-  if (postIndex <= item.sourceCourierIndex) return 'this post cannot sign for its own things';
-  // A two-stop race is signed from its finish on: handing it in at the first stop
-  // would end a two-ruble race at the distance of a one-ruble one.
-  if (item.raceLegs !== undefined && postIndex < item.sourceCourierIndex + item.raceLegs) {
-    return 'this one races on to the next post';
-  }
-  return null;
+  return postIndex <= item.sourceCourierIndex ? 'this post cannot sign for its own things' : null;
 }
 
 /** The kind's own reason the contract may not be handed in now (`ContractKindDef.acceptRefusal`), or null. */

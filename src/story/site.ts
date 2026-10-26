@@ -98,8 +98,8 @@ export function storySite(seed: number, road: Road, terrain: Terrain): StorySite
 /** The car every new drive starts in. */
 const START_CAR_MODEL_ID = 'kit_vaz1111';
 
-/** Rubles the player has at the start: forty-five, a few litres of petrol and a can. */
-export const START_MONEY = 45;
+/** Shells the player has at the start: five, of random kinds — a few fills at a pump, or a can and gum. */
+export const START_SHELLS = 5;
 
 /**
  * Builds the starter car: the VAZ-1111 Oka, the cheapest car on the road, every

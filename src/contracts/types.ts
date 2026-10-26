@@ -11,11 +11,9 @@
  * record that is saved ON the item, and the hand-in world view the kinds read.
  *
  * NOTHING IS SCORED ON THE WAY but a thing's condition: knocks to the car it rides in,
- * drops to the ground and harsh driving wear it down (contracts/runtime.ts), and the
- * delivery pays that share of its pay (economy/economy.ts `deliveryPay`). Below
- * `BROKEN_BELOW` it is broken: the contract is closed and the thing stays a souvenir. The
- * other thing remembered on the item is whether it has left its source post
- * (`progress.started`), which the rival race reads.
+ * drops to the ground and harsh driving wear it down (contracts/runtime.ts); its pay does
+ * not (economy/economy.ts `contractPay`). Below `BROKEN_BELOW` it is broken: the contract
+ * is closed undelivered (and fined) and the thing stays a souvenir.
  */
 
 import type { CarState } from '../game/state';
@@ -47,8 +45,6 @@ export type ContractPlace = 'post' | 'machine' | 'hand' | 'car' | 'loose' | 'hau
 
 /** What a contract remembers, saved on the item. */
 export interface ContractProgress {
-  /** Set the first time the cargo leaves its source post. */
-  started: boolean;
   /**
    * A thing's condition, 1 (as signed out) down to 0; the delivery's quality. Absent on
    * a thing not yet worn, and always on teddies (their quality is the ride) and hauls
@@ -82,8 +78,8 @@ export interface ContractProgress {
 /** Below this condition a thing is broken (game-design2.md §11.1). */
 export const BROKEN_BELOW = 0.3;
 
-/** An urgent delivery on time pays this share of its pay on top (§7.5). */
-export const URGENT_BONUS = 0.5;
+/** An urgent delivery on time is paid this many times its pay (§7.5). */
+export const URGENT_PAY_FACTOR = 2;
 
 /** Seconds left on an urgent contract's clock, negative once late; null when it is not urgent. */
 export function urgentRemainingS(item: { readonly urgentS?: number; readonly progress: ContractProgress }): number | null {
@@ -104,9 +100,9 @@ export function formatClock(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
-/** A fresh, unstarted contract. */
+/** A fresh contract: nothing worn, ridden or timed yet. */
 export function defaultProgress(): ContractProgress {
-  return { started: false };
+  return {};
 }
 
 /**

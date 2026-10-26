@@ -1,11 +1,12 @@
 /**
  * tools/look/hud.mjs
  *
- * Screenshots of the HUD (ui/hud.ts, ui/hudmap.ts, ui/hudgyro.ts, ui/hudjar.ts, ui/balls.ts)
+ * Screenshots of the HUD (ui/hud.ts, ui/hudmap.ts, ui/hudgyro.ts, ui/hudjar.ts, ui/shellsprites.ts)
  * in the real game: driving under the autopilot and by hand, on foot, far off the road,
- * on foot at a post's shop with the money jar out — a pour, the merges after it and a
- * split to pay small change — prices on the shop's cards, and at a phone's width. Each card is also painted alone at full size (`card-*.png`), so
- * the balls on it can be judged without the world around them.
+ * on foot at a post's shop with the shell jar out — a pour that overfills it (shells
+ * popping over the rim) and a spend — prices on the shop's cards, and at a phone's
+ * width. Each card is also painted alone at full size (`card-*.png`), so the shells on
+ * it can be judged without the world around them.
  *
  *   npm run dev -- --port 5199          (in another terminal)
  *   node tools/look/hud.mjs <outdir>
@@ -35,9 +36,19 @@ try {
     await page.screenshot({ path: `${out}/${name}.png` });
     console.log(`${out}/${name}.png`);
   };
-  const money = (rubles) => page.evaluate((r) => window.__bro.world.apply({ t: 'money', rubles: r }), rubles);
+  // Shells paid in (economy/economy.ts `credit`, random kinds) and a price taken out.
+  const pay = (n) => page.evaluate(async (count) => {
+    const { credit } = await import('/src/economy/economy.ts');
+    credit(window.__bro.world, count);
+  }, n);
+  const spendSome = (n) => page.evaluate(async (count) => {
+    const { debit } = await import('/src/economy/economy.ts');
+    const shells = window.__bro.world.state.player.shells;
+    const kind = Object.keys(shells).reduce((a, b) => (shells[b] > shells[a] ? b : a));
+    debit(window.__bro.world, { kind, count: Math.min(count, shells[kind]) });
+  }, n);
 
-  await money(1347);
+  await pay(12);
   await page.evaluate(() => {
     const a = window.__bro.autopilot;
     a.setMode('hurried');
@@ -67,12 +78,11 @@ try {
   await until(page, () => window.__bro.settled(), null, 120000, 'the post');
   await sleep(2500);
   await shot('shop');
-  // The jar: 1347 + 63 pours six middle balls and three small, then ten small merge into
-  // a middle and ten middle into a big: 1410. Paying 5 splits the middle one.
-  await money(1347);
+  // The jar: 12 shells, then 40 more pour in and the full jar loses two over the rim;
+  // then a price of 3 is taken out.
   await sleep(1500);
-  await shot('jar-1347');
-  await money(1410);
+  await shot('jar-12');
+  await pay(40);
   await sleep(350);
   await shot('jar-pour');
   await until(page, () => document.querySelectorAll('.hud-jar.is-shown').length > 0, null, 5000, 'the jar');
@@ -81,19 +91,21 @@ try {
     await shot(`jar-after-${i}`);
   }
   await sleep(1500);
-  await shot('jar-1410');
-  await money(1405);
+  await shot('jar-full');
+  await spendSome(3);
   await sleep(320);
-  await shot('jar-split');
+  await shot('jar-spend');
   await sleep(2000);
-  await shot('jar-1405');
+  await shot('jar-after-spend');
   const cards = await page.evaluate(async () => {
     const { paintCardFace } = await import('/src/world/cardmachine.ts');
-    const { formatMoney } = await import('/src/economy/economy.ts');
+    const { formatPay, formatPrice } = await import('/src/economy/economy.ts');
     const faces = [
-      { band: '#2d5d8a', bandText: 'PART', corner: '1/4', headline: 'gearbox, worn', lines: [formatMoney(137), 'fits the bonnet'], footer: '' },
-      { band: '#8a2d2d', bandText: 'JOB', corner: '2/5', headline: 'piano', lines: ['→ Dustwell · 6.2 km', `${formatMoney(352)} · bulky`, 'three rivals race you to it'], footer: 'the pay goes into your money' },
-      { band: '#3b6b35', bandText: 'GUM', corner: '3/4', headline: 'bubble gum', lines: [formatMoney(2), 'NOT ENOUGH MONEY'], footer: '' },
+      { band: '#2d5d8a', bandText: 'PART', corner: '1/4', headline: 'gearbox', lines: [formatPrice({ kind: 'horn', count: 7 }), 'fits the bonnet'], footer: '' },
+      { band: '#8a2d2d', bandText: 'JOB', corner: '2/5', headline: 'piano', lines: ['→ Dustwell · 6.2 km', `${formatPay(6)} · bulky`], footer: 'the pay goes into your jar' },
+      { band: '#3b6b35', bandText: 'GUM', corner: '3/4', headline: 'bubble gum', lines: [formatPrice({ kind: 'cowrie', count: 1 }), 'NOT ENOUGH COWRIE SHELLS'], footer: '' },
+      { band: '#4f6a3a', bandText: 'CAN', corner: '4/4', headline: 'can 20 L', lines: [formatPrice({ kind: 'scallop', count: 3 }), 'empty — fill it at a pump'], footer: '' },
+      { band: '#2f4f7a', bandText: 'PART', corner: '1/2', headline: 'engine', lines: [formatPrice({ kind: 'spiral', count: 10 }), 'a new engine'], footer: '' },
     ];
     return faces.map((face) => {
       const c = document.createElement('canvas');
@@ -104,17 +116,17 @@ try {
     });
   });
   cards.forEach((data, i) => fs.writeFileSync(`${out}/card-${i}.png`, Buffer.from(data, 'base64')));
-  // A toast with an amount in it, as the HUD paints one.
+  // A toast and a prompt with a price in them, as the HUD paints them.
   await page.evaluate(async () => {
-    const { setGameText } = await import('/src/ui/balls.ts');
-    const { formatMoney } = await import('/src/economy/economy.ts');
+    const { setGameText } = await import('/src/ui/shellsprites.ts');
+    const { formatPrice } = await import('/src/economy/economy.ts');
     const toast = document.createElement('div');
     toast.className = 'hud-toast';
-    setGameText(toast, `race won — ${formatMoney(30)} more in the pay`);
+    setGameText(toast, `petrol pump — fill ${formatPrice({ kind: 'spiral', count: 1 })}`);
     document.querySelector('.hud-toasts')?.append(toast);
     const prompt = document.querySelector('.hud-prompt');
     if (prompt) {
-      setGameText(prompt, `VAZ-2106 for sale — ${formatMoney(450)} · ${formatMoney(120)} paid · pay at the key box`);
+      setGameText(prompt, `VAZ-2106 for sale — ${formatPrice({ kind: 'scallop', count: 6 })} · pay at the key box`);
       prompt.classList.remove('is-hidden');
     }
   });

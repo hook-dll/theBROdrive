@@ -58,8 +58,8 @@ export const MID_CAR_EXIT_M = KIT_DETAIL_M;
 
 /**
  * Far cars of one model the mesh holds: the densest traffic setting's cap (40,
- * game/settings.ts `TRAFFIC_CAPS`) plus the race rivals, with room to spare. A car past
- * it stays drawn in full.
+ * game/settings.ts `TRAFFIC_CAPS`), with room to spare. A car past it stays drawn in
+ * full.
  */
 const FAR_CAR_CAPACITY = 64;
 

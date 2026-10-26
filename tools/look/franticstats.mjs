@@ -49,7 +49,7 @@ try {
       const dt = last > 0 ? Math.min(0.1, (now - last) / 1000) : 0;
       last = now;
       for (const car of b.traffic.carList) {
-        if (car.style !== 'frantic' || car.rails !== null || car.rival) continue;
+        if (car.style !== 'frantic' || car.rails !== null) continue;
         const v = car.vehicle;
         const c = v.chassis;
         const lv = c.linvel();

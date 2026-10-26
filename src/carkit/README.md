@@ -5,7 +5,7 @@ loader would return. From there the car goes through the usual pipeline in
 `render/carmodel.ts` (`buildTemplate`), so it gets paint, dust, scratches, stickers, glass
 dirt, lamps and fitting to the factory dimensions on the same terms as every other model.
 
-Since 2026-10-13 the kit cars are the game's only cars (`CAR_MODELS`): traffic, rivals, the
+Since 2026-10-13 the kit cars are the game's only cars (`CAR_MODELS`): traffic, the
 start car, contract cars, couriers, wrecks and the dev spawn menu draw from them, and a save
 naming a pack body loads on its kit twin. The car lab (`/?car-lab`) shows the kit cars
 only.

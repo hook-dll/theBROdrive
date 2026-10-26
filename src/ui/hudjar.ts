@@ -1,32 +1,40 @@
-import { balls } from '../economy/money';
-import { ballSprite, shimmer, type BallKind } from './balls';
+import { JAR_CAPACITY, purseTotal, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
+import { shellSprite } from './shellsprites';
 
 /**
- * THE MONEY JAR: the player's calcite balls (economy/money.ts) in a round glass jar
- * drawn in section, as the purse in Kingdom Two Crowns. It stands in the bottom right
- * corner, and only while the player is on foot on a lay-by — where money is made and
- * spent (main.ts); elsewhere it is put away. The light plays on the balls while the jar
- * is out: their film of rainbow turns, each ball its own way; and every couple of
- * seconds the jar is given a little shake, so the balls shift in it.
+ * THE SHELL JAR: the player's shells (economy/shells.ts) in a round glass jar drawn in
+ * section, as the purse in Kingdom Two Crowns. It stands in the corner of the screen
+ * (hud.css `.hud-jar`), out while the player is on foot on a lay-by — where shells are
+ * paid and spent (main.ts `setShellsShown`) — and put away elsewhere. There is no figure
+ * on it anywhere: what the jar holds is read by looking at it.
  *
- *  - Money coming in is POURED through the neck as its own balls, a ball at a time,
- *    and they roll and settle on the rest. Once everything lies still, every ten balls
- *    of a kind MERGE: they run together and are one ball of the next size.
- *  - Money going out LEAPS out of the neck and falls away, the biggest balls that fit
- *    the amount first; short of small change, a bigger ball SPLITS into ten of the next
- *    size down, and what is left of them merges back later.
+ *  - Shells coming in are POURED through the neck, a shell at a time, and roll and
+ *    settle on the rest.
+ *  - Shells going out are LIFTED out of the neck, the topmost of the kind first, and
+ *    fade as they rise.
+ *  - The jar holds `JAR_CAPACITY` and not one more: a shell pushed out by a new one in a
+ *    full jar (`spill`) POPS up out over the rim and falls away past the jar.
+ *  - Shells a FINE takes (`fine`, economy/economy.ts) LEAP out of the jar on their own,
+ *    higher and slower than a pop, greyed and dimmed, turning over slowly, and drop away
+ *    on its sides: lost, not spent. The jar sags on its foot with each.
  *
- * The balls are a small 2D simulation — gravity, the jar's walls, the balls on each
- * other — stepped at `STEP_S` while anything moves. Put away, nothing runs: a change
- * of money is laid in settled, and shown when the jar comes out.
+ * Put away, the jar still shows itself for a moment whenever the shells change — it
+ * FLASHES: fades in, does its pouring or lifting where it can be seen, holds a couple of
+ * seconds after the last of it and fades away (hud.css `.hud-jar.is-flash`).
+ *
+ * The shells are a small 2D simulation — gravity, the jar's walls, the shells on each
+ * other, each a disc of one size — stepped at `STEP_S` while anything moves; and every
+ * couple of seconds, while the jar is out and still, it is given a little shake so the
+ * shells shift in it. Out of sight nothing runs: the first purse is laid in settled, and
+ * whatever was still moving when the jar went away is laid in settled too.
  */
 
-/** Ball diameters in the jar, em (hud.css `.hud-jar` sets the em). */
-const DIAMETER: Readonly<Record<BallKind, number>> = { big: 1.5, middle: 1.06, small: 0.68 };
-/** Big balls past this many are a "+N" on the glass rather than balls. */
-const MAX_BIG = 15;
+/** A shell's size in the jar, em (hud.css `.hud-jar` sets the em): `JAR_CAPACITY` of them lie in the belly with room to tumble. */
+const DIAMETER = 1.05;
+/** The sprite is drawn a little past the disc the shell is simulated as: its shape does not fill the disc. */
+const SPRITE_OVER = 1.12;
 
-/** The jar, em: its outside size, and the canvas margin round it the balls leap into. */
+/** The jar, em: its outside size, and the canvas margin round it the shells leave into. */
 const JAR_W = 10.4;
 const JAR_H = 10;
 const MARGIN_X = 2.6;
@@ -34,7 +42,7 @@ const MARGIN_TOP = 2.4;
 const MARGIN_BOTTOM = 0.4;
 const CANVAS_W = JAR_W + 2 * MARGIN_X;
 const CANVAS_H = JAR_H + MARGIN_TOP + MARGIN_BOTTOM;
-/** The glass's thickness, em: the balls roll on its inner face. */
+/** The glass's thickness, em: the shells roll on its inner face. */
 const WALL = 0.16;
 /** The mouth's half width and the neck's depth, under the rolled lip. */
 const MOUTH_HALF = 2.3;
@@ -46,82 +54,81 @@ const FOOT_H = 0.35;
 const STEP_S = 1 / 120;
 const GRAVITY = 42;
 const WALL_BOUNCE = 0.25;
-const BALL_BOUNCE = 0.15;
+const SHELL_BOUNCE = 0.15;
 const FRICTION = 0.9;
-/** At rest once every ball has been slower than this, em/s, for `REST_S`: above the one step of gravity a lying ball gains and loses. */
+/** At rest once every shell has been slower than this, em/s, for `REST_S`: above the one step of gravity a lying shell gains and loses. */
 const REST_SPEED = 1.2;
 const REST_S = 0.4;
-/** Pouring: one ball per `POUR_MS`; a ball out per `SPEND_MS`; after a split or a turn from spending to pouring, `SWAP_MS`. */
+/** One shell poured per `POUR_MS`; one lifted out per `TAKE_MS`; one popped over the rim per `POP_MS`; one leaping out to a fine per `FINE_MS`; a turn from one to another waits `SWAP_MS`. */
 const POUR_MS = 70;
-const SPEND_MS = 35;
+const TAKE_MS = 90;
+const POP_MS = 220;
+const FINE_MS = 380;
 const SWAP_MS = 260;
-/**
- * Merging: the balls run together in `MERGE_S`, once all has lain still `MERGE_REST_S`
- * — or at the latest `MERGE_WAIT_MS` after the last op, a pile never being quite still
- * — and `MERGE_GAP_MS` apart.
- */
-const MERGE_S = 0.35;
-const MERGE_REST_S = 0.25;
-const MERGE_WAIT_MS = 1200;
-const MERGE_GAP_MS = 160;
-/** The shake: every `SHAKE_MIN_MS`..`SHAKE_MAX_MS` while the jar is out and nothing else goes on; the jar rocks this far, degrees, and the balls are kicked up to this fast, em/s. */
+/** The shake: every `SHAKE_MIN_MS`..`SHAKE_MAX_MS` while the jar is out and still; the jar rocks this far, degrees, and the shells are kicked up to this fast, em/s. */
 const SHAKE_MIN_MS = 2000;
 const SHAKE_MAX_MS = 3500;
 const SHAKE_DEG = 2;
 const SHAKE_KICK = 2.6;
-/** A ball born of a merge or a split swells to its size in this long. */
-const POP_S = 0.22;
-/** A ball leaving: the height over the mouth its leap tops out at, em; its throw aside, em/s; how long it fades. */
-const LEAP_OVER = 1.6;
-const LEAP_SIDE = 5;
-const FADE_S = 0.4;
-/** The shimmer: how fast the light turns on a ball, turns per second, and how strong it lies. */
-const SHIMMER_TURNS = 0.12;
-const SHIMMER_ALPHA = 0.32;
-/** Drawn at most this often while only the shimmer moves. */
-const SHIMMER_FRAME_MS = 40;
+/** A shell lifted out: how long it takes to rise from where it lay to over the mouth, and how far over, em. */
+const LIFT_S = 0.5;
+const LIFT_OVER = 1.4;
+/** A shell popped over the rim: the height over the mouth its leap tops out at, em; its throw aside, em/s; how long it falls before it is gone. */
+const POP_OVER = 2;
+const POP_SIDE = 4.5;
+const POP_FALL_S = 0.9;
+/**
+ * A shell leaping out to a fine: the height over the mouth its leap tops out at, em; its
+ * drift aside, em/s (slow: it is not thrown, it gives up); its fall before it is gone, s;
+ * how slowly it turns, rad/s; how dim and how grey it is drawn; how far the jar sags, em.
+ */
+const FINE_OVER = 3.2;
+const FINE_SIDE = 2.2;
+const FINE_FALL_S = 1.3;
+const FINE_SPIN = 2.5;
+const FINE_ALPHA = 0.75;
+const FINE_FILTER = 'grayscale(0.85) brightness(0.8)';
+const FINE_SAG = 0.25;
+/** How a lying shell turns as it rolls: radians per em it moves sideways. */
+const ROLL = 0.6;
+/** The flash: how long the jar stays in sight after the last change, when it is not out. */
+const FLASH_HOLD_MS = 2500;
 
-interface Ball {
-  readonly kind: BallKind;
+interface Shell {
+  readonly kind: ShellKind;
   readonly r: number;
-  readonly mass: number;
-  /** Where its shimmer starts and which way it turns. */
-  readonly phase: number;
-  readonly spin: number;
   x: number;
   y: number;
   vx: number;
   vy: number;
-  /** Seconds since it left the jar, or -1 while it is in; then seconds since its leap topped out, or -1 before. */
-  leftS: number;
+  /** How it lies, radians, and how fast it spins while it flies. */
+  angle: number;
+  spin: number;
+  /** Popped over the rim or leapt out to a fine: seconds since, or -1 while it is in; then seconds since its leap topped out, or -1 before. */
+  popS: number;
   fallS: number;
-  /** Merging: where it runs from and to, and seconds since it started, or -1. */
-  mergeS: number;
+  /** Leapt out to a fine (`popS` runs its flight): drawn greyed and dimmed. */
+  fined: boolean;
+  /** Lifted out: seconds since, from where it lay, or -1. */
+  liftS: number;
   fromX: number;
   fromY: number;
-  toX: number;
-  toY: number;
-  /** Seconds since it was born of a merge or a split, for its swelling, or -1. */
-  popS: number;
 }
 
-const VALUE: Readonly<Record<BallKind, number>> = { big: 100, middle: 10, small: 1 };
-const NEXT_UP: Readonly<Record<BallKind, BallKind | null>> = { small: 'middle', middle: 'big', big: null };
-const NEXT_DOWN: Readonly<Record<BallKind, BallKind | null>> = { big: 'middle', middle: 'small', small: null };
-const KINDS_DOWN = ['big', 'middle', 'small'] as const;
-
-/** What the jar is to do next: a ball poured in, a ball out, a ball split into ten. */
+/** What the jar is to do next: a shell poured in, lifted out, popped over the rim, or leaping out to a fine. */
 interface JarOp {
-  readonly t: 'pour' | 'spend' | 'split';
-  readonly kind: BallKind;
+  readonly t: 'pour' | 'take' | 'pop' | 'fine';
+  readonly kind: ShellKind;
 }
 
-/** Ten balls running together into one. */
-interface Merge {
-  readonly balls: Ball[];
-  readonly into: BallKind;
-  readonly x: number;
-  readonly y: number;
+const OP_MS: Readonly<Record<JarOp['t'], number>> = { pour: POUR_MS, take: TAKE_MS, pop: POP_MS, fine: FINE_MS };
+
+/** The purse in words, the jar's label: "12 shells: 4 scallop, 3 spiral, 5 horn". */
+function purseWords(purse: Readonly<ShellPurse>): string {
+  const total = purseTotal(purse);
+  if (total === 0) return 'No shells';
+  const kinds = SHELL_KINDS.filter((kind) => purse[kind] > 0).map((kind) => `${purse[kind]} ${kind}`);
+  return `${total} shell${total === 1 ? '' : 's'}: ${kinds.join(', ')}`;
 }
 
 const CX = MARGIN_X + JAR_W / 2;
@@ -158,7 +165,7 @@ function jarWall(): number[] {
 
 const WALL_LINE = jarWall();
 
-/** Half the belly's inside width at height `y`, for a ball of radius `r` (0 where none fits). */
+/** Half the belly's inside width at height `y`, for a shell of radius `r` (0 where none fits). */
 function bellyHalfAt(y: number, r: number): number {
   const a = BELLY_A - WALL / 2 - r;
   const b = BELLY_B - WALL / 2 - r;
@@ -167,10 +174,10 @@ function bellyHalfAt(y: number, r: number): number {
 }
 
 /**
- * Puts a ball found outside the belly (a contact pass can push one through the glass
+ * Puts a shell found outside the belly (a contact pass can push one through the glass
  * where the wall turns sharply) back in, on the line to the belly's middle.
  */
-function keepInBelly(b: Ball): void {
+function keepInBelly(b: Shell): void {
   if (b.y < BELLY_TOP) return;
   const a = BELLY_A - WALL / 2 - b.r;
   const h = BELLY_B - WALL / 2 - b.r;
@@ -190,34 +197,36 @@ function keepInBelly(b: Ball): void {
   }
 }
 
-export class MoneyJar {
+export class ShellJar {
   readonly el: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly g: CanvasRenderingContext2D | null;
   private readonly observer: ResizeObserver | null = null;
   /** Canvas pixels per em. */
   private unit = 0;
-  private readonly balls: Ball[] = [];
+  private readonly shells: Shell[] = [];
   /** What is still to be done, in order. */
   private readonly ops: JarOp[] = [];
-  /** The balls the jar will hold once `ops` and the merge in hand are done: big ones beyond the glass included. */
-  private readonly ledger: Record<BallKind, number> = { big: 0, middle: 0, small: 0 };
-  private merge: Merge | null = null;
+  /** The purse last set, or null before the first. */
+  private purse: ShellPurse | null = null;
+  /** Shells gone over the rim since the last `set`, by kind. */
+  private readonly spilled: ShellPurse = { scallop: 0, spiral: 0, horn: 0, cowrie: 0 };
+  /** Shells a fine took since the last `set`, by kind: the purse's drop leaps out instead of being lifted. */
+  private readonly fined: ShellPurse = { scallop: 0, spiral: 0, horn: 0, cowrie: 0 };
   private nextActionMs = 0;
-  private lastOpMs = 0;
   private nextShakeMs = 0;
+  private flashUntilMs = 0;
   private restS = 0;
   private frame = 0;
   private lastMs = 0;
-  private drawnMs = 0;
   private accS = 0;
-  private overflow = 0;
-  private rubles = -1;
   private shown = false;
+  private flashing = false;
 
   constructor() {
     this.el = document.createElement('div');
     this.el.className = 'hud-jar';
+    this.el.setAttribute('role', 'img');
     this.el.style.width = `${CANVAS_W}em`;
     this.el.style.height = `${CANVAS_H}em`;
     this.canvas = document.createElement('canvas');
@@ -231,67 +240,90 @@ export class MoneyJar {
         this.canvas.width = Math.round(rect.width * dpr);
         this.canvas.height = Math.round(rect.height * dpr);
         this.unit = this.canvas.width / CANVAS_W;
-        this.draw(performance.now());
+        this.draw();
       });
       this.observer.observe(this.canvas);
     }
   }
 
-  /** Out on the screen, or put away. */
-  setShown(shown: boolean): void {
-    if (shown === this.shown) return;
-    this.shown = shown;
-    this.el.classList.toggle('is-shown', shown);
-    // Put away, whatever was still falling settles at once: the jar comes out as it is.
-    if (shown) {
-      this.nextShakeMs = performance.now() + SHAKE_MIN_MS;
-      this.wake();
-    } else {
-      this.settle();
-    }
+  /** In sight: out on the screen, or flashing a change. The simulation runs only then. */
+  private get visible(): boolean {
+    return this.shown || this.flashing;
   }
 
-  /** The money now: poured or spent while the jar is out, laid in settled while it is away. */
-  set(rubles: number): void {
-    if (rubles === this.rubles) return;
-    const before = this.rubles;
-    this.rubles = rubles;
-    this.el.setAttribute('aria-label', `${rubles} rubles`);
-    if (!this.shown || before < 0) {
+  /** Out on the screen (on foot on a lay-by, main.ts), or put away. */
+  setShown(shown: boolean): void {
+    if (shown === this.shown) return;
+    const was = this.visible;
+    this.shown = shown;
+    this.el.classList.toggle('is-shown', shown);
+    this.afterVisibility(was);
+  }
+
+  /**
+   * Shells of these kinds went over the rim of the full jar as new ones came in: called
+   * before the `set` that brings the new purse, which pops them out as it pours.
+   */
+  spill(kinds: readonly ShellKind[]): void {
+    if (this.purse === null) return;
+    for (const kind of kinds) this.spilled[kind]++;
+    if (kinds.length > 0) this.flash();
+  }
+
+  /**
+   * Shells of these kinds were taken by a fine: called before the `set` that brings the
+   * new purse, which has them leap out of the jar rather than be lifted out.
+   */
+  fine(kinds: readonly ShellKind[]): void {
+    if (this.purse === null) return;
+    for (const kind of kinds) this.fined[kind]++;
+    if (kinds.length > 0) this.flash();
+  }
+
+  /** The shells now: the change poured in, lifted out and popped where it can be seen; the first purse laid in settled. */
+  set(purse: Readonly<ShellPurse>): void {
+    const before = this.purse;
+    // Called every frame: nothing changed, nothing to do (and nothing allocated).
+    if (before !== null) {
+      let same = true;
+      for (const kind of SHELL_KINDS) same &&= purse[kind] === before[kind] && this.spilled[kind] === 0 && this.fined[kind] === 0;
+      if (same) return;
+    }
+    this.purse = { ...purse };
+    this.el.setAttribute('aria-label', purseWords(purse));
+    if (before === null) {
       this.layIn();
       return;
     }
-    if (rubles > before) {
-      // The income as its own balls, the big ones first so they go under.
-      const amount = balls(rubles - before);
-      for (const kind of KINDS_DOWN) {
-        for (let i = 0; i < amount[kind]; i++) this.ops.push({ t: 'pour', kind });
-        this.ledger[kind] += amount[kind];
-      }
-    } else {
-      // The biggest ball that fits what is left to pay; none fits, the smallest bigger one splits.
-      let left = before - rubles;
-      while (left > 0) {
-        const fit = KINDS_DOWN.find((k) => this.ledger[k] > 0 && VALUE[k] <= left);
-        if (fit !== undefined) {
-          this.ops.push({ t: 'spend', kind: fit });
-          this.ledger[fit]--;
-          left -= VALUE[fit];
-          continue;
-        }
-        const split = (['middle', 'big'] as const).find((k) => this.ledger[k] > 0);
-        if (split === undefined) break;
-        this.ops.push({ t: 'split', kind: split });
-        this.ledger[split]--;
-        this.ledger[NEXT_DOWN[split]!] += 10;
-      }
-      if (left > 0) {
-        // Out of step with the money somehow: start again from it.
-        this.layIn();
-        return;
-      }
+    // Per kind: the spilled ones came in and went out again, so pour them as well as pop
+    // them; of what went out, the fined ones leap and the rest (spent) are lifted.
+    const pours: ShellKind[] = [];
+    const pops: ShellKind[] = [];
+    const fines: ShellKind[] = [];
+    const takes: ShellKind[] = [];
+    for (const kind of SHELL_KINDS) {
+      const spilled = this.spilled[kind];
+      const net = purse[kind] - before[kind] + spilled;
+      const fined = Math.min(this.fined[kind], Math.max(0, -net));
+      for (let i = 0; i < Math.max(0, net); i++) pours.push(kind);
+      for (let i = 0; i < fined; i++) fines.push(kind);
+      for (let i = 0; i < Math.max(0, -net) - fined; i++) takes.push(kind);
+      for (let i = 0; i < spilled; i++) pops.push(kind);
+      this.spilled[kind] = 0;
+      this.fined[kind] = 0;
     }
-    this.wake();
+    if (pours.length + pops.length + fines.length + takes.length === 0) return;
+    // The new shells in a mixed handful, as they were paid; then what the full jar loses,
+    // then what a fine takes, in the order it took them, then what is spent.
+    for (let i = pours.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pours[i], pours[j]] = [pours[j]!, pours[i]!];
+    }
+    for (const kind of pours) this.ops.push({ t: 'pour', kind });
+    for (const kind of pops) this.ops.push({ t: 'pop', kind });
+    for (const kind of fines) this.ops.push({ t: 'fine', kind });
+    for (const kind of takes) this.ops.push({ t: 'take', kind });
+    this.flash();
   }
 
   dispose(): void {
@@ -300,70 +332,84 @@ export class MoneyJar {
     this.frame = 0;
   }
 
-  /** The queues run out at once and the balls settle, unseen. */
-  private settle(): void {
-    const still = this.ops.length === 0 && this.merge === null && this.balls.every((b) => b.leftS < 0) && this.restS >= REST_S && !this.canMerge();
-    if (!still && this.rubles >= 0) this.layIn();
+  /** In sight for a change: held `FLASH_HOLD_MS` past the last of it (`tick` lets it go). */
+  private flash(): void {
+    const was = this.visible;
+    this.flashing = true;
+    this.flashUntilMs = performance.now() + FLASH_HOLD_MS;
+    this.el.classList.add('is-flash');
+    this.afterVisibility(was);
   }
 
-  /** The jar filled at once with the money as it stands, settled: dropped in rows and the simulation run till they lie still. */
+  /** Come into sight, the simulation starts; gone out of it, whatever still moved lies down at once. */
+  private afterVisibility(was: boolean): void {
+    const now = this.visible;
+    if (now && !was) {
+      this.nextShakeMs = performance.now() + SHAKE_MIN_MS;
+      this.wake();
+    } else if (!now && was) {
+      this.settle();
+    }
+  }
+
+  private moving(): boolean {
+    return this.ops.length > 0 || this.restS < REST_S || this.shells.some((s) => s.popS >= 0 || s.liftS >= 0);
+  }
+
+  /** The queue run out at once and the shells settled, unseen. */
+  private settle(): void {
+    if (this.moving() && this.purse !== null) this.layIn();
+  }
+
+  /** The jar filled at once with the purse as it stands, settled: dropped in rows and the simulation run till they lie still. */
   private layIn(): void {
-    const amount = balls(Math.max(0, this.rubles));
-    this.ledger.big = amount.big;
-    this.ledger.middle = amount.middle;
-    this.ledger.small = amount.small;
-    this.overflow = Math.max(0, amount.big - MAX_BIG);
-    this.balls.length = 0;
+    const purse = this.purse!;
+    this.shells.length = 0;
     this.ops.length = 0;
-    this.merge = null;
-    // In rows from the foot up, each as wide as the belly is at its height.
-    let y = FLOOR_Y - WALL / 2 - DIAMETER.big / 2;
-    let half = bellyHalfAt(y, DIAMETER.big / 2);
+    for (const kind of SHELL_KINDS) this.fined[kind] = 0;
+    // Mixed, as they came; in rows from the foot up, each as wide as the belly is at its height.
+    const kinds: ShellKind[] = [];
+    for (const kind of SHELL_KINDS) for (let i = 0; i < purse[kind]; i++) kinds.push(kind);
+    for (let i = kinds.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [kinds[i], kinds[j]] = [kinds[j]!, kinds[i]!];
+    }
+    let y = FLOOR_Y - WALL / 2 - DIAMETER / 2;
+    let half = bellyHalfAt(y, DIAMETER / 2);
     let x = CX - half;
-    for (const kind of KINDS_DOWN) {
-      const count = kind === 'big' ? amount.big - this.overflow : amount[kind];
-      const d = DIAMETER[kind];
-      for (let i = 0; i < count; i++) {
-        if (x + d > CX + half) {
-          y -= DIAMETER.big;
-          half = Math.max(0, bellyHalfAt(y, DIAMETER.big / 2));
-          x = CX - half;
-        }
-        this.balls.push(this.newBall(kind, x + d / 2, y));
-        x += d * 1.02;
+    for (const kind of kinds.slice(0, JAR_CAPACITY)) {
+      if (x + DIAMETER > CX + half) {
+        y -= DIAMETER;
+        half = Math.max(0, bellyHalfAt(y, DIAMETER / 2));
+        x = CX - half;
       }
+      this.shells.push(this.newShell(kind, x + DIAMETER / 2, y));
+      x += DIAMETER * 1.02;
     }
     for (let i = 0; i < 700; i++) this.step();
-    for (const b of this.balls) b.vx = b.vy = 0;
+    for (const s of this.shells) s.vx = s.vy = 0;
     this.restS = REST_S;
-    this.draw(performance.now());
+    this.draw();
   }
 
-  /** Balls of `kind` lying in the jar (not leaving, not merging). */
-  private lying(kind: BallKind): Ball[] {
-    return this.balls.filter((b) => b.kind === kind && b.leftS < 0 && b.mergeS < 0);
-  }
-
-  private canMerge(): boolean {
-    return this.lying('small').length >= 10 || this.lying('middle').length >= 10;
-  }
-
-  private topmost(kind: BallKind): Ball | null {
-    let top: Ball | null = null;
-    for (const b of this.lying(kind)) if (top === null || b.y < top.y) top = b;
+  /** The topmost shell of `kind` lying in the jar, or null. */
+  private topmost(kind: ShellKind): Shell | null {
+    let top: Shell | null = null;
+    for (const s of this.shells) {
+      if (s.kind === kind && s.popS < 0 && s.liftS < 0 && (top === null || s.y < top.y)) top = s;
+    }
     return top;
   }
 
-  private newBall(kind: BallKind, x: number, y: number): Ball {
-    const r = DIAMETER[kind] / 2;
+  private newShell(kind: ShellKind, x: number, y: number): Shell {
     return {
-      kind, r, mass: r * r, phase: Math.random(), spin: Math.random() < 0.5 ? -1 : 1,
-      x, y, vx: 0, vy: 0, leftS: -1, fallS: -1, mergeS: -1, fromX: 0, fromY: 0, toX: 0, toY: 0, popS: -1,
+      kind, r: DIAMETER / 2, x, y, vx: 0, vy: 0, angle: Math.random() * Math.PI * 2, spin: 0,
+      popS: -1, fallS: -1, fined: false, liftS: -1, fromX: 0, fromY: 0,
     };
   }
 
   private wake(): void {
-    if (this.frame || !this.shown || typeof requestAnimationFrame === 'undefined') return;
+    if (this.frame || !this.visible || typeof requestAnimationFrame === 'undefined') return;
     this.lastMs = performance.now();
     this.accS = 0;
     this.frame = requestAnimationFrame(this.tick);
@@ -371,102 +417,92 @@ export class MoneyJar {
 
   private readonly tick = (now: number): void => {
     this.frame = 0;
-    if (!this.shown) return;
+    if (!this.visible) return;
     this.act(now);
     this.accS += Math.min(0.1, (now - this.lastMs) / 1000);
     this.lastMs = now;
-    const moving = this.ops.length > 0 || this.merge !== null || this.restS < REST_S || this.canMerge() || this.balls.some((b) => b.leftS >= 0 || b.popS >= 0);
+    const moving = this.moving();
     if (moving) {
       while (this.accS >= STEP_S) {
         this.accS -= STEP_S;
         this.step();
       }
+      this.draw();
     } else {
       this.accS = 0;
+      if (this.flashing && now >= this.flashUntilMs) {
+        // All done and held long enough: the flash fades away (hud.css), the jar as it lies.
+        this.flashing = false;
+        this.el.classList.remove('is-flash');
+        if (!this.shown) return;
+      }
     }
-    // The shimmer goes on while the jar is out, drawn less often than the balls move.
-    if (moving || now - this.drawnMs >= SHIMMER_FRAME_MS) this.draw(now);
     this.frame = requestAnimationFrame(this.tick);
   };
 
-  /** The next thing to do, when one is due: an op off the queue, or with none left and all still, a merge. */
+  /** The next thing to do, when one is due: an op off the queue, or with none left and all still, a shake. */
   private act(now: number): void {
-    if (this.merge !== null) {
-      this.finishMerge(now);
-      return;
-    }
     if (now < this.nextActionMs) return;
     const op = this.ops.shift();
     if (op === undefined) {
-      const still = this.restS >= MERGE_REST_S || now - this.lastOpMs >= MERGE_WAIT_MS;
-      if (!still || this.balls.some((b) => b.leftS >= 0)) return;
-      if (this.canMerge()) this.startMerge();
-      else if (now >= this.nextShakeMs) this.shake(now);
+      if (this.shown && !this.moving() && now >= this.nextShakeMs) this.shake(now);
       return;
     }
     this.restS = 0;
-    this.lastOpMs = now;
+    this.flashUntilMs = now + FLASH_HOLD_MS;
     const next = this.ops[0];
+    this.nextActionMs = now + (next === undefined || next.t === op.t ? OP_MS[op.t] : SWAP_MS);
     if (op.t === 'pour') {
-      this.nextActionMs = now + (next === undefined || next.t === 'pour' ? POUR_MS : SWAP_MS);
-      if (op.kind === 'big' && this.lying('big').length >= MAX_BIG) {
-        this.overflow++;
-        return;
-      }
-      const ball = this.newBall(op.kind, CX + (Math.random() - 0.5) * (MOUTH_HALF - DIAMETER[op.kind] / 2), LIP_Y - DIAMETER[op.kind]);
-      ball.vy = 4;
-      ball.vx = (Math.random() - 0.5) * 1.5;
-      this.balls.push(ball);
-    } else if (op.t === 'spend') {
-      this.nextActionMs = now + (next?.t === 'spend' ? SPEND_MS : SWAP_MS);
-      if (op.kind === 'big' && this.overflow > 0) {
-        this.overflow--;
-        return;
-      }
-      const top = this.topmost(op.kind);
-      if (top !== null) {
-        // Up through the mouth: the leap tops out over its middle, then the ball is
-        // thrown aside and falls past the jar.
-        const rise = top.y - (LIP_Y - LEAP_OVER * (0.8 + Math.random() * 0.4));
-        top.leftS = 0;
-        top.vy = -Math.sqrt(2 * GRAVITY * Math.max(0.5, rise));
-        top.vx = (CX - top.x) / (-top.vy / GRAVITY);
-      }
+      const shell = this.newShell(op.kind, CX + (Math.random() - 0.5) * (MOUTH_HALF - DIAMETER / 2), LIP_Y - DIAMETER);
+      shell.vy = 4;
+      shell.vx = (Math.random() - 0.5) * 1.5;
+      this.shells.push(shell);
+      return;
+    }
+    const top = this.topmost(op.kind);
+    if (top === null) return;
+    if (op.t === 'take') {
+      top.liftS = 0;
+      top.fromX = top.x;
+      top.fromY = top.y;
+      top.vx = top.vy = 0;
+    } else if (op.t === 'pop') {
+      // Up through the mouth: the leap tops out over its middle, then the shell is thrown
+      // aside, spinning, and falls past the jar and off it.
+      this.leap(top, POP_OVER * (0.8 + Math.random() * 0.4), 6 + Math.random() * 4);
     } else {
-      this.nextActionMs = now + SWAP_MS;
-      const down = NEXT_DOWN[op.kind]!;
-      let x = CX;
-      let y = LIP_Y + NECK_H + 0.5;
-      if (op.kind === 'big' && this.overflow > 0) {
-        this.overflow--;
-      } else {
-        const top = this.topmost(op.kind);
-        if (top !== null) {
-          x = top.x;
-          y = top.y;
-          this.balls.splice(this.balls.indexOf(top), 1);
-        }
-      }
-      // Ten of the next size burst out where it lay.
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        const ball = this.newBall(down, x + Math.cos(a) * 0.35, y + Math.sin(a) * 0.35);
-        ball.vx = Math.cos(a) * 3;
-        ball.vy = Math.sin(a) * 3 - 2;
-        ball.popS = 0;
-        this.balls.push(ball);
-      }
+      // A fine: the same way out but higher, turning over slowly, greyed; and the jar
+      // sags on its foot as it goes.
+      top.fined = true;
+      this.leap(top, FINE_OVER * (0.9 + Math.random() * 0.2), FINE_SPIN * (0.7 + Math.random() * 0.6));
+      this.canvas.animate?.(
+        [
+          { transform: 'translateY(0)' },
+          { transform: `translateY(${FINE_SAG}em) scaleY(0.98)`, offset: 0.3 },
+          { transform: 'translateY(0)' },
+        ],
+        { duration: 360, easing: 'ease-out' },
+      );
     }
   }
 
-  /** A little shake: the jar rocks on its foot and the balls are kicked, all a little the same way. */
+  /** Sets `top` leaping out of the mouth, its leap topping out `over` em above the lip, spinning at up to `spin` rad/s. */
+  private leap(top: Shell, over: number, spin: number): void {
+    const rise = top.y - (LIP_Y - over);
+    top.popS = 0;
+    top.vy = -Math.sqrt(2 * GRAVITY * Math.max(0.5, rise));
+    top.vx = (CX - top.x) / (-top.vy / GRAVITY);
+    top.spin = (Math.random() < 0.5 ? -1 : 1) * spin;
+  }
+
+  /** A little shake: the jar rocks on its foot and the shells are kicked, all a little the same way. */
   private shake(now: number): void {
     this.nextShakeMs = now + SHAKE_MIN_MS + Math.random() * (SHAKE_MAX_MS - SHAKE_MIN_MS);
     const way = Math.random() < 0.5 ? -1 : 1;
-    for (const b of this.balls) {
-      if (b.leftS >= 0 || b.mergeS >= 0) continue;
-      b.vx += way * SHAKE_KICK * (0.4 + Math.random() * 0.6);
-      b.vy -= SHAKE_KICK * Math.random();
+    for (const s of this.shells) {
+      if (s.popS >= 0 || s.liftS >= 0) continue;
+      s.vx += way * SHAKE_KICK * (0.4 + Math.random() * 0.6);
+      s.vy -= SHAKE_KICK * Math.random();
     }
     this.restS = 0;
     this.canvas.animate?.(
@@ -480,94 +516,48 @@ export class MoneyJar {
     );
   }
 
-  /** Ten lying balls of a kind run together: the topmost and the nine nearest it, into their middle. */
-  private startMerge(): void {
-    for (const kind of ['small', 'middle'] as const) {
-      const lying = this.lying(kind);
-      if (lying.length < 10) continue;
-      const seed = this.topmost(kind)!;
-      lying.sort((a, b) => Math.hypot(a.x - seed.x, a.y - seed.y) - Math.hypot(b.x - seed.x, b.y - seed.y));
-      const group = lying.slice(0, 10);
-      let x = 0;
-      let y = 0;
-      for (const b of group) {
-        x += b.x / 10;
-        y += b.y / 10;
-      }
-      for (const b of group) {
-        b.mergeS = 0;
-        b.fromX = b.x;
-        b.fromY = b.y;
-        b.toX = x;
-        b.toY = y;
-        b.vx = b.vy = 0;
-      }
-      this.merge = { balls: group, into: NEXT_UP[kind]!, x, y };
-      this.ledger[kind] -= 10;
-      this.ledger[NEXT_UP[kind]!] += 1;
-      this.restS = 0;
-      return;
-    }
-  }
-
-  private finishMerge(now: number): void {
-    const m = this.merge!;
-    if (m.balls[0]!.mergeS < MERGE_S) return;
-    for (const b of m.balls) this.balls.splice(this.balls.indexOf(b), 1);
-    this.merge = null;
-    this.nextActionMs = now + MERGE_GAP_MS;
-    this.lastOpMs = now - MERGE_WAIT_MS;
-    this.restS = 0;
-    if (m.into === 'big' && this.lying('big').length >= MAX_BIG) {
-      this.overflow++;
-      return;
-    }
-    const ball = this.newBall(m.into, m.x, m.y);
-    ball.popS = 0;
-    this.balls.push(ball);
-  }
-
   private step(): void {
-    const list = this.balls;
+    const list = this.shells;
     for (let i = list.length - 1; i >= 0; i--) {
-      const b = list[i]!;
-      if (b.popS >= 0) {
-        b.popS += STEP_S;
-        if (b.popS > POP_S) b.popS = -1;
-      }
-      if (b.mergeS >= 0) {
-        // Running together, eased in and out, over everything.
-        b.mergeS += STEP_S;
-        const k = Math.min(1, b.mergeS / MERGE_S);
+      const s = list[i]!;
+      if (s.liftS >= 0) {
+        // Lifted straight up out of the mouth, eased, over everything.
+        s.liftS += STEP_S;
+        const k = Math.min(1, s.liftS / LIFT_S);
         const e = k * k * (3 - 2 * k);
-        b.x = b.fromX + (b.toX - b.fromX) * e;
-        b.y = b.fromY + (b.toY - b.fromY) * e;
+        s.x = s.fromX + (CX - s.fromX) * e;
+        s.y = s.fromY + (LIP_Y - LIFT_OVER - s.fromY) * e;
+        if (k >= 1) list.splice(i, 1);
         continue;
       }
-      b.vy += GRAVITY * STEP_S;
-      b.vx *= 0.996;
-      b.vy *= 0.996;
-      b.x += b.vx * STEP_S;
-      b.y += b.vy * STEP_S;
-      if (b.leftS >= 0) {
-        b.leftS += STEP_S;
-        if (b.fallS < 0 && b.vy >= 0) {
-          b.fallS = 0;
-          b.vx = (Math.random() < 0.5 ? -1 : 1) * LEAP_SIDE * (0.7 + Math.random() * 0.6);
-        } else if (b.fallS >= 0) {
-          b.fallS += STEP_S;
-          if (b.fallS > FADE_S) list.splice(i, 1);
+      s.vy += GRAVITY * STEP_S;
+      s.vx *= 0.996;
+      s.vy *= 0.996;
+      s.x += s.vx * STEP_S;
+      s.y += s.vy * STEP_S;
+      if (s.popS >= 0) {
+        s.popS += STEP_S;
+        s.angle += s.spin * STEP_S;
+        if (s.fallS < 0 && s.vy >= 0) {
+          s.fallS = 0;
+          const side = s.fined ? FINE_SIDE : POP_SIDE;
+          s.vx = (Math.random() < 0.5 ? -1 : 1) * side * (0.7 + Math.random() * 0.6);
+        } else if (s.fallS >= 0) {
+          s.fallS += STEP_S;
+          if (s.fallS > (s.fined ? FINE_FALL_S : POP_FALL_S) || s.y - s.r > CANVAS_H) list.splice(i, 1);
         }
+      } else {
+        s.angle += s.vx * STEP_S * ROLL;
       }
     }
-    // A few passes of contacts: ball on ball, then ball on glass.
+    // A few passes of contacts: shell on shell, then shell on glass.
     for (let pass = 0; pass < 3; pass++) {
       for (let i = 0; i < list.length; i++) {
         const a = list[i]!;
-        if (a.leftS >= 0 || a.mergeS >= 0) continue;
+        if (a.popS >= 0 || a.liftS >= 0) continue;
         for (let j = i + 1; j < list.length; j++) {
           const b = list[j]!;
-          if (b.leftS >= 0 || b.mergeS >= 0) continue;
+          if (b.popS >= 0 || b.liftS >= 0) continue;
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const min = a.r + b.r;
@@ -576,30 +566,30 @@ export class MoneyJar {
           const d = Math.sqrt(d2);
           const nx = dx / d;
           const ny = dy / d;
-          const share = b.mass / (a.mass + b.mass);
-          const overlap = min - d;
-          a.x -= nx * overlap * share;
-          a.y -= ny * overlap * share;
-          b.x += nx * overlap * (1 - share);
-          b.y += ny * overlap * (1 - share);
+          // One size, one mass: each takes half the overlap and half the impulse.
+          const overlap = (min - d) / 2;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
           const closing = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
           if (closing < 0) {
-            const impulse = (-(1 + BALL_BOUNCE) * closing) / (1 / a.mass + 1 / b.mass);
-            a.vx -= (impulse / a.mass) * nx;
-            a.vy -= (impulse / a.mass) * ny;
-            b.vx += (impulse / b.mass) * nx;
-            b.vy += (impulse / b.mass) * ny;
+            const impulse = (-(1 + SHELL_BOUNCE) * closing) / 2;
+            a.vx -= impulse * nx;
+            a.vy -= impulse * ny;
+            b.vx += impulse * nx;
+            b.vy += impulse * ny;
           }
         }
       }
-      for (const b of list) if (b.leftS < 0 && b.mergeS < 0) this.collideWall(b);
+      for (const s of list) if (s.popS < 0 && s.liftS < 0) this.collideWall(s);
     }
     let fastest = 0;
-    for (const b of list) if (b.leftS < 0 && b.mergeS < 0) fastest = Math.max(fastest, Math.hypot(b.vx, b.vy));
+    for (const s of list) if (s.popS < 0 && s.liftS < 0) fastest = Math.max(fastest, Math.hypot(s.vx, s.vy));
     this.restS = fastest < REST_SPEED ? this.restS + STEP_S : 0;
   }
 
-  private collideWall(b: Ball): void {
+  private collideWall(b: Shell): void {
     const w = WALL_LINE;
     const reach = b.r + WALL / 2;
     for (let k = 0; k + 3 < w.length; k += 2) {
@@ -646,11 +636,22 @@ export class MoneyJar {
     }
   }
 
-  private draw(now: number): void {
+  /** One shell, turned as it lies, faded by `alpha`; a fined one greyed and dimmed besides. */
+  private drawShell(g: CanvasRenderingContext2D, s: Shell, alpha: number): void {
+    const half = s.r * SPRITE_OVER;
+    g.save();
+    g.globalAlpha = s.fined ? alpha * FINE_ALPHA : alpha;
+    if (s.fined) g.filter = FINE_FILTER;
+    g.translate(s.x, s.y);
+    g.rotate(s.angle);
+    g.drawImage(shellSprite(s.kind), -half, -half, 2 * half, 2 * half);
+    g.restore();
+  }
+
+  private draw(): void {
     const g = this.g;
     const u = this.unit;
     if (g === null || u <= 0) return;
-    this.drawnMs = now;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
     g.setTransform(u, 0, 0, u, 0, 0);
@@ -662,7 +663,7 @@ export class MoneyJar {
       }
     };
 
-    // Its shadow on whatever it stands on, then the glass behind the balls: a faint
+    // Its shadow on whatever it stands on, then the glass behind the shells: a faint
     // tint, the far wall darker toward the sides.
     g.fillStyle = 'rgba(0, 0, 0, 0.28)';
     g.beginPath();
@@ -677,32 +678,8 @@ export class MoneyJar {
     g.fillStyle = back;
     g.fill();
 
-    // The balls, each with the light turning on it; those leaving fade as they fall.
-    const t = now / 1000;
-    for (const b of this.balls) {
-      const fade = b.fallS < 0 ? 1 : Math.max(0, 1 - b.fallS / FADE_S);
-      if (fade <= 0) continue;
-      // Born of a merge or a split it swells past its size and back; merging it shrinks into the rest.
-      let r = b.r;
-      if (b.popS >= 0) {
-        const k = b.popS / POP_S;
-        r *= k < 0.7 ? 0.3 + (k / 0.7) * 0.85 : 1.15 - ((k - 0.7) / 0.3) * 0.15;
-      } else if (b.mergeS >= 0) {
-        r *= 1 - 0.45 * Math.min(1, b.mergeS / MERGE_S);
-      }
-      g.globalAlpha = fade;
-      g.drawImage(ballSprite(b.kind), b.x - r, b.y - r, 2 * r, 2 * r);
-      g.save();
-      g.beginPath();
-      g.arc(b.x, b.y, r * 0.92, 0, Math.PI * 2);
-      g.clip();
-      g.globalCompositeOperation = 'overlay';
-      g.globalAlpha = fade * SHIMMER_ALPHA;
-      g.fillStyle = shimmer(g, b.x, b.y, r, b.phase + b.spin * t * SHIMMER_TURNS);
-      g.fillRect(b.x - r, b.y - r, 2 * r, 2 * r);
-      g.restore();
-    }
-    g.globalAlpha = 1;
+    // The shells lying in the jar, behind the front glass.
+    for (const s of this.shells) if (s.popS < 0 && s.liftS < 0) this.drawShell(g, s, 1);
 
     // The glass in front: the wall in section, a window's highlight down the left of
     // the belly and a spot on its right shoulder.
@@ -749,20 +726,14 @@ export class MoneyJar {
     g.quadraticCurveTo(nx + 0.2, tie + 0.6, nx, tie + 1.0);
     g.stroke();
 
-    if (this.overflow > 0) {
-      // In pixels: a font is not scaled down to an em reliably.
-      const text = `+${this.overflow}`;
-      const x = (CX + BELLY_A - 0.6) * u;
-      const y = (BELLY_TOP + 0.5) * u;
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.font = `700 ${Math.round(1.1 * u)}px sans-serif`;
-      g.textAlign = 'right';
-      g.textBaseline = 'top';
-      g.lineWidth = 0.2 * u;
-      g.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-      g.strokeText(text, x, y);
-      g.fillStyle = '#f2b84e';
-      g.fillText(text, x, y);
+    // The shells on their way out, in front of everything: lifted ones fading as they
+    // rise, popped and fined ones fading in the last of their fall.
+    for (const s of this.shells) {
+      if (s.liftS >= 0) this.drawShell(g, s, 1 - Math.min(1, s.liftS / LIFT_S) ** 2);
+      else if (s.popS >= 0) {
+        const fall = s.fined ? FINE_FALL_S : POP_FALL_S;
+        this.drawShell(g, s, s.fallS < 0 ? 1 : Math.max(0, 1 - Math.max(0, s.fallS - fall * 0.5) / (fall * 0.5)));
+      }
     }
   }
 }

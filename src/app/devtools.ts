@@ -27,7 +27,7 @@ import type { Renderer } from '../core/renderer';
 import { spawnCarState, type SpawnRequest } from '../game/spawn';
 import type { GameWorld } from '../game/state';
 import { CAMERA_FRAME_LIMIT, Inventory, isHaul, itemLabel, type Item } from '../items/items';
-import { credit, formatMoney } from '../economy/economy';
+import { credit, formatPay } from '../economy/economy';
 import type { LoosePartField } from '../parts/loose';
 import { variant, type PartInstance } from '../parts/registry';
 import type { Interaction } from '../player/interaction';
@@ -61,10 +61,12 @@ import type { DesertTileStreamer } from '../world/deserttiles';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { RoadTraffic } from '../world/traffic';
-import type { RivalRace } from '../contracts/race';
 import type { Terrain } from '../world/terrain';
 import type { WorldWorkScheduler } from '../world/workqueue';
 import { forceWeather, weather } from '../world/weather';
+
+/** Shells the dev pause-menu gift pays (`giveShells`): a fifth of a full jar. */
+const DEV_SHELLS = 10;
 
 /**
  * Gap between the player and the NEAR END of a spawned vehicle, metres.
@@ -122,7 +124,6 @@ export interface DevToolsContext {
   readonly lakeWater: LakeWater;
   readonly tumbleweeds: TumbleweedField;
   readonly traffic: RoadTraffic;
-  readonly race: RivalRace;
   readonly vitals: PlayerVitals;
   readonly autopilot: Autopilot;
   readonly hud: Hud;
@@ -146,8 +147,8 @@ export interface DevTools {
   seatInNearestCar(): void;
   /** Puts the player on the road side of one lake site. */
   jumpToLake(index: number): void;
-  /** Adds 100 rubles to the player's money. */
-  giveMoney(): void;
+  /** Pays `DEV_SHELLS` shells of random kinds into the player's jar. */
+  giveShells(): void;
   /** Puts the player and the driven car on the road at a kilometre; see `__bro.jumpTo`. */
   jumpTo(km: number): void;
   /** Walks a `jumpToLake` marker forward until a site comes up wet. */
@@ -322,11 +323,10 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     ctx.hud.setToast(`spawned ${itemLabel(item)}`);
   };
 
-  /** The dev money behind `PauseHooks.giveMoney`: 1000 rubles added, ten big balls. */
-  const devGiveMoney = (): void => {
-    const amount = 1000;
-    credit(ctx.world, amount);
-    ctx.hud.setToast(`+${formatMoney(amount)}`);
+  /** The dev gift behind `PauseHooks.giveShells`: ten shells, a full jar spilling as any would. */
+  const devGiveShells = (): void => {
+    credit(ctx.world, DEV_SHELLS);
+    ctx.hud.setToast(`+${formatPay(DEV_SHELLS)}`);
   };
 
   /**
@@ -637,8 +637,6 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     driveModel: devDriveModel,
     tumbleweeds: ctx.tumbleweeds,
     traffic: ctx.traffic,
-    // `race.snapshot()`: the three rivals' place, speed and phase.
-    race: ctx.race,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
     // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands
@@ -677,23 +675,21 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     });
   };
   /**
-   * `thing(id, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts,
-   * e.g. 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound
-   * for the next, dropped loose in front of him (the post machine itself gives into its grid). A
-   * haul is taken there and then: its load stood in that post's pick-up slot, the first
+   * `thing(id, urgent?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
+   * 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound for
+   * the next, dropped loose in front of him (the post machine itself gives into its grid).
+   * A haul is taken there and then: its load stood in that post's pick-up slot, the first
    * of its parking row (whatever stands there already), and bound to it, as TAKE does
-   * (contracts/world.ts). `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes
-   * it a race to the post that many on,
-   * started when it is picked up (a haul's, at once). The teddies wait in a shelter: see
-   * `teddies`. Returns the contract id.
+   * (contracts/world.ts). `urgent` gives it the urgent clock. The teddies wait in a
+   * shelter: see `teddies`. Returns the contract id.
    */
-  dev['thing'] = (id: string, urgent = false, raceLegs?: 1 | 2): string => {
+  dev['thing'] = (id: string, urgent = false): string => {
     if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
     if (id === 'teddies') throw new Error('the teddies wait in a shelter: __bro.teddies(count?)');
     const seed = ctx.world.seed;
     const source = nearestPost();
     // A runtime id: a reloaded save resumes the counter past it (game/state.ts GameWorld).
-    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, raceLegs, urgent);
+    const offer = makeContract(seed, ctx.world.runtimePartId(), source, id, Date.now() >>> 0, urgent);
     if (isHaul(offer)) {
       spawnHaulLoad({ world: ctx.world, road: ctx.road, terrain: ctx.terrain }, offer);
       ctx.world.apply({ t: 'haul_take', haul: { contract: offer, loadId: haulLoadId(offer) } });
@@ -832,7 +828,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     flipVehicle: devFlipVehicle,
     seatInNearestCar: devSeatInNearestCar,
     jumpToLake: devJumpToLake,
-    giveMoney: devGiveMoney,
+    giveShells: devGiveShells,
     jumpTo: devJumpTo,
     updateLakeSeek,
   };

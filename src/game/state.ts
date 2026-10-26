@@ -1,4 +1,5 @@
 import { hash } from '../core/rng';
+import { emptyPurse, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
 import type { ContractCargoItem, FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
 import type { ThingId } from '../items/things';
 import type { PartInstance } from '../parts/registry';
@@ -171,17 +172,17 @@ export interface CarState {
    */
   papers?: boolean;
   /**
-   * Rubles a car standing on a lot asks (world/carlot.ts), flat across the road. Present
+   * Shells a car standing on a lot asks (world/carlot.ts `carShells`), flat across the
+   * road, in the one kind its key box takes (economy/economy.ts `carShellKind`). Present
    * only while it is for sale: nobody drives it off before `car_buy` clears it.
    */
   lotPrice?: number;
   /**
-   * Rubles already paid into this lot car's key box (world/keybox.ts), toward
-   * `lotPrice`: the whole price once its lever has taken it from the player's money, or what a
-   * save from the coin days had fed in. Kept so a reload never eats it; `car_buy` clears
+   * The key box's lever has taken `lotPrice` from the player's jar (world/keybox.ts,
+   * `lot_pay`): the key is his to take. Kept so a reload never eats it; `car_buy` clears
    * it with the price.
    */
-  lotPaid?: number;
+  lotPaid?: true;
 }
 
 /** A kit car's four seats; the driver sits on the car's left (+X in the kit frame). */
@@ -223,10 +224,23 @@ export interface PlayerState {
   /** Shades currently on the player's face; absent from the carried pack while worn. */
   wornSunShades: SunShadesItem | null;
   /**
-   * The player's balance, whole RUBLES (economy/economy.ts). Not an item: money machines
-   * debit or pay it directly while they are worked.
+   * The player's SHELLS by kind (economy/shells.ts), the jar's contents: never more than
+   * `JAR_CAPACITY` together. Not an item: machines take their price out of it and pay
+   * goes into it directly while they are worked (economy/economy.ts `debit`, `credit`).
    */
-  money: number;
+  shells: ShellPurse;
+  /**
+   * Shell draws made in the world so far — shells minted (economy/shells.ts
+   * `mintShells`) and shells taken by fines (`takeShells`) — the index of the next
+   * draw, so a reload or a replay mints and fines the same shells.
+   */
+  shellMint: number;
+  /**
+   * Metres ridden in a car (the odometer of the car he sits in, `car_odometer`) not yet
+   * paid: below a kilometre once `payDriving` (economy/economy.ts) has run, which pays a
+   * shell per whole kilometre and leaves the rest here in the same delta.
+   */
+  driveM: number;
 }
 
 /**
@@ -285,7 +299,7 @@ export interface TrailerLoad {
  * it: the load is the contract.
  */
 export interface HaulState {
-  /** The card as taken: its thing, source, destination, race and urgent clock; the runtime ticks its progress. */
+  /** The card as taken: its thing, source, destination and urgent clock; the runtime ticks its progress. */
   readonly contract: ContractCargoItem;
   /** The trailer (`contract-trailer:…`) or the car (`contract-car:…`) it is about. */
   readonly loadId: string;
@@ -299,10 +313,15 @@ export interface HaulState {
  *    filter), where a version 1 bonnet had the tank fourth and the filter fifth.
  *  - 3: money is kopecks in the purse (`PlayerState.money`); before it, coin items
  *    were the money and lot prices were coins.
- *  - 4: money is whole rubles, ten to the ruble of version 3 (economy/money.ts): the
- *    purse and the lot prices are a tenth of their kopecks.
+ *  - 4: money is whole rubles, ten to the ruble of version 3.
+ *  - 5: money is SHELLS by kind (`PlayerState.shells`, economy/shells.ts), lot prices
+ *    are shells and `lotPaid` a flag. An older save's money is not converted: its jar
+ *    starts empty and its lot cars ask their price in shells again.
+ *  - 6: no races. A contract carries no race legs and its progress no `started`; a
+ *    contract an older save had out as a race loads as a plain one bound for the next
+ *    post (save/save.ts `migrateItem`). `shellMint` counts fines' draws as well.
  */
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 6;
 
 export interface WorldState {
   readonly seed: number;
@@ -500,10 +519,23 @@ export type WorldDelta =
   | { t: 'machine_grid'; machineId: string; cells: readonly (Item | null)[] }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
-  /** Rubles paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `rubles`. */
-  | { t: 'lot_pay'; carId: string; rubles: number }
-  /** The player's balance is now `rubles` (economy/economy.ts `debit`, `credit`). */
-  | { t: 'money'; rubles: number };
+  /** A lot car's price taken by its key box (world/keybox.ts): its key is the player's to take. */
+  | { t: 'lot_pay'; carId: string }
+  /**
+   * The player's jar is now `shells` (economy/economy.ts `debit`, `credit`, `fine`). A
+   * credit or a fine also moves the draw count on (`mint`), and a credit may leave the
+   * driving not yet paid (`driveM`); `spilled` names the shells a full jar lost over its
+   * rim on the way, and `fined` the shells a fine took out of it, for the jar to show
+   * (ui/hudjar.ts). Absent fields are unchanged.
+   */
+  | {
+      t: 'shells';
+      shells: ShellPurse;
+      mint?: number;
+      driveM?: number;
+      spilled?: readonly ShellKind[];
+      fined?: readonly ShellKind[];
+    };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
@@ -540,7 +572,9 @@ export function newWorldState(seed: number): WorldState {
       carried: [],
       carriedSelected: 0,
       wornSunShades: null,
-      money: 0,
+      shells: emptyPurse(),
+      shellMint: 0,
+      driveM: 0,
     },
     cars: {},
     toyBox: {},
@@ -793,6 +827,8 @@ export class GameWorld {
       case 'car_odometer': {
         const car = s.cars[delta.carId];
         if (car) car.odometer += delta.metres;
+        // The car he sits in: its kilometres earn shells (economy/economy.ts `payDriving`).
+        if (car && s.player.drivingCarId === delta.carId && delta.metres > 0) s.player.driveM += delta.metres;
         break;
       }
       case 'car_lights': {
@@ -975,11 +1011,15 @@ export class GameWorld {
       }
       case 'lot_pay': {
         const car = s.cars[delta.carId];
-        if (car?.lotPrice !== undefined) car.lotPaid = Math.min(car.lotPrice, (car.lotPaid ?? 0) + delta.rubles);
+        if (car?.lotPrice !== undefined) car.lotPaid = true;
         break;
       }
-      case 'money': {
-        s.player.money = Math.max(0, Math.round(delta.rubles));
+      case 'shells': {
+        for (const kind of SHELL_KINDS) {
+          s.player.shells[kind] = Math.max(0, Math.round(delta.shells[kind]));
+        }
+        if (delta.mint !== undefined) s.player.shellMint = delta.mint;
+        if (delta.driveM !== undefined) s.player.driveM = Math.max(0, delta.driveM);
         break;
       }
       case 'courier_storage':

@@ -28,11 +28,12 @@
  * `haulLoadLock`), until the player is `CLEAR_M` away and it is out of view: then it goes.
  *
  * DESTINATION OR RETURN. The same reverse-in at a post that may sign for the haul
- * (`contractDestinationRefusal`: any post past its source, a race's from its finish on)
- * is a DELIVERY and pays `contractPay` (urgent bonus, the pulling car's stickers) plus a
- * race win; at ANY other post, its source included, it is a RETURN TO SENDER: no pay, the
- * contract closed. A post's hand-in slot is the one or the other, never both: the
- * destination always wins.
+ * (`contractDestinationRefusal`: any post past its source) is a DELIVERY and pays
+ * `contractPay` (the route's kilometres in shells, twice that urgent and on time); at ANY
+ * other post, its source included, it is a RETURN TO SENDER: no pay, the contract closed
+ * undelivered and FINED `FINE_SHELLS` (economy/economy.ts `fine`) right after the
+ * `haul_close` that a reload finds, so never twice. A post's hand-in slot is the one or
+ * the other, never both: the destination always wins.
  *
  * While the load stands still at a hand-in slot and is not accepted, the reason is told
  * once in a toast (again after `RETELL_S`): back it in, straighten up, all the way in,
@@ -40,14 +41,13 @@
  * player's car that is not the load of the haul he has out.
  */
 
-import { carUniqueness, contractPay, credit, formatMoney } from '../economy/economy';
+import { contractPay, credit, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
 import type { GameWorld, WorldState } from '../game/state';
 import { contractKindOf, contractThing, isHaul } from '../items/items';
 import { carModelMeasure } from '../render/carmodel';
 import { hasCarModel } from '../vehicle/carmodels';
 import { TRAILER_BALL_Z, TRAILER_HALF_WIDTH, trailerTailZ } from '../vehicle/trailer';
 import { postParkingSlots, type ParkingSlot } from '../world/haulbay';
-import { LAYBY_CAR_RANGE_M } from '../world/post';
 import { postStopsBetween } from '../world/poststops';
 import { HAUL_SLOT, postStock } from './offers';
 import { contractDestinationRefusal, contractKindRefusal } from './registry';
@@ -237,8 +237,6 @@ export interface HaulBayHost {
   uncouple(id: string): void;
   /** A sphere at ABSOLUTE metres is in the camera's view. */
   inView(x: number, y: number, z: number, radius: number): boolean;
-  /** Rubles a race win adds for handing `contractId` in now (contracts/race.ts). */
-  racePay(contractId: string): number;
   toast(text: string): void;
 }
 
@@ -482,7 +480,7 @@ export class HaulBays {
       this.tell(watch, why);
       return;
     }
-    if (watch.still >= ACCEPT_STILL_S) this.accept(contractId, watch.bay, bay);
+    if (watch.still >= ACCEPT_STILL_S) this.accept(contractId, watch.bay);
   }
 
   /**
@@ -517,43 +515,23 @@ export class HaulBays {
     return probe;
   }
 
-  /**
-   * The stickers a delivery in `bay` is paid by: the car pulling the load (its trailer's
-   * ball, its tow bar), else the player's own car standing nearest the bay within
-   * `LAYBY_CAR_RANGE_M` (a car driven over came without one), else none.
-   */
-  private deliveryStickers(loadId: string, bay: ParkingSlot): number {
-    const state = this.state;
-    const pullerId = state.trailers[loadId]?.hitchedTo ?? state.cars[loadId]?.towedBy ?? null;
-    const puller = pullerId ? state.cars[pullerId] : undefined;
-    if (puller) return carUniqueness(puller);
-    let best = 0;
-    let bestD = LAYBY_CAR_RANGE_M;
-    for (const car of Object.values(state.cars)) {
-      if (!car.papers) continue;
-      const d = Math.hypot(car.x - bay.x, car.z - bay.z);
-      if (d > bestD) continue;
-      bestD = d;
-      best = carUniqueness(car);
-    }
-    return best;
-  }
-
-  /** Accepts the load of `contractId` in post `index`'s `bay`: delivered, or returned to its sender. */
-  private accept(contractId: string, index: number, bay: ParkingSlot): void {
+  /** Accepts the load of `contractId` in post `index`'s hand-in bay: delivered, or returned to its sender and fined. */
+  private accept(contractId: string, index: number): void {
     const haul = this.state.hauls[contractId]!;
     const contract = haul.contract;
     const delivered = contractDestinationRefusal(contract, index) === null;
-    // Read before anything changes: the puller's stickers, the race the hand-in ends.
-    const pay = delivered
-      ? contractPay(this.world.seed, contract, this.deliveryStickers(haul.loadId, bay)) + this.host.racePay(contractId)
-      : 0;
+    // Read before anything changes.
+    const pay = delivered ? contractPay(this.world.seed, contract) : 0;
     this.host.uncouple(haul.loadId);
-    // The contract closed first, then paid: a failure between cannot pay twice.
+    // The contract closed first, then paid or fined: a failure between cannot pay or fine twice.
     this.world.apply({ t: 'haul_close', contractId, postIndex: index, deliveredKind: delivered ? contractKindOf(contract) : null });
-    credit(this.world, pay);
     this.watches.delete(haul.loadId);
     const name = contractThing(contract).name;
-    this.host.toast(delivered ? `${name} handed in — ${formatMoney(pay)}` : `${name} back to the sender — no pay`);
+    if (delivered) {
+      credit(this.world, pay);
+      this.host.toast(`${name} handed in — ${formatPay(pay)}`);
+    } else {
+      this.host.toast(`${name} back to the sender — ${formatFine(fine(this.world, FINE_SHELLS))}`);
+    }
   }
 }

@@ -9,16 +9,10 @@
  * is hidden. The teddies are no card's: they wait in the shelter (contracts/shelters.ts),
  * whose party is made here too (`makeContract`).
  *
- * The offer is a plain `contract_cargo` item with its thing, destination, seed and fresh
- * progress already on it.
- * RACE is a modifier on top: an ordinary, fragile or bulky offer, or a trailer haul, is a
- * race to the next post or the one after with `RACE_SHARE` chance, drawn per offer
- * (contracts/race.ts); the rivals carry the cargo as its weight, so footprint does not
- * matter. A tow or a car to drive over never races: there is one car in the job, and no
- * rival can bring its own copy of it. The drive's very first offer is a plain ordinary
- * thing, never a race.
- * URGENT is the other modifier, on any card: `URGENT_SHARE` of the offers (never the
- * drive's first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
+ * The offer is a plain `contract_cargo` item with its thing, destination (always the
+ * next post), seed and fresh progress already on it.
+ * URGENT is a modifier on any card: `URGENT_SHARE` of the offers (never the drive's
+ * first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
  *
  * A post never runs dry: an offer taken out is replaced in its slot by the next ROUND of
  * that slot (`nextOffer`), drawn the same way, so the machine always shows one offer of
@@ -41,9 +35,6 @@ import { defaultProgress } from './types';
 /** Offer draws stay on the courier domain the base system already used. */
 const OFFER_DOMAIN = 0x4f464631; // 'OFF1'
 const THING_DOMAIN = 0x4f464b31; // 'OFK1'
-const RACE_DOMAIN = 0x4f465231; // 'OFR1'
-/** Share of the offers that may race (all but tows, drives and the special card) that are a race. */
-const RACE_SHARE = 0.3;
 const URGENT_DOMAIN = 0x4f465531; // 'OFU1'
 /** Share of the offers, any card, that are urgent (game-design2.md §7.5). */
 const URGENT_SHARE = 0.25;
@@ -83,9 +74,9 @@ function parseOfferId(index: number, id: string): { slot: number; round: number 
   return { slot: Number(match[2]), round: match[3] === undefined ? 0 : Number(match[3]) };
 }
 
-/** The post an offer is bound for: the next one, or the race's finish. */
+/** The post an offer is bound for: always the next one. */
 export function offerDestinationIndex(item: ContractCargoItem): number {
-  return item.sourceCourierIndex + (item.raceLegs ?? 1);
+  return item.sourceCourierIndex + 1;
 }
 
 /** An urgent contract's clock from post `source` to post `destination`, seconds; see `URGENT_KMH`. */
@@ -95,9 +86,9 @@ export function urgentDeadlineS(seed: number, source: number, destination: numbe
 }
 
 /**
- * A fresh contract for `thing` sent from post `courierIndex` to the next one (or a
- * race's finish `raceLegs` posts on), under `id`, its draws from `generatedSeed`. The
- * one way an offer is made: the post's slots and the dev tools (app/devtools.ts).
+ * A fresh contract for `thing` sent from post `courierIndex` to the next one, under `id`,
+ * its draws from `generatedSeed`. The one way an offer is made: the post's slots and the
+ * dev tools (app/devtools.ts).
  */
 export function makeContract(
   seed: number,
@@ -105,7 +96,6 @@ export function makeContract(
   courierIndex: number,
   thing: ThingId,
   generatedSeed: number,
-  raceLegs?: 1 | 2,
   urgent = false,
 ): ContractCargoItem {
   const item: ContractCargoItem = {
@@ -114,11 +104,10 @@ export function makeContract(
     sourceCourierIndex: courierIndex,
     thing,
     generatedSeed,
-    destination: placeNameAt(seed, postStop(seed, courierIndex + (raceLegs ?? 1)).s),
+    destination: placeNameAt(seed, postStop(seed, courierIndex + 1).s),
     progress: defaultProgress(),
   };
-  if (urgent) item.urgentS = urgentDeadlineS(seed, courierIndex, courierIndex + (raceLegs ?? 1));
-  if (raceLegs !== undefined) item.raceLegs = raceLegs;
+  if (urgent) item.urgentS = urgentDeadlineS(seed, courierIndex, courierIndex + 1);
   dressContractOffer(item);
   return item;
 }
@@ -141,22 +130,8 @@ export function generateContractOffer(
   const pool = special ? specialThings(relics) : cardThings(card);
   const thing = pool[Math.min(pool.length - 1, Math.floor(hash01(seed, THING_DOMAIN, courierIndex, key) * pool.length))]!;
   const first = courierIndex === 0 && key === 0;
-  const raceRoll = hash01(seed, RACE_DOMAIN, courierIndex, key);
-  // A special thing never races: it is the boy's own, not one of three copies. Nor does
-  // a tow or a drive: the one car in the job cannot be copied.
-  const raceLegs = thing.place === 'tow' || thing.place === 'transfer' || special || first || raceRoll >= RACE_SHARE
-    ? undefined
-    : raceRoll < RACE_SHARE / 2 ? 1 : 2;
   const urgent = !first && hash01(seed, URGENT_DOMAIN, courierIndex, key) < URGENT_SHARE;
-  return makeContract(
-    seed,
-    offerId(courierIndex, slot, round),
-    courierIndex,
-    thing.id,
-    hash(seed, OFFER_DOMAIN, courierIndex, key),
-    raceLegs,
-    urgent,
-  );
+  return makeContract(seed, offerId(courierIndex, slot, round), courierIndex, thing.id, hash(seed, OFFER_DOMAIN, courierIndex, key), urgent);
 }
 
 /** The offer that replaces `offer` in its slot once it is taken out: the next round (`relics`: see `generateContractOffer`). */
@@ -192,13 +167,11 @@ export function parseShelterPartyId(id: string): { index: number; round: number 
 
 /**
  * Round `round` of the teddy party waiting in post `courierIndex`'s shelter (§10): 1–3
- * teddies (kinds/teddyPassengers.ts `dressOffer`), bound for the next post or a race's
- * finish, urgent or not, at the cards' shares. The drive's very first party is plain.
+ * teddies (kinds/teddyPassengers.ts `dressOffer`), bound for the next post, urgent or
+ * not at the cards' share. The drive's very first party is plain.
  */
 export function shelterParty(seed: number, courierIndex: number, round: number): ContractCargoItem {
   const first = courierIndex === 0 && round === 0;
-  const raceRoll = hash01(seed, RACE_DOMAIN, SHELTER_DOMAIN, courierIndex, round);
-  const raceLegs = first || raceRoll >= RACE_SHARE ? undefined : raceRoll < RACE_SHARE / 2 ? 1 : 2;
   const urgent = !first && hash01(seed, URGENT_DOMAIN, SHELTER_DOMAIN, courierIndex, round) < URGENT_SHARE;
   return makeContract(
     seed,
@@ -206,7 +179,6 @@ export function shelterParty(seed: number, courierIndex: number, round: number):
     courierIndex,
     'teddies',
     hash(seed, OFFER_DOMAIN, SHELTER_DOMAIN, courierIndex, round),
-    raceLegs,
     urgent,
   );
 }

@@ -7,7 +7,7 @@
  * which the player cannot change. Each teddy taken off the bench is its own item
  * (`teddyItem`) with its own id and the party's id and size on it
  * (`ContractCargoItem.party`). The party is ONE contract however many of it are taken;
- * each teddy is paid on its own when it is seated on a bench at its destination.
+ * the party is paid once, and only if every teddy of it is seated at its destination (world/shelter.ts).
  *
  * Teddies ride only on passenger seats — the front passenger's and either half of the
  * rear bench (vehicle/cabin.ts `layPlace`) — never in the boot, under the bonnet, on the
@@ -15,8 +15,8 @@
  * the ride, never their place. While a teddy rides in the car the player drives, the
  * ride meter accounts it under its own id (`trackPassengerRide`), softened by that car's
  * comfort (§11.2, `comfortFactor`), and the comfort and harsh moments are kept on the
- * teddy, so a reload mid-trip keeps the ride so far. Its pay is `contractPay` scaled by
- * that ride (`passengerQuality`).
+ * teddy, so a reload mid-trip keeps the ride so far (`passengerQuality`); it does not
+ * change the pay (economy/economy.ts `contractPay`).
  */
 
 import { hash01 } from '../../core/rng';

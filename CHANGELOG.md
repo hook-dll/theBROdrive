@@ -4,6 +4,24 @@
 
 ### Added
 
+- FINES (economy phase 2; `economy/shells.ts` `takeShells`, `economy/economy.ts` `fine`,
+  `FINE_SHELLS`, `formatFine`, `game/state.ts`, `contracts/runtime.ts`,
+  `contracts/haulbays.ts`, `world/post.ts`, `world/shelter.ts`, `ui/hudjar.ts`,
+  `ui/hud.ts`, `audio/foley.ts`, `main.ts`). A job that CLOSES WITHOUT DELIVERY costs 3
+  shells, once per job: a thing broken (fined the moment it breaks; handing the broken
+  souvenir back fines nothing more), a thing put into a post's grid as a return to sender
+  (any post that does not sign for it), a haul's load returned in a hand-in bay, and a
+  teddy party that closes short or put back whole at its source. The shells are drawn from
+  the jar by count (`pickWeighted`) on the seed and the same saved draw counter as pay
+  (`PlayerState.shellMint`), never below empty — no debt; the shells delta carries
+  `fined` for the jar. Each fine is applied right after the saved closing it fines for
+  (`completedContractIds`, `progress.broken`), so a reload never fines twice. The jar
+  fades in and the fined shells leap out of it — higher and slower than an overflow pop,
+  greyed and dimmed, turning over slowly — with the jar sagging on its foot and a falling
+  three-note `fine` foley; the toast names the reason and "−3 shells". The post's return
+  card, the shelter's prompts and toasts say the fine before it is taken. A late urgent
+  delivery is not fined (plain pay); abandoning a haul is not fined yet.
+
 - TRAFFIC COST BREAKDOWN (`core/trafficprofile.ts`, `RoadTraffic.profile`, dev only, off
   by default; `__bro.traffic.profile.enabled = true` in the console). Where a traffic step's
   milliseconds go — the coordinator, the drivers' `drive`, the cars' `Vehicle.fixedUpdate`,
@@ -16,6 +34,41 @@
   (`world/haulbay.ts` `postParkingSlot`).
 
 ### Changed
+
+- SHELLS REPLACE RUBLES (economy phase 1; `economy/shells.ts`, `economy/economy.ts`,
+  `game/state.ts`, `save/save.ts`, `ui/shellsprites.ts`, `ui/hudjar.ts`, `ui/hud.ts`,
+  `ui/hud.css`, `world/vending.ts`, `world/pumps.ts`, `world/keybox.ts`, `world/carlot.ts`,
+  `world/poi.ts`, `world/post.ts`, `world/shelter.ts`, `contracts/haulbays.ts`,
+  `contracts/race.ts`, `items/things.ts`, `player/interaction.ts`, `app/devtools.ts`,
+  `ui/menu.ts`, `main.ts`, `tools/look/hud.mjs`). The money is SHELLS: four kinds of one
+  size and one worth — scallop, spiral, horn, cowrie — kept by kind in
+  `PlayerState.shells`, in a jar of 50. Pay comes as shells of random kinds, drawn from the
+  seed and a saved mint count (`PlayerState.shellMint`, `mintShells`), so a reload mints
+  the same ones; a full jar still takes a new shell and loses one (weighted by count) over
+  the rim. A price is one kind × a count (`ShellPrice`): every machine takes its own kind
+  (`machineShellKind` of seed and fixture id) and refuses when short of it, whatever else
+  the jar holds. EARNING: a shell per whole kilometre ridden in the car the player sits in
+  (`PlayerState.driveM`, raised by `car_odometer`, paid by `payDriving` in the same delta
+  that keeps the remainder); a delivery pays its route's kilometres, source post to the
+  post it is bound for (min 1), ×2 urgent and on time — the thing's base pay, km index,
+  condition, a teddy's ride and the sticker bonus are gone from pay, and so is the race
+  win's pay (`winPay`, `racePay`). A teddy party is paid ONCE and only whole: when its last
+  teddy is seated at the destination bench and every teddy of the party was seated there;
+  one returned, left on the source bench or forgotten, and it pays nothing. PRICES, flat down the road:
+  gum 1, air filter 2, sticker envelope 2, spray 3, shades 4, radiator 5, gearbox 7,
+  turbine 9, engine 10, cans 5/10/20 L 1/2/3; a pump fill of any amount 1, taken with the
+  first drop (from taking the nozzle until it is hung back, or one held can fill); a lot
+  car 5–10 by its place in the old price ranking (the lot's model ceiling is in shells
+  too, +1 per 50 km band); the key box's lever takes it all at once (`lotPaid` is a flag).
+  No km-index scaling, no worn-part discount. THE JAR: no figures; four procedural shell
+  sprites; shells pour in, are lifted out, and a spilled one pops over the rim and falls
+  away; no merging or change. It is out on foot on a lay-by as before and also shows for
+  about 2.5 s whenever shells come or go. Prices on cards, boards and prompts are drawn as
+  shells of their kind (≤5 a row, more a figure and one shell); pay is written "N
+  shells". New game: 5 shells. Dev: "Get 10 shells". SAVE_VERSION 5: an older save's
+  money is not converted (the jar starts empty), lot cars ask their price in shells, and a
+  key box that had the whole old price keeps the key paid; the coin-days conversion is
+  gone (coin items are still dropped).
 
 - A BOY'S EYE AND GAIT ON FOOT (`render/cameras.ts`, `player/player.ts`, `player/gait.ts`,
   `audio/foley.ts`, `main.ts`). The standing eye is at 1.10 m (was 1.62), a full crouch
@@ -692,6 +745,22 @@
   `completedContractIds` too (`GameWorld`).
 
 ### Removed
+
+- RACES (`contracts/race.ts` and everything only it used). No offer or teddy party is a
+  race any more (`RACE_SHARE` and the race roll are gone from `generateContractOffer`
+  and `shelterParty`; the other draws are unchanged); a contract has no `raceLegs` and is
+  always bound for the next post (`offerDestinationIndex`, `makeContract`,
+  `contractDestinationRefusal`). Gone with them: the rival racers and the traffic
+  stream's rival support (`RivalSpawn`, `spawnRival`, `rivalHandIn`, `reserveHandIn`,
+  the across-the-road lay-by turn and its yields, `world/traffic.ts`), the race band and
+  notes on the post's cards and the shelter's timetable, the item label's "· race", the
+  navigator's race view (rival rings, chequered finish, "race 2/4" plate), the
+  `__bro.race` dev handle and `__bro.thing`'s `raceLegs` argument, the race section of
+  `tools/traffic-bench.ts`, and `ContractProgress.started`, which only the race read.
+  SAVE_VERSION 6: a contract an older save had out as a race loads as a plain one bound
+  for the next post — any post past its source signs for it, its old finish (which its
+  label still names) included, paying the next post's distance. Races come back later as
+  their own "race me!" entry point.
 
 - Per-car contract slots (`CONTRACT_SLOTS`, `contractSlotsFor`, the interaction's
   `contractSlotsRefusal`, `items.ts` `contractsAmong`): any car takes any number of

@@ -7,16 +7,12 @@ import { CAR_MODELS } from '../src/vehicle/carmodels';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import type { Vehicle } from '../src/vehicle/vehicle';
 import { laybyLevel, laybyParkLateral, laybysBetween, type Layby } from '../src/world/layby';
-import { postParkingSlot } from '../src/world/haulbay';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
-import { DENSITY_FLOOR, RoadTraffic, type RivalPose } from '../src/world/traffic';
+import { DENSITY_FLOOR, RoadTraffic } from '../src/world/traffic';
 import { TRAFFIC_CAPS, type ComputeLevel } from '../src/game/settings';
 import { RAILS_REFUSALS, resetTrafficProfile } from '../src/core/trafficprofile';
-import { RivalRace } from '../src/contracts/race';
-import type { ContractCargoItem } from '../src/items/items';
-import { postStopsBetween } from '../src/world/poststops';
 import { Terrain } from '../src/world/terrain';
 import { TERMINUS_CENTRE_M, TERMINUS_PAD_M } from '../src/world/terminus';
 import { widenessAt } from '../src/world/roadprofile';
@@ -206,7 +202,6 @@ function sampleStoppedTraffic(): void {
 // is re-synced after every step it spends on them (`syncRailClocks`).
 type ClockCar = {
   id: string;
-  rival: boolean;
   direction: 1 | -1;
   style: string;
   settleFor: number;
@@ -254,7 +249,7 @@ const liveDirections = new Set<number>();
 let cautiousElsewhere = 0;
 function observeOpeners(): void {
   for (const car of clockTraffic.carList) {
-    if (car.rival || seenCars.has(car.id)) continue;
+    if (seenCars.has(car.id)) continue;
     seenCars.add(car.id);
     if (!liveDirections.has(car.direction)) {
       openers.push({ id: car.id, direction: car.direction, mode: car.autopilot.mode, style: car.style, model: car.modelId });
@@ -264,7 +259,7 @@ function observeOpeners(): void {
     liveDirections.add(car.direction);
   }
   liveDirections.clear();
-  for (const car of clockTraffic.carList) if (!car.rival) liveDirections.add(car.direction);
+  for (const car of clockTraffic.carList) liveDirections.add(car.direction);
 }
 let unsupportedSamples = 0;
 let supportSamples = 0;
@@ -800,171 +795,6 @@ check(
     `${status.impacts - impactsBefore} impact(s)`,
   );
   stops.dispose();
-}
-// A RIVAL HANDS IN AT THE POST'S LAY-BY, AND FINISHES ITS RUN AFTER THE RACE.
-//
-// A race to the post at a lay-by on each side of the road (the rivals drive the
-// road forward, so a left-hand lay-by is across the oncoming lane). The player stands
-// just past the finish. Every live rival must pull in, stand beside the post for its
-// short hand-in, pull out and be back in its lane before the race hands it back to the
-// stream, touching nothing — a haul's load waiting nose out in the post's pick-up slot
-// (world/haulbay.ts `postParkingSlot`) is a fixed body here. On the right-hand
-// lay-by the player wins at once, so the rivals measured there all finish after the
-// race was decided.
-{
-  const paved = new Set<number>([laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000)[0]!.poiIndex]);
-  for (const side of [-1, 1] as const) {
-    const layby = laybysBetween(SEED, ROAD_TO + LAYBY_ROAD_REACH_M, ROAD_TO + 100_000).find(
-      (candidate) => candidate.side === side && postStopsBetween(SEED, candidate.s - 1, candidate.s + 1).length > 0,
-    );
-    if (!layby) throw new Error(`no post lay-by on side ${side} on this seed`);
-    const courier = postStopsBetween(SEED, layby.s - 1, layby.s + 1)[0]!;
-    if (!paved.has(layby.poiIndex)) addLaybyCollider(physics, road, layby);
-    paved.add(layby.poiIndex);
-    const pickup = postParkingSlot(SEED, road, courier.index, 'pickup');
-    const courierPoint = road.offsetPoint(pickup.s, laybyParkLateral(layby));
-    const heading = pickup.yaw;
-    const courierBody = physics.world.createRigidBody(
-      physics.rapier.RigidBodyDesc.fixed()
-        .setTranslation(pickup.x, courierPoint.y + 0.75, pickup.z)
-        .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }),
-    );
-    physics.world.createCollider(physics.rapier.ColliderDesc.cuboid(0.9, 0.75, 2.2), courierBody);
-    const stream = new RoadTraffic(
-      physics,
-      new GameWorld(newWorldState(SEED)),
-      new THREE.Scene(),
-      new WorldOrigin(),
-      road,
-      loadCarModel,
-      () => true,
-    );
-    const pose: RivalPose = { s: 0, speed: 0, handIn: 'none' };
-    const toasts: string[] = [];
-    let releasedEarly = 0;
-    const released = new Set<string>();
-    const race = new RivalRace(
-      SEED,
-      road,
-      {
-        spawnRival: (spec) => stream.spawnRival(spec),
-        rivalPose: (id, out) => stream.rivalPose(id, out),
-        setRivalSpeedCap: (id, mps) => stream.setRivalSpeedCap(id, mps),
-        rivalHandIn: (id, courierS, standS, parkS) => stream.rivalHandIn(id, courierS, standS, parkS),
-        reserveHandIn: (courierS, reserved) => stream.reserveHandIn(courierS, reserved),
-        releaseRival: (id) => {
-          // Back to the stream only once it is back in its lane.
-          if (!stream.rivalPose(id, pose) || pose.handIn !== 'clear') releasedEarly++;
-          released.add(id);
-          stream.releaseRival(id);
-        },
-      },
-      loadCarModel,
-      (text) => toasts.push(text),
-    );
-    const item: ContractCargoItem = {
-      type: 'contract_cargo',
-      id: `bench-race-${side}`,
-      sourceCourierIndex: courier.index - 1,
-      thing: 'pencils',
-      raceLegs: 1,
-      generatedSeed: 7 + side,
-      progress: { started: false },
-    };
-    race.observe(item, 'hand', layby.s - 2200);
-    const playerS = layby.s + 150;
-    if (side === -1) {
-      race.winPay(item.id);
-      race.playerDelivered(item.id);
-    }
-    type RivalCar = {
-      id: string;
-      rival: boolean;
-      forwardS: number;
-      roadLateral: number;
-      vehicle: Vehicle;
-      handIn: string;
-      layby: { phase: string; enterS: number } | null;
-      crossYield: boolean;
-      direction: 1 | -1;
-    };
-    const cars = stream as unknown as { carList: RivalCar[] };
-    const parkedFrom = new Map<string, number>();
-    const stands: string[] = [];
-    const badStands: string[] = [];
-    const cleared = new Set<string>();
-    const parkLateral = laybyParkLateral(layby);
-    const impactsBefore = stream.status.impacts;
-    let crossedWhileOncoming = 0;
-    let nearestOncomingWhileCrossing = Infinity;
-    const yielders = new Set<string>();
-    for (let i = 0; i < Math.ceil(300 / FIXED_DT); i++) {
-      const t = i * FIXED_DT;
-      race.fixedUpdate(FIXED_DT, playerS);
-      stream.fixedUpdate(FIXED_DT, playerS, 0, 0, 0);
-      physics.step();
-      stream.postStep();
-      for (const car of cars.carList) {
-        if (!car.id.startsWith('rival:')) continue;
-        const phase = car.layby?.phase;
-        if (phase === 'parked' && !parkedFrom.has(car.id)) parkedFrom.set(car.id, t);
-        if (phase === 'out' && parkedFrom.has(car.id) && !stands.some((s) => s.startsWith(car.id))) {
-          const stood = t - parkedFrom.get(car.id)!;
-          const along = car.forwardS - layby.s;
-          const across = car.roadLateral - parkLateral;
-          const line = `${car.id} ${stood.toFixed(2)} s at ${along.toFixed(1)} m along, ${across.toFixed(2)} m off the line`;
-          stands.push(line);
-          if (stood < 1.5 || stood > 3 || Math.abs(along) > 3 || Math.abs(across) > 1) badStands.push(line);
-        }
-        if (car.handIn === 'clear') {
-          const lane = road.laneCentreAt(car.forwardS, road.lanesPerSideAt(car.forwardS) - 1);
-          if (Math.abs(car.roadLateral - lane) < 1) cleared.add(car.id);
-        }
-        // Across the oncoming lane on the way in: no ONCOMING car (driving -1; the rivals
-        // drive +1) that could not stop short of it on a firm 4 m/s² with 3 m to spare
-        // (centre to centre less two half-lengths). A car that lets it through rolls up
-        // close; that is allowed. A same-direction car ahead is not in the way.
-        if (side === 1 && phase === 'in' && car.roadLateral > 0 && car.roadLateral < road.halfWidthAt(car.forwardS)) {
-          for (const other of cars.carList) {
-            if (other.crossYield) yielders.add(other.id);
-            const ahead = other.forwardS - car.forwardS;
-            if (other === car || other.direction !== -1 || other.roadLateral <= 0 || ahead <= 0) continue;
-            const gap = ahead - 5;
-            if (ahead < 120) nearestOncomingWhileCrossing = Math.min(nearestOncomingWhileCrossing, gap);
-            const mps = other.vehicle.speedKmh / 3.6;
-            if (gap < (mps * mps) / 8 + 3) crossedWhileOncoming++;
-          }
-        }
-      }
-      if (i % 12 === 0) await Bun.sleep(0);
-    }
-    const where = side === -1 ? 'own-side' : 'far-side';
-    console.log(`  ${where} courier lay-by at ${layby.s.toFixed(0)} m: ${toasts.slice(1).join(' | ')}`);
-    check(
-      `${where}: rivals stand beside the courier 1.5-3 s`,
-      stands.length >= 2 && badStands.length === 0,
-      stands.join('; ') || 'no stand',
-    );
-    check(
-      `${where}: every rival that pulled in is back in its lane before it is released`,
-      released.size >= 2 && releasedEarly === 0 && [...parkedFrom.keys()].every((id) => cleared.has(id) && released.has(id)),
-      `${parkedFrom.size} pulled in, ${cleared.size} back in the lane, ${released.size} released, ${releasedEarly} released early`,
-    );
-    check(
-      `${where}: hand-ins cost no collisions`,
-      stream.status.impacts === impactsBefore && crossedWhileOncoming === 0,
-      `${stream.status.impacts - impactsBefore} impact(s), ${crossedWhileOncoming} sample(s) crossing ahead of oncoming traffic, nearest oncoming ${nearestOncomingWhileCrossing.toFixed(1)} m, ${yielders.size} yielder(s)`,
-    );
-    if (side === -1) {
-      check(
-        'after a player win the rivals still hand in, and are placed',
-        toasts.filter((text) => /handed in — (2nd|3rd|4th)/.test(text)).length >= 2,
-        toasts.join(' | '),
-      );
-    }
-    stream.dispose();
-    physics.world.removeRigidBody(courierBody);
-  }
 }
 traffic.dispose();
 

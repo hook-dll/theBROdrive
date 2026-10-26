@@ -2316,8 +2316,8 @@ export class Vehicle implements Rebasable {
    */
   launchRolling(speedMps: number): void {
     // The settle that put the car down latched the parking hold, and `postStep` would
-    // zero this velocity on the very step it is set: measured, every rolling spawn
-    // (traffic and race rivals alike) stood up from 0 km/h after its settle.
+    // zero this velocity on the very step it is set: measured, every rolling traffic
+    // spawn stood up from 0 km/h after its settle.
     this.parkingHoldRequested = false;
     this.parkingHoldActive = false;
     this.chassisBody.rotation(this.rotationScratch);
@@ -5209,8 +5209,7 @@ export class Vehicle implements Rebasable {
    * The three hand slots are physically in the car with whoever is sitting in it, so
    * they are part of what the springs carry. `Vehicle` cannot read them itself — the
    * pack belongs to the player, not to the car — so `main` reports it, and this
-   * refreshes the load only when the number actually moves. A race rival's cargo rides
-   * the same way: its weight with no item (world/traffic.ts `RivalSpawn.cargoKg`).
+   * refreshes the load only when the number actually moves.
    */
   setCarriedMass(kilograms: number): void {
     const next = Math.max(0, kilograms);

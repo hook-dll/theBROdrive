@@ -356,8 +356,7 @@ body.is-machine-focus .hud-crosshair {
   border-radius: inherit;
 }
 
-/* The plate over the navigator: a race's place in the field and the urgent clock aboard,
-   out only when there is one. */
+/* The plate over the navigator: the urgent clock aboard, out only when there is one. */
 .hud-navi-plate {
   position: absolute;
   bottom: 100%;
@@ -579,47 +578,43 @@ body.is-machine-focus .hud-crosshair {
   stroke-linecap: square;
 }
 
-/* THE BALLS in a line of game text (ui/balls.ts `setGameText`): toasts, the prompt. */
-.ball {
+/* THE SHELLS in a line of game text (ui/shellsprites.ts `setGameText`): toasts, the
+   prompt. Up to five shells in a row; more, the figure and one shell; none, one faded. */
+.shell {
   display: inline-block;
   flex: none;
-  width: 1.1em;
-  height: 1.1em;
-  border-radius: 50%;
+  width: 1.15em;
+  height: 1.15em;
   background: center / contain no-repeat;
-  box-shadow: 0 0.06em 0.12em rgba(0, 0, 0, 0.4);
+  filter: drop-shadow(0 0.06em 0.06em rgba(0, 0, 0, 0.4));
 }
 
-.ball--big { background-image: var(--ball-big); }
-.ball--middle { background-image: var(--ball-middle); }
-.ball--small { background-image: var(--ball-small); }
+.shell + .shell { margin-left: -0.02em; }
 
-.money-row {
+.shell--scallop { background-image: var(--shell-scallop); }
+.shell--spiral { background-image: var(--shell-spiral); }
+.shell--horn { background-image: var(--shell-horn); }
+.shell--cowrie { background-image: var(--shell-cowrie); }
+
+.shell-row {
   display: inline-flex;
   align-items: flex-end;
-  gap: 0.3em;
   margin: 0 0.12em;
-  vertical-align: -0.2em;
+  vertical-align: -0.25em;
 }
 
-.money-kind {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 0.04em;
+.shell-figure {
+  margin-right: 0.12em;
+  align-self: center;
 }
 
-.money-kind .ball--middle { width: 0.86em; height: 0.86em; }
-.money-kind .ball--small { width: 0.64em; height: 0.64em; }
-.money-kind .ball.is-five { margin-left: 0.16em; }
-
-.money-row.is-zero .ball {
-  width: 0.64em;
-  height: 0.64em;
+.shell-row.is-zero .shell {
   opacity: 0.35;
 }
 
-/* THE MONEY JAR (hudjar.ts) in the top right corner, out only on foot on a lay-by: it
-   drops into view and rises away. Sized in em by hudjar.ts. */
+/* THE SHELL JAR (hudjar.ts) in the top right corner, out on foot on a lay-by
+   (`is-shown`) and for a moment whenever the shells change (`is-flash`): it drops into
+   view and rises away. Sized in em by hudjar.ts. */
 .hud-jar {
   position: absolute;
   right: calc(0.6 * var(--hud-u) + env(safe-area-inset-right));
@@ -631,7 +626,8 @@ body.is-machine-focus .hud-crosshair {
   transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-.hud-jar.is-shown {
+.hud-jar.is-shown,
+.hud-jar.is-flash {
   opacity: 1;
   transform: none;
 }

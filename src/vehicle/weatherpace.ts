@@ -1,6 +1,6 @@
 /**
- * WHEN WEATHER STOPS A DRIVER. Every driver the game runs reads this one place — the
- * live autopilot and the race's ghost rivals — so nobody is the only one braving it.
+ * WHEN WEATHER STOPS A DRIVER. Every driver the game runs reads this one place, so
+ * nobody is the only one braving it.
  *
  * Only a full haboob does it, and it does it to everybody alike, frantic included:
  * inside the dust there is a hundred metres of sight and a gust front that, measured

@@ -3,9 +3,10 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
-import { installBallStyle, setGameText } from './balls';
+import type { ShellKind, ShellPurse } from '../economy/shells';
+import { installShellStyle, setGameText } from './shellsprites';
 import { MapScreen, type MapSource, type MapView } from './hudmap';
-import { MoneyJar } from './hudjar';
+import { ShellJar } from './hudjar';
 import { GyroOrb, type PedalReadout, type RideReadout } from './hudgyro';
 
 export type { MapPost, MapSource, MapView } from './hudmap';
@@ -152,8 +153,8 @@ export class Hud {
    * THE PANEL along the top edge, on foot and driving alike: the navigator screen in the
    * left corner (`map`), the gyro orb and the pedal lever scale in the right one (`gyro`),
    * and between them the POD — the segment display. The display and the gyro go dark
-   * on foot; the map stays lit. The money jar is not on it: it stands in the bottom
-   * right corner, and only on foot on a lay-by (`setMoneyShown`).
+   * on foot; the map stays lit. The shell jar is not on it: it stands in its own corner,
+   * out on foot on a lay-by (`setShellsShown`) and for a moment whenever the shells change.
    */
   private readonly panelEl: HTMLElement;
   private readonly podEl: HTMLElement;
@@ -164,8 +165,8 @@ export class Hud {
   private readonly toastEl: HTMLElement;
   private readonly inventoryEl: HTMLElement;
   private readonly lcdEl: SVGSVGElement;
-  /** The money jar (`setMoney`, ui/hudjar.ts). */
-  private readonly jar: MoneyJar;
+  /** The shell jar (`setShells`, ui/hudjar.ts). */
+  private readonly jar: ShellJar;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
@@ -204,7 +205,7 @@ export class Hud {
 
   constructor(root: HTMLElement, mapSource: MapSource) {
     this.root = root;
-    installBallStyle();
+    installShellStyle();
     this.crosshairEl = el('div', 'hud-crosshair');
 
     this.promptEl = el('div', 'hud-prompt is-hidden');
@@ -213,7 +214,7 @@ export class Hud {
     this.lcdEl = display.svg;
     this.lcdDigits = display.digits;
 
-    this.jar = new MoneyJar();
+    this.jar = new ShellJar();
 
     this.podEl = el('div', 'hud-pod');
     this.podEl.append(this.lcdEl);
@@ -363,13 +364,23 @@ export class Hud {
     this.podEl.classList.toggle('is-autopilot-frantic', mode === 'frantic');
   }
 
-  /** The player's money, rubles, as calcite balls in the jar: poured in as it comes, out as it goes. */
-  setMoney(rubles: number): void {
-    this.jar.set(rubles);
+  /** The player's shells in the jar: poured in as they come, lifted out as they go, the jar flashing into sight to show it. */
+  setShells(purse: Readonly<ShellPurse>): void {
+    this.jar.set(purse);
   }
 
-  /** The money jar out in the bottom right corner (on foot on a lay-by, main.ts), or put away. */
-  setMoneyShown(shown: boolean): void {
+  /** Shells of these kinds pushed out of the full jar by new ones: called just before the `setShells` that brings them in. */
+  spillShells(kinds: readonly ShellKind[]): void {
+    this.jar.spill(kinds);
+  }
+
+  /** Shells of these kinds taken by a fine (economy/economy.ts `fine`): called just before the `setShells` that takes them out. */
+  fineShells(kinds: readonly ShellKind[]): void {
+    this.jar.fine(kinds);
+  }
+
+  /** The shell jar out in its corner (on foot on a lay-by, main.ts), or put away. */
+  setShellsShown(shown: boolean): void {
     this.jar.setShown(shown);
   }
 

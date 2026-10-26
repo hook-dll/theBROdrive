@@ -179,13 +179,6 @@ export interface LaybyCourse {
   /** What the lamps tell the cars round it. */
   indicator: IndicatorSide;
   /**
-   * Longest preview the pursuit may take along the line, metres, or Infinity for the
-   * mode's own. A turn across the road is driven on a short one, and the coordinator
-   * grows it with the distance to the turn so a car waiting short of it does not aim
-   * into it and stand with its nose over the crown.
-   */
-  lookahead: number;
-  /**
    * Own-frame arclength to back up to before the line is driven, or absent. Set by the
    * coordinator for a car stopped close behind something it is about to go round
    * (`RoadTraffic` bypass); it backs straight, slowly, and clears it once there.
@@ -3084,12 +3077,10 @@ export class Autopilot {
     // Steering: the road controller's pursuit, hold and damping, on the course's line.
     const line = course.lineAt(projection.s);
     const lineSlope = (course.lineAt(projection.s + 1) - course.lineAt(projection.s - 1)) * 0.5;
-    const lookahead = Math.min(
-      course.lookahead,
-      clamp(config.lookaheadBase + speed * config.lookaheadSpeed, MIN_LOOKAHEAD_M, LAYBY_LOOKAHEAD_MAX_M),
-    );
-    // The preview is measured ALONG the line, not along the road: across a turn the line
-    // runs steeply over the road, and a preview of road metres aimed past the whole turn.
+    const lookahead = clamp(config.lookaheadBase + speed * config.lookaheadSpeed, MIN_LOOKAHEAD_M, LAYBY_LOOKAHEAD_MAX_M);
+    // The preview is measured ALONG the line, not along the road: where the line runs
+    // over the road (a slip, the move out round a standing car), a preview of road
+    // metres aims past the whole move.
     let aimS = projection.s;
     let aimLateral = line;
     for (let walked = 0; walked < lookahead; ) {
@@ -5492,8 +5483,8 @@ export class Autopilot {
       );
     }
     // The 3 m/s floor is the road profile's (a hairpin never asks for a standstill),
-    // and it must not swallow a cap set from outside: a race rival told to stop beside
-    // its courier was held at 11 km/h by it, creeping past the courier for good.
+    // and it must not swallow a cap set from outside: a car told to stop by its cap was
+    // held at 11 km/h by it, creeping past the place it was meant to stand for good.
     this.speedLimit.atLeast(3);
     // AND A COMMITTED PASS IS DRIVEN AT THE SPEED IT WAS SIZED ON. The cap a traffic
     // driver is given is a cruising habit, not a limiter (`PASS_KICKDOWN_SHARE`): the
@@ -5501,7 +5492,7 @@ export class Autopilot {
     // pace, and clipping it back to the cap here left the pedal short of the speed the
     // window was proven at — measured on a hurried car capped at 20 m/s passing one at
     // 13: committed at a 25 m/s pass, held at 20 for the whole crossing. Scaled, not
-    // replaced, so a cap that is a stop (a rival told to halt at its courier) stays one.
+    // replaced, so a cap that is a stop stays one.
     const capSpeed = this.passAttemptValue
       ? this.speedCapValue * (1 + PASS_KICKDOWN_SHARE / config.passNerve)
       : this.speedCapValue;

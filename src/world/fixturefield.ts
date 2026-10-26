@@ -1,5 +1,6 @@
 import type { FoleyContinuous, FoleyEvent } from '../audio/foley';
 import type { DeliveryProbe } from '../contracts/types';
+import type { ShellPrice } from '../economy/shells';
 import type { GameWorld } from '../game/state';
 import type { Inventory, Item } from '../items/items';
 import type { FixedGridView } from '../vehicle/trunk';
@@ -27,12 +28,12 @@ export interface FixtureContext {
   /** The item in the hands, or null. */
   readonly held: Item | null;
   /**
-   * Takes `rubles` from the player's money while a machine is being worked (framed or
-   * engaged); false, and nothing taken, when none is or the money is short.
+   * Takes `price` out of the player's jar while a machine is being worked (framed or
+   * engaged); false, and nothing taken, when none is or he is short of its kind.
    */
-  debit(rubles: number): boolean;
-  /** Pays `rubles` into the player's money (economy/economy.ts `credit`). */
-  credit(rubles: number): void;
+  debit(price: ShellPrice): boolean;
+  /** Pays `count` shells of random kinds into the player's jar (economy/economy.ts `credit`). */
+  credit(count: number): void;
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;
   /**
@@ -46,8 +47,6 @@ export interface FixtureContext {
    * (contracts/types.ts). Reused in place: valid only for the call that asked.
    */
   probe(postIndex: number, x: number, z: number): DeliveryProbe;
-  /** Rubles a race win adds for handing contract `contractId` in now (contracts/race.ts). */
-  racePay(contractId: string): number;
   /**
    * Puts the player's car `carId` into the toy box (`car_box`), its live body's fuel,
    * wear and pose written to its `CarState` first. The caller has checked it may go

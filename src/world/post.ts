@@ -12,7 +12,7 @@ import {
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { formatClock, urgentRemainingS, type ContractKind, type DeliveryProbe } from '../contracts/types';
 import { haulLoadId, isContractCarId } from '../contracts/world';
-import { carUniqueness, contractPay, formatMoney, RELIC_STICKERS, SPECIAL_CARD_STICKERS, uniquenessBonusText } from '../economy/economy';
+import { carUniqueness, contractPay, fine, FINE_SHELLS, formatFine, formatPay, RELIC_STICKERS, SPECIAL_CARD_STICKERS } from '../economy/economy';
 import type { GameWorld, WorldState } from '../game/state';
 import {
   contractIdOf,
@@ -43,7 +43,7 @@ import { box, mergeKitStatics } from './poi/kit';
  * SPECIAL thing (relics among them from `RELIC_STICKERS`), while the car on the
  * lay-by has `SPECIAL_CARD_STICKERS` stickers or more (§12); hidden, its slot keeps its
  * round. A card prints the thing, where it goes and how far, the pay, its tags, a haul's
- * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
+ * note, the lay-by car's sticker bonus, and says when the thing will not fit
  * that car. The wheel turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing appears in the
  * machine's GRID, its one cell, and he takes it from there into his hands or pack as
@@ -57,17 +57,19 @@ import { box, mergeKitStatics } from './poi/kit';
  * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the post's
  * hand-in slot, the middle of its parking row: the one he last drove
  * (`PlayerState.lastDrivenCarId`) when it is there, else
- * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
- * cards print. A delivery is paid by the same car's stickers, read when the grid takes
- * it; with no car on the lay-by, by the car he last drove, wherever it stands.
+ * the nearest. Its stickers open the fifth card (and relics on it); they change no pay.
  *
  * The GRID takes things in too: a thing bound here, put into the empty cell, lies there a
- * moment while the machine draws it in, and the pay goes into the player's money (§7.7:
- * no envelope, stickers are only bought). A thing this post will not sign for goes in as
- * a RETURN TO SENDER: no pay, the job closed. Standing at it with a thing in hand, the
- * window shows the HAND-IN card first, and follows what he holds: what to put in the
- * grid, what it pays, that it is a return, or why it will not take it. A haul is handed
- * in by its load, in the second slot (contracts/haulbays.ts), never at the grid.
+ * moment while the machine draws it in, and the pay goes into the player's jar as
+ * shells (economy/economy.ts `contractPay`: the route's kilometres, twice that urgent and
+ * on time; §7.7: no envelope, stickers are only bought). A thing this post will not sign
+ * for goes in as a RETURN TO SENDER: no pay, the job closed undelivered and FINED
+ * `FINE_SHELLS` (economy/economy.ts `fine`) — once, with the closing saved first, and
+ * never for a broken thing, whose job closed (and was fined) when it broke. Standing at
+ * it with a thing in hand, the window shows the HAND-IN card first, and follows what he
+ * holds: what to put in the grid, what it pays, that it is a return and what it costs, or
+ * why it will not take it. A haul is handed in by its load, in the second slot
+ * (contracts/haulbays.ts), never at the grid.
  *
  * TAKE refuses while the player already has `ACTIVE_CONTRACT_LIMIT` jobs out, and a haul
  * while he has `ACTIVE_HAUL_LIMIT` hauls out (`activeContracts`); the cards say so.
@@ -94,8 +96,6 @@ const CARD_BAND: Readonly<Record<PostCard, string>> = {
 };
 /** A relic's band, on the special card. */
 const RELIC_BAND = '#6a2f5f';
-/** A race card's band, whatever its property. */
-const RACE_BAND = '#a2452f';
 /** The hand-in card's band: a delivery, a return to sender. */
 const HAND_IN_BAND: Readonly<Record<HandInCard['mode'], string>> = {
   deliver: '#2f6a3a',
@@ -110,17 +110,16 @@ const BAY_TAKEN_TEXT = 'slot 1 is taken — its load comes when the slot is clea
 registerCardMachineSigns(POST_LOOK);
 
 /** A car counts as standing on the post's lay-by inside this radius of its hand-in slot, m. */
-export const LAYBY_CAR_RANGE_M = 20;
+const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
 
-/** What the card's band calls the offer: its property, a haul's kind, a race, an urgent clock. */
+/** What the card's band calls the offer: its property, a haul's kind, an urgent clock. */
 function bandText(offer: ContractCargoItem, thing: ThingDef): string {
   // A post's offer is never the teddies, who wait in the shelter (world/shelter.ts).
   const card = thingCard(thing) ?? 'ordinary';
   const property = isHaul(offer) ? 'HAUL' : hasTag(thing, 'relic') ? 'RELIC' : card.toUpperCase();
   const urgent = offer.urgentS === undefined ? '' : ` · URGENT ${formatClock(offer.urgentS)}`;
-  if (offer.raceLegs) return urgent ? `${property} · RACE ${offer.raceLegs}${urgent}` : `${property} · RACE ${offer.raceLegs} STOP${offer.raceLegs > 1 ? 'S' : ''}`;
   return `${property}${urgent}`;
 }
 
@@ -192,7 +191,7 @@ interface HandInCard {
  * is there, else the nearest; none, null. A haul's own car is not one to load, and a car
  * for sale is nobody's. `position`: where a car stands, absolute.
  */
-export function laybyCarId(
+function laybyCarId(
   state: WorldState,
   haulX: number,
   haulZ: number,
@@ -212,16 +211,6 @@ export function laybyCarId(
     best = carId;
   }
   return best;
-}
-
-/**
- * The stickers a delivery is paid by: the lay-by car's (`laybyCarId`); with no car on
- * the lay-by, the car the player last drove, wherever it stands.
- */
-export function deliveryStickers(state: WorldState, laybyCar: string | null): number {
-  const id = laybyCar ?? state.player.lastDrivenCarId;
-  const car = id ? state.cars[id] : undefined;
-  return car ? carUniqueness(car) : 0;
 }
 
 /**
@@ -275,8 +264,7 @@ class PostMachine extends CardMachine {
   private handIn: HandInCard | null = null;
   /** The model of the car standing on the lay-by when the cards were last painted, or null. */
   private laybyModel: CarModelDef | null = null;
-  /** That car's id and stickers (`carUniqueness`): null and 0 with no car there. */
-  private laybyCarId: string | null = null;
+  /** That car's stickers (`carUniqueness`): 0 with no car there. */
   private laybyStickers = 0;
   /** The player has `ACTIVE_CONTRACT_LIMIT` contracts out: TAKE refuses (`refreshLimit`). */
   private atLimit = false;
@@ -344,16 +332,9 @@ class PostMachine extends CardMachine {
     const model = car ? carModel(car.modelId) : null;
     const stickers = car ? carUniqueness(car) : 0;
     const changed = model !== this.laybyModel || stickers !== this.laybyStickers;
-    this.laybyCarId = best;
     this.laybyModel = model;
     this.laybyStickers = stickers;
     return changed;
-  }
-
-  /** The stickers a delivery here is paid by (`deliveryStickers`), the lay-by read live. */
-  private deliveryStickers(ctx: FixtureContext): number {
-    this.refreshLayby(ctx);
-    return deliveryStickers(this.world.state, this.laybyCarId);
   }
 
   /**
@@ -398,19 +379,16 @@ class PostMachine extends CardMachine {
     const km = (postStop(this.world.seed, offerDestinationIndex(offer)).s - this.stop.s) / 1000;
     const lines = [
       `→ ${offer.destination ?? 'the next post'} · ${km.toFixed(1)} km`,
-      `${formatMoney(contractPay(this.world.seed, offer, this.laybyStickers))} · ${tagText(offer, thing)}`,
+      `${formatPay(contractPay(this.world.seed, offer))} · ${tagText(offer, thing)}`,
     ];
-    const bonus = uniquenessBonusText(this.laybyStickers);
-    if (bonus) lines.push(bonus);
     // At the limit the card says so before any note: TAKE will refuse it.
     if (this.atLimit) lines.push('three jobs out: hand one in or return it');
     else if (this.haulsAtLimit && isHaul(offer)) lines.push('one haul out: hand it in or return it');
     const haul = haulNote(thing);
     if (haul) lines.push(haul);
-    if (offer.raceLegs) lines.push('three rivals race you to it');
     if (this.laybyModel && wontFit(thing, this.laybyModel)) lines.push(`won't fit your ${this.laybyModel.label}`);
     paintCardFace(g, w, h, {
-      band: offer.raceLegs ? RACE_BAND : hasTag(thing, 'relic') ? RELIC_BAND : CARD_BAND[thingCard(thing) ?? 'ordinary'],
+      band: hasTag(thing, 'relic') ? RELIC_BAND : CARD_BAND[thingCard(thing) ?? 'ordinary'],
       bandText: bandText(offer, thing),
       corner: `${index + 1}/${count}`,
       headline: thing.name,
@@ -511,16 +489,13 @@ class PostMachine extends CardMachine {
         headline,
         lines: closed
           ? [name, 'the post takes it off your hands', 'no pay']
-          : [name, 'back to the sender', 'no pay'],
+          : [name, 'back to the sender', `no pay · ${formatFine(FINE_SHELLS)}`],
         footer: closed ? '' : 'the job is closed and off your list',
       };
     } else {
       const left = urgentRemainingS(item);
-      const stickers = this.deliveryStickers(ctx);
-      const lines = [name, `pays ${formatMoney(contractPay(this.world.seed, item, stickers))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent +50%'}`];
-      const bonus = uniquenessBonusText(stickers);
-      if (bonus) lines.push(bonus);
-      card = { mode: 'deliver', band: left === null ? 'HAND IN' : left < 0 ? 'HAND IN · LATE' : 'HAND IN · ON TIME', headline, lines, footer: 'the pay goes into your money' };
+      const lines = [name, `pays ${formatPay(contractPay(this.world.seed, item))}${left === null ? '' : left < 0 ? ' · late: base pay' : ' · urgent ×2'}`];
+      card = { mode: 'deliver', band: left === null ? 'HAND IN' : left < 0 ? 'HAND IN · LATE' : 'HAND IN · ON TIME', headline, lines, footer: 'the pay goes into your jar' };
     }
     return { ...card, key: `${card.mode}:${item.id}:${card.headline}:${card.lines.join('|')}` };
   }
@@ -579,8 +554,7 @@ class PostMachine extends CardMachine {
     }
     const item = posting.item;
     if (posting.mode === 'return') return this.takeBack(ctx, item);
-    const stickers = this.deliveryStickers(ctx);
-    const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(item.id);
+    const pay = contractPay(this.world.seed, item);
     this.swallow(item);
     // The completed id and the ledger first, then the pay, so a crash between cannot pay twice.
     this.save({ consumedItemId: item.id, completedContractId: item.id, completedContractKind: contractKindOf(item) });
@@ -594,14 +568,18 @@ class PostMachine extends CardMachine {
   /**
    * RETURN TO SENDER: the grid takes `item` back with no pay, and its contract is closed —
    * recorded in `completedContractIds` without a kind, so the ledger does not count it
-   * and it no longer counts against the limit.
+   * and it no longer counts against the limit — and fined, after the closing is recorded,
+   * so a reload finds it closed and never fines it twice. A thing whose job was closed
+   * already (broken, fined when it broke) is only taken off his hands.
    */
   private takeBack(ctx: FixtureContext, item: ContractCargoItem): FoleyEvent {
     const contractId = contractIdOf(item);
     const open = !this.world.state.completedContractIds.includes(contractId);
+    const fined = !isContractClosed(item, this.world.state.completedContractIds);
     this.swallow(item);
     this.save(open ? { consumedItemId: item.id, completedContractId: contractId } : { consumedItemId: item.id });
     ctx.give(item.id);
+    if (fined) ctx.toast(`the ${contractThing(item).name} goes back to the sender — ${formatFine(fine(this.world, FINE_SHELLS))}`);
     this.showHandIn(this.handInCard(ctx));
     this.refreshLimit();
     return 'drop';

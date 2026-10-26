@@ -346,8 +346,8 @@ async function checkCrosswind(): Promise<void> {
 
 /**
  * Inside the dust: the driver pulls to the edge of the asphalt on its own side, stops
- * with the hazards on and stays there (vehicle/weatherpace.ts). Every mode does; hurried
- * is the race rivals' mode, so the ghosts' shelter has a live counterpart.
+ * with the hazards on and stays there (vehicle/weatherpace.ts). Every mode does; this
+ * checks a hurried driver.
  */
 async function checkShelter(): Promise<void> {
   const rig = await makeRig(START_S, ROUTE_METRES, MODEL_ID);

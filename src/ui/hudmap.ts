@@ -6,10 +6,10 @@ import { formatClock } from '../contracts/types';
  * to the top of the screen and the car stands low on it, so most of the screen is the
  * road ahead — about the next one or two settlements. The posts are dots with their
  * names, each name on the side of the road its lay-by is on, the one the route goes to
- * (the post that signs the cargo, a race's finish, or with nothing aboard the next post)
+ * (the post that signs the cargo, or with nothing aboard the next post)
  * lit, and the road from the car to it lit as the route. A goal beyond the screen is a
  * notch on its edge pointing to it; a road left far behind is an arrow on the edge. The
- * plate over the screen is out only in a race (the place in the field) or with an urgent clock aboard.
+ * plate over the screen is out only with an urgent clock aboard.
  *
  * Painted on a canvas, again only when the picture has moved by a fraction of a pixel
  * or a degree.
@@ -34,8 +34,8 @@ export interface MapSource {
 
 /** One frame's map, written into by the game loop (`newMapView`) and read by `MapScreen.update`. */
 export interface MapView {
-  /** `race`: to a race's finish. `delivery`: to the post that signs the cargo. `idle`: the next post. */
-  kind: 'race' | 'delivery' | 'idle';
+  /** `delivery`: to the post that signs the cargo. `idle`: the next post. */
+  kind: 'delivery' | 'idle';
   /** Whom the map follows: world XZ, and the way the car (or the walker's view) faces, radians (0 = +Z). */
   x: number;
   z: number;
@@ -43,21 +43,16 @@ export interface MapView {
   /** Arclength of the road point closest to them, and their lateral offset off it (+ left). */
   s: number;
   lateral: number;
-  /** The post the route goes to (-1 for a race), its arclength and the urgent clock aboard. */
+  /** The post the route goes to, its arclength and the urgent clock aboard. */
   targetIndex: number;
   targetS: number;
   urgentS: number | null;
-  /** A race's rivals' arclengths, the first `rivalCount` valid, and the player's place among the field. */
-  readonly rivals: number[];
-  rivalCount: number;
-  rank: number;
 }
 
 export function newMapView(): MapView {
   return {
     kind: 'idle', x: 0, z: 0, facing: 0, s: 0, lateral: 0,
     targetIndex: -1, targetS: 0, urgentS: null,
-    rivals: [], rivalCount: 0, rank: 1,
   };
 }
 
@@ -169,10 +164,8 @@ export class MapScreen {
     const carY = h * CAR_AT;
     const scale = carY / AHEAD_M;
     // Redrawn only when the picture has moved: a quarter pixel, a fifth of a degree.
-    let rivalsKey = '';
-    for (let i = 0; i < v.rivalCount; i++) rivalsKey += `${Math.round(v.rivals[i]! * scale)},`;
     const key = `${Math.round(v.x * scale * 4)}:${Math.round(v.z * scale * 4)}:${Math.round(v.facing * 286)}:` +
-      `${v.kind}:${v.targetIndex}:${Math.round(v.targetS)}:${Math.abs(v.lateral) > FAR_M}:${rivalsKey}:${w}x${h}:${this.sampledS}:${this.travel}`;
+      `${v.kind}:${v.targetIndex}:${Math.round(v.targetS)}:${Math.abs(v.lateral) > FAR_M}:${w}x${h}:${this.sampledS}:${this.travel}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const pal = this.palette!;
@@ -286,30 +279,6 @@ export class MapScreen {
       g.fillText(name, at, y);
     }
 
-    // A race: the rivals as rings on the road, the finish chequered.
-    if (v.kind === 'race') {
-      for (let i = 0; i < v.rivalCount; i++) {
-        this.source.roadPoint(v.rivals[i]!, this.point);
-        g.beginPath();
-        g.arc(toX(this.point.x, this.point.z), toY(this.point.x, this.point.z), 4.5 * unit, 0, Math.PI * 2);
-        g.fillStyle = pal.glass;
-        g.fill();
-        g.strokeStyle = pal.hot;
-        g.lineWidth = 2 * unit;
-        g.stroke();
-      }
-      this.source.roadPoint(v.targetS, this.point);
-      const fx = toX(this.point.x, this.point.z);
-      const fy = toY(this.point.x, this.point.z);
-      const cell = 3.5 * unit;
-      for (let a = 0; a < 3; a++) {
-        for (let b = 0; b < 3; b++) {
-          g.fillStyle = (a + b) % 2 === 0 ? pal.hot : pal.glass;
-          g.fillRect(fx - 1.5 * cell + a * cell, fy - 1.5 * cell + b * cell, cell, cell);
-        }
-      }
-    }
-
     // The edge: a notch toward a goal beyond the screen; an arrow toward a road left far behind.
     this.source.roadPoint(v.targetS, this.point);
     this.edgeMark(toX(this.point.x, this.point.z), toY(this.point.x, this.point.z), 8 * unit, pal.hot);
@@ -402,12 +371,9 @@ export class MapScreen {
     else if (along < -TRAVEL_FLIP_COS) this.travel = -1;
   }
 
-  /** The plate over the screen: a race's place among the field and the urgent clock aboard. */
+  /** The plate over the screen: the urgent clock aboard. */
   private updatePlate(v: MapView): void {
-    const parts: string[] = [];
-    if (v.kind === 'race') parts.push(`race ${v.rank}/${v.rivalCount + 1}`);
-    if (v.urgentS !== null) parts.push(formatClock(v.urgentS));
-    const text = parts.join(' · ');
+    const text = v.urgentS === null ? '' : formatClock(v.urgentS);
     if (text !== this.plateShown) {
       this.plateShown = text;
       this.plate.textContent = text;

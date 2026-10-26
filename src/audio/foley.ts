@@ -54,6 +54,8 @@ export type FoleyEvent =
   | 'detach'
   | 'drop'
   | 'coin'
+  /** A fine (economy/economy.ts `fine`): shells leaving the jar, a falling, sorry tune. */
+  | 'fine'
   /** A selector wheel's detent (world/post.ts): one dry tick. */
   | 'click'
   | 'refused';
@@ -304,6 +306,14 @@ export class Foley {
         // One coin down a slot: a bright clink and the little ring of it landing.
         this.mixer.blip(this.out, { gain: 0.06, frequency: 3300, endFrequency: 2900, decay: 0.05 });
         this.mixer.burst(this.out, { gain: 0.09, frequency: 2400, q: 4, decay: 0.04 });
+        break;
+      case 'fine':
+        // The coin turned sad: three soft notes falling, each a little lower and longer,
+        // the last sagging under its own pitch; a dull tap of the jar under the first.
+        this.mixer.blip(this.out, { gain: 0.07, frequency: 784, endFrequency: 740, decay: 0.14, type: 'sine' });
+        this.mixer.blip(this.out, { gain: 0.07, frequency: 622, endFrequency: 587, decay: 0.16, type: 'sine', delay: 0.16 });
+        this.mixer.blip(this.out, { gain: 0.08, frequency: 523, endFrequency: 392, decay: 0.42, type: 'sine', delay: 0.34 });
+        this.mixer.burst(this.out, { gain: 0.08, frequency: 600, q: 1.2, decay: 0.06, type: 'lowpass' });
         break;
       case 'click':
         this.mixer.burst(this.out, { gain: 0.11, frequency: 3800, q: 6, decay: 0.018 });

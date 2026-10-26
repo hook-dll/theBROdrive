@@ -1,20 +1,24 @@
 /**
  * The per-tick walk over live contracts. It visits the places a contract cargo
- * can be and the hauls taken (`WorldState.hauls`, place `haul`), marks each started once
- * it has left its source post, runs the urgent clocks and hands each contract to the
- * composition root (race, delivery target).
+ * can be and the hauls taken (`WorldState.hauls`, place `haul`), runs the urgent clocks
+ * from the moment a contract leaves its source post's stock and hands each contract to
+ * the composition root (the delivery target).
  *
  * Nothing is scored on the way but a thing's condition (game-design2.md §11.1): the
  * knocks the car it rides in takes, the harsh driving of the car the player drives
  * (trip/ride.ts) and its drops to the ground wear it down. What reaches it through a car
  * is softened by that car's comfort (`comfortFactor`, §11.2). Below `BROKEN_BELOW` it is
- * broken: the contract closes there and then, and the thing stays a souvenir. The tick
- * scans state rather than holding its own list of contracts, so an item picked up,
+ * broken: the contract closes there and then, undelivered, and is FINED
+ * (economy/economy.ts `fine`, `FINE_SHELLS`) in the same step — the break is saved on the
+ * item (`progress.broken`) and is found already made after a reload, so it is never fined
+ * twice; the thing stays a souvenir, and handing it back later fines nothing more. The
+ * tick scans state rather than holding its own list of contracts, so an item picked up,
  * swapped into another boot or dropped is followed with no bookkeeping.
  */
 
+import { fine, FINE_SHELLS, formatFine } from '../economy/economy';
 import type { CarState, GameWorld } from '../game/state';
-import { contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { contractIdOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
 import { thingWears, thingWearShare } from '../items/things';
 import type { RideMeter } from '../trip/ride';
 import { carModel, comfortFactor, type CarComfort } from '../vehicle/carmodels';
@@ -23,7 +27,7 @@ import { BROKEN_BELOW, defaultProgress, type ContractPlace } from './types';
 /**
  * Called for every live contract, once per tick, with where it is and which car carries
  * it: a thing's item, or a taken haul's card (place `haul`, no car). The composition root
- * starts a race from it and gathers the HUD's delivery target.
+ * gathers the HUD's delivery target from it.
  */
 export type ContractItemVisitor = (item: ContractCargoItem, place: ContractPlace, carId: string | null) => void;
 
@@ -66,12 +70,15 @@ export function carBorneWear(comfort: CarComfort, knock: number, rideExcess: num
 /**
  * Takes `wear` (already scaled by the thing's own share) off the item's condition, and
  * breaks it the moment it falls under `BROKEN_BELOW`. A broken thing wears no further.
+ * True only on the wear that broke it.
  */
-export function wearThing(item: ContractCargoItem, wear: number): void {
-  if (wear <= 0 || item.progress.broken) return;
+export function wearThing(item: ContractCargoItem, wear: number): boolean {
+  if (wear <= 0 || item.progress.broken) return false;
   const condition = Math.max(0, (item.progress.condition ?? 1) - wear);
   item.progress.condition = condition;
-  if (condition < BROKEN_BELOW) item.progress.broken = true;
+  if (condition >= BROKEN_BELOW) return false;
+  item.progress.broken = true;
+  return true;
 }
 
 /**
@@ -94,6 +101,8 @@ export class ContractRuntime {
     private readonly world: GameWorld,
     private readonly ride: RideMeter,
     private readonly impacts: CarImpacts,
+    /** A one-line message on the HUD: the thing broken and the fine it cost. */
+    private readonly notify: (text: string) => void,
   ) {}
 
   /**
@@ -170,23 +179,22 @@ export class ContractRuntime {
     carWear: number,
     onContractItem: ContractItemVisitor,
   ): void {
-    // The race reads the item before it is marked started: unstarted away from the post
-    // is the moment it was taken.
     onContractItem(item, place, carId);
     // A hand-made or very old item may lack the record; the runtime owns it.
     if (!item.progress) item.progress = defaultProgress();
-    if (place !== 'post') {
-      item.progress.started = true;
-      // The urgent clock runs from TAKE, wherever the thing is (`ContractProgress.elapsedS`).
-      if (item.urgentS !== undefined && !item.progress.broken && this.clockS > 0) {
-        item.progress.elapsedS = (item.progress.elapsedS ?? 0) + this.clockS;
-      }
+    // The urgent clock runs from TAKE, wherever the thing is (`ContractProgress.elapsedS`).
+    if (place !== 'post' && item.urgentS !== undefined && !item.progress.broken && this.clockS > 0) {
+      item.progress.elapsedS = (item.progress.elapsedS ?? 0) + this.clockS;
     }
     const thing = contractThing(item);
     if (!thingWears(thing) || item.progress.broken) return;
     const previous = this.lastPlace.get(item.id);
     this.lastPlace.set(item.id, place);
     const dropped = place === 'loose' && (previous === 'hand' || previous === 'car');
-    wearThing(item, (carWear + (dropped ? DROP_WEAR : 0)) * thingWearShare(thing));
+    if (!wearThing(item, (carWear + (dropped ? DROP_WEAR : 0)) * thingWearShare(thing))) return;
+    // Broken: its job closed undelivered there and then, and fined with the break — unless
+    // the job was closed already and this is only its souvenir.
+    if (this.world.state.completedContractIds.includes(contractIdOf(item))) return;
+    this.notify(`the ${thing.name} broke — the job is off, ${formatFine(fine(this.world, FINE_SHELLS))}`);
   }
 }

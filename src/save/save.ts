@@ -15,7 +15,8 @@ import type {
 import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
-import { carPrice } from '../economy/economy';
+import { carShells } from '../economy/economy';
+import { emptyPurse, JAR_CAPACITY, SHELL_KINDS, type ShellPurse } from '../economy/shells';
 import {
   CAMERA_FRAME_LIMIT,
   isHaul,
@@ -179,7 +180,7 @@ export function installVehicleAutosave(
       case 'trailer_cargo':
       case 'sticker_place':
       case 'inventory':
-      // A purchase (world/vending.ts, world/keybox.ts): the money and what it bought.
+      // A purchase (world/vending.ts, world/keybox.ts): the shells and what they bought.
       case 'vend_sold':
       // Something given into a card machine's grid or taken out (world/cardmachine.ts).
       case 'machine_grid':
@@ -536,11 +537,9 @@ export function migrateState(raw: unknown): WorldState {
       Math.max(0, carried.length - 1),
     ),
     wornSunShades: wornItem,
-    // A save from the coin days carries its coins instead (`legacyCoinRubles`); one
-    // from the kopeck days, kopecks.
-    money: version < 3
-      ? legacyCoinRubles(carriedRaw, looseItemsRaw, carsRaw, courierStorageRaw)
-      : legacyRubles(numOr(playerRaw.money, 0), version),
+    // Before version 5 the money was the old purse (`SAVE_VERSION` history): it is not
+    // converted, and the jar starts empty (`savedWallet`).
+    ...savedWallet(playerRaw, version),
   };
 
   const cars: Record<string, CarState> = {};
@@ -967,14 +966,15 @@ function migrateCar(raw: Record<string, unknown>, version: number): CarState {
   // Bought or started in: the player's papers. A lot car still for sale keeps its price.
   if (raw.papers === true) car.papers = true;
   if (typeof raw.lotPrice === 'number' && Number.isFinite(raw.lotPrice) && raw.lotPrice > 0) {
-    // A save from the coin days priced in coins: the lot asks the model's price now,
-    // and what was fed into its box counts `RUBLES_PER_COIN` a coin. One from the kopeck
-    // days priced in kopecks.
-    const coins = version < 3;
-    car.lotPrice = coins ? carPrice(car.modelId) : legacyRubles(raw.lotPrice, version);
-    // Already in its key box; a save from before the key boxes has none.
-    if (typeof raw.lotPaid === 'number' && Number.isFinite(raw.lotPaid) && raw.lotPaid > 0) {
-      car.lotPaid = Math.min(car.lotPrice, coins ? Math.round(raw.lotPaid) * RUBLES_PER_COIN : legacyRubles(raw.lotPaid, version));
+    // Before version 5 a lot car was priced in the old money: it asks its
+    // model's price in shells now, and a key box that had taken the whole old price
+    // (`lotPaid` a number then) still holds the key for him.
+    if (version < 5) {
+      car.lotPrice = carShells(car.modelId);
+      if (typeof raw.lotPaid === 'number' && Number.isFinite(raw.lotPaid) && raw.lotPaid >= raw.lotPrice) car.lotPaid = true;
+    } else {
+      car.lotPrice = Math.round(raw.lotPrice);
+      if (raw.lotPaid === true) car.lotPaid = true;
     }
   }
   // The mirrors' hand-set aims (inside and door mirrors); anything malformed leaves the
@@ -1062,8 +1062,7 @@ function migrateLooseItem(raw: Record<string, unknown>): { item: Item; x: number
 function isRemovedLegacyItem(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false;
   const obj = raw as Record<string, unknown>;
-  // The coin item went with the purse: its value is counted into the balance first
-  // (`legacyCoinRubles`).
+  // The coin item went with the purse of the coin days; its value is not carried over.
   if (obj.type === 'hand_winch' || obj.type === 'postcard' || obj.type === 'letter' || obj.type === 'coin') return true;
   if (obj.type === 'contract_cargo' && isThingId(obj.thing) && isHaulThing(thingDef(obj.thing))) return true;
   if (obj.type === 'tool' && obj.tool === 'wrench') return true;
@@ -1082,59 +1081,38 @@ function withoutHaulPapers(cells: (Item | null)[]): (Item | null)[] {
   return cells.map((item) => (item?.type === 'contract_cargo' && isHaul(item) ? null : item));
 }
 
-/** A coin of the coin days in today's rubles: it was a ruble of the kopeck days. */
-const RUBLES_PER_COIN = 10;
-/** Kopecks of a version 3 save in one of today's rubles: money went ×10 and lost its kopecks. */
-const V3_KOPECKS_PER_RUBLE = 10;
-
-/** A saved amount in today's whole rubles: a version 3 save wrote kopecks. */
-function legacyRubles(amount: number, version: number): number {
-  return Math.max(0, Math.round(version < 4 ? amount / V3_KOPECKS_PER_RUBLE : amount));
-}
-
 /**
- * The coin days' money, rubles: every coin item of a version 2 save, wherever it lay —
- * the pack, the ground, a boot, a cabin, a post's stock — at `RUBLES_PER_COIN` a coin,
- * for the purse. The coins themselves are then dropped (`isRemovedLegacyItem`).
+ * The jar, the mint count and the driving not yet paid of a saved player. A save from
+ * before version 5 kept the old money: its jar starts empty and its mint at 0. The shells are
+ * whole and never negative, and a jar somehow over `JAR_CAPACITY` loses the excess.
  */
-function legacyCoinRubles(
-  carried: readonly unknown[],
-  looseItems: Record<string, unknown>,
-  cars: Record<string, unknown>,
-  courierStorage: Record<string, unknown>,
-): number {
-  let coins = 0;
-  const count = (raw: unknown): void => {
-    if (typeof raw !== 'object' || raw === null) return;
-    const obj = raw as Record<string, unknown>;
-    if (obj.type === 'coin') coins += Math.max(0, Math.trunc(numOr(obj.value, 0)));
-  };
-  const countAll = (raw: unknown): void => {
-    if (Array.isArray(raw)) for (const item of raw) count(item);
-  };
-  countAll(carried);
-  for (const loose of Object.values(looseItems)) {
-    if (typeof loose === 'object' && loose !== null) count((loose as Record<string, unknown>).item);
+function savedWallet(playerRaw: Record<string, unknown>, version: number): { shells: ShellPurse; shellMint: number; driveM: number } {
+  const shells = emptyPurse();
+  if (version < 5) return { shells, shellMint: 0, driveM: 0 };
+  const saved = typeof playerRaw.shells === 'object' && playerRaw.shells !== null ? (playerRaw.shells as Record<string, unknown>) : {};
+  let room = JAR_CAPACITY;
+  for (const kind of SHELL_KINDS) {
+    const count = Math.min(room, Math.max(0, Math.trunc(numOr(saved[kind], 0))));
+    shells[kind] = count;
+    room -= count;
   }
-  for (const car of Object.values(cars)) {
-    if (typeof car !== 'object' || car === null) continue;
-    countAll((car as Record<string, unknown>).storage);
-    countAll((car as Record<string, unknown>).cabin);
-  }
-  for (const cells of Object.values(courierStorage)) countAll(cells);
-  return coins * RUBLES_PER_COIN;
+  return {
+    shells,
+    shellMint: Math.max(0, Math.trunc(numOr(playerRaw.shellMint, 0))),
+    driveM: Math.max(0, numOr(playerRaw.driveM, 0)),
+  };
 }
 
 /**
- * Rebuilds a contract's saved progress: `started`, a thing's `condition` and `broken`,
- * and a passenger's ride (`comfort`, `harsh`, harsh moments scaled by the car's comfort),
- * and an urgent contract's clock (`elapsedS`)
- * when it has them. Older saves also carry heat, violated and status fields from when
- * deliveries were scored; they are dropped.
+ * Rebuilds a contract's saved progress: a thing's `condition` and `broken`, a
+ * passenger's ride (`comfort`, `harsh`, harsh moments scaled by the car's comfort), and
+ * an urgent contract's clock (`elapsedS`) when it has them. Older saves also carry heat,
+ * violated and status fields from when deliveries were scored, and `started` from when
+ * the rival race read it (before `SAVE_VERSION` 6); they are dropped.
  */
 function sanitizeContractProgress(raw: unknown): ContractProgress {
   const obj = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
-  const progress: ContractProgress = { started: obj.started === true };
+  const progress: ContractProgress = {};
   if (typeof obj.condition === 'number' && Number.isFinite(obj.condition)) {
     progress.condition = Math.min(1, Math.max(0, obj.condition));
   }
@@ -1288,6 +1266,10 @@ function migrateItem(raw: unknown, where: string): Item {
       if (sourceCourierIndex < 0 || !isThingId(obj.thing)) {
         throw new Error(`Save data is malformed: contract cargo at ${where} is invalid`);
       }
+      // A contract an older save (before `SAVE_VERSION` 6) had out as a race loads as a
+      // plain one: its race legs are not read, so it is bound for the next post
+      // (`offerDestinationIndex`) and paid that distance, and any post past its source
+      // signs for it — the finish its label still names included.
       const item: ContractCargoItem = {
         type: 'contract_cargo',
         id: obj.id,
@@ -1298,7 +1280,6 @@ function migrateItem(raw: unknown, where: string): Item {
         ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
         ...(typeof obj.urgentS === 'number' && Number.isFinite(obj.urgentS) && obj.urgentS > 0 ? { urgentS: obj.urgentS } : {}),
       };
-      if (obj.raceLegs === 1 || obj.raceLegs === 2) item.raceLegs = obj.raceLegs;
       // A passenger's party: its contract id and 1–3 teddies. Anything else is dropped,
       // and the teddy then delivers as a party of its own.
       const party = typeof obj.party === 'object' && obj.party !== null ? (obj.party as Record<string, unknown>) : null;

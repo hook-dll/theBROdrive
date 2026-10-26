@@ -6,7 +6,7 @@
  *
  * WAITING. Each post's shelter is at a ROUND (`WorldState.shelterRounds`, 0 when
  * absent); round `r`'s party is `shelterParty(seed, post, r)` (contracts/offers.ts):
- * 1–3 teddies, bound for the next post or a race's finish, maybe urgent, all drawn from
+ * 1–3 teddies, bound for the next post, maybe urgent, all drawn from
  * the seed. Nothing else about the bench is saved: a teddy is on it while its item
  * (`teddyItem`) is nowhere in the world — not in the hands, a car or on the ground — and
  * it has not been delivered (its own id among `completedContractIds`).
@@ -17,13 +17,14 @@
  * those left keep waiting and can be taken while the contract is open.
  *
  * SEATING (F with a teddy in hand at a shelter, `teddySeating`):
- *  - at a post that may sign for it (`contractDestinationRefusal`: past its source, a
- *    race's from its finish on) it is DELIVERED and paid there and then;
+ *  - at a post that may sign for it (`contractDestinationRefusal`: past its source) it
+ *    is DELIVERED and paid there and then;
  *  - at its own source shelter it is PUT BACK: no pay, it waits on the bench again;
  *  - anywhere else it is refused: "this one rides on to …".
  * The contract closes when the last of its teddies out is seated, here or there:
  * DELIVERED when any of the party was delivered, else RETURNED; the source shelter then
- * moves to the next round, and its bench fills with the next party.
+ * moves to the next round, and its bench fills with the next party. Only a party seated
+ * WHOLE at its destination pays; one that closes otherwise is fined (world/shelter.ts).
  */
 
 import type { WorldState } from '../game/state';
@@ -34,7 +35,7 @@ import { contractDestinationRefusal } from './registry';
 
 /** The party waiting at post `index`'s shelter now, and which of its bench places still hold a teddy. */
 export interface ShelterBench {
-  /** The party's contract (`shelterParty`): destination, pay, urgent, race, `party.size`. */
+  /** The party's contract (`shelterParty`): destination, pay, urgent, `party.size`. */
   readonly party: ContractCargoItem;
   readonly round: number;
   /** One per teddy of the party, by bench place: true while it waits there. */
@@ -93,8 +94,7 @@ export function teddySeating(state: WorldState, item: ContractCargoItem, index: 
   if (index === item.sourceCourierIndex) mode = 'return';
   else if (contractDestinationRefusal(item, index) === null) mode = 'deliver';
   else {
-    const to = item.destination ?? 'the next post';
-    return { mode: 'refuse', why: item.raceLegs !== undefined && index > item.sourceCourierIndex ? `this one races on to ${to}` : `this one rides on to ${to}` };
+    return { mode: 'refuse', why: `this one rides on to ${item.destination ?? 'the next post'}` };
   }
   const others = teddiesOut(state, partyId);
   others.delete(item.id);

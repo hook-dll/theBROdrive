@@ -72,7 +72,7 @@ stage 4 = driving):
 - **Cockpit view ("Сесть" / "Get in")**: a button in the car lab puts the camera in the
   driver's seat; keys turn the wheel and press the pedals (`KitRig` channels `steer`,
   `throttle`, `brake`, `clutch`, `gear`, …); fittings clickable from inside. Not started.
-- **Driving in the world**: done (2026-10-13). `CAR_MODELS` is `KIT_CARS`: traffic, rivals,
+- **Driving in the world**: done (2026-10-13). `CAR_MODELS` is `KIT_CARS`: traffic,
   contract cars, the start car, couriers, wrecks and the dev spawn menu are kit cars on the
   running gear of their `sv_*` siblings; the pack bodies are drawn nowhere, not even in the lab,
   and a save naming one loads on its kit twin. Every world `Vehicle` of a kit model has a

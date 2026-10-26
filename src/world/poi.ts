@@ -15,7 +15,7 @@ import {
   isCarModelLoaded,
   loadCarModel,
 } from '../render/carmodel';
-import { carPrice } from '../economy/economy';
+import { carShellKind, carShells } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import { buildParkingRow, postParkingSlots, type ParkingSlot } from './haulbay';
 import { setReflectorEmission } from './props/delineators';
@@ -573,13 +573,14 @@ function buildLot(
 
   // The price board, facing the road, and the key box on its post beside it, the same
   // way round (world/keybox.ts); only while the car is still for sale.
-  const priceBoard = (price: number): void => {
+  const priceBoard = (shells: number): void => {
+    const price = { kind: carShellKind(ctx.world.seed, carId), count: shells };
     const out = next * (slot.halfWidth + LOT_BOARD_OUT_M);
     const at = { x: slot.x + Math.cos(slot.yaw) * out, z: slot.z - Math.sin(slot.yaw) * out };
     const y = ctx.terrain.heightAt(at.x, at.z, slot.s);
     const road = ctx.road.offsetPoint(slot.s, 0);
     const face = Math.atan2(road.x - at.x, road.z - at.z);
-    buildLotSign(ctx, group, carId, def, at.x, y, at.z, face, market, registeredMarket);
+    buildLotSign(ctx, group, carId, def, price, at.x, y, at.z, face, market, registeredMarket);
     const boxX = at.x + Math.cos(face) * KEY_BOX_BESIDE_M;
     const boxZ = at.z - Math.sin(face) * KEY_BOX_BESIDE_M;
     buildKeyBox(
@@ -594,7 +595,7 @@ function buildLot(
     if (existing.lotPrice !== undefined) priceBoard(existing.lotPrice);
     return;
   }
-  priceBoard(carPrice(def.id));
+  priceBoard(carShells(def.id));
   if (ctx.hasPhysics) {
     // Created in clear air, so gravity and suspension find its ride height.
     ctx.world.apply({

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { makeFlatPaletteMaterial } from '../render/materials';
 import { maxAnisotropy } from '../render/texturequality';
-import { fillGameText } from '../ui/balls';
+import { fillGameText } from '../ui/shellsprites';
 import { box, C } from './poi/kit';
 
 /**

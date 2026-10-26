@@ -414,7 +414,6 @@ interface StreamCar {
   autopilot: Autopilot;
   /** Non-null while the car rides on rails, away from the ego. */
   rails: { speed: number } | null;
-  rival: boolean;
   turnS: number;
   input: InputFrame;
 }
@@ -1326,7 +1325,7 @@ function trackControl(car: StreamCar): void {
     state.wakeMin = Infinity;
     state.wakeLog = '';
   }
-  if (car.rival || car.turnS >= 0) return;
+  if (car.turnS >= 0) return;
   state.driven += FIXED_DT;
   if (TRACE_CAR === car.id && ticks % 6 === 0 && car.forwardS - START_S >= TRACE_FROM && car.forwardS - START_S <= TRACE_TO) {
     const a = car.autopilot;
@@ -1544,7 +1543,7 @@ function trackOvertakes(): void {
   participants.length = 0;
   if (!SOLO) participants.push({ id: 'ego', style: 'ego', s: egoS, direction: 1, autopilot: egoAutopilot });
   for (const car of cars) {
-    if (car.rails !== null || car.settleFor > 0 || car.turnS >= 0 || car.rival) continue;
+    if (car.rails !== null || car.settleFor > 0 || car.turnS >= 0) continue;
     participants.push({ id: car.id, style: car.style, s: car.forwardS, direction: car.direction, autopilot: car.autopilot });
   }
   const live = new Set<string>();

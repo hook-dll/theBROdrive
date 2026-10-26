@@ -225,15 +225,9 @@ export interface ContractCargoItem {
   readonly thing: ThingId;
   readonly generatedSeed: number;
   /**
-   * A race offer: how many posts on its destination is, 1 or 2. The cargo is
-   * signed only from there on, three rivals carry the same thing there, and the
-   * player handing in first wins a ruble a leg (contracts/race.ts). Absent on an ordinary trip.
-   */
-  raceLegs?: 1 | 2;
-  /**
    * An urgent offer (contracts/offers.ts `urgentDeadlineS`): the seconds of simulation it
-   * has from TAKE, against `progress.elapsedS`. On time it pays `URGENT_BONUS` on top;
-   * late it pays the base. Absent on an ordinary offer.
+   * has from TAKE, against `progress.elapsedS`. On time it pays `URGENT_PAY_FACTOR` times
+   * the pay; late it pays the base. Absent on an ordinary offer.
    */
   urgentS?: number;
   /**
@@ -400,11 +394,10 @@ export function itemLabel(item: Item): string {
       const percent = Math.round((item.progress?.condition ?? 1) * 100);
       const worn = percent < 100 ? ` · ${percent}%` : '';
       const to = item.destination ? ` → ${item.destination}` : '';
-      const race = item.raceLegs ? ' · race' : '';
       const left = urgentRemainingS(item);
       const clock = left === null ? '' : ` · ${formatClock(left)}`;
       const name = item.party ? 'teddy passenger' : thing.name;
-      return `${name}${to}${race}${clock}${worn}`;
+      return `${name}${to}${clock}${worn}`;
     }
     case 'sticker_envelope':
       // The name is on the envelope; the picture is seen when it is tried on.

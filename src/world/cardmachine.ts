@@ -8,7 +8,7 @@ import type { FixedGridView, GridLayout, TrunkGrid } from '../vehicle/trunk';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type WorldFixture } from './fixturefield';
 import { paintSign, registerAtlasSign, signMesh } from './market';
-import { fillGameText } from '../ui/balls';
+import { fillGameText } from '../ui/shellsprites';
 import { box, C, cylinder, material, mergeKitStatics, type V3 } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
 
@@ -34,8 +34,8 @@ import { addStatic, yawRotation } from './props/scatter';
  *    lies there is saved (`WorldState.machineGrids`, by the fixture's id), and so is
  *    what an older save left in the eight cells the grid had: those wait in the machine
  *    and drop into the cell one by one as it is emptied.
- *  - MONEY: what it sells is debited straight from the player's money; short, the
- *    button rattles and gives nothing.
+ *  - SHELLS: what it sells is taken straight out of the player's jar, in the one kind of
+ *    shell the machine takes; short of that kind, the button rattles and gives nothing.
  *
  * The cabinet is an arcade cabinet, the owner's pick of three trial designs (2026-10-26):
  * black cheeks with art stripes and a T-moulding, a hood overhanging the top with the
@@ -623,7 +623,7 @@ export abstract class CardMachine implements WorldFixture {
     this.flips.push(this.selected);
   }
 
-  /** The button springs back with a rattle: it will not do it now (the money is short). */
+  /** The button springs back with a rattle: it will not do it now (short of shells, the grid full). */
   protected refuse(): FoleyEvent {
     this.refuseT = REFUSE_S;
     return 'refused';

@@ -48,6 +48,7 @@ import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { MachineFocus } from './player/machinefocus';
+import { offerDestinationIndex } from './contracts/offers';
 import { ContractRuntime } from './contracts/runtime';
 import { isContractClosed } from './contracts/registry';
 import { type ContractWorldDeps } from './contracts/world';
@@ -96,7 +97,8 @@ import {
 } from './world/ranges';
 import { AirfieldProvider, BoardableField } from './story/sitebuild';
 import { AIRFIELD, airfieldAt } from './story/airfield';
-import { createStartingCar, spawnStartingItems, START_MONEY, storySite } from './story/site';
+import { createStartingCar, spawnStartingItems, START_SHELLS, storySite } from './story/site';
+import { credit, payDriving } from './economy/economy';
 import { TakeoffCutscene } from './story/takeoff';
 import { StoryOverlay } from './story/overlay';
 import { playEnding } from './story/ending';
@@ -160,7 +162,6 @@ import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } f
 import { cabinOpenness, type CabinOpenness } from './audio/cabinopenness';
 import { STREAM_FRAME_BUDGET_MS, STREAM_JOBS_PER_FRAME, warmUpBoot } from './app/bootwarmup';
 import { installDevTools } from './app/devtools';
-import { RivalRace, newRaceProgress } from './contracts/race';
 import { createPlayerImpacts } from './app/playerimpacts';
 import { createWheelEffects } from './app/wheeleffects';
 import { SignpostProvider } from './world/signposts';
@@ -888,14 +889,10 @@ async function boot(): Promise<void> {
       return true;
     },
   );
-  /** Three hurried rivals carrying the player's cargo to the next post; see contracts/race.ts. */
-  const race = new RivalRace(world.seed, road, traffic, loadCarModel, (text) => hud.setToast(text));
-  /** Reused receiver for the HUD bead line; see `RivalRace.progress`. */
-  const raceProgress = newRaceProgress();
   const mapView = newMapView();
   /** How far past a receiving post's arclength it stays the delivery target, m. */
   const DELIVERY_PAST_POST_M = 40;
-  /** The money jar is out on foot this near a lay-by: along it past its slips, and out across it past its pad (the post's furniture, the houses' fronts). */
+  /** The shell jar is out on foot this near a lay-by: along it past its slips, and out across it past its pad (the post's furniture, the houses' fronts). */
   const JAR_ALONG_M = 10;
   const JAR_ACROSS_M = 25;
   /** Fixed ground somewhere under an ABSOLUTE point; see STATE_LOAD_RADIUS_M in world/ranges.ts. */
@@ -1082,9 +1079,19 @@ async function boot(): Promise<void> {
     }
   } else {
     spawnStartingItems(world, loose, road, terrain);
-    // The player starts with a little money.
-    world.apply({ t: 'money', rubles: START_MONEY });
+    // The player starts with a few shells.
+    credit(world, START_SHELLS);
   }
+  // A full jar's lost shells, for the jar to pop over its rim, and a fine's, to leap out
+  // of it with its sorry tune, before it takes the new purse.
+  world.onDelta((delta) => {
+    if (delta.t !== 'shells') return;
+    if (delta.spilled && delta.spilled.length > 0) hud.spillShells(delta.spilled);
+    if (delta.fined && delta.fined.length > 0) {
+      hud.fineShells(delta.fined);
+      audio.foley('fine');
+    }
+  });
 
   // POI working cars enter state when their chunk reaches the physics band. A new
   // runtime exists immediately only if the car belongs in the current active set.
@@ -1302,7 +1309,6 @@ async function boot(): Promise<void> {
     },
     origin,
     boardable,
-    (contractId) => race.winPay(contractId),
     fixtures,
     {
       toast: (text) => hud.setToast(text),
@@ -1354,23 +1360,7 @@ async function boot(): Promise<void> {
     markResumeTarget,
   );
   world.onDelta((delta) => {
-    // The post machine (world/post.ts) shows the delivery itself; a completed contract
-    // (kind recorded) decides the race, and one closed with no kind is a return to
-    // sender, which calls it off.
-    if (delta.t === 'courier_storage' && delta.completedContractId && delta.completedContractKind) {
-      race.playerDelivered(delta.completedContractId);
-    } else if (delta.t === 'courier_storage' && delta.completedContractId) {
-      race.playerReturned(delta.completedContractId);
-    } else if (delta.t === 'haul_close') {
-      // A haul's load accepted in a bay (contracts/haulbays.ts): delivered, or returned.
-      if (delta.deliveredKind) race.playerDelivered(delta.contractId);
-      else race.playerReturned(delta.contractId);
-    } else if (delta.t === 'teddy_seat') {
-      // A teddy seated on a shelter's bench (contracts/shelters.ts): the first one
-      // delivered decides a party's race; the party put back whole calls it off.
-      if (delta.delivered) race.playerDelivered(delta.partyId);
-      else if (delta.close === 'returned') race.playerReturned(delta.partyId);
-    } else if (delta.t === 'sticker_place') {
+    if (delta.t === 'sticker_place') {
       hud.setToast('stuck on');
     } else if (delta.t === 'settings') {
       // Every path that changes preferences goes through this delta — the pause menu,
@@ -1567,7 +1557,6 @@ async function boot(): Promise<void> {
         lakeWater,
         tumbleweeds,
         traffic,
-        race,
         vitals,
         autopilot,
         hud,
@@ -1632,9 +1621,15 @@ async function boot(): Promise<void> {
 
   /** The ride of the car he drives (trip/ride.ts), and the velocity it is fed, reused. */
   const ride = new RideMeter();
-  // Contract walk: keeps the race and the delivery target in step with where each
-  // contract is, and wears each thing by the knocks, drops and the ride it takes.
-  const contracts = new ContractRuntime(world, ride, (carId) => vehicles.get(carId)?.impactTotal ?? null);
+  // Contract walk: keeps the delivery target in step with where each contract is, and
+  // wears each thing by the knocks, drops and the ride it takes — a thing broken by it
+  // closes its job undelivered, fined and told.
+  const contracts = new ContractRuntime(
+    world,
+    ride,
+    (carId) => vehicles.get(carId)?.impactTotal ?? null,
+    (text) => hud.setToast(text),
+  );
   let rideCarId: string | null = null;
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
@@ -1682,7 +1677,6 @@ async function boot(): Promise<void> {
       haulSphere.radius = radius;
       return haulFrustum.intersectsSphere(haulSphere);
     },
-    racePay: (contractId) => race.winPay(contractId),
     toast: (text) => hud.setToast(text),
   });
 
@@ -1701,10 +1695,9 @@ async function boot(): Promise<void> {
   let urgentLeftNext: number | null = null;
   let urgentLeft: number | null = null;
   const onContractItem = (item: ContractCargoItem, place: ContractPlace, carId: string | null): void => {
-    race.observe(item, place, activeS);
     if (isContractClosed(item, world.state.completedContractIds)) return;
     if (place === 'hand' || place === 'haul' || (place === 'car' && carId !== null && carId === world.state.player.drivingCarId)) {
-      deliveryMinIndexNext = Math.min(deliveryMinIndexNext, item.sourceCourierIndex + (item.raceLegs ?? 1));
+      deliveryMinIndexNext = Math.min(deliveryMinIndexNext, offerDestinationIndex(item));
       const left = urgentRemainingS(item);
       if (left !== null) urgentLeftNext = urgentLeftNext === null ? left : Math.min(urgentLeftNext, left);
     }
@@ -1804,44 +1797,27 @@ async function boot(): Promise<void> {
     traffic.setPlayerVehicle(driving);
     frameProfiler?.begin('traffic');
     traffic.fixedUpdate(dt, activeS, activeLateral, origin.x, origin.z);
-    race.fixedUpdate(dt, activeS);
     // THE NAVIGATOR ORB (ui/hudmap.ts): where the player is to the road, and where the
-    // route goes — a race's finish, the nearest post ahead that will sign the cargo (it
-    // stays the target until the car is past its stand, so stopping alongside does not
-    // flip it to the next one), or with nothing aboard the next post.
+    // route goes — the nearest post ahead that will sign the cargo (it stays the target
+    // until the car is past its stand, so stopping alongside does not flip it to the next
+    // one), or with nothing aboard the next post.
     {
       mapView.s = activeS;
       mapView.lateral = activeLateral;
       mapView.x = projectedX;
       mapView.z = projectedZ;
       mapView.facing = driving !== null ? driving.heading : camera.yaw;
-      mapView.urgentS = urgentLeft;
-      if (race.progress(activeS, raceProgress)) {
-        mapView.kind = 'race';
-        mapView.targetIndex = -1;
-        mapView.targetS = raceProgress.finishS;
-        const span = raceProgress.finishS - raceProgress.startS;
-        let rank = 1;
-        for (let i = 0; i < raceProgress.rivals.length; i++) {
-          const p = raceProgress.rivals[i]!;
-          mapView.rivals[i] = raceProgress.startS + p * span;
-          if (p > raceProgress.player) rank++;
-        }
-        mapView.rivalCount = raceProgress.rivals.length;
-        mapView.rank = rank;
-      } else {
-        const delivering = deliveryMinIndex !== Infinity;
-        const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, delivering ? deliveryMinIndex : 0);
-        mapView.kind = delivering ? 'delivery' : 'idle';
-        mapView.targetIndex = target;
-        mapView.targetS = postStop(world.seed, target).s;
-        mapView.rivalCount = 0;
-        if (!delivering) mapView.urgentS = null;
-      }
+      const delivering = deliveryMinIndex !== Infinity;
+      const target = nextPostIndex(world.seed, activeS - DELIVERY_PAST_POST_M, delivering ? deliveryMinIndex : 0);
+      mapView.kind = delivering ? 'delivery' : 'idle';
+      mapView.targetIndex = target;
+      mapView.targetS = postStop(world.seed, target).s;
+      mapView.urgentS = delivering ? urgentLeft : null;
       hud.setMap(mapView);
-      // THE MONEY JAR (ui/hudjar.ts): out only on foot on a lay-by, where money is made and spent.
+      // THE SHELL JAR (ui/hudjar.ts): out on foot on a lay-by, where shells are made and
+      // spent; elsewhere it only shows a moment whenever shells come or go.
       const layby = driving === null ? laybyNear(world.seed, activeS) : null;
-      hud.setMoneyShown(
+      hud.setShellsShown(
         layby !== null &&
           activeS > layby.sEntry - JAR_ALONG_M &&
           activeS < layby.sExit + JAR_ALONG_M &&
@@ -2882,7 +2858,9 @@ async function boot(): Promise<void> {
     } else {
       hud.setDriving(null);
     }
-    hud.setMoney(s.player.money);
+    // A shell for every whole kilometre ridden, then the jar as it stands.
+    payDriving(world);
+    hud.setShells(s.player.shells);
     // The G-force widget: the ride of the car he drives from the driver's seat (trip/ride.ts).
     hud.setRide(driving && s.player.seat === 'driver' ? ride : null);
     if (autopilotDebug !== null) {
@@ -3405,7 +3383,7 @@ async function boot(): Promise<void> {
     flipVehicle: devTools?.flipVehicle,
     seatInNearestCar: devTools?.seatInNearestCar,
     jumpToLake: devTools?.jumpToLake,
-    giveMoney: devTools?.giveMoney,
+    giveShells: devTools?.giveShells,
     jumpToKm: devTools?.jumpTo,
   };
 

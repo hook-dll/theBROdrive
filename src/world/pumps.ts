@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SurfaceType } from '../core/surfaces';
 import type { FoleyEvent } from '../audio/foley';
-import { debit, formatMoney, pumpTenLitres } from '../economy/economy';
+import { debit, formatPrice, pumpPrice } from '../economy/economy';
+import type { ShellPrice } from '../economy/shells';
 import type { GameWorld } from '../game/state';
 import { canTakes, fillCan, litreText, type FluidKind } from '../items/items';
 import type { ChunkContext } from './chunks';
@@ -18,10 +19,11 @@ import { addStatic, yawRotation } from './props/scatter';
  * settlements, petrol, oil and water, each painted its own loud colour with white
  * reflector chips on its front, so the three read apart in head lamps and dust.
  *
- * A pump never runs dry and is paid by the litre: ten litres cost
- * `pumpTenLitres(fluid, km)` (economy/economy.ts), shown on the board on its front,
- * and every litre poured takes a tenth of that from the player's money. With no money
- * left it does not pour.
+ * A pump never runs dry and is paid by the fill: one shell, of the kind that pump takes
+ * (`pumpPrice`, economy/economy.ts), shown on the board on its front, for as much as he
+ * pours. It is taken as the first drop runs (`dispense`): from taking the nozzle until
+ * it is hung back, or for one held fill of a can at the pump. Without that shell it does
+ * not pour.
  *
  * Each pump has a hose of about four metres and a nozzle in a holster. F with empty
  * hands takes the nozzle (`PumpNozzle`, kept by player/interaction.ts); the hose follows
@@ -92,8 +94,8 @@ const POUR_EPSILON = 1e-4;
  */
 export interface PumpNozzle extends WorldFixture {
   readonly fluid: FluidKind;
-  /** Rubles for ten litres here (`pumpTenLitres`). */
-  readonly tenLitres: number;
+  /** The fill's price here (`pumpPrice`): one shell of the pump's kind. */
+  readonly price: ShellPrice;
   /**
    * The hand moved to ABSOLUTE (`x`, `y`, `z`), looking along (`dx`, `dz`): the nozzle
    * and the hose follow it. False, and nothing moved, when the hose does not reach.
@@ -101,9 +103,9 @@ export interface PumpNozzle extends WorldFixture {
   follow(x: number, y: number, z: number, dx: number, dz: number): boolean;
   /** The nozzle back into its holster. */
   hangUp(): void;
-  /** Litres the player's money still pays for here. */
-  affordable(world: GameWorld): number;
-  /** Pours up to `litres`, paying for them; returns the litres the money covered. */
+  /** Whether it pours for him now: this fill is paid, or his jar holds its price. */
+  canPour(world: GameWorld): boolean;
+  /** Pours up to `litres`, taking the fill's price with the first drop; 0 when it cannot be paid. */
   dispense(world: GameWorld, litres: number): number;
 }
 
@@ -142,11 +144,11 @@ export function buildPumpStand(
   box(root, [ISLAND_W, ISLAND_H, ISLAND_D], [0, ISLAND_H / 2, 0], C.concreteLight);
   box(root, [ISLAND_W + 0.02, 0.04, 0.04], [0, ISLAND_H - 0.02, -ISLAND_D / 2], 0xd8b02a);
 
-  const km = poi.s / 1000;
   const pumps: Pump[] = [];
   FLUIDS.forEach((fluid, index) => {
     const lx = (1 - index) * SPACING;
-    const tenLitres = pumpTenLitres(fluid, km);
+    const fixtureId = `pump:${poi.index}:${fluid}`;
+    const price = pumpPrice(ctx.world.seed, fixtureId);
     const pump = new THREE.Group();
     pump.position.set(lx, 0, 0);
     root.add(pump);
@@ -154,17 +156,17 @@ export function buildPumpStand(
     box(pump, [HEAD_W, HEAD_H, HEAD_D], [0, ISLAND_H + BODY_H + HEAD_H / 2, 0], HEAD_PAINT);
     box(pump, [HEAD_W + 0.01, 0.06, HEAD_D + 0.01], [0, ISLAND_H + BODY_H + 0.03, 0], TRIM[fluid]);
     box(pump, [BODY_W + 0.02, 0.08, BODY_D + 0.02], [0, ISLAND_H + 0.04, 0], C.darkMetal);
-    // The name on the head, the price for ten litres on the body.
+    // The name on the head, the price of a fill on the body.
     const plate = signMesh([NAME[fluid]], ...NAME_BOARD);
     plate.scale.set(0.5, 0.19, 1);
     plate.position.set(0, ISLAND_H + BODY_H + HEAD_H / 2, -HEAD_D / 2 - 0.006);
     plate.rotation.y = Math.PI;
     pump.add(plate);
-    const price = signMesh([`10 L ${formatMoney(tenLitres)}`], ...PRICE_BOARD);
-    price.scale.set(0.34, 0.13, 1);
-    price.position.set(0, ISLAND_H + BODY_H - 0.16, FRONT_Z - 0.006);
-    price.rotation.y = Math.PI;
-    pump.add(price);
+    const priceBoard = signMesh([`FILL ${formatPrice(price)}`], ...PRICE_BOARD);
+    priceBoard.scale.set(0.34, 0.13, 1);
+    priceBoard.position.set(0, ISLAND_H + BODY_H - 0.16, FRONT_Z - 0.006);
+    priceBoard.rotation.y = Math.PI;
+    pump.add(priceBoard);
     // White chips low on the front corners: the paint is what tells the three apart, the
     // chips are what a head lamp finds first.
     for (const sx of [-1, 1]) reflector(pump, sx * (BODY_W / 2 - 0.07), ISLAND_H + 0.45, FRONT_Z - 0.008);
@@ -185,7 +187,7 @@ export function buildPumpStand(
     const px = x + c * lx;
     const pz = z - s * lx;
     const ground = (hx: number, hz: number): number => ctx.terrain.heightAt(px + c * hx + s * hz, pz - s * hx + c * hz, poi.s) - y;
-    const fixture = new Pump(`pump:${poi.index}:${fluid}`, fluid, tenLitres, px, y, pz, yaw, -lx, nozzle, hose, ground);
+    const fixture = new Pump(fixtureId, fluid, price, px, y, pz, yaw, -lx, nozzle, hose, ground);
     fixture.hangUp();
     // Built before the chunk freezes it: the first frame draws it in its holster.
     fixture.update();
@@ -337,15 +339,15 @@ class Pump implements WorldFixture, PumpNozzle {
   private yawInHand = 0;
   private dirty = true;
   /**
-   * Rubles poured and not yet taken: money is whole rubles and a litre is a fraction of
-   * one, so the pump takes each ruble as it is used up.
+   * This fill is paid: set by the first drop (`dispense`), cleared when the nozzle is
+   * hung back or a new held fill of a can begins.
    */
-  private owed = 0;
+  private paid = false;
 
   constructor(
     readonly id: string,
     readonly fluid: FluidKind,
-    readonly tenLitres: number,
+    readonly price: ShellPrice,
     /** The pump's base centre, ABSOLUTE world metres (the island's foot). */
     readonly x: number,
     private readonly y: number,
@@ -360,7 +362,7 @@ class Pump implements WorldFixture, PumpNozzle {
   ) {}
 
   private priceText(): string {
-    return `10 L ${formatMoney(this.tenLitres)}`;
+    return `fill ${formatPrice(this.price)}`;
   }
 
   aim(
@@ -397,7 +399,7 @@ class Pump implements WorldFixture, PumpNozzle {
     if (!canTakes(held, this.fluid)) return `${name} — not into a ${held.fluid} can`;
     const reading = `can ${held.litres.toFixed(1)}/${litreText(held.capacity)}`;
     if (held.litres >= held.capacity - CAN_FULL_EPSILON) return `${name} — ${reading}, full`;
-    if (this.affordable(ctx.world) <= POUR_EPSILON) return `${name} — ${this.priceText()} · no money, it does not pour`;
+    if (!this.canPour(ctx.world)) return `${name} — ${this.priceText()} · no ${this.price.kind} shell, it does not pour`;
     return `[F] hold to fill — ${reading} · ${this.priceText()}`;
   }
 
@@ -415,6 +417,8 @@ class Pump implements WorldFixture, PumpNozzle {
     const can = ctx.held;
     if (can?.type !== 'fluid_can') return null;
     const refused: FixtureHoldResult | null = first ? { sound: 'refused', continuous: null } : null;
+    // A can held to the pump is a fill of its own each time the button goes down.
+    if (first && !this.taken) this.paid = false;
     if (!canTakes(can, this.fluid)) return refused;
     const room = can.capacity - can.litres;
     if (room <= CAN_FULL_EPSILON) return refused;
@@ -441,21 +445,22 @@ class Pump implements WorldFixture, PumpNozzle {
     return true;
   }
 
-  affordable(world: GameWorld): number {
-    return Math.max(0, ((world.state.player.money - this.owed) * 10) / this.tenLitres);
+  canPour(world: GameWorld): boolean {
+    return this.paid || world.state.player.shells[this.price.kind] >= this.price.count;
   }
 
   dispense(world: GameWorld, litres: number): number {
-    const poured = Math.min(litres, this.affordable(world));
-    if (poured <= POUR_EPSILON) return 0;
-    this.owed += (poured * this.tenLitres) / 10;
-    const whole = Math.floor(this.owed + 1e-9);
-    if (whole > 0 && debit(world, whole)) this.owed -= whole;
-    return poured;
+    if (litres <= POUR_EPSILON) return 0;
+    if (!this.paid) {
+      if (!debit(world, this.price)) return 0;
+      this.paid = true;
+    }
+    return litres;
   }
 
   hangUp(): void {
     this.taken = false;
+    this.paid = false;
     this.end.copy(HOLSTER);
     this.dirty = true;
   }

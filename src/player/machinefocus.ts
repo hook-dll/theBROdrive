@@ -26,7 +26,7 @@ const WHEEL_NOTCH = 1;
  * The card machines are not framed: they are worked by walking up to them
  * (`WorldFixture.reach`, player/interaction.ts).
  *
- * A money machine debits or pays the player's money only while it is framed (`onFramed`
+ * A machine takes shells out of the player's jar or pays them in only while it is framed (`onFramed`
  * tells player/interaction.ts which fixture is being worked).
  *
  * Nothing pauses: the world runs on while the player works the machine.
@@ -98,7 +98,7 @@ export class MachineFocus {
     this.input.setCursorFree(true);
     if (document.pointerLockElement !== null) document.exitPointerLock();
     document.body.classList.add('is-machine-focus');
-    // Framed first, so the machine can take money when it is told; last, because what
+    // Framed first, so the machine can take shells when it is told; last, because what
     // the machine gives on being framed may let go of it again at once.
     this.onFramed(fixtureId);
     fixture.setFocused?.(true, this.context());

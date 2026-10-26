@@ -67,7 +67,8 @@ import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
-import { credit, debit, formatMoney } from '../economy/economy';
+import { carShellKind, credit, debit, formatPrice } from '../economy/economy';
+import type { ShellPrice } from '../economy/shells';
 import type { FixtureContext, FixtureField, WorldFixture } from '../world/fixturefield';
 import { PUMP_RATE, type PumpNozzle } from '../world/pumps';
 
@@ -733,8 +734,8 @@ export class Interaction {
       get world() { return self.world; },
       get inventory() { return self.inventory; },
       get held() { return self.inventory.held; },
-      debit: (rubles: number) => (self.focusedFixture !== null || self.engagedFixture !== null) && debit(self.world, rubles),
-      credit: (rubles: number) => credit(self.world, rubles),
+      debit: (price: ShellPrice) => (self.focusedFixture !== null || self.engagedFixture !== null) && debit(self.world, price),
+      credit: (count: number) => credit(self.world, count),
       give: (itemId: string) => self.inventory.remove(itemId),
       stepBack: () => self.hooks.stepBack(),
       probe: (postIndex: number, x: number, z: number) => {
@@ -745,7 +746,6 @@ export class Interaction {
         probe.drivingCarId = self.world.state.player.drivingCarId;
         return probe;
       },
-      racePay: (contractId: string) => self.racePay(contractId),
       boxCar: (carId: string) => {
         // The body's throttled counters into its state before the state leaves the world.
         self.carLookup.vehicle(carId)?.pushState();
@@ -804,8 +804,6 @@ export class Interaction {
     private readonly origin: WorldOrigin,
     /** Colliders that mean "this is the parked plane"; boarding is offered here. */
     private readonly boardable: BoardableField,
-    /** Rubles a race win pays for handing this contract in now; see `RivalRace.winPay`. */
-    private readonly racePay: (contractId: string) => number,
     /** The streamed mechanical fixtures: post machines, pumps, key boxes. */
     private readonly worldFixtures: FixtureField,
     /** What the composition root does for a fixture: a HUD toast, the machine focus. */
@@ -2712,8 +2710,8 @@ export class Interaction {
 
   /**
    * Pours from the pump nozzle in hand into the reservoir the crosshair is on — the same
-   * ones a can pours into — paying the pump for every litre (world/pumps.ts). With no
-   * money left it does not pour.
+   * ones a can pours into — the fill paid with one shell of the pump's kind as the first
+   * drop runs (world/pumps.ts). Without it the pump does not pour.
    */
   private pumpPour(dt: number, nozzle: PumpNozzle, resolved: Resolved): void {
     const reservoir = this.aimedReservoir(resolved);
@@ -2732,7 +2730,7 @@ export class Interaction {
    */
   private nozzlePrompt(resolved: Resolved): string | null {
     const nozzle = this.nozzle!;
-    const price = `10 L ${formatMoney(nozzle.tenLitres)}`;
+    const price = `fill ${formatPrice(nozzle.price)}`;
     const reservoir = this.aimedReservoir(resolved);
     if (!reservoir) {
       return resolved.target.kind === 'none' ? `${nozzle.fluid} nozzle — ${price} · aim at a filler or a can` : null;
@@ -2741,8 +2739,8 @@ export class Interaction {
       return `${fillReadout(reservoir)} — ${nozzle.fluid} does not go in there`;
     }
     if (reservoir.level >= reservoir.capacity - FLUID_FULL_EPSILON) return fillReadout(reservoir);
-    if (nozzle.affordable(this.world) <= FLUID_FULL_EPSILON) {
-      return `${fillReadout(reservoir)} — no money, the pump does not pour`;
+    if (!nozzle.canPour(this.world)) {
+      return `${fillReadout(reservoir)} — no ${nozzle.price.kind} shell, the pump does not pour`;
     }
     return `[LMB] pour ${nozzle.fluid} — ${fillReadout(reservoir)} · ${price}`;
   }
@@ -2959,9 +2957,9 @@ export class Interaction {
     if (!car) return null;
     const label = carModel(car.modelId).label;
     if (car.lotPrice !== undefined) {
-      const paid = car.lotPaid ?? 0;
-      const owing = paid > 0 ? ` · ${formatMoney(paid)} paid` : '';
-      return `${label} for sale — ${formatMoney(car.lotPrice)}${owing} · pay at the key box`;
+      if (car.lotPaid) return `${label} for sale — paid · take the key from the key box`;
+      const price = { kind: carShellKind(this.world.seed, resolved.carId), count: car.lotPrice };
+      return `${label} for sale — ${formatPrice(price)} · pay at the key box`;
     }
     const lock = haulLoadLock(this.world.state, resolved.carId);
     return lock ? `${label} — ${lock}` : null;

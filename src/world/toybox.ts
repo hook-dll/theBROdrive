@@ -8,7 +8,7 @@ import type { CarState, GameWorld, WorldState } from '../game/state';
 import type { Item } from '../items/items';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { makeFlatPaletteMaterial } from '../render/materials';
-import { fillGameText } from '../ui/balls';
+import { fillGameText } from '../ui/shellsprites';
 import { DieCastShop, dieCastGeometry, dieCastShopAvailable } from '../ui/diecastshop';
 import { carModel, hasCarModel } from '../vehicle/carmodels';
 import { visiblePaintHex } from '../vehicle/carpaint';

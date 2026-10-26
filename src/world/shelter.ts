@@ -7,16 +7,14 @@ import { offerDestinationIndex } from '../contracts/offers';
 import { ACTIVE_CONTRACT_LIMIT, activeContracts } from '../contracts/registry';
 import { shelterBench, teddySeating, type ShelterBench } from '../contracts/shelters';
 import { formatClock, isLate } from '../contracts/types';
-import { carUniqueness, contractPay, formatMoney, uniquenessBonus } from '../economy/economy';
+import { contractPay, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { contractIdOf, type ContractCargoItem } from '../items/items';
 import { createItemMesh, disposeItemMeshResources } from '../render/partmesh';
 import type { ChunkContext } from './chunks';
 import { rayBox, type FixtureContext, type FixtureField, type WorldFixture } from './fixturefield';
-import { postParkingSlot } from './haulbay';
 import { paintSign, repaintSign, SIGN_PLANE } from './market';
 import { box, C, mergeKitStatics } from './poi/kit';
-import { deliveryStickers, laybyCarId } from './post';
 import { postStop, type PostStop } from './poststops';
 import { addStatic, yawRotation } from './props/scatter';
 import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
@@ -31,16 +29,21 @@ import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
  * "the stop is a massive box now — make it light: only a bench and a skewed roof over
  * it, two metal posts carrying both" (owner, 2026-10-25).
  * On the post at the waiting party's end hangs the timetable: where the party waiting
- * goes and how far, how many wait, what each pays (the lay-by car's sticker bonus in it,
- * as the post's cards print it), and the urgent clock or the race.
+ * goes and how far, how many wait, what the party pays (economy/economy.ts
+ * `contractPay`: the route's kilometres, once for the whole party), and the urgent clock.
  *
  * The party's teddies sit on the bench (the teddy item's own model), left of its middle;
  * who is still there is read from the world (contracts/shelters.ts `shelterBench`), so a
  * teddy taken here or put back shows at once. F on a teddy takes it into the hands; F at
- * the shelter with a teddy in hand seats it (`teddySeating`): delivered and paid, put
- * back at its source, or refused with where it rides on to. Delivered teddies sit right
- * of the middle until the chunk is streamed out with the player long gone; they are not
- * saved.
+ * the shelter with a teddy in hand seats it (`teddySeating`): delivered, put back at its
+ * source, or refused with where it rides on to. The party is paid ONCE, and only whole:
+ * when its last teddy is seated at the destination bench and EVERY teddy of the party
+ * was seated there (`partyPays`); one returned, left behind or forgotten, and it pays
+ * nothing. A party that CLOSES so — short at the destination, or put back whole at its
+ * source — closed undelivered and is FINED `FINE_SHELLS` (economy/economy.ts `fine`),
+ * once, right after the seat that closed it is recorded (`teddy_seat`, which a reload
+ * finds and never closes again). Delivered teddies sit right of the middle
+ * until the chunk is streamed out with the player long gone; they are not saved.
  *
  * Shared kit materials, merged; only the timetable has its own painted board.
  */
@@ -97,18 +100,16 @@ const BOARD_PAINT = ['#f2ecd8', '#1f3f7a'] as const;
 /** The bench and the board are read again this often, s. */
 const REFRESH_S = 0.4;
 
-/** The text of a shelter's timetable for `bench`, the pay read with `stickers`. */
-function timetable(world: GameWorld, stop: PostStop, bench: ShelterBench, stickers: number): string[] {
+/** The text of a shelter's timetable for `bench`. */
+function timetable(world: GameWorld, stop: PostStop, bench: ShelterBench): string[] {
   const party = bench.party;
   const km = (postStop(world.seed, offerDestinationIndex(party)).s - stop.s) / 1000;
   const waiting = bench.waiting.filter(Boolean).length;
-  const bonus = uniquenessBonus(stickers);
   const lines = [
     `→ ${(party.destination ?? 'the next post').toUpperCase()}`,
     `${km.toFixed(1)} km · ${waiting === 0 ? 'nobody waiting' : `${waiting} waiting`}`,
-    `${formatMoney(contractPay(world.seed, party, stickers))} a teddy${bonus > 0 ? ` · +${Math.round(bonus * 100)}%` : ''}`,
+    `${formatPay(contractPay(world.seed, party))} for the party`,
   ];
-  if (party.raceLegs) lines.push(`RACE ${party.raceLegs} STOP${party.raceLegs > 1 ? 'S' : ''}`);
   if (party.urgentS !== undefined) lines.push(`URGENT ${formatClock(party.urgentS)}`);
   return lines;
 }
@@ -209,13 +210,7 @@ export function buildShelter(
 
   const world = ctx.world;
   const bench = shelterBench(world.state, world.seed, stop.index);
-  const bay = postParkingSlot(world.seed, ctx.road, stop.index, 'handIn');
-  const stickersNow = (): number => {
-    const car = laybyCarId(world.state, bay.x, bay.z, (id) => world.state.cars[id] ?? null);
-    return car ? carUniqueness(world.state.cars[car]!) : 0;
-  };
-  const stickers = stickersNow();
-  const boardMaterial = paintSign(timetable(world, stop, bench, stickers), ...BOARD_PAINT, 512, 480);
+  const boardMaterial = paintSign(timetable(world, stop, bench), ...BOARD_PAINT, 512, 480);
   const board = new THREE.Mesh(SIGN_PLANE, boardMaterial);
   board.userData.kitKeep = true;
   board.scale.set(BOARD_W, BOARD_H, 1);
@@ -252,7 +247,7 @@ export function buildShelter(
   const pitched = new THREE.Quaternion().setFromEuler(new THREE.Euler(ROOF_PITCH, yaw, 0, 'YXZ'));
   solid(0, ROOF_Y + ROOF_T / 2, 0, HALF_W, ROOF_T / 2, HALF_D, { x: pitched.x, y: pitched.y, z: pitched.z, w: pitched.w });
 
-  const shelter = new Shelter(world, stop, x, y, z, yaw, bay.x, bay.z, teddies, boardMaterial, stickersNow, bench, stickers);
+  const shelter = new Shelter(world, stop, x, y, z, yaw, teddies, boardMaterial, bench);
   registered.push(fixtures.register(shelter));
 }
 
@@ -263,7 +258,7 @@ class Shelter implements WorldFixture {
   readonly id: string;
   private part: Part = null;
   private refreshIn = REFRESH_S;
-  /** The board's state as last painted: round, who waits, the stickers. */
+  /** The board's state as last painted: round, who waits. */
   private paintedKey: string;
   /** Teddies delivered here this visit: the next one sits on arrival place `arrivals % 3`. */
   private arrivals = 0;
@@ -276,34 +271,27 @@ class Shelter implements WorldFixture {
     private readonly y: number,
     private readonly z: number,
     private readonly yaw: number,
-    /** The post's haul bay, ABSOLUTE: where the lay-by car is looked for. */
-    private readonly bayX: number,
-    private readonly bayZ: number,
     /** The teddy on each bench place: the waiting party's, then the arrivals'. */
     private readonly teddies: readonly THREE.Object3D[],
     private readonly board: THREE.MeshStandardMaterial,
-    /** The lay-by car's stickers from its saved pose, for the board. */
-    private readonly boardStickers: () => number,
     private bench: ShelterBench,
-    stickers: number,
   ) {
     this.id = `shelter:${stop.index}`;
-    this.paintedKey = this.key(bench, stickers);
+    this.paintedKey = this.key(bench);
   }
 
-  private key(bench: ShelterBench, stickers: number): string {
-    return `${bench.round}|${bench.waiting.map((w) => (w ? 1 : 0)).join('')}|${stickers}`;
+  private key(bench: ShelterBench): string {
+    return `${bench.round}|${bench.waiting.map((w) => (w ? 1 : 0)).join('')}`;
   }
 
   /** Reads the bench again; on a change, the teddies and the board follow. */
   private refresh(): void {
     this.bench = shelterBench(this.world.state, this.world.seed, this.stop.index);
-    const stickers = this.boardStickers();
-    const key = this.key(this.bench, stickers);
+    const key = this.key(this.bench);
     if (key === this.paintedKey) return;
     this.paintedKey = key;
     for (let place = 0; place < WAITING_PLACES; place++) this.teddies[place]!.visible = this.bench.waiting[place] === true;
-    repaintSign(this.board, timetable(this.world, this.stop, this.bench, stickers), ...BOARD_PAINT);
+    repaintSign(this.board, timetable(this.world, this.stop, this.bench), ...BOARD_PAINT);
   }
 
   update(dt: number): void {
@@ -367,12 +355,6 @@ class Shelter implements WorldFixture {
     return best > range ? Infinity : best;
   }
 
-  /** The stickers a delivery here is paid by, the lay-by car read live (world/post.ts `deliveryStickers`). */
-  private stickers(ctx: FixtureContext): number {
-    const probe = ctx.probe(this.stop.index, this.bayX, this.bayZ);
-    return deliveryStickers(this.world.state, laybyCarId(this.world.state, this.bayX, this.bayZ, (id) => probe.carPosition(id)));
-  }
-
   /** Why the waiting teddy cannot be taken now, or null: the limit, for the first of a party. */
   private takeRefusal(): string | null {
     const active = activeContracts(this.world.state);
@@ -396,9 +378,14 @@ class Shelter implements WorldFixture {
     if (held) {
       const seating = teddySeating(this.world.state, held, this.stop.index);
       if (seating.mode === 'refuse') return seating.why;
-      if (seating.mode === 'return') return '[F] put the teddy back — no pay';
+      if (seating.mode === 'return') return seating.close ? `[F] put the teddy back — the job is off, ${formatFine(FINE_SHELLS)}` : '[F] put the teddy back — no pay';
       const late = isLate(held) ? ' · late' : '';
-      return `[F] seat the teddy — ${formatMoney(contractPay(this.world.seed, held, this.stickers(ctx)))}${late}`;
+      const pays = this.partyPays(held, seating.close !== null)
+        ? `the party pays ${formatPay(contractPay(this.world.seed, held))}`
+        : seating.close
+          ? `not every teddy came: no pay, ${formatFine(FINE_SHELLS)}`
+          : 'the party pays when every teddy is here';
+      return `[F] seat the teddy — ${pays}${late}`;
     }
     if (this.part?.kind === 'teddy') {
       const why = this.takeRefusal();
@@ -426,12 +413,6 @@ class Shelter implements WorldFixture {
       return 'refused';
     }
     const teddy = teddyItem(this.bench.party, seat);
-    // A party races once, and its first teddy delivered decided it: one taken after that
-    // is no fresh start for the rivals (contracts/race.ts `observe`).
-    const party = this.bench.party;
-    if (party.raceLegs !== undefined && this.bench.waiting.some((_, k) => this.world.state.completedContractIds.includes(teddyId(party.id, k)))) {
-      teddy.progress.started = true;
-    }
     if (!ctx.inventory.add(teddy)) {
       ctx.toast('hands full');
       return 'refused';
@@ -449,8 +430,8 @@ class Shelter implements WorldFixture {
     }
     const partyId = contractIdOf(teddy);
     const delivered = seating.mode === 'deliver';
-    // Read before anything changes: the stickers, the race the first delivery decides.
-    const pay = delivered ? contractPay(this.world.seed, teddy, this.stickers(ctx)) + ctx.racePay(partyId) : 0;
+    // The party is paid once, and only whole: read before anything changes.
+    const pay = delivered && this.partyPays(teddy, seating.close !== null) ? contractPay(this.world.seed, teddy) : 0;
     // Recorded first, then paid: a failure between cannot pay twice.
     this.world.apply({
       t: 'teddy_seat',
@@ -462,16 +443,35 @@ class Shelter implements WorldFixture {
       close: seating.close,
     });
     ctx.give(teddy.id);
+    if (pay > 0) ctx.credit(pay);
+    // Closed short or put back whole: undelivered, fined once, after the closing seat.
+    const fined = seating.close && pay === 0 ? formatFine(fine(this.world, FINE_SHELLS)) : null;
     if (delivered) {
-      ctx.credit(pay);
       const arrival = this.teddies[WAITING_PLACES + (this.arrivals % (PLACES - WAITING_PLACES))];
       this.arrivals++;
       if (arrival) arrival.visible = true;
-      ctx.toast(`teddy seated — ${formatMoney(pay)}${seating.close ? ' · job done' : ''}`);
+      ctx.toast(pay > 0 ? `teddy seated — job done · ${formatPay(pay)}` : fined ? `teddy seated — not every teddy came, no pay · ${fined}` : 'teddy seated — the party pays when every teddy is here');
     } else {
-      ctx.toast(seating.close ? 'teddy back on the bench — the job is off your list' : 'teddy back on the bench — no pay');
+      ctx.toast(fined ? `teddy back on the bench — the job is off · ${fined}` : 'teddy back on the bench — no pay');
     }
     this.refresh();
     return delivered ? 'coin' : 'drop';
+  }
+
+  /**
+   * Whether seating `teddy` here, at its destination, pays its party: only when it closes
+   * the party (`closes`) and EVERY teddy of the party (`party.size`) has then been seated
+   * at the destination bench — one returned, left on the source bench or forgotten in a
+   * car, and the party pays nothing.
+   */
+  private partyPays(teddy: ContractCargoItem, closes: boolean): boolean {
+    if (!closes) return false;
+    const partyId = contractIdOf(teddy);
+    const done = this.world.state.completedContractIds;
+    for (let seat = 0; seat < (teddy.party?.size ?? 1); seat++) {
+      const id = teddyId(partyId, seat);
+      if (id !== teddy.id && !done.includes(id)) return false;
+    }
+    return true;
   }
 }

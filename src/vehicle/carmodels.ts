@@ -2882,7 +2882,7 @@ function catalogueDef(e: Entry): CarModelDef {
 }
 
 /**
- * The cars of the world: traffic, rivals, wrecks, couriers, contract cars, the start car
+ * The cars of the world: traffic, wrecks, couriers, contract cars, the start car
  * and the spawn menu draw from this list. Kit bodies only (src/carkit): each opens its
  * doors and lids and has a cabin.
  */
