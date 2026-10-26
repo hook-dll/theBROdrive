@@ -19,7 +19,7 @@
  * layout owns the removable engine, optional turbine, radiator and fuel tank.
  */
 
-import type { BodyClass, EngineSpec, GearboxSpec, SuspensionTuning } from '../parts/registry';
+import type { BodyClass, EngineSpec, GearboxSpec, PitchCentre, SuspensionTuning } from '../parts/registry';
 import { variant } from '../parts/registry';
 import modelFits from './model-fits.json';
 import { KIT_GLASS_MATERIAL, KIT_LIGHTS, KIT_WHEEL_NODES } from '../carkit/names';
@@ -165,6 +165,47 @@ export function wheelDampingRateAbs(hz: number, ratio: number, cornerMassKg: num
   return 2 * ratio * omega * cornerMassKg;
 }
 
+/* ---- side-view instant centres (`SuspensionTuning.frontPitchCentre`) ----
+ *
+ * Read off each layout's links, because no maker in the catalogue publishes them, and
+ * checked as anti figures against the bands the old fixed fractions were sized inside
+ * (20-50% anti-squat, 20-40% anti-dive). The percentages below are at a
+ * saloon's h/L of about 0.21 (tools/roll-balance.ts: h 0.51-0.52 m on 2.42-2.46 m).
+ */
+/**
+ * Unequal wishbones and kingpins (Zhiguli, Niva, Volga fronts): pivot axes tilted a little
+ * in side view, the centre about 3 m behind the axle and 0.15 m up — ~24% anti-dive.
+ * Driven through half-shafts (the Niva) the centre sits BELOW the wheel centre, so the
+ * nose lifts a little more under power than the springs alone would let it.
+ */
+const WISHBONE_PITCH: PitchCentre = { lengthM: 3, heightM: 0.15 };
+/**
+ * A MacPherson strut's lower arm and the strut's own lean (Samara family): the centre
+ * well behind and higher than a wishbone's, ~48% anti-dive at the patch; at the wheel
+ * centre, which is what front drive pulls on, it is nearly level — little anti-lift.
+ */
+const STRUT_PITCH: PitchCentre = { lengthM: 3, heightM: 0.3 };
+/**
+ * A live axle on four trailing links (Zhiguli, Niva rears): long lower links nearly level
+ * and short upper ones converging on them about 2 m ahead — ~40% anti-squat, the housing
+ * reacting the drive torque.
+ */
+const FOUR_LINK_PITCH: PitchCentre = { lengthM: 2, heightM: 0.17 };
+/**
+ * A beam on semi-elliptic leaves (Volga, pickup, UAZ): a leaf has no fixed instant centre
+ * — its front half is a link from the front eye, and it winds up under torque — so this is
+ * the effective one a wound leaf behaves as, ~48% anti-squat rather than the 250% a rigid
+ * link to the eye would give.
+ */
+const LEAF_PITCH: PitchCentre = { lengthM: 2, heightM: 0.2 };
+/**
+ * Trailing arms (the Samara family's twist beam, whose arms pivot on the body 0.5 m ahead
+ * of the hubs just below their centres): the pivot IS the instant centre, so the line is
+ * steep — several hundred per cent of anti-lift. Under braking the tail squats rather than
+ * rises, which is what a short trailing arm does.
+ */
+const TRAILING_ARM_PITCH: PitchCentre = { lengthM: 0.5, heightM: 0.25 };
+
 /**
  * The everyday saloon: 1.15 Hz front, 1.32 Hz rear. Sag 188/143 mm, and a soft
  * damper that lets the body take a set before it comes back.
@@ -184,8 +225,12 @@ const SUSP_CAR: SuspensionTuning = {
   ackermann: 0.6,
   frontCamberDeg: 0,
   rearCamberDeg: 0,
-  frontRollCamber: 0.7,
-  rearRollCamber: 0,
+  // Front-view swing arms (`SuspensionTuning.frontSwingArmM`): wishbones of 2.3 m keep
+  // 0.7 of the body's roll at a 1.4 m track; the beam's figure is not read.
+  frontSwingArmM: 2.3,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   frontToeDeg: 0.05,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -249,8 +294,10 @@ const SUSP_CAR: SuspensionTuning = {
  * Roll camber and roll steer follow the linkage: a beam axle (`SuspensionTuning.
  * rearAxle`/`frontAxle`) keeps its wheels square to a flat road whatever the body does
  * and tilts both with the axle when one wheel is higher — that is geometry, not a
- * figure, and its roll camber is written 0 — unequal wishbones keep ~0.6 of the body's
- * lean, a strut ~0.8, a twist beam with its cross member near the pivots ~0.75. The
+ * figure, and its swing arm is written 0 and never read. An independent wheel's share
+ * of the body's lean is DERIVED from its front-view swing arm and the model's measured
+ * track, `1 − t / 2L` (`SuspensionTuning.frontSwingArmM`): unequal wishbones of 1.7-1.8 m
+ * keep ~0.6 of it, a strut's 3.5 m ~0.8, the twist beam's 2.8 m equivalent ~0.75. The
  * live axles are the Zhigulis', the Nivas', the Volgas' and the IZh pickup's rears and
  * both of a UAZ's; every other axle in the catalogue is independent. Roll steer is the
  * mild understeer every period chassis was given: ~0.04 °/° at the front from the
@@ -287,8 +334,11 @@ const SUSP_VOLGA_21: SuspensionTuning = {
   ackermann: 0.7,
   frontCamberDeg: 0,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  // Kingpin wishbones, 1.8 m: 0.6 of the roll at the 1.47 m track.
+  frontSwingArmM: 1.8,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: LEAF_PITCH,
   // 1.5 mm at a 6.70-15 tyre (0.72 m).
   frontToeDeg: 0.06,
   rearToeDeg: 0,
@@ -313,8 +363,10 @@ const SUSP_VOLGA_24: SuspensionTuning = {
   ackermann: 0.7,
   frontCamberDeg: 0,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  frontSwingArmM: 1.8,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: LEAF_PITCH,
   frontToeDeg: 0.06,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -343,8 +395,12 @@ const SUSP_ZHIGULI: SuspensionTuning = {
   ackermann: 0.6,
   frontCamberDeg: 0.5,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  // Unequal wishbones, 1.7 m: 0.6 of the roll at the 1.365 m track; instant centre
+  // 0.2 m up (the 0.08 m roll centre's line), inside the arms' reach.
+  frontSwingArmM: 1.7,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   // 2 mm across a 13-inch rim's flanges (0.36 m).
   frontToeDeg: 0.16,
   rearToeDeg: 0,
@@ -374,8 +430,10 @@ const SUSP_ZHIGULI_ESTATE: SuspensionTuning = {
   ackermann: 0.6,
   frontCamberDeg: 0.5,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  frontSwingArmM: 1.7,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   frontToeDeg: 0.16,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -405,8 +463,13 @@ const SUSP_SAMARA: SuspensionTuning = {
   ackermann: 0.5,
   frontCamberDeg: 0,
   rearCamberDeg: 0,
-  frontRollCamber: 0.8,
-  rearRollCamber: 0.75,
+  // The strut's lower arm, 3.5 m: 0.8 of the roll at the 1.40 m track, instant centre
+  // 0.35 m up. The twist beam's cross member sits a quarter of the way down its arms, so
+  // its equivalent arm is (t/2)·4 = 2.8 m at the 1.37 m track: 0.75 of the roll.
+  frontSwingArmM: 3.5,
+  rearSwingArmM: 2.8,
+  frontPitchCentre: STRUT_PITCH,
+  rearPitchCentre: TRAILING_ARM_PITCH,
   frontToeDeg: 0,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -436,8 +499,11 @@ const SUSP_NIVA: SuspensionTuning = {
   ackermann: 0.6,
   frontCamberDeg: 0.5,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  // 1.8 m: 0.6 of the roll at the 1.43 m track.
+  frontSwingArmM: 1.8,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   // 2 mm across a 16-inch rim's flanges (0.43 m).
   frontToeDeg: 0.13,
   rearToeDeg: 0,
@@ -466,8 +532,10 @@ const SUSP_LADA_RALLY: SuspensionTuning = {
   ackermann: 0.4,
   frontCamberDeg: -1,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  frontSwingArmM: 1.7,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   frontToeDeg: 0,
   rearToeDeg: 0,
   frontRollSteer: 0.03,
@@ -499,8 +567,10 @@ const SUSP_SOFT: SuspensionTuning = {
   ackermann: 0.6,
   frontCamberDeg: 0,
   rearCamberDeg: 0,
-  frontRollCamber: 0.7,
-  rearRollCamber: 0.8,
+  frontSwingArmM: 2.3,
+  rearSwingArmM: 3.5,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: TRAILING_ARM_PITCH,
   frontToeDeg: 0.05,
   rearToeDeg: 0,
   frontRollSteer: 0.03,
@@ -524,8 +594,10 @@ const SUSP_SPORT: SuspensionTuning = {
   ackermann: 0.5,
   frontCamberDeg: -0.5,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  frontSwingArmM: 1.7,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: FOUR_LINK_PITCH,
   frontToeDeg: 0,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -553,8 +625,10 @@ const SUSP_TRUCK: SuspensionTuning = {
   ackermann: 0.7,
   frontCamberDeg: 0.5,
   rearCamberDeg: 0,
-  frontRollCamber: 0.6,
-  rearRollCamber: 0,
+  frontSwingArmM: 1.8,
+  rearSwingArmM: 0,
+  frontPitchCentre: WISHBONE_PITCH,
+  rearPitchCentre: LEAF_PITCH,
   frontToeDeg: 0.06,
   rearToeDeg: 0,
   frontRollSteer: 0.04,
@@ -775,6 +849,22 @@ export const KAMA_217: TyreSpec = { construction: 'radial', aspect: 0.7 };
  * docs/physics-references.md, kit_vaz2108 and kit_vaz2110.
  */
 export const KAMA_217_GRIP = 0.53;
+/**
+ * PER-CAR SKIDPAD CALIBRATION (`CarModelDef.lateralGripScale`), only where a measured
+ * steady-state lateral figure exists (docs/physics-references.md). There is one: Car and
+ * Driver 06/1989, 0.71 g on a 300 ft (91.4 m) circle, Samara 1500 3-door on Goodyear
+ * Arriva M+S P175/70R13 — the 2108 itself, and the 2109 and 21099 as its same-chassis
+ * siblings. `KAMA_217_GRIP` was set on that test when the bench gave the Samara 0.73 g;
+ * later chassis changes left it at 0.69 (tools/physics-suite.ts skidpad, 40 m, +150 kg),
+ * so these put the three back on the measurement without moving the tyre's braking. The
+ * scale is a share of the side-force capacity, and the car's limit moves by a little less
+ * than it, through load transfer.
+ */
+const MEASURED_SKIDPAD_SCALE: Readonly<Record<string, number>> = {
+  kit_vaz2108: 1.05,
+  kit_vaz2109: 1.05,
+  kit_vaz21099: 1.05,
+};
 
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
@@ -977,6 +1067,13 @@ export interface CarModelDef {
   /** Tyre grip multiplier on the surface's friction, in every direction alike. */
   readonly wheelGrip: number;
   /**
+   * Per-car calibration of the CORNERING coefficient against a measured skidpad, on top
+   * of `wheelGrip` and the handling profile's `tyreLateralScale`; 1 where no measurement
+   * exists (`MEASURED_SKIDPAD_SCALE`). Lateral only: braking and drive keep `wheelGrip`,
+   * which the measured stops are held to.
+   */
+  readonly lateralGripScale: number;
+  /**
    * What the car's own brakes deliver at a FLOORED pedal (a panic stamp) on a surface
    * that does not limit them, in g: the drums, discs and servo, not the tyres. Every
    * car here could lock its wheels on dry asphalt, so every figure is above its tyres'
@@ -1059,6 +1156,7 @@ export interface CarModelDef {
 type Entry = Omit<
   CarModelDef,
   | 'file'
+  | 'lateralGripScale'
   | 'fit'
   | 'factory'
   | 'scale'
@@ -2052,7 +2150,7 @@ const SAAS_SPECS: readonly Entry[] = [
       frontAxle: 'beam',
       ackermann: 0.8,
       frontCamberDeg: 1,
-      frontRollCamber: 0,
+      frontPitchCentre: LEAF_PITCH,
       frontRollSteer: 0.06,
     },
     // Beam axles on leaf springs at BOTH ends and no anti-roll bars: the roll centre
@@ -2291,7 +2389,7 @@ const CARFORGE_CARS: readonly Entry[] = [
       frontAxle: 'beam',
       ackermann: 0.8,
       frontCamberDeg: 1,
-      frontRollCamber: 0,
+      frontPitchCentre: LEAF_PITCH,
       frontRollSteer: 0.06,
     },
     rollCentre: { front: 0.45, rear: 0.48 },
@@ -2862,6 +2960,7 @@ function catalogueDef(e: Entry): CarModelDef {
     gearboxId: e.gearboxId,
     tankLitres: e.tankLitres,
     wheelGrip: e.wheelGrip,
+    lateralGripScale: MEASURED_SKIDPAD_SCALE[e.id] ?? 1,
     brakeDecelG: e.brakeDecelG,
     rearBrakeValve: e.rearBrakeValve,
     suspension: e.suspension ?? SUSP_CAR,

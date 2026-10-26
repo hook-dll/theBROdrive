@@ -183,10 +183,10 @@ const FLYWHEEL_DOWN_TAU = 0.35;
  *            is slow. In the manual mode there is no blip — a downshift without the
  *            driver's own blip closes the clutch over `MANUAL_SYNC_TAU_S` and the
  *            gearbox drags the crank up through the wheels: a real shunt.
- *   locked   crank and gearbox turn together; the crank's inertia rides on the driven
- *            wheels (`drivenWheelInertiaKgM2`) and its torque, positive or the overrun
- *            drag, goes straight through. It breaks loose into `sync` when holding it
- *            would take more than `CLUTCH_CAPACITY_FACTOR` of peak torque.
+ *   locked   crank and gearbox turn together, and with the driven wheels through the
+ *            driveline's shaft (`crankInertiaAtWheelsKgM2`); its torque, positive or the
+ *            overrun drag, goes straight into the shaft. It breaks loose into `sync` when
+ *            the shaft asks more of it than `CLUTCH_CAPACITY_FACTOR` of peak torque.
  *
  * A slipping clutch only ever passes torque from the faster side to the slower one,
  * which is what keeps the engine braking out of a launch and the drive out of a stop.
@@ -657,34 +657,39 @@ export class Drivetrain {
   }
 
   /**
-   * Rotating inertia the CRANK adds to one driven wheel, kg·m², or 0 when the clutch
-   * is not locked (neutral, mid-shift, slipping, no gearbox): a slipping clutch passes
-   * a torque set by its own friction, not by the crank's acceleration.
+   * Rotating inertia of the crank, flywheel and gearbox as the WHEELS see it, kg·m²:
+   * `I_crank · k²` for the overall ratio k, or 0 when the clutch is not locked (neutral,
+   * mid-shift, slipping, no gearbox), when a slipping clutch passes a torque set by its own
+   * friction, not by the crank's acceleration.
    *
-   * This is the term whose absence made a bumpy road undriveable. A driven wheel is
-   * not a free disc: it is bolted through the gears to a crankshaft and a flywheel,
-   * and gearing multiplies that inertia by the SQUARE of the ratio. Without it the
-   * only thing resisting drive torque was the wheel's own ~1.2 kg·m², so a first-gear
-   * 2000 N·m at the wheel spun it up 13 rad/s — nearly 5 m/s of slip — in a single
-   * 60 Hz step. Any dip in load (a pothole, a crest, a bump) was therefore an instant
-   * wheelspin, traction control cut 85% of the torque to answer it, and the car could
-   * not accelerate: measured on the real road collider, 0-100 km/h took 14.8 s
-   * against 8.6 s on a flat plane of the same asphalt, with the aid then fitted lit 68% of
-   * the run (tools/surface-feel.ts).
+   * It is the gearbox end of the TWO-MASS DRIVELINE (`Vehicle.updateWheelDynamics`,
+   * `DRIVELINE_SHAFT_RATE_NM_PER_RAD`): the crank turns as one mass, the driven wheels as
+   * the other, and the half-shafts, propshaft and axle between them as a damped torsional
+   * spring. Gearing multiplies the crank's inertia by the SQUARE of the ratio, so in first
+   * it outweighs the wheels thirty times over. It used to be added to each driven wheel
+   * as though bolted rigidly to it, and that term's absence before then made a bumpy road
+   * undriveable: with only the wheel's own ~1.2 kg·m² resisting it, a first-gear 2000 N·m
+   * spun a wheel up 13 rad/s in one 60 Hz step, any dip in load was an instant wheelspin,
+   * and 0-100 km/h on the real road took 14.8 s against 8.6 s on a flat plane
+   * (tools/surface-feel.ts). Behind the shaft the crank still holds a wheel that loses its
+   * load — the shaft's damper ties the two together within milliseconds — but the two can
+   * now move apart for a moment and spring back, which is the tip-in shunt.
    *
-   * `drivenWheels` is the divisor because that is how the torque is split. Through an
-   * open differential the crank speed is the MEAN of the driven wheel speeds, so the
-   * exact system is an n x n mass matrix: `I·k²/n²` on the diagonal and the same value
-   * off it. This returns the diagonal — the value that is exactly right for the case
-   * that matters, ONE wheel breaking away on its own — and leaves the coupling out, so
-   * a wheel is never restrained by inertia it does not really have.
+   * The rigid version also carried only half of it: it put the DIAGONAL of the open
+   * differential's mass matrix, `I·k²/n²`, on each of the n driven wheels, which is right
+   * for one wheel breaking away alone and `1/n` of the crank for the two moving together.
+   * The shaft carries all of it on their mean, which is what made every car 0.5-1.0 s
+   * slower to 100 km/h (2026-10-27, accepted by the owner).
+   *
+   * The vehicle passes the shaft's gearbox-end speed back as `drivenWheelAngularSpeed` on
+   * the next `update`, so the crank's speed is that end's, not the wheels'.
    */
-  drivenWheelInertiaKgM2(drivenWheels: number): number {
+  get crankInertiaAtWheelsKgM2(): number {
     const gearbox = this.gearbox;
     const engine = this.engine;
-    if (gearbox == null || engine == null || !this.coupled || drivenWheels <= 0) return 0;
+    if (gearbox == null || engine == null || !this.coupled) return 0;
     const total = Math.abs(this.gearRatio() * gearbox.finalDrive);
-    return (crankInertiaKgM2(engine) * total * total) / (drivenWheels * drivenWheels);
+    return crankInertiaKgM2(engine) * total * total;
   }
 
   /**

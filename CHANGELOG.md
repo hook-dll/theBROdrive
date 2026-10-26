@@ -4,6 +4,46 @@
 
 ### Added
 
+- CHASSIS AND DRIVELINE TOWARD BEAMNG FEEL (`vehicle/vehicle.ts`, `vehicle/vehicletuning.ts`,
+  `vehicle/carmodels.ts`, `vehicle/drivetrain.ts`, `parts/registry.ts` `SuspensionTuning`
+  `frontPitchCentre`/`rearPitchCentre`/`frontSwingArmM`/`rearSwingArmM`, `PitchCentre`;
+  `tools/chassis-stability.ts` new; `tools/reality.ts`; docs/physics-references.md).
+  - TWO-MASS DRIVELINE: the crank geared to the wheels and the driven wheels are joined by
+    a damped torsional shaft (`DRIVELINE_SHAFT_RATE_NM_PER_RAD` 8 kN·m/rad,
+    `DRIVELINE_SHAFT_DAMPING_RATIO` 0.4 of the shuffle mode), solved implicitly at the
+    wheel substep. It replaces `DRIVELINE_LAG_S` and the profiles' `drivelineLag`. A tip-in
+    in second now builds in 0.12-0.15 s (it was 0.23-0.32) with a 17-27% surge; a lift-off
+    rings once. The shaft carries the crank's WHOLE inertia on the driven wheels' mean
+    (`Drivetrain.crankInertiaAtWheelsKgM2`), where `drivenWheelInertiaKgM2` put `I·k²/n²`
+    on each wheel, half the crank on two-wheel drive. Every car is 0.5-1.0 s slower to
+    100 km/h (VAZ-2108 17.9 → 18.6 s, VAZ-2101 20.3 → 21.3 s), and the owner accepted the
+    new `known0to100` sizes; the 2106 and 2107 gain notes, and the short Niva's is gone.
+    Road against flat (tools/surface-feel.ts, rally 2105) stays 0.1 s apart, so a bump
+    still does not flick a driven wheel into a spin.
+  - ANTI-PITCH FROM GEOMETRY: `ANTI_SQUAT_FRACTION` 0.38 and `ANTI_DIVE_FRACTION` 0.26 are
+    gone, and so is `applyAntiPitch`. Each axle's side-view instant centre sends `F · tanθ`
+    of its longitudinal force straight to the body at the patch and to the tyre's load
+    (`pitchLinkN`): the patch line for brakes and live axles, the wheel-centre line for
+    half-shaft drive. Tyres now carry the whole `m·a·h/L` transfer. Squat/dive: 2101
+    +1.16°/−2.43° (was +0.85°/−2.09°), 2108 +1.02°/−1.04° (was +0.63°/−1.45°), Niva
+    +2.05°/−3.83°. The 100-0 stops are 1.3-2.0 m shorter; the first axle to lock is still
+    the front. The rear regulator's settings and the planner's threshold estimate read the
+    rear links' share (`rearLinkTan`).
+  - ROLL-ONLY CHASSIS DAMPING: Rapier's isotropic `setAngularDamping(0.1)` also damped yaw
+    and pitch. It is now `CHASSIS_ROLL_DAMPING_PER_S` 0.1, an implicit impulse about the
+    body's forward axis. Crawl lean, park rates and straight-line yaw drift are unchanged
+    within a few hundredths.
+  - ROLL CAMBER FROM GEOMETRY: `frontRollCamber`/`rearRollCamber` are replaced by
+    front-view swing arms; the share is `1 − t/2L` on the measured track
+    (`rollCamberShare`), and the roll's camber is held to ±5° (`ROLL_CAMBER_LIMIT_RAD`).
+    The shares land at the old figures (0.60 wishbone, 0.80 strut, 0.755 twist beam).
+  - PER-CAR SKIDPAD CALIBRATION: `CarModelDef.lateralGripScale` (`MEASURED_SKIDPAD_SCALE`),
+    1.05 on the 2108/2109/21099 against CD89's 0.71 g: 0.689 → 0.708 g on the 40 m pad.
+    1 for every other car. `LATERAL_GRIP_FRACTION` sizes only the parked hold, never
+    cornering, so it stays as it was.
+  - Pad steering: the direct stick-to-rack mode already existed (Settings → Controller →
+    Steering assist Off, `SteerMode` 'analog'); nothing was added.
+
 - HAULS WITHOUT CARDS (contracts phase 3; `contracts/hauls.ts` `haulRound`,
   `waitingHaul`, `waitingHaulOfLoad`, `takeHaulLoads`; `contracts/offers.ts` `postHaul`,
   `postHaulId`, `parsePostHaulId`; `contracts/world.ts` `haulLoadId`,

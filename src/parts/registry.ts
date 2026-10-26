@@ -229,16 +229,53 @@ export interface SuspensionTuning {
   readonly frontCamberDeg: number;
   readonly rearCamberDeg: number;
   /**
-   * How much of the body's roll the wheel takes with it as camber against the ROAD: 1 is
-   * a wheel that stays parallel to the body (trailing arm, equal wishbones), 0 one that
-   * stays square to the road whatever the body does. A MacPherson strut is ~0.8,
-   * unequal wishbones ~0.6: their camber gain claws back the rest. INDEPENDENT axles
-   * only: a beam axle's camber is its own geometry — square to a flat road whatever the
-   * body does, tilted with the axle when one wheel is higher than the other — and its
-   * figure here is written 0 and never read.
+   * FRONT-VIEW SWING ARM of each INDEPENDENT axle, metres: how far inboard of the contact
+   * patch the wheel's front-view instant centre lies — the point the upright pivots about
+   * for small travel, where the two wishbones' lines meet, or a strut's lower arm meets
+   * the perpendicular to the strut through its top mount. It is what the arm lengths and
+   * angles reduce to, and it decides two things the old authored figures held apart:
+   *
+   *   camber gain    a wheel rising by z leans in against the body by z / L, so a body
+   *                  rolled by φ takes its outer wheel (track t) through (t/2)·φ of travel
+   *                  and leans it back by (t/2)·φ / L. Against the ROAD the wheel keeps
+   *                  `1 − t / (2L)` of the roll (`rollCamberShare`): 1 for an infinite arm
+   *                  (parallel equal wishbones, a pure trailing arm), 0 at L = t/2.
+   *   roll centre    the instant centre lies on the line from the patch through the roll
+   *                  centre, so it is `2 · h_rc · L / t` off the road. That height is the
+   *                  check on a figure here: it has to be a point the arms can make.
+   *
+   * The swing-arm method is the textbook one (Milliken, Race Car Vehicle Dynamics, ch. 17);
+   * the lengths are ESTIMATES read off each layout: unequal wishbones 1.5-2.5 m, a
+   * MacPherson strut 3-5 m (its lower arm alone sets the gain, so the arm is long). A
+   * twist beam's equivalent arm follows from where the cross member
+   * sits: at the pivots it is two trailing arms (L infinite), at the wheel centres a beam
+   * (L = t/2), so `L = (t/2) · arm / (cross member behind the pivots)`. A BEAM axle's
+   * camber is its own geometry (`Vehicle`'s beam pass) and its figure is never read.
    */
-  readonly frontRollCamber: number;
-  readonly rearRollCamber: number;
+  readonly frontSwingArmM: number;
+  readonly rearSwingArmM: number;
+  /**
+   * SIDE-VIEW INSTANT CENTRE of each axle: where the wheel carrier pivots in side view,
+   * as `lengthM` from the contact patch TOWARD THE OTHER AXLE and `heightM` above the road.
+   * It is the longitudinal twin of the roll centre and sets the car's anti-dive, anti-lift
+   * and anti-squat (`Vehicle.updateWheelDynamics`): a longitudinal tyre force F on that axle
+   * reaches the body along the line from the patch through the centre, so the links take
+   * `F · tanθ` of vertical load straight to the tyre and the springs never see it.
+   *
+   *   tanθ, patch    `heightM / lengthM`: brake torque on outboard brakes, and drive torque
+   *                  on a live axle, whose housing reacts it through the same links
+   *   tanθ, centre   `(heightM − wheel radius) / lengthM`: drive torque through half-shafts
+   *                  (a front-driven or independent driven axle), which the body reacts at
+   *                  the diff, so only the wheel centre's line counts
+   *
+   * As a share of the axle's own transfer, an axle's anti figure is `tanθ · L / h` (L the
+   * wheelbase, h the centre of mass' height): the 20-50% anti-squat and 20-40% anti-dive
+   * bands the old fixed fractions were sized inside, and several hundred per cent of
+   * anti-lift on a short trailing arm, whose tail squats under braking. No maker in the
+   * catalogue publishes these points; they are read off each layout's linkage.
+   */
+  readonly frontPitchCentre: PitchCentre;
+  readonly rearPitchCentre: PitchCentre;
   /**
    * Static toe per wheel, degrees; positive is toe-IN (the front of the tyre toward the
    * car's centreline). A factory total-toe figure in mm is `2 · d · tan(toe)` across the
@@ -264,6 +301,14 @@ export interface SuspensionTuning {
    * +0°30′. Steering only; the body's yaw never sees it (see `PNEUMATIC_TRAIL_M`).
    */
   readonly frontCasterDeg: number;
+}
+
+/** A side-view instant centre: see `SuspensionTuning.frontPitchCentre`. */
+export interface PitchCentre {
+  /** From the contact patch toward the other axle, metres. */
+  readonly lengthM: number;
+  /** Above the road, metres. */
+  readonly heightM: number;
 }
 
 /*

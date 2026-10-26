@@ -225,17 +225,62 @@ export const CAMBER_STIFFNESS_RADIAL = 0.1;
  */
 export const CAMBER_GRIP_LOSS_PER_DEG = 0.01;
 /**
+ * The share of its axle's roll an INDEPENDENT wheel takes as camber against the road,
+ * from its front-view swing arm L and the axle's measured track t (`SuspensionTuning.
+ * frontSwingArmM`): the body rolls by φ, the outer wheel rises (t/2)·φ against it and its
+ * arm leans it back in by (t/2)·φ / L, which leaves `1 − t / 2L` of the roll. Bounded to
+ * 0..1: a swing arm shorter than half the track would overcorrect, which no road linkage
+ * does, and a beam axle's 0 is never read.
+ */
+export function rollCamberShare(swingArmM: number, trackM: number): number {
+  if (!(swingArmM > 0) || !(trackM > 0)) return 0;
+  return Math.min(1, Math.max(0, 1 - trackM / (2 * swingArmM)));
+}
+/**
+ * The most camber an independent wheel's roll gain adds to its static camber, radians
+ * (5°). The share above is the linkage's slope at ride height; real camber curves flatten
+ * and the arms run out of travel long before the axle's roll limit (`AXLE_ROLL_LIMIT_RAD`,
+ * ~9°), so the gain is held inside the band a road car's camber actually sweeps.
+ */
+export const ROLL_CAMBER_LIMIT_RAD = (5 * Math.PI) / 180;
+/**
  * Ceiling on the axle roll the geometry reads, radians (~9°). Past it a wheel is
  * hanging in the air rather than rolling with the body, and its "roll" is droop.
  */
 export const AXLE_ROLL_LIMIT_RAD = 0.15;
 /**
- * Driveline slack and compliance, seconds. A leaf-sprung live axle on worn U-joints
- * does not deliver torque the instant the pedal moves: the slack takes up, the
- * shaft winds, and then the car goes. A first-order lag on the applied wheel torque
- * is the whole of it — no fake clunk, and it costs one float of state.
+ * THE TWO-MASS DRIVELINE. The crank, flywheel and gearbox are one mass
+ * (`Drivetrain.crankInertiaAtWheelsKgM2`, `I_crank · k²` at the wheels), the driven wheels
+ * the other, and everything between — propshaft, axle, half-shafts, U-joints, the rubber
+ * in the mounts — one torsional spring and damper, referred to the wheels, stepped with
+ * the wheels at the 480 Hz substep (`Vehicle.updateWheelDynamics`). The engine winds the
+ * shaft; the shaft, not the engine, pushes the wheels.
+ *
+ * What it does: the crank against the whole car (`m · r²` through the tyres) is the
+ * driveline's SHUFFLE mode, `sqrt(k · J_crank·J_car / (J_crank + J_car)) / 2π`: about
+ * 2.6 Hz in first on a VAZ-2101, 3.8 Hz in second, 8 Hz in fourth — the 2-8 Hz band a
+ * driveline shuffles in. A stab of throttle winds the shaft and the car surges a little
+ * past the pull it then holds, a lift lets it unwind the other way; between shifts the
+ * clutch is open and the shaft carries nothing.
+ *
+ * It replaced a first-order lag on the wheel torque (`DRIVELINE_LAG_S`, 0.1 s, and a
+ * per-profile 35-75 ms), which could build the drive late but never overshoot it.
+ *
+ * Stiffness, N·m per radian of wind-up at the wheels: an ESTIMATE. No catalogue maker
+ * publishes it; 8 kN·m/rad is chosen so the shuffle lands in the band above for every
+ * car in the catalogue (2-3 Hz in first on the 1.2-1.6 litre cars, the cranks' inertias
+ * being derived in drivetrain.ts), one figure for all of them.
  */
-export const DRIVELINE_LAG_S = 0.1;
+export const DRIVELINE_SHAFT_RATE_NM_PER_RAD = 8000;
+/**
+ * The shaft's damping as a share of critical FOR THE SHUFFLE MODE in the gear the car is
+ * in, so every gear rings the same way. 0.4 lets a tip-in surge by a fifth of the pull
+ * and settle inside a cycle (tools/chassis-stability.ts): felt, not thrown — this is a
+ * kids' game, and a real shuffle at 0.1-0.2 is what car makers spend years tuning out.
+ * The tyres damp the mode further. The same damper ties a wheel that loses its load to the
+ * crank within milliseconds, which is what keeps a bump from flicking it into a spin.
+ */
+export const DRIVELINE_SHAFT_DAMPING_RATIO = 0.4;
 
 // ---------------------------------------------------------------------------
 // Lateral grip budget.
@@ -542,7 +587,6 @@ export interface HandlingTuning {
   /** Rack speed, rad/s at the road wheel: see `STEER_RACK_SPEED_RAD_S`. */
   readonly steerRackSpeed: number;
   readonly bumpSteer: number;
-  readonly drivelineLag: number;
   readonly lateralGripFraction: number;
   /**
    * Cornering scale on top of the tyre's own coefficient, for the profiles whose cars
@@ -869,7 +913,6 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
   classic: {
     steerRackSpeed: STEER_RACK_SPEED_RAD_S,
     bumpSteer: BUMP_STEER_MAX_RAD,
-    drivelineLag: DRIVELINE_LAG_S,
     lateralGripFraction: LATERAL_GRIP_FRACTION,
     tyreLateralScale: 1,
     rearAxleSideGrip: REAR_AXLE_SIDE_GRIP,
@@ -881,7 +924,6 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     // The old rate pair's own ratio to classic's (×1.25 parked, ×1.44 at speed).
     steerRackSpeed: (117 * Math.PI) / 180,
     bumpSteer: 0.009,
-    drivelineLag: 0.055,
     lateralGripFraction: 0.36,
     tyreLateralScale: 1,
     rearAxleSideGrip: 0.985,
@@ -892,7 +934,6 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
   sport: {
     steerRackSpeed: (150 * Math.PI) / 180,
     bumpSteer: 0.005,
-    drivelineLag: 0.035,
     lateralGripFraction: 0.39,
     tyreLateralScale: 1.1765,
     rearAxleSideGrip: 0.99,
@@ -903,7 +944,6 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
   utility: {
     steerRackSpeed: (105 * Math.PI) / 180,
     bumpSteer: 0.016,
-    drivelineLag: 0.075,
     lateralGripFraction: 0.34,
     tyreLateralScale: 0.9647,
     rearAxleSideGrip: 0.97,
@@ -1068,7 +1108,9 @@ export const LOCK_SLIP_RATIO = -0.5;
  *                                             same at every speed: 18 Hz on the GAZ-24,
  *                                             21 on the 2101, 27 on the 2108's front
  *   fuel cut against the crank                I_crank · (150 rpm) / T_peak: ~30 ms
- *   driveline lag (`drivelineLag`)            35-100 ms
+ *   driveline shuffle (`DRIVELINE_SHAFT_RATE_NM_PER_RAD`)  2-8 Hz by gear; a wheel
+ *                                             against the crank through the shaft's
+ *                                             damper, 1-10 ms
  *   clutch (drivetrain.ts)                    engage 0.12 s, launch 0.15 s, sync 0.12 s
  *
  * At 60 Hz the wheel-carcass mode had two to three steps a period: the implicit solve
@@ -1760,8 +1802,22 @@ export function stockRadiatorWater(variantId: string): number {
   return variant(variantId).radiator?.capacity ?? 0;
 }
 
-/** Roll damping on the chassis for stability against low-speed flop. */
-export const CHASSIS_ANGULAR_DAMPING = 0.1;
+/**
+ * Damping of the chassis' ROLL rate, per second: each step the body's angular velocity
+ * about its own forward axis loses `c·dt / (1 + c·dt)` of itself (`Vehicle.
+ * applyRollDamping`), the same implicit decay Rapier's `setAngularDamping` applies.
+ *
+ * It used to be exactly that Rapier setting, at the same 0.1, documented as roll damping
+ * for stability against low-speed flop. Rapier's damping is isotropic: it took the same
+ * share out of the YAW and PITCH rates too, so a car rotating into a slide or rocking on
+ * its springs lost momentum no real car loses — air does not damp a body's yaw, and the
+ * pitch is the springs' and dampers' business. Only roll is the stability case: a car
+ * crawling at full lock or parked on one kerb rocks on four light tyres and nothing else
+ * bleeds that motion, so it is kept, about the roll axis alone and at the same rate.
+ * 0.1/s is a 10 s time constant; the suspension's own roll damping (a 0.45-0.67 damping
+ * ratio, tools/roll-balance.ts) dwarfs it whenever the wheels are working.
+ */
+export const CHASSIS_ROLL_DAMPING_PER_S = 0.1;
 
 // ---------------------------------------------------------------------------
 // Delta emission throttling (keep the delta stream small).
@@ -1899,29 +1955,39 @@ export function rotateVector(
 }
 
 /**
- * Anti-squat and anti-dive: the fraction of the longitudinal pitch couple that real
- * suspension GEOMETRY carries through the links instead of through the springs.
+ * Anti-squat, anti-dive and anti-lift: the share of the longitudinal load transfer that
+ * real suspension GEOMETRY carries through the links instead of through the springs,
+ * now read off each axle's side-view instant centre (`SuspensionTuning.frontPitchCentre`,
+ * resolved in the body pass of `Vehicle.updateWheelDynamics`).
  *
- * The wheel contacts' suspension has no geometry at all — no wishbones, no instant
- * centre, no trailing-arm angle — so 100% of the couple goes into the springs and the
- * nose rises under power like a speedboat. Pitch inertia cannot cure that (an earlier
- * pass raised it to 2.55 times a solid box's for exactly this complaint): it only makes
- * the lift SLOWER, and the body still travels the whole way, just less abruptly. The
- * cause is a missing reaction path, not too little inertia.
+ * The wheel contacts' suspension has no links: Rapier receives each tyre's force at the
+ * contact patch, so 100% of the pitch couple goes into the springs and the nose rises
+ * under power like a speedboat. Pitch inertia cannot cure that (an earlier pass raised
+ * it to 2.55 times a solid box's for exactly this complaint): it only makes the lift
+ * SLOWER. The cause is a missing reaction path, not too little inertia.
  *
- * It is the longitudinal counterpart of the roll centre (see the body-roll block
- * above): the share of the moment the links carry never reaches the springs. Here the
- * engine applies the moment in full at the contact patch, so that share is taken out.
+ * The path, per wheel: a longitudinal tyre force F reaches the body along the line from
+ * the patch through the axle's instant centre, so besides F itself the body takes a
+ * vertical `F · tanθ` at that wheel — up at a braking front, down at a braking rear, up
+ * at a driving rear, down at a driving front — and the tyre carries the same load (it is
+ * the link's reaction), next step, the way it carries the roll centre's share of the side
+ * force (`linkN`). The springs therefore see only what the links do not, the total
+ * transfer `m · a · h / L` at the tyres is unchanged, and the difference between the two
+ * ends is a small heave the geometry makes too (jacking). Which line: the PATCH's for
+ * brake torque and a live axle's drive, the WHEEL CENTRE's for drive through half-shafts
+ * and for engine braking on such an axle.
  *
- * Real geometry runs 20-50% anti-squat and 20-40% anti-dive, and the two differ
- * because the ends of the car are built differently — a live rear axle on trailing
- * leaves has far more anti-squat available than a MacPherson front has anti-dive. The
- * pair below sit inside those bands, deliberately at the low end: this removes the
- * exaggeration, it does not iron the car flat. Squat and dive are how a driver reads
- * weight transfer, and a car with no pitch at all feels like it is on rails.
+ * It replaced two fixed fractions of the couple, 0.38 under power and 0.26 under braking,
+ * taken back as a torque at the centre of mass for every car alike. That model also kept
+ * the links' share of the transfer away from the TYRES, so the loads a stop or a launch
+ * put on each axle were 26-38% short of `m · a · h / L`; now they are the whole of it.
+ *
+ * `aboveM` is the height the line starts from: 0 for the patch, the wheel radius for the
+ * wheel centre.
  */
-export const ANTI_SQUAT_FRACTION = 0.38;
-export const ANTI_DIVE_FRACTION = 0.26;
+export function pitchLinkTan(centre: { lengthM: number; heightM: number }, aboveM: number): number {
+  return centre.lengthM > 0 ? (centre.heightM - aboveM) / centre.lengthM : 0;
+}
 
 /**
  * Height of the centre of mass, as a fraction of the measured chassis box below its

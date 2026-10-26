@@ -149,6 +149,12 @@ interface Target {
  * through the whole of first gear. The 2106 (6.6%) and the 2107 (7.8%) came inside
  * tolerance with it and lost their notes; the rest stayed within `KNOWN_DRIFT`.
  *
+ * The two-mass driveline (2026-10-27) then put them all back 3-7% slower, and the owner
+ * accepted the sizes below on it: the shaft carries the crank's whole inertia on the
+ * driven wheels' mean, where the rigid coupling had put only `I·k²/n²` on each of the n
+ * wheels — half the crank on a two-wheel drive (`Drivetrain.crankInertiaAtWheelsKgM2`).
+ * The 2106 and 2107 took notes again; the short Niva came inside tolerance and lost its.
+ *
  * CATALOGUE_OPTIMISTIC. A point-mass run from the catalogue's own net kW, kerb mass
  * plus the stated 150 kg, the gearbox's ratios and efficiency and the Cd·A that fits
  * the top speed is already slower than the printed time, before any tyre is involved
@@ -409,33 +415,35 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 1475,
     brakeTest: { m: 49.4, judged: false, source: 'AR' },
     source: 'as sv_vaz2104: AO vaz-2104 (base 2104, 1.3; gross); turn and brake per AO vaz-2105',
-    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.132 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.173 },
   },
   kit_vaz2105: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 145, to100: 18,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.71, hz: 1.1,
     brake80: 38, grossKg: 1395,
     source: 'as sv_vaz2105: AO vaz-2105 (also the kerb axle split 545/450 kg)',
-    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.111 },
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.152 },
   },
   kit_vaz2106: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
     brake80: 43.2, grossKg: 1435,
     source: 'as sv_vaz2106: AO vaz-2106; brake man. welove2106.narod.ru/objie/ob_1.htm (carexpert.ru vaz060s prints 154 km/h)',
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.101 },
   },
   kit_vaz2107: {
     wheelbase: 2.424, track: 1.365, radius: 0.288, top: 150, to100: 17,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: 0.72, hz: 1.1,
     brake80: 38, grossKg: 1430,
     source: 'as sv_vaz2107: AO vaz-2107 (VAZ-2103 engine); brake, gross man. vazbook.ru/07/2107/main/manual/osnovnye-ekspluatacionnye-parametry-i-razmery',
+    known0to100: { reason: CLASSIC_LAUNCH, dev: 0.115 },
   },
   kit_vaz2108: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
     brake80: 38, grossKg: 1370,
     source: 'as sv_vaz2108: AO vaz-2108; man. vaz-sputnik.ru/2109/1-4.html; brake, gross ZRW (AO prints 1325)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.115 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.165 },
   },
   kit_vaz2109: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 148, to100: 16,
@@ -443,14 +451,14 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 1370,
     brakeTest: { m: 44.7, judged: false, source: 'AR' },
     source: 'as sv_vaz2109: AO vaz-2109 (kerb split 555/360 kg); VS; brake, gross ZRW (AO prints 1340)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.127 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.179 },
   },
   kit_vaz21099: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 154, to100: 13.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: 0.78, hz: 1.3,
     brake80: 38, grossKg: 1395,
     source: 'as sv_vaz21099: VS (970 kg, 154 km/h, 13.5 s with driver and passenger, 5.2 m, 38 m); gross ZRW',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.231 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.288 },
   },
   kit_vaz2110: {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
@@ -458,7 +466,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 1480,
     brakeTest: { m: 55.0, judged: true, source: 'Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/' },
     source: 'VAZ-21102 (2111 engine): M110 (top, 0-100, turn, brake ceiling); R110 (load condition, gross 1480); geometry kit_vaz2110 row',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.108 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.161 },
   },
   kit_vaz2112: {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
@@ -466,7 +474,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 1495,
     brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
     source: 'VAZ-21122 (2111 engine): M110 (top, 0-100, turn, brake ceiling; gross as kerb 1020 + payload 475); R110 (load condition); geometry kit_vaz2112 row (autoopt.ru vaz-2112)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.161 },
   },
   kit_vaz2111: {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 162, to100: 14,
@@ -474,35 +482,34 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: 38, grossKg: 1540,
     brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
     source: 'VAZ-2111 (2111 engine): M110 (kerb 1040, payload 500, 162 km/h, 14.0 s, turn, brake ceiling); R110 (load condition); geometry kit_vaz2111 row (vaz.ru/v2111.htm)',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.136 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.187 },
   },
   kit_vaz2115: {
     wheelbase: 2.46, track: 1.4, radius: 0.281, top: 158, to100: 13.2,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
     brake80: 38, grossKg: 1410,
     source: 'VAZ-2115 1.5i (2111 engine): LO (top, 0-100, turn, brake ceiling "груженого"), CE (top, 0-100, gross 1410); drom.ru/catalog/lada/2115/77754 prints 155 km/h and 14 s',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.167 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.22 },
   },
   kit_vaz2121: {
     wheelbase: 2.2, track: 1.43, radius: 0.343, top: 132, to100: 23,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.5, lat: 0.66, hz: 1.15,
     brake80: 40, grossKg: 1550,
     source: 'as sv_niva: AO vaz-2121 (brake, gross); lada-niva.ru/niva/soobschenie-s-harakteristikami.html',
-    known0to100: { reason: NIVA_LOSSES, dev: -0.106 },
   },
   kit_vaz2131: {
     wheelbase: 2.7, track: 1.43, radius: 0.343, top: 132, to100: 25,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.3, lat: 0.64, hz: 1.15,
     brake80: 40, grossKg: 1870,
     source: 'as sv_niva_long: AO vaz-2131; lada-niva.ru/vid-img/sravnenie.jpg; brake (the 2121x family table), gross niva-faq.msk.ru/tehnika/obsch/tehdann/213_312.htm; track vaz.ru/v2131.htm (kit_vaz2131 row)',
-    known0to100: { reason: NIVA_LOSSES, dev: -0.131 },
+    known0to100: { reason: NIVA_LOSSES, dev: -0.082 },
   },
   kit_vaz1111: {
     wheelbase: 2.18, track: 1.214, radius: 0.26, top: 120, to100: 30,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 4.8, lat: null, hz: 1.3,
     brake80: 38, grossKg: 975,
     source: 'as cf_vaz1111: man. autoprospect.ru/vaz/1111-oka/1-4-tekhnicheskie-kharakteristiki.html; brake, gross AO vaz-1111',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.146 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.215 },
   },
   kit_gaz24: {
     wheelbase: 2.8, track: 1.476, radius: 0.354, top: 145, to100: null,
@@ -521,7 +528,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, lat: null, hz: 1.15,
     brake80: 43.2, grossKg: 1455,
     source: 'as sa_azlk2141: AO moskvich-2141 (2141-01, VAZ-2106-70 engine; brake, gross); AP azlk/2141-moskvich/1-2-tekhnicheskie-dannye-i-kharakteristiki-avtomobilejj-moskvich.html; geometry kit_azlk2141 row',
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.109 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.14 },
   },
   // The foreign kit cars, on their own running gear (no catalogue sibling).
   kit_nexia: {
@@ -531,7 +538,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'Daewoo Nexia 1.5 GL (G15MF): Nexia repair manual table 3ruk.ru/vehicles/jado/tezeab/lla and remkomplekt.org/daewoo-nexia/tehnicheskie-harakteristiki.html (163 km/h, 4.9 m, gross 1404); 0-100 drom.ru catalog/daewoo/nexia/161911 (it prints 175 km/h); no braking ceiling found; geometry kit_nexia row',
     // 55 kW on 1119 kg is the 21099's power to weight (51.5 kW, 1120 kg: 13.5 s printed,
     // +23% on the bench); the 12.5 s stands beside drom.ru's 175 km/h, not the manual's 163.
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.221 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.255 },
   },
   kit_espero: {
     wheelbase: 2.62, track: 1.426, radius: 0.298, top: 185, to100: 10.8,
@@ -540,7 +547,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'Daewoo Espero 2.0 MT CD (C20LE): drom.ru catalog/daewoo/espero/70454 (185 km/h, 10.8 s, 5.2 m, gross 1630); no braking ceiling found; geometry kit_espero row',
     // The catalogue's 10.8 s stands with its 185 km/h on the bench as the Nexia's 12.5 s does
     // (+22%): the same optimistic catalogue figure on the same F16 box and 3.944 axle.
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.181 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.184 },
   },  kit_astraf: {
     wheelbase: 2.517, track: 1.43, radius: 0.288, top: 170, to100: 14.0,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.25, lat: null, hz: 1.3,
@@ -548,7 +555,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     source: 'Opel Astra F 1.6i (C16NZ) five-door: auto-data.net Opel Astra F 1.6i (75 Hp) (170 km/h, 14.0 s, 10.5 m circle between walls, gross 1495); no braking ceiling found; geometry kit_astraf row',
     // The C16NZ's 55 kW on 1160 kg: the catalogue's 14.0 s stands with its 170 km/h as the
     // Nexia's and Espero's do (the same Family I / F13-F16 driveline, +22 % and +18 %).
-    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.11 },
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.14 },
   },  kit_vectraa: {
     wheelbase: 2.6, track: 1.437, radius: 0.295, top: 198, to100: 10.5,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 6.0, lat: null, hz: 1.3,

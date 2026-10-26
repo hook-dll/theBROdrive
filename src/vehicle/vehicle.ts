@@ -95,8 +95,6 @@ import { KIT_DOME_LAMP_NODE } from '../carkit/interior';
 
 import {
   AIR_DENSITY,
-  ANTI_DIVE_FRACTION,
-  ANTI_SQUAT_FRACTION,
   AUTO_DIRECTION_RELEASE_MPS,
   AXLE_ROLL_LIMIT_RAD,
   type AxleGeometry,
@@ -116,7 +114,7 @@ import {
   CAMBER_STIFFNESS_CROSSPLY,
   CAMBER_STIFFNESS_RADIAL,
   CARRIED_MASS_EPSILON_KG,
-  CHASSIS_ANGULAR_DAMPING,
+  CHASSIS_ROLL_DAMPING_PER_S,
   COM_DROP_FRACTION,
   CONTACT_PATCH_M,
   DAMPER_BLEED_GAIN,
@@ -130,7 +128,8 @@ import {
   DIG_GONE_MPS,
   DIG_SURFACES,
   DRAG_CD,
-  DRIVELINE_LAG_S,
+  DRIVELINE_SHAFT_DAMPING_RATIO,
+  DRIVELINE_SHAFT_RATE_NM_PER_RAD,
   FLUID_DENSITY_OIL,
   FOOT_BRAKE_GRIP_RATIO,
   FOOT_BRAKE_REAR_BIAS,
@@ -189,8 +188,11 @@ import {
   PARK_HOLD_SPEED_MPS,
   PNEUMATIC_TRAIL_M,
   pneumaticTrailShape,
+  pitchLinkTan,
   aligningMomentPeak,
   REAR_AXLE_SIDE_GRIP,
+  ROLL_CAMBER_LIMIT_RAD,
+  rollCamberShare,
   SCRATCH_IMPACT_THRESHOLD_MPS,
   SCRATCH_PER_IMPACT_CAP,
   SCRATCH_PER_SEVERITY_MPS,
@@ -293,8 +295,11 @@ function rearValvePressure(pedal: number, knee: number, slope: number): number {
  * transfer `n = n0 ± χ·z` (χ = CoM height / wheelbase) with the tyre's LOAD_SENSITIVITY,
  * and the pedal is shared between the axles as the brakes share it: `rearShare` of the
  * force up to the regulator's knee, less past it. The knee itself rides on the rear
- * springs, which see the transfer the links do not carry (ANTI_DIVE_FRACTION):
- * `kneeParked · (1 − (1 − ANTI_DIVE_FRACTION)·χ·z / rear0)`.
+ * springs, which see the transfer the links do not carry: the rear brake force times the
+ * rear links' slope (`rearLinkTan`, `SuspensionTuning.rearPitchCentre`) goes through the
+ * links, so the springs unload by `χ·z − tanθ·rearForce` of the weight and the knee is
+ * `kneeParked · (1 − that / rear0)`. The rear force depends on the knee in turn, so each
+ * trial takes three passes of the two.
  *
  * Bisection on z, because the knee moves with the deceleration it decides: each trial
  * deceleration fixes the rear load and so the knee, the pedal that produces that total
@@ -309,6 +314,7 @@ function thresholdBrakeG(
   fullG: number,
   kneeParked: number,
   slope: number,
+  rearLinkTan: number,
 ): number {
   const rear0 = 1 - front0;
   const frontShare = 1 - rearShare;
@@ -316,12 +322,16 @@ function thresholdBrakeG(
   let hi = fullG;
   for (let i = 0; i < 24; i++) {
     const z = 0.5 * (lo + hi);
-    const unload = 1 - ((1 - ANTI_DIVE_FRACTION) * transfer * z) / Math.max(1e-6, rear0);
-    const knee = kneeParked === Infinity ? Infinity : kneeParked * Math.max(0, unload);
-    const pedal =
-      knee * fullG >= z ? z / fullG : (z / fullG - rearShare * knee * (1 - slope)) / (frontShare + rearShare * slope);
-    const frontForce = fullG * frontShare * pedal;
-    const rearForce = z - frontForce;
+    let pedal = z / fullG;
+    let rearForce = rearShare * z;
+    for (let pass = 0; pass < 3; pass++) {
+      const unload = 1 - (transfer * z - rearLinkTan * rearForce) / Math.max(1e-6, rear0);
+      const knee = kneeParked === Infinity ? Infinity : kneeParked * Math.max(0, unload);
+      pedal =
+        knee * fullG >= z ? z / fullG : (z / fullG - rearShare * knee * (1 - slope)) / (frontShare + rearShare * slope);
+      rearForce = z - fullG * frontShare * pedal;
+    }
+    const frontForce = z - rearForce;
     const nFront = front0 + transfer * z;
     const nRear = Math.max(0, rear0 - transfer * z);
     const frontCap = front0 > 0 ? peakMu * nFront * (1 - LOAD_SENSITIVITY * (nFront / front0 - 1)) : 0;
@@ -436,7 +446,8 @@ interface WheelVisual {
    *
    *   toeRad       static steer: the toe-in, in this side's sign
    *   leanRad      static camber, as the top of the tyre leaning toward +X
-   *   rollCamber   share of the axle's roll the wheel leans with (0 for a beam)
+   *   rollCamber   share of the axle's roll the wheel leans with, derived from its
+   *                front-view swing arm and the track (`rollCamberShare`; 0 for a beam)
    *   rollSteer    steer per unit of axle roll, signed so a positive preset
    *                coefficient understeers on either axle
    */
@@ -468,6 +479,22 @@ interface WheelVisual {
    * body, so it is added to `loadN` and never applied as an impulse.
    */
   linkN: number;
+  /**
+   * The links' side-view slopes on this wheel (`SuspensionTuning.frontPitchCentre`,
+   * `pitchLinkTan`): from the patch, what a brake force (and a live axle's drive) reaches
+   * the body along, and `pitchDriveTan` what a drive or overrun torque does — the patch's
+   * on a live axle, the wheel centre's through half-shafts. Signed for this axle: positive
+   * resists the pitch at either end.
+   */
+  pitchPatchTan: number;
+  pitchDriveTan: number;
+  /**
+   * The links' vertical share of this wheel's longitudinal force last step, N, positive
+   * loading the tyre (the body pass of `updateWheelDynamics`): applied to the body at the
+   * patch along its up axis, and added to `loadN` as the links' reaction, as `linkN` is
+   * for the side force.
+   */
+  pitchLinkN: number;
   /** This tyre's vertical carcass rate, N/m. Nothing to do with the springs. */
   tyreRateN: number;
   /**
@@ -1070,6 +1097,12 @@ export class Vehicle implements Rebasable {
   private rearValveKerbKnee = Infinity;
   private rearValveSlope = 1;
   /**
+   * The rear links' slope from the patch (`SuspensionTuning.rearPitchCentre`): the share
+   * of the rear brake force they carry as vertical load, which the rear springs — and the
+   * regulator's lever on them — never see.
+   */
+  private rearLinkTan = 0;
+  /**
    * The parked rear spring load over the kerb load the springs were cut for: what the
    * regulator's lever reads standing still. The planner's estimate takes the knee from
    * it (`estimatedBrakeDecel`); the step reads the springs themselves.
@@ -1153,7 +1186,22 @@ export class Vehicle implements Rebasable {
   private wheelbaseM = 1;
   /** This car's tyre camber stiffness over its cornering stiffness, per radian. */
   private camberStiffness = CAMBER_STIFFNESS_RADIAL;
+  /**
+   * The drive at the hubs, N·m summed over the driven wheels: the driveline shaft's
+   * torque while the clutch is locked, the clutch's own while it slips (see the two-mass
+   * driveline in `updateWheelDynamics`). The pedal's override is already in it.
+   */
   private appliedDriveTorqueNm = 0;
+  /**
+   * THE TWO-MASS DRIVELINE's state (`DRIVELINE_SHAFT_RATE_NM_PER_RAD`): the shaft's
+   * wind-up, radians at the wheels, and its gearbox end's speed, rad/s at the wheels —
+   * the crank's speed over the overall ratio while the clutch is locked. `shaftEngaged`
+   * false re-seats both on the next locked substep, at the wheels' speed and the twist
+   * the last torque held; anything that sets the wheels' speed from outside clears it.
+   */
+  private shaftTwistRad = 0;
+  private shaftInputRadS = 0;
+  private shaftEngaged = false;
   /**
    * Direction the driven wheels are PUSHING the car this step: the gear's direction
    * while the engine drives through it, 0 while it coasts or engine-brakes. The dig
@@ -1353,18 +1401,11 @@ export class Vehicle implements Rebasable {
   private steerLightnessValue = 0;
   /**
    * Height of the centre of mass above the contact plane, metres: the arm the
-   * longitudinal tyre forces pitch the body on (see `applyAntiPitch`).
+   * longitudinal tyre forces pitch the body on.
    */
   private rollLeverArm = 0.5;
   /** The chassis' roll inertia about its centre of mass, kg·m² (`applyChassisMass`). */
   private rollInertiaKgM2 = 1;
-  /**
-   * Total longitudinal tyre force applied to the chassis this step, newtons. Signed:
-   * positive drives, negative brakes. Summed in `updateWheelDynamics` and consumed by
-   * `applyAntiPitch`, which needs the force that was actually DELIVERED rather than
-   * the one the pedals asked for — the tyre model routinely delivers less.
-   */
-  private longitudinalForceSum = 0;
   /**
    * The tyre contact plane in chassis-local metres: where the ground is when the
    * car stands at its published factory clearance. `rebuild` places each suspension
@@ -1484,7 +1525,6 @@ export class Vehicle implements Rebasable {
     const desc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(carState.x - this.origin.x, carState.y, carState.z - this.origin.z)
       .setRotation({ x: carState.qx, y: carState.qy, z: carState.qz, w: carState.qw })
-      .setAngularDamping(CHASSIS_ANGULAR_DAMPING)
       .setCanSleep(false);
 
     this.chassisBody = physics.world.createRigidBody(desc);
@@ -1743,6 +1783,7 @@ export class Vehicle implements Rebasable {
       SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
+      this.model.lateralGripScale *
       this.tyreCarGrip(this.statsValue.mass) *
       this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip *
@@ -1815,6 +1856,7 @@ export class Vehicle implements Rebasable {
         this.model.brakeDecelG,
         knee,
         this.rearValveSlope,
+        this.rearLinkTan,
       ) * GRAVITY
     );
   }
@@ -2135,6 +2177,10 @@ export class Vehicle implements Rebasable {
         ? wheel.radius * Math.tan((suspension.frontCasterDeg * Math.PI) / 180)
         : 0;
       const alignPeak = aligningMomentPeak(casterTrailM / PNEUMATIC_TRAIL_M);
+      // The axle's linkage: its swing arm decides the roll camber, its side-view instant
+      // centre the pitch links (`pitchLinkN`), and a beam reacts both at the patch.
+      const beamAxle = (wheel.isFront ? suspension.frontAxle : suspension.rearAxle) === 'beam';
+      const pitchCentre = wheel.isFront ? suspension.frontPitchCentre : suspension.rearPitchCentre;
       this.wheels.push({
         index,
         tyre,
@@ -2163,12 +2209,20 @@ export class Vehicle implements Rebasable {
         axleTrackM: wheel.isFront ? frontTrack : rearTrack,
         toeRad: -side * toeDeg * degToRad,
         leanRad: side * camberDeg * degToRad,
-        rollCamber: wheel.isFront ? suspension.frontRollCamber : suspension.rearRollCamber,
+        rollCamber: beamAxle
+          ? 0
+          : rollCamberShare(
+              wheel.isFront ? suspension.frontSwingArmM : suspension.rearSwingArmM,
+              wheel.isFront ? frontTrack : rearTrack,
+            ),
         rollSteer: wheel.isFront ? suspension.frontRollSteer : -suspension.rearRollSteer,
         beamPartner: null,
         beamLeanRad: 0,
         sideForceBodyXN: 0,
         linkN: 0,
+        pitchPatchTan: pitchLinkTan(pitchCentre, 0),
+        pitchDriveTan: pitchLinkTan(pitchCentre, beamAxle ? 0 : wheel.radius),
+        pitchLinkN: 0,
         tyreRateN: tyreVerticalRate(wheel.radius),
         profileHeight: 0,
         profileRate: 0,
@@ -2340,6 +2394,7 @@ export class Vehicle implements Rebasable {
       w.locked = false;
       radius += w.radius;
     }
+    this.shaftEngaged = false;
     if (this.wheels.length > 0) {
       this.drivetrain.engageAtWheelSpeed(speedMps / (radius / this.wheels.length));
     }
@@ -2435,6 +2490,7 @@ export class Vehicle implements Rebasable {
       w.spinRadS = speedMps / w.radius;
       w.drawnSpin += w.spinRadS * dt;
     }
+    this.shaftEngaged = false;
     this.brakeLightCommand = braking ? 1 : 0;
     this.serviceBrakeCommand = braking ? 1 : 0;
     // What a distant listener hears follows the road speed; the engine note keeps the
@@ -2983,6 +3039,7 @@ export class Vehicle implements Rebasable {
         this.world.apply({ t: 'car_bonnet', carId: this.car.id, cell: 0, item: destroyed });
         this.drivetrain.reconfigure(this.drivetrainEngine(), stats.gearbox);
         this.appliedDriveTorqueNm = 0;
+        this.shaftEngaged = false;
       }
     }
 
@@ -2995,8 +3052,9 @@ export class Vehicle implements Rebasable {
     this.updateSteering(dt, input, fwd);
 
     // The drive at the hubs as the driveline's last substep left it (it is stepped with
-    // the wheels, in `updateWheelDynamics`), with the pedal's override applied: the
-    // overrun the threshold pedal below has to leave room for.
+    // the wheels, in `updateWheelDynamics`), with this step's pedal override applied as
+    // the engine will apply it once the shaft unwinds: the overrun the threshold pedal
+    // below has to leave room for.
     const appliedTorque =
       this.propulsionDirection !== 0 ? this.appliedDriveTorqueNm * (1 - brake) : this.appliedDriveTorqueNm;
 
@@ -3125,7 +3183,8 @@ export class Vehicle implements Rebasable {
     // tyre's own coefficient and the handling profile's cornering scale. The SURFACE's
     // own coefficient is applied per wheel below, because with four wheels on as many
     // surfaces it is no longer one number.
-    const lateralCarFactor = this.handling.tyreLateralScale * tyreCarGrip;
+    // `lateralGripScale` is the car's own skidpad calibration where one was measured.
+    const lateralCarFactor = this.handling.tyreLateralScale * this.model.lateralGripScale * tyreCarGrip;
     // The load μ(Fz) is measured against THIS WHEEL parked: `w.staticLoadN`, from the
     // weight distribution and the axle geometry (see AxleGeometry). It is per-wheel
     // now, which is the point — referencing a front tyre against a quarter of the
@@ -3369,7 +3428,7 @@ export class Vehicle implements Rebasable {
     this.audioState.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
 
     this.applyAntiRollBars(dt);
-    this.applyAntiPitch(dt, contactCount);
+    this.applyRollDamping(dt);
 
     // Rolling resistance (∝ weight) + quadratic aerodynamic drag in still air, opposing
     // horizontal motion, at the centre of mass. Drag always applies; rolling resistance
@@ -3751,6 +3810,7 @@ export class Vehicle implements Rebasable {
       w.carcassSlip = 0;
       w.locked = false;
     }
+    this.shaftEngaged = false;
     this.impactVelocityPrimed = false;
     // Release the parking hold, or this does nothing at all on a car nobody is
     // driving: `postStep` re-teleports a held chassis to `parkingHoldPos` every
@@ -4269,7 +4329,6 @@ export class Vehicle implements Rebasable {
     this.stepDriveTorque = false;
     this.stepFuelBurnLitres = 0;
     if (!this.tyres || dt <= 0) return;
-    this.longitudinalForceSum = 0;
     this.ownTyreCapacityN = 0;
 
     this.chassisBody.rotation(this.rotationScratch);
@@ -4370,11 +4429,17 @@ export class Vehicle implements Rebasable {
       // see one angle, and the force still acts along the wheel's own axis.
       // A beam axle's wheels lean with the axle itself (`updateBeamLean`), not with
       // the body.
+      // The body's share is bounded (ROLL_CAMBER_LIMIT_RAD): the linkage's slope at ride
+      // height, not a camber curve the arms could follow to the axle's roll limit.
       const lean =
         w.leanRad +
         (w.beamPartner !== null
           ? w.beamLeanRad
-          : w.rollCamber * (w.isFront ? this.frontRollRad : this.rearRollRad));
+          : clamp(
+              w.rollCamber * (w.isFront ? this.frontRollRad : this.rearRollRad),
+              -ROLL_CAMBER_LIMIT_RAD,
+              ROLL_CAMBER_LIMIT_RAD,
+            ));
       const camberSteer = this.camberStiffness * lean * Math.sign(fwdSpeed);
       w.camberSteerRad = camberSteer;
       const latSpeed = wheelLatSpeed * Math.cos(camberSteer) - fwdSpeed * Math.sin(camberSteer);
@@ -4403,7 +4468,7 @@ export class Vehicle implements Rebasable {
       // so an edge or a seam reaches it as the rise a wheel rolling over it makes, not
       // as a step.
       w.loadN = inContact
-        ? Math.max(0, w.tyre.forceN + w.bumpStopN + w.bleedN + w.barN + w.linkN)
+        ? Math.max(0, w.tyre.forceN + w.bumpStopN + w.bleedN + w.barN + w.linkN + w.pitchLinkN)
         : 0;
 
       w.inContact = inContact;
@@ -4440,34 +4505,40 @@ export class Vehicle implements Rebasable {
     const share = 1 / substeps;
     const frontShare = 1 - this.model.rearDriveBias;
     const rearShare = this.model.rearDriveBias;
-    const drivenCount = this.frontDrivenCount + this.rearDrivenCount;
     const roadWheelSpeed = vehicleForwardSpeed / this.drivenRadius;
-    // Driveline slack and compliance: torque arrives late (DRIVELINE_LAG_S). One
-    // pole, so a stab of throttle builds over ~0.3 s instead of hitting the tyres
-    // on the same tick the pedal moved. Engine braking is the same torque with the
-    // other sign, so it takes the same path through the same slack.
-    const driveBlend = h / (this.handling.drivelineLag + h);
+    // THE TWO-MASS DRIVELINE (`DRIVELINE_SHAFT_RATE_NM_PER_RAD`): the crank geared to the
+    // wheels is one mass (`Drivetrain.crankInertiaAtWheelsKgM2`), the driven wheels the
+    // other, and the shaft between them a damped spring. The car's own inertia at the
+    // driven wheels, `m · r²`, sets the shuffle mode the damping is a share of.
+    const carInertia = this.statsValue.mass * this.drivenRadius * this.drivenRadius;
+    const shaftRate = DRIVELINE_SHAFT_RATE_NM_PER_RAD;
     let carDigWeight = 0;
     for (let step = 0; step < substeps; step++) {
-      // The crank turns with the DRIVEN wheels (their mean, which is what an open
-      // differential gives it), so a tyre breaking loose revs the engine towards its
-      // cut, loses torque there and is bounded by it, and the driver hears it. The
-      // gearbox decides on the faster of the two speeds: see `Drivetrain.update`. Until the tyre
-      // model owned the thrust this could not be done — with Rapier's engine force
-      // pushing the car, a slipping wheel pinned the engine at its redline and full
-      // throttle in first settled at 26 km/h.
+      // The crank turns with the gearbox end of the shaft while the clutch is locked, and
+      // that end turns with the DRIVEN wheels (their mean, which is what an open
+      // differential gives it) less the shaft's wind-up rate. So a tyre breaking loose
+      // still revs the engine towards its cut, loses torque there and is bounded by it,
+      // and the driver hears it. The gearbox decides on the faster of the road and the
+      // wheels: see `Drivetrain.update`. Until the tyre model owned the thrust this could
+      // not be done — with Rapier's engine force pushing the car, a slipping wheel pinned
+      // the engine at its redline and full throttle in first settled at 26 km/h.
       let drivenSpinSum = 0;
       let drivenWheels = 0;
+      let drivenInertia = 0;
       for (const w of this.wheels) {
         if (w.isFront ? this.frontDrivenCount === 0 : this.rearDrivenCount === 0) continue;
         drivenSpinSum += w.spinRadS;
+        drivenInertia += w.discInertia;
         drivenWheels++;
       }
+      const wheelMean = drivenWheels > 0 ? drivenSpinSum / drivenWheels : roadWheelSpeed;
+      const gearboxEnd =
+        this.shaftEngaged && this.drivetrain.crankInertiaAtWheelsKgM2 > 0 ? this.shaftInputRadS : wheelMean;
       const drive = this.drivetrain.update(
         h,
         throttle,
         roadWheelSpeed,
-        drivenWheels > 0 ? drivenSpinSum / drivenWheels : roadWheelSpeed,
+        gearboxEnd,
         this.drivenRadius,
         automatic,
         input.reverse,
@@ -4475,31 +4546,63 @@ export class Vehicle implements Rebasable {
       );
       if (drive.driveTorqueNm !== 0) this.stepDriveTorque = true;
       this.stepFuelBurnLitres += drive.fuelBurnLitres;
-      this.appliedDriveTorqueNm += (drive.driveTorqueNm - this.appliedDriveTorqueNm) * driveBlend;
       const gearDirection = this.drivetrain.gearDirection;
+      // The brake pedal overrides the engine's DRIVE, at the engine: the shaft then
+      // unwinds through the tyres. Braking against a driving torque through a low gear
+      // cancelled the driven axle's brake force: the RWD cars needed 86 m from 100 km/h
+      // instead of 60, and their rear tyres never reached their friction limit, so a
+      // rear-biased brake could not step the tail out. The overrun drag is not
+      // overridden: it adds to the brakes, as it does on a real car.
+      const engineTorque =
+        drive.driveTorqueNm * gearDirection > 0 ? drive.driveTorqueNm * (1 - brake) : drive.driveTorqueNm;
+      const crankInertia = this.drivetrain.crankInertiaAtWheelsKgM2;
+      if (crankInertia > 0 && drivenInertia > 0) {
+        // Locked: the engine winds the shaft, the shaft drives the wheels. Coming into the
+        // lock the gearbox end starts at the wheels' speed with the twist the clutch's last
+        // torque held, so nothing jumps.
+        if (!this.shaftEngaged) {
+          this.shaftEngaged = true;
+          this.shaftInputRadS = wheelMean;
+          this.shaftTwistRad = this.appliedDriveTorqueNm / shaftRate;
+        }
+        const shuffleInertia = (crankInertia * carInertia) / (crankInertia + carInertia);
+        const damping = DRIVELINE_SHAFT_DAMPING_RATIO * 2 * Math.sqrt(shaftRate * shuffleInertia);
+        // Implicit in the shaft: its torque is the one at the END of the substep's wind-up,
+        // against the two masses it moves apart (the crank and the wheels' own discs; the
+        // tyres answer the wheels in their own implicit pass), with the engine's torque on
+        // the crank's side taken as known. Unconditionally stable at any substep, so the
+        // traffic's 240 Hz loop runs the same shaft.
+        const reduced = (crankInertia * drivenInertia) / (crankInertia + drivenInertia);
+        const gain = damping + h * shaftRate;
+        const slip = this.shaftInputRadS - wheelMean + (h * engineTorque) / crankInertia;
+        const shaftNm = (shaftRate * this.shaftTwistRad + gain * slip) / (1 + (h * gain) / reduced);
+        this.shaftInputRadS += (h * (engineTorque - shaftNm)) / crankInertia;
+        this.appliedDriveTorqueNm = shaftNm;
+      } else {
+        // Open or slipping: the clutch's torque goes straight through a shaft whose
+        // gearbox end is only the gearbox, too light to wind against.
+        this.shaftEngaged = false;
+        this.appliedDriveTorqueNm = engineTorque;
+      }
       this.propulsionDirection = this.appliedDriveTorqueNm * gearDirection > 0 ? gearDirection : 0;
-      // The brake pedal overrides what is left of the DRIVE. Braking against a driving
-      // torque through a low gear cancelled the driven axle's brake force: the RWD cars
-      // needed 86 m from 100 km/h instead of 60, and their rear tyres never reached
-      // their friction limit, so a rear-biased brake could not step the tail out. The
-      // overrun drag is not overridden: it adds to the brakes, as it does on a real car.
-      const appliedTorque =
-        this.propulsionDirection !== 0 ? this.appliedDriveTorqueNm * (1 - brake) : this.appliedDriveTorqueNm;
       for (const w of this.wheels) {
         const axleShare = w.isFront ? frontShare : rearShare;
         const axleCount = w.isFront ? this.frontDrivenCount : this.rearDrivenCount;
-        w.driveTorqueNm = axleShare > 0 && axleCount > 0 ? (appliedTorque * axleShare) / axleCount : 0;
+        w.driveTorqueNm =
+          axleShare > 0 && axleCount > 0 ? (this.appliedDriveTorqueNm * axleShare) / axleCount : 0;
       }
       const spinCeiling = this.drivetrain.maxDrivenWheelSpinRadS;
-      // The crank and flywheel a driven wheel has to drag round with it, geared up by
-      // the square of the ratio. See `Drivetrain.drivenWheelInertiaKgM2`: without it a
-      // driven wheel is a bare disc and every dip in load is an instant wheelspin.
-      const drivelineInertia = this.drivetrain.drivenWheelInertiaKgM2(drivenCount);
-      this.applyDifferentials(h, drivelineInertia);
+      this.applyDifferentials(h);
       carDigWeight = 0;
+      let spunSum = 0;
       for (const w of this.wheels) {
-        const dig = this.substepWheel(w, h, dt, share, vehicleForwardSpeed, drivelineInertia, spinCeiling);
+        const dig = this.substepWheel(w, h, dt, share, vehicleForwardSpeed, spinCeiling);
         if (dig > carDigWeight) carDigWeight = dig;
+        if (w.isFront ? this.frontDrivenCount > 0 : this.rearDrivenCount > 0) spunSum += w.spinRadS;
+      }
+      // The shaft winds by what its gearbox end gained on the wheels over the substep.
+      if (this.shaftEngaged && drivenWheels > 0) {
+        this.shaftTwistRad += h * (this.shaftInputRadS - spunSum / drivenWheels);
       }
     }
     this.digWeightCar = carDigWeight;
@@ -4516,18 +4619,29 @@ export class Vehicle implements Rebasable {
       // Only a moving car can have a locked wheel; a stopped one is just stopped.
       w.locked = Math.abs(contactSpeed) > SLIDE_MIN_MPS && w.slipRatio <= LOCK_SLIP_RATIO;
 
-      // Drive the chassis with it, at the contact patch. Applying it there is what
-      // produces the pitch couple (dive and squat) for free — and, because Rapier has
-      // no suspension geometry to react any of it, produces ALL of it. `applyAntiPitch`
-      // below takes back the share real links would have carried, so the running total
-      // is accumulated here rather than recomputed from the pedals.
+      // Drive the chassis with it, at the contact patch, and with the links' vertical
+      // share of it there too (the anti-pitch block in vehicletuning.ts): a force F on
+      // this axle comes up the line from the patch through the axle's side-view instant
+      // centre, `F · tanθ` up or down at this corner, which the springs then never carry.
+      // The slope is the patch's for brake torque, the drive's own (a live axle's patch,
+      // a half-shaft's wheel centre) for drive and overrun; signed so it resists the pitch
+      // at either end — the front's force pitches the nose the other way to the rear's.
+      // The tyre carries the same load from the next step (`pitchLinkN`), as it does the
+      // roll centre's share of the side force.
+      w.pitchLinkN = 0;
       if (longitudinalForce !== 0) {
+        const braked = (w.brakeForceN > 0 || w.cableLocked) && longitudinalForce * contactSpeed < 0;
+        const driven = w.isFront ? this.frontDrivenCount > 0 : this.rearDrivenCount > 0;
+        const slope = braked || !driven ? w.pitchPatchTan : w.pitchDriveTan;
+        const vertical = inContact ? (w.isFront ? -longitudinalForce : longitudinalForce) * slope : 0;
+        w.pitchLinkN = vertical;
         const impulse = longitudinalForce * dt;
-        this.tyreImpulse.x = w.forwardDir.x * impulse;
-        this.tyreImpulse.y = w.forwardDir.y * impulse;
-        this.tyreImpulse.z = w.forwardDir.z * impulse;
+        const lift = vertical * dt;
+        const up = this.bodyUpScratch;
+        this.tyreImpulse.x = w.forwardDir.x * impulse + up.x * lift;
+        this.tyreImpulse.y = w.forwardDir.y * impulse + up.y * lift;
+        this.tyreImpulse.z = w.forwardDir.z * impulse + up.z * lift;
         this.chassisBody.applyImpulseAtPoint(this.tyreImpulse, w.contactPoint, false);
-        this.longitudinalForceSum += longitudinalForce;
       }
 
       // LATERAL FORCE, ours now. Three things decide it: the capacity the setup pass
@@ -4790,7 +4904,6 @@ export class Vehicle implements Rebasable {
     dt: number,
     share: number,
     vehicleForwardSpeed: number,
-    drivelineInertia: number,
     spinCeiling: number,
   ): number {
     const driven = w.isFront ? this.frontDrivenCount > 0 : this.rearDrivenCount > 0;
@@ -4848,10 +4961,10 @@ export class Vehicle implements Rebasable {
       capacityN = longitudinalMu * w.loadN;
     }
 
-    // A DRIVEN wheel also has to turn the engine, which through the gears is the larger
-    // half of the total in the low gears — and the reason a bump cannot flick it into
-    // a spin.
-    const inertia = w.discInertia + (driven ? drivelineInertia : 0);
+    // A DRIVEN wheel's engine is behind the driveline's shaft, a mass of its own (the
+    // two-mass driveline in `updateWheelDynamics`); the wheel here is its own disc, and
+    // the shaft's damper is what keeps a bump from flicking it into a spin.
+    const inertia = w.discInertia;
 
     // Drive torque spins the wheel up. Nothing is taken away from it: the tyre model
     // below decides what the contact can actually transmit, and a wheel that spins
@@ -4939,8 +5052,8 @@ export class Vehicle implements Rebasable {
         // peak it goes negative, and feeding that back drives the wheel away from
         // equilibrium instead of toward it.
         //
-        // The substep is linearised where its torques have put the wheel. A light
-        // wheel — one the clutch is slipping behind, with no crank geared to it — can be
+        // The substep is linearised where its torques have put the wheel. A light wheel —
+        // every driven wheel is its own disc, the crank being behind the shaft — can be
         // kicked by its drive torque past the tyre's peak in one substep (a launch's
         // 650 N·m spins a 0.6 kg·m² wheel up 4 rad/s in 1/240 s), where the slope is zero
         // and the force is the sliding friction: linearised there it can only ever pull
@@ -5397,7 +5510,10 @@ export class Vehicle implements Rebasable {
     // steering axes and the one it is measured against (`STEER_FREE_TAU_S`), the travel
     // angle and the peak, and the steering-lightness cue.
     const staticCapacityPerN =
-      SURFACES[SurfaceType.Asphalt].mu * this.handling.tyreLateralScale * this.tyreCarGrip(this.statsValue.mass);
+      SURFACES[SurfaceType.Asphalt].mu *
+      this.handling.tyreLateralScale *
+      this.model.lateralGripScale *
+      this.tyreCarGrip(this.statsValue.mass);
     let moment = 0;
     let referenceMoment = 0;
     let travel = 0;
@@ -5758,7 +5874,7 @@ export class Vehicle implements Rebasable {
    * reverses it. Half of that, because the tyres are acting too and the full figure
    * would overshoot into the next step's opposite correction.
    */
-  private applyDifferentials(dt: number, drivelineInertia: number): void {
+  private applyDifferentials(dt: number): void {
     for (let axle = 0; axle < 2; axle++) {
       const front = axle === 0;
       const diff = front ? this.model.frontDiff : this.model.rearDiff;
@@ -5776,7 +5892,9 @@ export class Vehicle implements Rebasable {
       if (cap <= 0 || slip === 0) continue;
       const radius = 0.5 * (left.radius + right.radius);
       const wheelMass = WHEEL_MASS_KG * (radius / WHEEL_REFERENCE_RADIUS) ** 2;
-      const inertia = 0.5 * wheelMass * radius * radius + drivelineInertia;
+      // The two wheels' own discs: their DIFFERENCE turns the side gears, not the crank,
+      // which only ever sees their mean (the driveline's shaft).
+      const inertia = 0.5 * wheelMass * radius * radius;
       const sync = (Math.abs(slip) * inertia) / (2 * dt);
       const transfer = Math.sign(slip) * Math.min(cap, 0.5 * sync);
       left.driveTorqueNm -= transfer;
@@ -6102,33 +6220,27 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Takes back the share of the longitudinal pitch couple that real suspension
-   * geometry would carry through the links (see ANTI_SQUAT_FRACTION).
-   *
-   * The couple exists because the tyre force is applied at the CONTACT PATCH while the
-   * centre of mass is `rollLeverArm` above it: a forward force of F therefore makes a
-   * nose-up moment of F times that arm, and Rapier applies every newton of it to the
-   * springs because it has no wishbones to react any of it. Removing a fixed fraction
-   * is the whole model — it is what an anti-squat percentage MEANS, so there is nothing
-   * to tune beyond the two fractions.
-   *
-   * Sign: forward is body +Z and the contact patch is below the centre of mass, so a
-   * driving force gives a NEGATIVE moment about body +X (nose up). The correction is
-   * therefore positive about +X under power and negative under braking, which falls out
-   * of the sign of the force without a branch — only the FRACTION differs by direction,
-   * because a car has more anti-squat available at the back than anti-dive at the front.
-   *
-   * Skipped with nothing on the ground: an airborne car has no contact patch for the
-   * couple to have come from, so there is none to take back.
+   * The chassis' roll-rate damping (`CHASSIS_ROLL_DAMPING_PER_S`): an angular impulse
+   * about the body's own forward axis that takes `c·dt / (1 + c·dt)` of the roll rate
+   * out, the implicit decay Rapier's isotropic damping used to apply to all three axes.
+   * The forward axis is a principal axis of the chassis (`applyChassisMass` keeps no
+   * products of inertia), so the impulse changes the roll rate alone, by
+   * `impulse / rollInertiaKgM2`, and leaves yaw and pitch exactly as they were.
    */
-  private applyAntiPitch(dt: number, contactCount: number): void {
-    if (contactCount === 0 || this.longitudinalForceSum === 0) return;
-    const fraction =
-      this.longitudinalForceSum >= 0 ? ANTI_SQUAT_FRACTION : ANTI_DIVE_FRACTION;
-    const torque = this.longitudinalForceSum * this.rollLeverArm * fraction * dt;
-    this.chassisBody.rotation(this.rotationScratch);
-    rotateVector(this.forceScratch, this.rotationScratch, torque, 0, 0);
-    this.chassisBody.applyTorqueImpulse(this.forceScratch, true);
+  private applyRollDamping(dt: number): void {
+    const body = this.chassisBody;
+    body.rotation(this.rotationScratch);
+    rotateVector(this.forceScratch, this.rotationScratch, 0, 0, 1);
+    const f = this.forceScratch;
+    const w = body.angvel();
+    const roll = w.x * f.x + w.y * f.y + w.z * f.z;
+    if (roll === 0) return;
+    const c = CHASSIS_ROLL_DAMPING_PER_S * dt;
+    const impulse = (-this.rollInertiaKgM2 * roll * c) / (1 + c);
+    f.x *= impulse;
+    f.y *= impulse;
+    f.z *= impulse;
+    body.applyTorqueImpulse(f, true);
   }
 
   /**
@@ -6392,6 +6504,7 @@ export class Vehicle implements Rebasable {
       ((1 - this.parkedFrontShare) * mass) / Math.max(1e-6, (1 - axles.frontWeightShare) * this.model.mass);
     const valve = this.model.rearBrakeValve;
     this.rearValveKerbKnee = Infinity;
+    this.rearLinkTan = pitchLinkTan(this.model.suspension.rearPitchCentre, 0);
     this.rearValveSlope = 1;
     if (valve?.kind === 'bench') {
       this.rearValveKerbKnee = valve.kneePedal;
@@ -6405,21 +6518,24 @@ export class Vehicle implements Rebasable {
       // close.
       //
       // The lever reads the rear SPRINGS, and they unload by the transfer the links do not
-      // carry, (1 − ANTI_DIVE_FRACTION)·χ·z of the weight, so standing at the kerb it is
-      // set to close at `z_k / (B·(1 − u·z_k))` of the pedal (B = `brakeDecelG`, u that
-      // unloading over r0), which the tail rising by z_k brings down to exactly z_k/B.
+      // carry: χ·z of the weight, less the rear brake force times the rear links' slope
+      // (`rearLinkTan`). Below the knee the rear force is b·z, so the unloading is
+      // u = (χ − b·tanθ)/r0 per g and standing at the kerb the valve is set to close at
+      // `z_k / (B·(1 − u·z_k))` of the pedal (B = `brakeDecelG`), which the tail rising
+      // by z_k brings down to exactly z_k/B.
       //
       // The slope past it puts a FLOORED pedal back on the ideal curve: the front's own
       // full-pedal force `(1 − b)·B` is its ideal share at z_f, the root of
       // `χ·z² + f0·z = (1 − b)·B`; the rear's ideal there is `z_f − (1 − b)·B`, a line
-      // pressure of p = that over `b·B`, and the knee has dropped to k = x_k·(1 − u·z_f),
-      // so the slope is (p − k)/(1 − k). Between the two points the rear runs under the
+      // pressure of p = that over `b·B`, and the knee has dropped to k = x_k·(1 − u_f),
+      // u_f the springs' unloading there with that ideal rear force through the links, so
+      // the slope is (p − k)/(1 − k). Between the two points the rear runs under the
       // ideal curve, which is concave: the kerb car's fronts lock first.
       const rearShare = rearAxleBrakeShare(axles.frontCount, axles.rearCount);
       const rear0 = 1 - axles.frontWeightShare;
       const front0 = axles.frontWeightShare;
       const chi = (kerbY - contactY) / wheelbase;
-      const unloadPerG = ((1 - ANTI_DIVE_FRACTION) * chi) / Math.max(1e-6, rear0);
+      const unloadPerG = (chi - rearShare * this.rearLinkTan) / Math.max(1e-6, rear0);
       const fullG = this.model.brakeDecelG;
       const kneeG = Math.max(0, (rear0 - rearShare) / chi);
       const frontFullG = (1 - rearShare) * fullG;
@@ -6427,7 +6543,9 @@ export class Vehicle implements Rebasable {
       if (kneeG < idealFullG && rearShare > 0) {
         const knee = kneeG / (fullG * (1 - unloadPerG * kneeG));
         const fullPressure = (idealFullG - frontFullG) / (rearShare * fullG);
-        const fullKnee = knee * (1 - unloadPerG * idealFullG);
+        const fullUnload =
+          (chi * idealFullG - this.rearLinkTan * (idealFullG - frontFullG)) / Math.max(1e-6, rear0);
+        const fullKnee = knee * (1 - fullUnload);
         this.rearValveKerbKnee = knee;
         this.rearValveSlope = clamp((fullPressure - fullKnee) / (1 - fullKnee), 0, 1);
       }
