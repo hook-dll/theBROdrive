@@ -82,6 +82,25 @@
 
 ### Changed
 
+- STICKERS ARE ONLY DECORATION (shells phase 4; `contracts/offers.ts`, `world/post.ts`,
+  `items/things.ts`, `economy/economy.ts`, `world/toybox.ts`, `save/save.ts`,
+  `game-design2.md` §7.2, §7.3, §12). Stickers no longer do anything in the game: the
+  post has no fourth SPECIAL card and no relics, and looks at the lay-by car only for its
+  boot ("won't fit your …"). Removed: `SPECIAL_SLOT`, `SPECIAL_CARD_STICKERS`,
+  `RELIC_STICKERS`, `carUniqueness`, `redrawOffer`, `specialThings`, the `special` and
+  `relic` thing tags, the `special` `PostCard`, the gold and plum card bands and the
+  `relics` argument of `generateContractOffer`, `nextOffer` and `postStock`. The nine
+  dearest things join the ordinary cards by their own property, as likely as any other
+  thing there: stamp album and chess set on the ORDINARY card (5 things now, was 3);
+  grandpa's radio, mum's music box, old camera, model plane, grandpa's medals, family
+  photo album and his first toy car on the FRAGILE card (11, was 4); the bulky card is
+  unchanged (5). A post's slot draw keys step by its three cards instead of four, so the
+  cards a seed shows change. Buying envelopes, putting stickers on, drawing them and the
+  toy box's sticker count are untouched. SAVES: no shape change, `SAVE_VERSION` stays; a
+  saved stock's fourth-slot offer (the special card's round) is dropped on load with any
+  other offer id past the three slots, and jobs already taken off the special card keep
+  working as plain things.
+
 - SHELLS REPLACE RUBLES (economy phase 1; `economy/shells.ts`, `economy/economy.ts`,
   `game/state.ts`, `save/save.ts`, `ui/shellsprites.ts`, `ui/hudjar.ts`, `ui/hud.ts`,
   `ui/hud.css`, `world/vending.ts`, `world/pumps.ts`, `world/keybox.ts`, `world/carlot.ts`,

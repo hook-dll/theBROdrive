@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { isContractClosed } from '../contracts/registry';
-import { carUniqueness } from '../economy/economy';
 import { poseOnGround } from '../game/spawn';
 import type { CarState, GameWorld, WorldState } from '../game/state';
 import type { Item } from '../items/items';
@@ -500,7 +499,7 @@ class ToyBox implements WorldFixture {
       refused = true;
     } else {
       const model = carModel(car.modelId);
-      const stickers = carUniqueness(car);
+      const stickers = car.stickers.length;
       const inCar = this.swap.inCarId ? this.world.state.cars[this.swap.inCarId] : undefined;
       headline = model.label;
       lines = [

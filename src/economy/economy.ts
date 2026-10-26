@@ -20,7 +20,7 @@
  * never disagree about a price.
  */
 
-import type { CarState, GameWorld } from '../game/state';
+import type { GameWorld } from '../game/state';
 import { offerDestinationIndex } from '../contracts/offers';
 import { isLate, URGENT_PAY_FACTOR } from '../contracts/types';
 import type { ContractCargoItem, Item } from '../items/items';
@@ -245,17 +245,3 @@ export function carShells(modelId: string): number {
 export function carShellKind(seed: number, carId: string): ShellKind {
   return machineShellKind(seed, `keybox:${carId}`);
 }
-
-// ---------------------------------------------------------------------------
-// Uniqueness
-// ---------------------------------------------------------------------------
-
-/** A car's uniqueness (game-design2.md §12): how many stickers it has earned. */
-export function carUniqueness(car: CarState): number {
-  return car.stickers.length;
-}
-
-/** Stickers on the post's lay-by car that open its fifth card, the special things. */
-export const SPECIAL_CARD_STICKERS = 3;
-/** Stickers from which the fifth card may offer a relic too. */
-export const RELIC_STICKERS = 8;

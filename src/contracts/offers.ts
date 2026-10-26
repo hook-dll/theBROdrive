@@ -2,13 +2,12 @@
  * Post offer generation: three per post stop, drawn deterministically from the world
  * seed, ONE CARD PER PROPERTY by slot (game-design2.md §7.2, items/things.ts
  * `POST_CARDS`): slot 0 an ordinary thing, slot 1 a fragile thing, slot 2 a bulky thing.
- * The thing is drawn evenly among the things its card offers. A fourth slot,
- * `SPECIAL_SLOT`, holds a special thing (§12, items/things.ts `specialThings`), relics
- * among them when asked; the post shows it only to a car with stickers (world/post.ts),
- * and its round is kept while it is hidden. The teddies are no card's: they wait in the
- * shelter (contracts/shelters.ts), whose party is made here too (`makeContract`). Nor
- * are the HAULS (a trailer, a towed car, a car to drive over): each post's pick-up slot
- * holds one by itself, round after round (`postHaul`, contracts/hauls.ts).
+ * The thing is drawn evenly among the things its card offers: every thing a card may
+ * offer comes up as often as any other, none is rare (§12: stickers buy nothing at the
+ * post). The teddies are no card's: they wait in the shelter (contracts/shelters.ts),
+ * whose party is made here too (`makeContract`). Nor are the HAULS (a trailer, a towed
+ * car, a car to drive over): each post's pick-up slot holds one by itself, round after
+ * round (`postHaul`, contracts/hauls.ts).
  *
  * The offer is a plain `contract_cargo` item with its thing, destination (always the
  * next post), seed and fresh progress already on it.
@@ -27,7 +26,7 @@
 import { hash, hash01 } from '../core/rng';
 import type { WorldState } from '../game/state';
 import type { ContractCargoItem, Item } from '../items/items';
-import { cardThings, POST_CARDS, specialThings, THINGS, type ThingDef, type ThingId } from '../items/things';
+import { cardThings, POST_CARDS, THINGS, type ThingDef, type ThingId } from '../items/things';
 import { placeNameAt } from '../world/placenames';
 import { postId, postStop } from '../world/poststops';
 import { dressContractOffer } from './registry';
@@ -51,14 +50,10 @@ export const POST_OFFER_COUNT = POST_CARDS.length;
 /** The pick-up slot's haul draws, apart from every card's. */
 const HAUL_DOMAIN = 0x48414c31; // 'HAL1'
 const HAUL_KIND_DOMAIN = 0x48414b31; // 'HAK1'
-/** The slot after the three: the special thing (§12). */
-export const SPECIAL_SLOT = POST_OFFER_COUNT;
-/** Slots a post's stock keeps a round for: the three and the special one. */
-const POST_SLOT_COUNT = POST_OFFER_COUNT + 1;
 
 /** The draw key of round `round` of `slot`. */
 function drawKey(slot: number, round: number): number {
-  return slot + round * POST_SLOT_COUNT;
+  return slot + round * POST_OFFER_COUNT;
 }
 
 /**
@@ -114,40 +109,21 @@ export function makeContract(
   return item;
 }
 
-/**
- * Round `round` of offer `slot` at post `courierIndex`. The special slot draws among
- * the special things, and among the relics too when `relics`: the same round may show
- * a relic to a car with enough stickers and a special thing to one without.
- */
-export function generateContractOffer(
-  seed: number,
-  courierIndex: number,
-  slot: number,
-  round = 0,
-  relics = false,
-): ContractCargoItem {
+/** Round `round` of offer `slot` at post `courierIndex`, drawn among its card's things. */
+export function generateContractOffer(seed: number, courierIndex: number, slot: number, round = 0): ContractCargoItem {
   const key = drawKey(slot, round);
-  const special = slot === SPECIAL_SLOT;
-  const card = POST_CARDS[slot] ?? 'ordinary';
-  const pool = special ? specialThings(relics) : cardThings(card);
+  const pool = cardThings(POST_CARDS[slot] ?? 'ordinary');
   const thing = pool[Math.min(pool.length - 1, Math.floor(hash01(seed, THING_DOMAIN, courierIndex, key) * pool.length))]!;
   const first = courierIndex === 0 && key === 0;
   const urgent = !first && hash01(seed, URGENT_DOMAIN, courierIndex, key) < URGENT_SHARE;
   return makeContract(seed, offerId(courierIndex, slot, round), courierIndex, thing.id, hash(seed, OFFER_DOMAIN, courierIndex, key), urgent);
 }
 
-/** The offer that replaces `offer` in its slot once it is taken out: the next round (`relics`: see `generateContractOffer`). */
-export function nextOffer(seed: number, offer: ContractCargoItem, relics = false): ContractCargoItem {
+/** The offer that replaces `offer` in its slot once it is taken out: the next round. */
+export function nextOffer(seed: number, offer: ContractCargoItem): ContractCargoItem {
   const at = parseOfferId(offer.sourceCourierIndex, offer.id);
   if (!at) throw new Error(`nextOffer: ${offer.id} is not a post offer`);
-  return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round + 1, relics);
-}
-
-/** `offer` drawn again in its slot and round, relics allowed or not: the special card when the lay-by car changes. */
-export function redrawOffer(seed: number, offer: ContractCargoItem, relics: boolean): ContractCargoItem {
-  const at = parseOfferId(offer.sourceCourierIndex, offer.id);
-  if (!at) throw new Error(`redrawOffer: ${offer.id} is not a post offer`);
-  return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round, relics);
+  return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round + 1);
 }
 
 /** The haul things by kind, in catalogue order: a pick-up slot draws its load among them. */
@@ -230,10 +206,7 @@ export function shelterParty(seed: number, courierIndex: number, round: number):
 
 /** A post's stock as the machine reads it: its offers by slot, and anything else left in it. */
 export interface PostStock {
-  /**
-   * The offer standing in each slot, whichever round it is at: the three, then the
-   * special one (`SPECIAL_SLOT`).
-   */
+  /** The offer standing in each slot, whichever round it is at: one per card. */
   readonly offers: readonly ContractCargoItem[];
   /**
    * Things a save from the courier days left in the courier's boot (an envelope, a
@@ -243,25 +216,26 @@ export interface PostStock {
 }
 
 /**
- * What post `index` holds, the special slot drawn with or without `relics`. Untouched
- * (no `WorldState.courierStorage` entry), round 0 of every slot. After the first release
- * the saved cells own it: a slot stands at the round of its offer found anywhere in the
- * cells (a courier-era boot kept them in any cell, and eight of them), and at round 1
- * when none is there (a save from before the rounds, whose taken offer left its slot
- * empty). The offers are generated fresh, so a saved stock reads with today's label
- * (thing, destination).
+ * What post `index` holds. Untouched (no `WorldState.courierStorage` entry), round 0 of
+ * every slot. After the first release the saved cells own it: a slot stands at the round
+ * of its offer found anywhere in the cells (a courier-era boot kept them in any cell, and
+ * eight of them), and at round 1 when none is there (a save from before the rounds, whose
+ * taken offer left its slot empty). The offers are generated fresh, so a saved stock
+ * reads with today's label (thing, destination). An offer of a slot past the cards is
+ * dropped: the fourth slot of the sticker days' special card (§12), its round with it;
+ * it was only ever an offer on the machine, never anyone's job.
  */
-export function postStock(state: WorldState, seed: number, index: number, relics: boolean): PostStock {
+export function postStock(state: WorldState, seed: number, index: number): PostStock {
   const saved = state.courierStorage[postId(index)];
-  const rounds = new Array<number>(POST_SLOT_COUNT).fill(saved ? 1 : 0);
+  const rounds = new Array<number>(POST_OFFER_COUNT).fill(saved ? 1 : 0);
   const isOffer = new Set<Item>();
   for (const cell of saved ?? []) {
     const at = cell ? parseOfferId(index, cell.id) : null;
-    if (!cell || !at || at.slot >= POST_SLOT_COUNT) continue;
-    rounds[at.slot] = at.round;
+    if (!cell || !at) continue;
     isOffer.add(cell);
+    if (at.slot < POST_OFFER_COUNT) rounds[at.slot] = at.round;
   }
-  const offers = rounds.map((round, slot) => generateContractOffer(seed, index, slot, round, relics));
+  const offers = rounds.map((round, slot) => generateContractOffer(seed, index, slot, round));
   const strays = (saved ?? []).filter((cell): cell is Item => cell !== null && !isOffer.has(cell));
   return { offers, strays };
 }

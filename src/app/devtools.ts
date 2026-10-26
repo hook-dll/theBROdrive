@@ -807,8 +807,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId, clear ? 0 : STICKERS.length);
   /**
    * `stickers(n, carId?)`: car `carId`, else the one driven or last driven, has exactly
-   * `n` stickers, for its uniqueness (game-design2.md §12: the post's fifth card from 3,
-   * relics from 8, +3% pay each up to +30%). Returns the count.
+   * `n` stickers, for judging how a covered car looks (game-design2.md §12: stickers are
+   * only decoration). Returns the count.
    */
   dev['stickers'] = (n: number, carId?: string): number =>
     devCoverWithStickers(carId ?? ctx.world.state.player.drivingCarId ?? ctx.world.state.player.lastDrivenCarId, Math.max(0, Math.trunc(n)));

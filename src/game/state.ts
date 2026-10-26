@@ -208,8 +208,8 @@ export interface PlayerState {
   seat: PlayerSeat;
   /**
    * The car he last sat in at the wheel, or took out of the toy box; null once it is
-   * boxed or gone. Saved: the car he arrived in, which a post pays the uniqueness bonus
-   * by when none stands on its lay-by (world/post.ts), and the old car a purchase boxes
+   * boxed or gone. Saved: the car he arrived in, which a post takes for its lay-by car
+   * when it stands there (world/post.ts), and the old car a purchase boxes
    * (world/keybox.ts).
    */
   lastDrivenCarId: string | null;

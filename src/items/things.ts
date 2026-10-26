@@ -19,12 +19,8 @@
 
 import type { ContractKind } from '../contracts/types';
 
-/**
- * A thing's constant tags. Urgency is the post's, not the thing's. `special` and `relic`
- * things are the boy's dearest (game-design2.md §12): only the fifth card offers them,
- * relics only from `RELIC_STICKERS` (economy/economy.ts).
- */
-export type ThingTag = 'ordinary' | 'bulky' | 'fragile' | 'special' | 'relic';
+/** A thing's constant tags. Urgency is the post's, not the thing's. */
+export type ThingTag = 'ordinary' | 'bulky' | 'fragile';
 
 export type ThingId =
   | 'pencils'
@@ -113,16 +109,17 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, place: 'transfer' },
   // A party is one teddy item each, paid once for the whole party (world/shelter.ts).
   { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, place: 'seats' },
-  // The fifth card's (§12): special things, relics among them.
-  { id: 'grandpa_radio', name: "grandpa's radio", tags: ['fragile', 'special'], massKg: 6, place: 'cells', boot: TWO },
-  { id: 'stamp_album', name: 'stamp album', tags: ['ordinary', 'special'], massKg: 1.2, place: 'cells', boot: ONE },
-  { id: 'music_box', name: "mum's music box", tags: ['fragile', 'special'], massKg: 1, place: 'cells', boot: ONE },
-  { id: 'old_camera', name: 'old camera', tags: ['fragile', 'special'], massKg: 1.2, place: 'cells', boot: ONE },
-  { id: 'chess_set', name: 'chess set', tags: ['ordinary', 'special'], massKg: 2, place: 'cells', boot: ONE },
-  { id: 'model_plane', name: 'model plane', tags: ['fragile', 'special'], massKg: 0.8, place: 'cells', boot: TWO },
-  { id: 'grandpa_medals', name: "grandpa's medals", tags: ['fragile', 'relic'], massKg: 0.6, place: 'cells', boot: ONE },
-  { id: 'photo_album', name: 'family photo album', tags: ['fragile', 'relic'], massKg: 2, place: 'cells', boot: ONE },
-  { id: 'first_toy_car', name: 'his first toy car', tags: ['fragile', 'relic'], massKg: 0.4, place: 'cells', boot: ONE },
+  // The boy's dearest things, once the sticker days' special card's (§12); on the
+  // ordinary cards now like the rest, by their own property.
+  { id: 'grandpa_radio', name: "grandpa's radio", tags: ['fragile'], massKg: 6, place: 'cells', boot: TWO },
+  { id: 'stamp_album', name: 'stamp album', tags: ['ordinary'], massKg: 1.2, place: 'cells', boot: ONE },
+  { id: 'music_box', name: "mum's music box", tags: ['fragile'], massKg: 1, place: 'cells', boot: ONE },
+  { id: 'old_camera', name: 'old camera', tags: ['fragile'], massKg: 1.2, place: 'cells', boot: ONE },
+  { id: 'chess_set', name: 'chess set', tags: ['ordinary'], massKg: 2, place: 'cells', boot: ONE },
+  { id: 'model_plane', name: 'model plane', tags: ['fragile'], massKg: 0.8, place: 'cells', boot: TWO },
+  { id: 'grandpa_medals', name: "grandpa's medals", tags: ['fragile'], massKg: 0.6, place: 'cells', boot: ONE },
+  { id: 'photo_album', name: 'family photo album', tags: ['fragile'], massKg: 2, place: 'cells', boot: ONE },
+  { id: 'first_toy_car', name: 'his first toy car', tags: ['fragile'], massKg: 0.4, place: 'cells', boot: ONE },
 ];
 
 const BY_ID = new Map<string, ThingDef>(THINGS.map((def) => [def.id, def]));
@@ -192,18 +189,17 @@ export function thingBootFootprint(def: ThingDef): BootFootprint | null {
 /**
  * The three cards of a post (§7.2), one per property: an ordinary thing, a fragile
  * thing, a bulky thing. A bulky thing that is fragile too (the TV, the aquarium) is a
- * bulky card's. The fourth card, `special`, offers the special things and relics, and
- * only to a car with stickers (§12, contracts/offers.ts `SPECIAL_SLOT`). The teddies are
- * no card's: they wait in the teddy shelter (§10, contracts/shelters.ts); nor are the
- * hauls, which wait in a post's pick-up slot by themselves (§7.8, contracts/hauls.ts).
+ * bulky card's. Every thing a card offers is as likely as the next: none is rare. The
+ * teddies are no card's: they wait in the teddy shelter (§10, contracts/shelters.ts);
+ * nor are the hauls, which wait in a post's pick-up slot by themselves (§7.8,
+ * contracts/hauls.ts).
  */
-export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'special';
+export type PostCard = 'ordinary' | 'fragile' | 'bulky';
 export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky'];
 
 /** The card that offers `def`, or null for the teddies and the hauls, which no card offers. */
 export function thingCard(def: ThingDef): PostCard | null {
   if (def.place === 'seats' || isHaulThing(def)) return null;
-  if (hasTag(def, 'special') || hasTag(def, 'relic')) return 'special';
   if (hasTag(def, 'bulky')) return 'bulky';
   if (hasTag(def, 'fragile')) return 'fragile';
   return 'ordinary';
@@ -213,16 +209,9 @@ const CARD_THINGS: Readonly<Record<PostCard, readonly ThingDef[]>> = {
   ordinary: THINGS.filter((def) => thingCard(def) === 'ordinary'),
   fragile: THINGS.filter((def) => thingCard(def) === 'fragile'),
   bulky: THINGS.filter((def) => thingCard(def) === 'bulky'),
-  special: THINGS.filter((def) => hasTag(def, 'special')),
 };
-const SPECIAL_AND_RELICS = THINGS.filter((def) => thingCard(def) === 'special');
 
 /** The things a card draws from, in catalogue order. */
 export function cardThings(card: PostCard): readonly ThingDef[] {
   return CARD_THINGS[card];
-}
-
-/** The fifth card's things: the special ones, and the relics too when `relics`. */
-export function specialThings(relics: boolean): readonly ThingDef[] {
-  return relics ? SPECIAL_AND_RELICS : CARD_THINGS.special;
 }

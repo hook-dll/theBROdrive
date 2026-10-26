@@ -44,8 +44,10 @@ import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
 
 /**
- * A post's saved stock (contracts/offers.ts `postStock`): its four slots' offers, then
- * what a courier-era boot of eight cells left that the post's grid has had no room for.
+ * A post's saved stock (contracts/offers.ts `postStock`): its slots' offers — three, and
+ * four in a save from the sticker days' special card, whose fourth `postStock` drops —
+ * then what a courier-era boot of eight cells left that the post's grid has had no room
+ * for.
  */
 const POST_STOCK_CELL_COUNT = 12;
 /**
