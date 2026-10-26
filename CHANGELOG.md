@@ -573,6 +573,21 @@
 
 ### Fixed
 
+- A TRAILER STANDING UNCOUPLED NO LONGER SLIDES DOWN A GRADE (`vehicle/trailer.ts`
+  `holdParked`). Reported from play (2026-10-26): a contract trailer waiting at a lay-by on
+  a slight slope slid off downhill in front of the player, its wheels not turning. The
+  chocked wheels' friction is an impulse per wheel ahead of the solver and leaves a little
+  of the slope's pull every step: `tools/trailer-sway.ts park`, 12°, 570 kg, crept 164 mm
+  nose-down and 738 mm side-on in 10 s. Now, once stopped on its wheels, it is pinned the
+  way a parked car is (`Vehicle.postStep`): horizontal position and heading re-applied
+  after every step, height, pitch and roll left to the springs; 0.0 mm both ways. The pin
+  lets go when something moves it faster than `PARK_HOLD_SPEED_MPS` in one step and
+  latches again where it stops (a 1.5 m/s shove on 12°: slid 0.2 m, held). A tyre-level
+  fix (holding each patch to where it stopped) was tried first and made it worse, 275 /
+  1 665 mm: two independent per-wheel holds fight the bed's roll. Parked cars (lot cars,
+  contract and towing cars, parked traffic) were checked on 6° and 12°, uphill and side-on,
+  spawned level and posed: their existing pin holds them to 0.0 mm after landing.
+
 - Traffic crashed into itself on an open road (owner, standing by the road at night,
   2026-10-26). Headless, a stationary player for ten minutes on eight seeds: 15 traffic
   impacts over 1.2 m/s (the crash sound's threshold) in 27 car-car contacts, among them

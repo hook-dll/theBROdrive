@@ -20,6 +20,8 @@ import {
   LOAD_SENSITIVITY_MIN,
   longitudinalSlipUnit,
   LONGITUDINAL_RELAXATION_FLOOR_MPS,
+  PARK_HOLD_MIN_LOAD_FRACTION,
+  PARK_HOLD_SPEED_MPS,
   rotateVector,
   SLIP_ANGLE_REF_MPS,
   slidingFloor,
@@ -486,6 +488,19 @@ export class Trailer implements Rebasable {
   private readonly stepQuat = new THREE.Quaternion();
   private snapshotPrimed = false;
 
+  /**
+   * THE PARKED PIN, `Vehicle.postStep`'s parking hold on a trailer standing uncoupled:
+   * where it stands and which way it faces, relative (Rapier) frame, latched once it
+   * has stopped on its wheels and re-applied after every step; see `holdParked`.
+   * Shifted by `rebase`.
+   */
+  private parkedHoldActive = false;
+  private readonly parkedHoldPos = { x: 0, y: 0, z: 0 };
+  private parkedHoldYaw = 0;
+  private readonly holdTranslation = { x: 0, y: 0, z: 0 };
+  private readonly holdRotation = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly holdVelocity = { x: 0, y: 0, z: 0 };
+
   private readonly vScratch = new THREE.Vector3();
   private readonly qScratch = new THREE.Quaternion();
 
@@ -809,6 +824,7 @@ export class Trailer implements Rebasable {
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.snapshotPrimed = false;
+    this.parkedHoldActive = false;
     this.resetTyres();
   }
 
@@ -951,10 +967,11 @@ export class Trailer implements Rebasable {
    * Coupled, the wheels roll free: the trailer has no brakes (see NO BRAKES above).
    *
    * Uncoupled, it is CHOCKED: both wheels held still, as a chock under a wheel holds
-   * a trailer that has no handbrake. That is the whole answer to a trailer parked on a
-   * grade rolling away: since a trailer with no car attached is by definition parked,
-   * there is no state to track and nothing for the player to remember. Dropping a
-   * trailer therefore leaves it exactly where it was dropped.
+   * a trailer that has no handbrake, and once it has stopped it is PINNED where it
+   * stands (`holdParked`). That is the whole answer to a trailer parked on a grade
+   * rolling away: since a trailer with no car attached is by definition parked, there
+   * is no state to track and nothing for the player to remember. Dropping a trailer
+   * therefore leaves it exactly where it was dropped.
    */
   fixedUpdate(dt: number): void {
     this.lastStepDt = dt;
@@ -1319,6 +1336,7 @@ export class Trailer implements Rebasable {
 
   postStep(): void {
     this.enforceHitch();
+    this.holdParked();
     const t = this.body.translation();
     const r = this.body.rotation();
 
@@ -1354,6 +1372,77 @@ export class Trailer implements Rebasable {
     }
     this.stepPos.set(t.x, t.y, t.z);
     this.stepQuat.set(r.x, r.y, r.z, r.w);
+  }
+
+  /**
+   * THE PARKED PIN. The chocks alone do not hold a trailer on a grade: their friction
+   * is an impulse per wheel ahead of the solver, sized on each wheel's share of the
+   * mass, and the bed pitches and rolls about its centre as it is held, so every step
+   * leaves a little of the slope's pull behind. Measured on 12° (`tools/trailer-sway.ts
+   * park`), 16 mm/s nose-down and 70 mm/s side-on, wheels locked: seen from the
+   * driver's seat, a trailer waiting at a lay-by sliding off down the hill.
+   *
+   * So a standing trailer is held as a parked car is (`Vehicle.postStep`): once it has
+   * stopped on its wheels, its horizontal position and heading are latched and put
+   * back after every step, and its horizontal velocity and yaw rate zeroed; height,
+   * pitch and roll stay the springs'. Unlike the car's hold, which lasts as long as
+   * the lever is up, the pin lets go of a trailer that something moves faster than
+   * the latch speed in one step — the car backing into it to couple, a car crashing
+   * into it — and latches again where it next comes to rest, because a chocked wheel
+   * can be shoved off its chock. Coupled, there is nothing to pin.
+   */
+  private holdParked(): void {
+    if (this.coupled) {
+      this.parkedHoldActive = false;
+      return;
+    }
+    const v = this.body.linvel(this.holdVelocity);
+    const speed = Math.hypot(v.x, v.z);
+    const yawRate = this.body.angvel(this.holdVelocity).y;
+    const moving = speed >= PARK_HOLD_SPEED_MPS || Math.abs(yawRate) * TRAILER_BALL_Z >= PARK_HOLD_SPEED_MPS;
+    if (moving) {
+      this.parkedHoldActive = false;
+      return;
+    }
+    const q = this.body.rotation(this.holdRotation);
+    const yaw = Math.atan2(2 * (q.x * q.z + q.w * q.y), 1 - 2 * (q.x * q.x + q.y * q.y));
+    if (!this.parkedHoldActive) {
+      // Latch only standing on the wheels: a trailer still dropping from its spawn
+      // would otherwise be pinned in mid-air (see PARK_HOLD_MIN_LOAD_FRACTION).
+      let loadN = 0;
+      for (const w of this.wheels) loadN += w.loadN;
+      if (loadN < PARK_HOLD_MIN_LOAD_FRACTION * this.body.mass() * GRAVITY) return;
+      this.body.translation(this.parkedHoldPos);
+      this.parkedHoldYaw = yaw;
+      this.parkedHoldActive = true;
+      return;
+    }
+    const t = this.body.translation(this.holdTranslation);
+    t.x = this.parkedHoldPos.x;
+    t.z = this.parkedHoldPos.z;
+    this.body.setTranslation(t, true);
+    // Back to the held heading about the world vertical, pitch and roll left alone.
+    let turn = this.parkedHoldYaw - yaw;
+    if (turn > Math.PI) turn -= Math.PI * 2;
+    else if (turn < -Math.PI) turn += Math.PI * 2;
+    const s = Math.sin(turn * 0.5);
+    const c = Math.cos(turn * 0.5);
+    const x = c * q.x + s * q.z;
+    const y = c * q.y + s * q.w;
+    const z = c * q.z - s * q.x;
+    const w = c * q.w - s * q.y;
+    q.x = x;
+    q.y = y;
+    q.z = z;
+    q.w = w;
+    this.body.setRotation(q, true);
+    const lv = this.body.linvel(this.holdVelocity);
+    lv.x = 0;
+    lv.z = 0;
+    this.body.setLinvel(lv, true);
+    const av = this.body.angvel(this.holdVelocity);
+    av.y = 0;
+    this.body.setAngvel(av, true);
   }
 
   syncVisuals(alpha: number): void {
@@ -1411,6 +1500,8 @@ export class Trailer implements Rebasable {
     this.prevPos.z -= shift.dz;
     this.stepPos.x -= shift.dx;
     this.stepPos.z -= shift.dz;
+    this.parkedHoldPos.x -= shift.dx;
+    this.parkedHoldPos.z -= shift.dz;
   }
 
   dispose(): void {
