@@ -96,9 +96,28 @@ export const TRAFFIC_REACH_M = Math.min(ROAD_PHYSICS_REACH_M, VERGE_SOLID_REACH_
  * player in is the 260 m opposing-pass exclusion. The gap to `RAILS_SLEEP_M` is
  * hysteresis: a car pacing the player at the boundary does not change hands every step.
  * Measured on a 28-car stream: the traffic step fell from 1.87 ms to 0.97 ms.
+ *
+ * A car DRAWING AWAY from the player cannot pace him at the boundary, so it needs no
+ * more hysteresis than a few metres: it sleeps from `RAILS_RECEDING_SLEEP_M` (traffic.ts
+ * `RAILS_RECEDING_MPS`) and wakes at `RAILS_WAKE_M`. Every oncoming car the player has
+ * met and every slower one he has overtaken used to cross the 60 m band driven.
+ *
+ * BEHIND A MOVING PLAYER a car drawing away from him rides from `RAILS_BEHIND_SLEEP_M`,
+ * and stays on rails down to `RAILS_BEHIND_WAKE_M` while it is not closing on him. It
+ * is out of his view ahead, it can no longer meet him, and at 150 m the springs the
+ * rails stand in for move a car by a fifth of a pixel. It cannot meet anything else
+ * the rails do not already hand back: a driven car in its lane wakes it like anywhere
+ * past `RAILS_SLEEP_M`, and so does the player turning, stopping or slowing to let it
+ * close. Measured at the 40-car ceiling over ten seeds of tools/traffic-bench.ts: the
+ * driven share of the stream fell from 59% to 55%, the traffic step by 5% (seed 42:
+ * 13.8 driven cars to 11.2, 0.505 ms to 0.458 ms), with no more contacts or failed
+ * checks than before. Two thirds of what is still driven is within 300 m of the player.
  */
 export const RAILS_WAKE_M = 300;
+export const RAILS_RECEDING_SLEEP_M = 310;
 export const RAILS_SLEEP_M = 360;
+export const RAILS_BEHIND_WAKE_M = 150;
+export const RAILS_BEHIND_SLEEP_M = 160;
 
 /**
  * NOTHING APPEARS OR DISAPPEARS WHERE IT CAN BE SEEN: the nearest a traffic car is
@@ -183,8 +202,14 @@ export function worldRangeFailures(): string[] {
       `(${ROAD_PHYSICS_REACH_M} / ${VERGE_SOLID_REACH_M} m)`,
   );
   need(
-    RAILS_WAKE_M < RAILS_SLEEP_M,
-    `rails need hysteresis: wake ${RAILS_WAKE_M} m must be nearer than sleep ${RAILS_SLEEP_M} m`,
+    RAILS_WAKE_M < RAILS_RECEDING_SLEEP_M && RAILS_RECEDING_SLEEP_M <= RAILS_SLEEP_M,
+    `rails need hysteresis: wake ${RAILS_WAKE_M} m must be nearer than sleep ` +
+      `${RAILS_RECEDING_SLEEP_M} m receding, ${RAILS_SLEEP_M} m otherwise`,
+  );
+  need(
+    RAILS_BEHIND_WAKE_M < RAILS_BEHIND_SLEEP_M && RAILS_BEHIND_SLEEP_M <= RAILS_WAKE_M,
+    `rails behind the player need hysteresis: wake ${RAILS_BEHIND_WAKE_M} m must be nearer than ` +
+      `sleep ${RAILS_BEHIND_SLEEP_M} m, and that no further than ${RAILS_WAKE_M} m`,
   );
   need(
     RAILS_SLEEP_M <= TRAFFIC_UNSEEN_M,

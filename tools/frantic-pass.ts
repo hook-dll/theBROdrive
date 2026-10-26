@@ -201,6 +201,8 @@ const position = new THREE.Vector3();
 function fieldFor(owner: Car, cars: readonly Car[]): TrafficField {
   const buffer = { s: 0, lateral: 0, speed: 0, halfWidth: FIELD_HALF_WIDTH, halfLength: FIELD_HALF_LENGTH };
   return {
+    // Answered live from the cars, so there is nothing to take.
+    snapshot(): void {},
     forEachNear(ahead: number, behind: number, fn: (neighbour: TrafficNeighbour) => void): void {
       for (const car of cars) {
         if (car === owner) continue;

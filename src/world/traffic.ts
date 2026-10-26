@@ -3,6 +3,7 @@ import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import { SurfaceType } from '../core/surfaces';
+import { REFUSAL, trafficProfile, type TrafficProfile } from '../core/trafficprofile';
 import { hash01, mulberry32 } from '../core/rng';
 import { createServiceableCarState, poseOnGround } from '../game/spawn';
 import { GameWorld, newWorldState } from '../game/state';
@@ -37,6 +38,9 @@ import type { DriveRoad } from './road';
 import { ReversedRoad } from './reversedroad';
 import { TurnaroundRoad, TURNAROUND_ENTRY_S } from './turnaround';
 import {
+  RAILS_BEHIND_SLEEP_M,
+  RAILS_BEHIND_WAKE_M,
+  RAILS_RECEDING_SLEEP_M,
   RAILS_SLEEP_M,
   RAILS_WAKE_M,
   TRAFFIC_FRANTIC_REAR_SPAWN_MAX_M,
@@ -352,6 +356,19 @@ const RAILS_SURVEY_MIN_M = 60;
 const RAILS_SURVEY_HORIZON_S = 3;
 /** A slower car is standing or queueing for a reason only its driver knows. */
 const RAILS_MIN_SPEED_MPS = 4;
+/**
+ * Along the road, away from the player at least this fast, m/s: a car that may sleep
+ * from `RAILS_RECEDING_SLEEP_M`, or from `RAILS_BEHIND_SLEEP_M` behind him. At two metres
+ * a second the 10 m of hysteresis take five seconds to close.
+ */
+const RAILS_RECEDING_MPS = 2;
+/**
+ * The player's own speed along the road, m/s, above which behind him is away from where
+ * he is looking (`RAILS_BEHIND_SLEEP_M`), and below which a car put on rails there is
+ * handed back: standing or crawling, he may be looking anywhere.
+ */
+const RAILS_BEHIND_PLAYER_MPS = 5;
+const RAILS_BEHIND_KEEP_PLAYER_MPS = 2;
 /**
  * Share of its driver's own cornering budget a racing car rides a bend at on rails.
  *
@@ -862,6 +879,8 @@ interface TrafficCar {
   rails: TrafficRails | null;
   /** Seconds before this car may be put on rails again; see RAILS_PASS_HOLDOFF_S. */
   railsHoldoff: number;
+  /** Why it is driven rather than on rails, for the profile; see `RAILS_REFUSALS`. */
+  railsRefusal: number;
   /** Seconds it is still drawn in full after a crash; see CRASH_FULL_DETAIL_S. */
   fullDetailFor: number;
   /** Driven for a race (see `RivalSpawn`): exempt from trim, recycle and the count. */
@@ -1238,6 +1257,11 @@ export class RoadTraffic {
    *
    * `excludeId` keeps a car out of its own answer. The buffer is reused per visit,
    * which is why `TrafficField` documents that it must not be retained.
+   *
+   * `snapshot` puts every other vehicle into the owner's frame once, in `carList` order
+   * with the player last, and each `forEachNear` of that decision is a scan of those
+   * numbers: a driver asks some ten questions a decision, and each used to walk the
+   * stream and redo the projection.
    */
   fieldFor(owner: FieldOwner, excludeId: string): TrafficField {
     const buffer = {
@@ -1247,41 +1271,44 @@ export class RoadTraffic {
       halfWidth: NEIGHBOUR_HALF_WIDTH_M,
       halfLength: NEIGHBOUR_HALF_LENGTH_M,
     };
-    const visit = (
-      otherS: number,
-      otherLateral: number,
-      otherSpeed: number,
-      ownS: number,
-      ahead: number,
-      behind: number,
-      fn: (neighbour: TrafficNeighbour) => void,
-    ): void => {
+    let count = 0;
+    let faced = new Float64Array(0);
+    let lateral = new Float64Array(0);
+    let speed = new Float64Array(0);
+    const take = (otherS: number, otherLateral: number, otherSpeed: number, ownS: number): void => {
       const along = (otherS - ownS) * owner.direction;
       // Centre to near face, with longitudinal overlap included in both queries.
-      const faced = Math.sign(along) * Math.max(0, Math.abs(along) - NEIGHBOUR_HALF_LENGTH_M);
-      if (faced > ahead || faced < -behind) return;
-      buffer.s = faced;
-      buffer.lateral = otherLateral * owner.direction;
-      buffer.speed = otherSpeed * owner.direction;
-      fn(buffer);
+      faced[count] = Math.sign(along) * Math.max(0, Math.abs(along) - NEIGHBOUR_HALF_LENGTH_M);
+      lateral[count] = otherLateral * owner.direction;
+      speed[count] = otherSpeed * owner.direction;
+      count++;
     };
     return {
-      forEachNear: (ahead, behind, fn) => {
+      snapshot: () => {
+        const capacity = this.carList.length + 1;
+        if (faced.length < capacity) {
+          faced = new Float64Array(capacity * 2);
+          lateral = new Float64Array(capacity * 2);
+          speed = new Float64Array(capacity * 2);
+        }
+        count = 0;
         const ownS = owner.forwardS;
         for (const car of this.carList) {
           if (car.id === excludeId || car.settleFor > 0 || car.turnS >= 0) continue;
-          visit(car.forwardS, car.roadLateral, car.forwardSpeed, ownS, ahead, behind, fn);
+          take(car.forwardS, car.roadLateral, car.forwardSpeed, ownS);
         }
         if (excludeId !== PLAYER_FIELD_ID && this.playerDriving) {
-          visit(
-            this.playerS,
-            this.playerLateral,
-            this.playerSpeed,
-            ownS,
-            ahead,
-            behind,
-            fn,
-          );
+          take(this.playerS, this.playerLateral, this.playerSpeed, ownS);
+        }
+      },
+      forEachNear: (ahead, behind, fn) => {
+        for (let i = 0; i < count; i++) {
+          const s = faced[i]!;
+          if (s > ahead || s < -behind) continue;
+          buffer.s = s;
+          buffer.lateral = lateral[i]!;
+          buffer.speed = speed[i]!;
+          fn(buffer);
         }
       },
     };
@@ -2390,6 +2417,8 @@ export class RoadTraffic {
     originX: number,
     originZ: number,
   ): void {
+    const profiling = trafficProfile.enabled;
+    const stepFrom = profiling ? performance.now() : 0;
     // A jump this large is a teleport (load, fast travel, the despawn-range test),
     // not motion, and must not be read as a speed no traffic could ever match.
     const advance = playerS - this.playerS;
@@ -2490,6 +2519,7 @@ export class RoadTraffic {
     this.coordinationTimer -= dt;
     const coordinate = this.coordinationTimer <= 0;
     if (coordinate) {
+      const coordinatorFrom = profiling ? performance.now() : 0;
       this.coordinationTimer = COORDINATION_INTERVAL_S;
       this.assignDeadlockPermissions();
       this.assignReverseRoom();
@@ -2498,6 +2528,10 @@ export class RoadTraffic {
       this.assignLaybyStops();
       this.assignCrossYields();
       this.assignBypasses();
+      if (profiling) {
+        trafficProfile.coordinations++;
+        trafficProfile.coordinatorMs += performance.now() - coordinatorFrom;
+      }
     }
     for (let i = this.carList.length - 1; i >= 0; i--) {
       const car = this.carList[i]!;
@@ -2572,23 +2606,35 @@ export class RoadTraffic {
       if (car.railsHoldoff > 0) car.railsHoldoff -= dt;
       if (car.fullDetailFor > 0) car.fullDetailFor -= dt;
       if (car.rails) {
-        if (
-          Math.abs(car.forwardS - playerS) >= RAILS_WAKE_M &&
-          car.rails.speed >= RAILS_MIN_SPEED_MPS &&
-          car.rails.heldUp < RAILS_HELD_UP_S &&
-          this.surveyRails(car, dt)
-        ) {
+        const railsFrom = profiling ? performance.now() : 0;
+        const near = this.railsNear(car, playerS);
+        const slow = car.rails.speed < RAILS_MIN_SPEED_MPS;
+        const heldUp = car.rails.heldUp >= RAILS_HELD_UP_S;
+        if (!near && !slow && !heldUp && this.surveyRails(car, dt)) {
           this.advanceRails(car, dt);
+          if (profiling) this.profileRails(railsFrom);
           continue;
         }
-        if (car.rails.heldUp >= RAILS_HELD_UP_S) car.railsHoldoff = RAILS_PASS_HOLDOFF_S;
+        if (heldUp) car.railsHoldoff = RAILS_PASS_HOLDOFF_S;
+        car.railsRefusal = near
+          ? REFUSAL['woke:near']
+          : slow
+            ? REFUSAL['woke:slow']
+            : heldUp
+              ? REFUSAL['woke:heldUp']
+              : REFUSAL['woke:survey'];
+        if (profiling) trafficProfile.railWakes++;
         this.wake(car);
       } else if (sampled && this.putOnRails(car, playerS)) {
+        const railsFrom = profiling ? performance.now() : 0;
         this.advanceRails(car, dt);
+        if (profiling) this.profileRails(railsFrom);
         continue;
       }
-      car.vehicle.setTreadCastGate(this.treadCastGate(car));
+      const treadGated = this.treadCastGate(car);
+      car.vehicle.setTreadCastGate(treadGated);
       if (car.settleFor > 0) {
+        if (profiling) trafficProfile.settlingCarSteps++;
         car.settleFor -= dt;
         car.vehicle.settle(dt);
         if (car.settleFor <= 0 && car.launchSpeed > 0) car.vehicle.launchRolling(car.launchSpeed);
@@ -2600,9 +2646,21 @@ export class RoadTraffic {
           const controlDt = car.controlElapsed;
           car.controlElapsed = 0;
           car.controlAccumulator %= this.controlIntervalS;
+          const driveFrom = profiling ? performance.now() : 0;
           car.autopilot.drive(controlDt, car.vehicle, car.input, originX, originZ);
+          if (profiling) {
+            trafficProfile.driveCalls++;
+            trafficProfile.driveMs += performance.now() - driveFrom;
+          }
         }
+        const vehicleFrom = profiling ? performance.now() : 0;
         car.vehicle.fixedUpdate(dt, car.input);
+        if (profiling) {
+          trafficProfile.drivenCarSteps++;
+          if (treadGated) trafficProfile.treadGatedCarSteps++;
+          trafficProfile.drivenWhy[car.railsRefusal]!++;
+          trafficProfile.vehicleMs += performance.now() - vehicleFrom;
+        }
         const passing = car.autopilot.activity === 'pass';
         if (passing && !car.wasPassing) this.passCount++;
         car.wasPassing = passing;
@@ -2621,6 +2679,16 @@ export class RoadTraffic {
           this.desiredCount > DENSE_STREAM_CARS ? DENSE_SPAWN_INTERVAL_S : SPAWN_INTERVAL_S;
       }
     }
+    if (profiling) {
+      trafficProfile.steps++;
+      trafficProfile.stepMs += performance.now() - stepFrom;
+    }
+  }
+
+  /** Books one car-step on rails that began at `from`; see `trafficProfile`. */
+  private profileRails(from: number): void {
+    trafficProfile.railCarSteps++;
+    trafficProfile.railsMs += performance.now() - from;
   }
 
   /**
@@ -2679,27 +2747,22 @@ export class RoadTraffic {
   /**
    * Puts a cruising car on rails when nothing about where it is needs a driver; see
    * RAILS_WAKE_M. Asked on the lifetime sample, so a car that cannot go is not asked
-   * again every step. False, with nothing changed, when it stays driven.
+   * again every step. False, with nothing changed but `railsRefusal`, when it stays driven.
    */
   private putOnRails(car: TrafficCar, playerS: number): boolean {
-    // A car on a lay-by stop or a route round a standing car follows a line the rails do not have.
-    if (car.settleFor > 0 || car.turnS >= 0 || car.railsHoldoff > 0 || car.layby || car.bypass) return false;
-    // A driver that wants past the car in front is about to do something.
-    if (car.autopilot.passUrge) return false;
-    if (Math.abs(car.forwardS - playerS) < RAILS_SLEEP_M) return false;
-    const activity = car.autopilot.activity;
-    if (activity !== 'cruise' && activity !== 'follow') return false;
+    const refusal = this.railsRefusalOf(car, playerS);
+    if (refusal >= 0) {
+      car.railsRefusal = refusal;
+      return false;
+    }
     const speed = car.forwardSpeed * car.direction;
-    if (speed < RAILS_MIN_SPEED_MPS) return false;
-    const q = car.vehicle.chassis.rotation();
-    if (1 - 2 * (q.x * q.x + q.z * q.z) < RAILS_UPRIGHT_MIN) return false;
     const lane = car.autopilot.homeLane;
-    const laneCentre = this.forwardLaneCentreAt(car.forwardS, car.direction, lane);
-    if (Math.abs(car.roadLateral - laneCentre) > RAILS_LANE_TOLERANCE_M) return false;
-    if (!this.railsRoadClear(car, car.forwardS, car.roadLateral, speed, lane)) return false;
     const t = car.vehicle.chassis.translation();
     const ground = this.railGroundUnder(car, t.x, t.y, t.z);
-    if (ground === null) return false;
+    if (ground === null) {
+      car.railsRefusal = REFUSAL.noGround;
+      return false;
+    }
     const centreY = this.road.offsetPoint(car.forwardS, car.roadLateral, this.railPoint).y;
     const rise = t.y - centreY;
     const clearance = -car.vehicle.contactPlaneLocalY;
@@ -2720,6 +2783,68 @@ export class RoadTraffic {
     car.vehicle.enterRails();
     this.railBodies.add(car.vehicle.chassis.handle);
     return true;
+  }
+
+  /**
+   * The first rule that keeps a driven car off rails (`REFUSAL`), or -1 when it may
+   * go. The ground under it is `putOnRails`'s own last question.
+   */
+  private railsRefusalOf(car: TrafficCar, playerS: number): number {
+    const away = Math.abs(car.forwardS - playerS);
+    if (this.railsTooNearToSleep(car, playerS)) {
+      return away < 150 ? REFUSAL['near<150'] : away < RAILS_WAKE_M ? REFUSAL['near<300'] : REFUSAL['near<360'];
+    }
+    if (car.settleFor > 0) return REFUSAL.settling;
+    if (car.turnS >= 0) return REFUSAL.turnaround;
+    if (car.railsHoldoff > 0) return REFUSAL.holdoff;
+    // A car on a lay-by stop or a route round a standing car follows a line the rails do not have.
+    if (car.layby) return REFUSAL.layby;
+    if (car.bypass) return REFUSAL.bypass;
+    // A driver that wants past the car in front is about to do something.
+    if (car.autopilot.passUrge) return REFUSAL.passUrge;
+    const activity = car.autopilot.activity;
+    if (activity === 'pass') return REFUSAL['activity:pass'];
+    if (activity !== 'cruise' && activity !== 'follow') return REFUSAL['activity:other'];
+    const speed = car.forwardSpeed * car.direction;
+    if (speed < RAILS_MIN_SPEED_MPS) return REFUSAL.slow;
+    const q = car.vehicle.chassis.rotation();
+    if (1 - 2 * (q.x * q.x + q.z * q.z) < RAILS_UPRIGHT_MIN) return REFUSAL.tilted;
+    const lane = car.autopilot.homeLane;
+    const laneCentre = this.forwardLaneCentreAt(car.forwardS, car.direction, lane);
+    if (Math.abs(car.roadLateral - laneCentre) > RAILS_LANE_TOLERANCE_M) return REFUSAL.offLane;
+    return this.railsRoadBlock(car, car.forwardS, car.roadLateral, speed, lane);
+  }
+
+  /**
+   * Whether a driven car is too near the player to be put on rails: nearer than
+   * `RAILS_SLEEP_M`, unless it is drawing away from him past `RAILS_RECEDING_SLEEP_M`, or
+   * past `RAILS_BEHIND_SLEEP_M` behind him as he drives (world/ranges.ts).
+   */
+  private railsTooNearToSleep(car: TrafficCar, playerS: number): boolean {
+    const offset = car.forwardS - playerS;
+    const away = Math.abs(offset);
+    if (away >= RAILS_SLEEP_M) return false;
+    if (away < RAILS_BEHIND_SLEEP_M) return true;
+    if ((car.forwardSpeed - this.playerSpeed) * Math.sign(offset) < RAILS_RECEDING_MPS) return true;
+    if (away >= RAILS_RECEDING_SLEEP_M) return false;
+    return !(Math.abs(this.playerSpeed) >= RAILS_BEHIND_PLAYER_MPS && offset * this.playerSpeed < 0);
+  }
+
+  /**
+   * Whether a car on rails is near enough the player to be handed back: nearer than
+   * `RAILS_WAKE_M`, unless it is past `RAILS_BEHIND_WAKE_M` behind him as he drives and
+   * not closing on him (world/ranges.ts).
+   */
+  private railsNear(car: TrafficCar, playerS: number): boolean {
+    const offset = car.forwardS - playerS;
+    const away = Math.abs(offset);
+    if (away >= RAILS_WAKE_M) return false;
+    if (away < RAILS_BEHIND_WAKE_M) return true;
+    return !(
+      Math.abs(this.playerSpeed) >= RAILS_BEHIND_KEEP_PLAYER_MPS &&
+      offset * this.playerSpeed < 0 &&
+      (car.forwardSpeed - this.playerSpeed) * Math.sign(offset) >= 0
+    );
   }
 
   /** Hands a car on rails back to its springs and its driver, at the speed it is doing. */
@@ -2760,7 +2885,7 @@ export class RoadTraffic {
     rails.survey -= dt;
     if (rails.survey > 0) return true;
     rails.survey = RAILS_SURVEY_S;
-    if (!this.railsRoadClear(car, rails.s, rails.lateral, rails.speed, rails.lane)) return false;
+    if (this.railsRoadBlock(car, rails.s, rails.lateral, rails.speed, rails.lane) >= 0) return false;
     rails.cruise = this.railCruise(car, rails.s, rails.speed);
     const t = car.vehicle.chassis.translation();
     const ground = this.railGroundUnder(car, t.x, t.y, t.z);
@@ -2837,28 +2962,29 @@ export class RoadTraffic {
   /**
    * Nothing ahead of a car at (s, lateral) that only a driver can deal with: the lane
    * it holds goes on, the road's ends are not near, no body that is not on rails
-   * itself stands in it and no driven car is coming down it (`oncomingInLane`).
+   * itself stands in it and no driven car is coming down it (`oncomingInLane`). -1
+   * when clear, else what is in the way (`REFUSAL`).
    */
-  private railsRoadClear(
+  private railsRoadBlock(
     car: TrafficCar,
     s: number,
     lateral: number,
     speed: number,
     lane: number,
-  ): boolean {
+  ): number {
     const reach = Math.max(RAILS_SURVEY_MIN_M, speed * RAILS_SURVEY_HORIZON_S);
     const ahead = s + car.direction * reach;
     const from = Math.min(s, ahead);
-    if (from < TURNAROUND_ENTRY_S + RAILS_SURVEY_MIN_M) return false;
-    if (Math.max(s, ahead) > this.road.length - END_MARGIN_M) return false;
+    if (from < TURNAROUND_ENTRY_S + RAILS_SURVEY_MIN_M) return REFUSAL.roadEnd;
+    if (Math.max(s, ahead) > this.road.length - END_MARGIN_M) return REFUSAL.roadEnd;
     if (
       this.road.lanesPerSideAt(ahead) <= lane ||
       this.road.lanesPerSideAt(s + car.direction * reach * 0.5) <= lane
     ) {
-      return false;
+      return REFUSAL.laneEnds;
     }
-    if (this.oncomingInLane(car, s, lateral, speed)) return false;
-    return !this.foreignBodyAhead(car, s, lateral, reach);
+    if (this.oncomingInLane(car, s, lateral, speed)) return REFUSAL.oncoming;
+    return this.foreignBodyAhead(car, s, lateral, reach) ? REFUSAL.foreignBody : -1;
   }
 
   /**
@@ -2917,6 +3043,7 @@ export class RoadTraffic {
     this.railProbeRotation.z = -sy * sp;
     this.railProbeRotation.w = cy * cp;
     this.railProbeHit = false;
+    if (trafficProfile.enabled) trafficProfile.railProbes++;
     this.physics.world.intersectionsWithShape(
       this.railProbeCentre,
       this.railProbeRotation,
@@ -3278,6 +3405,7 @@ export class RoadTraffic {
       turnS: -1,
       rails: null,
       railsHoldoff: 0,
+      railsRefusal: REFUSAL.fresh,
       fullDetailFor: 0,
       rival: false,
       handIn: 'none',
@@ -3730,6 +3858,15 @@ export class RoadTraffic {
     this.capOverride = value === null ? null : Math.min(64, Math.max(0, Math.round(value)));
     // Rescaled now, not on the next step, so a paused menu reads the new target.
     this.desiredCount = this.scaleDesiredCount(this.trafficCap);
+  }
+
+  /**
+   * Where traffic steps' time goes and what queries they make, while
+   * `profile.enabled` is set (`__bro.traffic.profile`); see core/trafficprofile.ts.
+   * Shared by every stream in the process.
+   */
+  get profile(): TrafficProfile {
+    return trafficProfile;
   }
 
   private floorOverride: number | null = null;

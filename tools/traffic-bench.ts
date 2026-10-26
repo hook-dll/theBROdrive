@@ -6,18 +6,14 @@ import { carModelMeasure, loadCarModel } from '../src/render/carmodel';
 import { CAR_MODELS } from '../src/vehicle/carmodels';
 import type { Autopilot } from '../src/vehicle/autopilot';
 import type { Vehicle } from '../src/vehicle/vehicle';
-import {
-  laybyHaulLateral,
-  laybyLevel,
-  laybyParkLateral,
-  laybysBetween,
-  type Layby,
-} from '../src/world/layby';
+import { laybyLevel, laybyParkLateral, laybysBetween, type Layby } from '../src/world/layby';
+import { postParkingSlot } from '../src/world/haulbay';
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
 import { DENSITY_FLOOR, RoadTraffic, type RivalPose } from '../src/world/traffic';
-import { TRAFFIC_CAPS } from '../src/game/settings';
+import { TRAFFIC_CAPS, type ComputeLevel } from '../src/game/settings';
+import { RAILS_REFUSALS, resetTrafficProfile } from '../src/core/trafficprofile';
 import { RivalRace } from '../src/contracts/race';
 import type { ContractCargoItem } from '../src/items/items';
 import { postStopsBetween } from '../src/world/poststops';
@@ -44,7 +40,15 @@ if (globalThis.ProgressEvent === undefined) globalThis.ProgressEvent = BunProgre
 installAssetShim();
 installDocumentShim();
 
-const SEED = Number(process.argv[2] ?? 42);
+// `bun tools/traffic-bench.ts [seed] [--cap 6|12|20|40]`: the main stream runs at the
+// traffic level whose ceiling is `--cap` (Medium's by default), and is profiled
+// (core/trafficprofile.ts) over its streamed phase.
+const ARGS = process.argv.slice(2);
+const CAP_FLAG = ARGS.indexOf('--cap');
+const CAP = CAP_FLAG >= 0 ? Number(ARGS[CAP_FLAG + 1]) : TRAFFIC_CAPS.medium;
+const LEVEL = (Object.keys(TRAFFIC_CAPS) as ComputeLevel[]).find((level) => TRAFFIC_CAPS[level] === CAP);
+if (!LEVEL) throw new Error(`--cap ${CAP}: not a traffic level's ceiling (${Object.values(TRAFFIC_CAPS).join(', ')})`);
+const SEED = Number(ARGS.find((arg, i) => !arg.startsWith('--') && (CAP_FLAG < 0 || i !== CAP_FLAG + 1)) ?? 42);
 const PLAYER_S = 1_000;
 const ROAD_FROM = 100;
 /** Enough road for the streamed phase below to cruise at motorway pace. */
@@ -164,11 +168,13 @@ function addLaybyCollider(physics: PhysicsWorld, road: Road, layby: Layby): void
 // fraction of a real second: without this the first spawn was still pending when the
 // phase ended and every populate check read an empty road.
 await Promise.all(CAR_MODELS.map((model) => loadCarModel(model.id)));
-console.log('world traffic bench: bounded, transient physical cars on the real road');
+console.log(`world traffic bench: bounded, transient physical cars on the real road (seed ${SEED}, cap ${CAP}, ${LEVEL})`);
 const road = new Road(SEED);
 const physics = await PhysicsWorld.create();
 addRoadCollider(physics, road);
 const world = new GameWorld(newWorldState(SEED));
+// A replacement, as the menu makes it: a fresh state's settings are the shared defaults.
+world.apply({ t: 'settings', settings: { ...world.state.settings, trafficDensity: LEVEL } });
 const traffic = new RoadTraffic(
   physics,
   world,
@@ -293,8 +299,8 @@ check(
 const populated = traffic.status;
 const catalogue = new Set(CAR_MODELS.map((model) => model.id));
 check(
-  'traffic stays within its wide-road cap',
-  largestCount <= 24 && populated.count <= 24,
+  `traffic stays within its ${CAP}-car cap`,
+  populated.cap === CAP && largestCount <= CAP && populated.count <= CAP,
   `largest ${largestCount}, live ${populated.count}, cap ${populated.cap}`,
 );
 check(
@@ -349,14 +355,23 @@ check(
 );
 // Keep the stream moving through several generations. Passing has a dedicated,
 // authored playground scenario; this random stream owns the collision-free queue.
+// It is also the phase the profile is taken over: a stream at play's pace.
 let aheadSum = 0;
 let liveSum = 0;
 let distributionSamples = 0;
+let physicsMs = 0;
+let postStepMs = 0;
+traffic.profile.enabled = true;
+resetTrafficProfile();
 for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   const movingPlayerS = PLAYER_S + step * FIXED_DT * PLAYER_MPS;
   traffic.fixedUpdate(FIXED_DT, movingPlayerS, 0, 0, 0);
+  const physicsFrom = performance.now();
   physics.step();
+  const postStepFrom = performance.now();
   traffic.postStep();
+  postStepMs += performance.now() - postStepFrom;
+  physicsMs += postStepFrom - physicsFrom;
   sampleTrafficSupport(movingPlayerS);
   sampleStoppedTraffic();
   const sample = traffic.status;
@@ -370,6 +385,8 @@ for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
   }
   if (step % 12 === 0) await Bun.sleep(0);
 }
+const profile = { ...traffic.profile };
+traffic.profile.enabled = false;
 check(
   'active traffic bodies stay within guaranteed physical support',
   supportSamples > 0 && unsupportedSamples === 0,
@@ -384,8 +401,8 @@ check(
   `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 check(
-  'traffic density varies within the catalogue-wide ceiling',
-  largestCount <= 24 && smallestPopulated < largestCount,
+  'traffic density varies within the ceiling',
+  largestCount <= CAP && smallestPopulated < largestCount,
   `${streamed.count} live, range ${smallestPopulated}-${largestCount}, cap ${streamed.cap.toFixed(0)}`,
 );
 check(
@@ -477,6 +494,7 @@ check(
     owner.direction = direction;
     for (const offset of [-3, -2.3, -1, 0, 1, 2.3, 3]) {
       fieldTraffic.fixedUpdate(FIXED_DT, PLAYER_S + offset, 0, 0, 0);
+      field.snapshot();
       const along = offset * direction;
       const expected = Math.sign(along) * Math.max(0, Math.abs(along) - 2.3);
       for (const [ahead, behind] of [[5, 0], [0, 5], [0, 0]]) {
@@ -789,7 +807,8 @@ check(
 // road forward, so a left-hand lay-by is across the oncoming lane). The player stands
 // just past the finish. Every live rival must pull in, stand beside the post for its
 // short hand-in, pull out and be back in its lane before the race hands it back to the
-// stream, touching nothing — a haul's car left at the post's place is a fixed body here. On the right-hand
+// stream, touching nothing — a haul's load waiting nose out in the post's pick-up slot
+// (world/haulbay.ts `postParkingSlot`) is a fixed body here. On the right-hand
 // lay-by the player wins at once, so the rivals measured there all finish after the
 // race was decided.
 {
@@ -802,11 +821,12 @@ check(
     const courier = postStopsBetween(SEED, layby.s - 1, layby.s + 1)[0]!;
     if (!paved.has(layby.poiIndex)) addLaybyCollider(physics, road, layby);
     paved.add(layby.poiIndex);
-    const courierPoint = road.offsetPoint(layby.s, laybyHaulLateral(layby));
-    const heading = road.headingAt(layby.s);
+    const pickup = postParkingSlot(SEED, road, courier.index, 'pickup');
+    const courierPoint = road.offsetPoint(pickup.s, laybyParkLateral(layby));
+    const heading = pickup.yaw;
     const courierBody = physics.world.createRigidBody(
       physics.rapier.RigidBodyDesc.fixed()
-        .setTranslation(courierPoint.x, courierPoint.y + 0.75, courierPoint.z)
+        .setTranslation(pickup.x, courierPoint.y + 0.75, pickup.z)
         .setRotation({ x: 0, y: Math.sin(heading / 2), z: 0, w: Math.cos(heading / 2) }),
     );
     physics.world.createCollider(physics.rapier.ColliderDesc.cuboid(0.9, 0.75, 2.2), courierBody);
@@ -947,6 +967,50 @@ check(
   }
 }
 traffic.dispose();
+
+// WHERE A TRAFFIC STEP'S TIME GOES, over the streamed phase above (core/trafficprofile.ts).
+// Shares are of `RoadTraffic.fixedUpdate`; the physics step and `postStep` are the
+// bench's own clocks round the calls that follow it.
+{
+  const steps = Math.max(1, profile.steps);
+  const perStep = (value: number): string => (value / steps).toFixed(3);
+  const share = (ms: number): string => `${((100 * ms) / Math.max(profile.stepMs, 1e-9)).toFixed(1).padStart(5)}%`;
+  const other = profile.stepMs - profile.coordinatorMs - profile.driveMs - profile.vehicleMs - profile.railsMs;
+  const driven = profile.drivenCarSteps / steps;
+  const rails = profile.railCarSteps / steps;
+  const settling = profile.settlingCarSteps / steps;
+  console.log(`\ntraffic profile: cap ${CAP}, ${profile.steps} steps streamed at ${(PLAYER_MPS * 3.6).toFixed(0)} km/h`);
+  console.log(`  traffic.fixedUpdate ${perStep(profile.stepMs).padStart(8)} ms/step`);
+  console.log(`    coordinator       ${perStep(profile.coordinatorMs).padStart(8)} ms/step ${share(profile.coordinatorMs)}  ${profile.coordinations} passes, ${(profile.coordinatorMs / Math.max(1, profile.coordinations)).toFixed(3)} ms each`);
+  console.log(`    autopilot drive   ${perStep(profile.driveMs).padStart(8)} ms/step ${share(profile.driveMs)}  ${(profile.driveCalls / steps).toFixed(2)} calls/step, ${((1000 * profile.driveMs) / Math.max(1, profile.driveCalls)).toFixed(1)} µs/call`);
+  console.log(`    vehicle step      ${perStep(profile.vehicleMs).padStart(8)} ms/step ${share(profile.vehicleMs)}  ${((1000 * profile.vehicleMs) / Math.max(1, profile.drivenCarSteps)).toFixed(1)} µs/driven car`);
+  console.log(`    rails             ${perStep(profile.railsMs).padStart(8)} ms/step ${share(profile.railsMs)}  ${((1000 * profile.railsMs) / Math.max(1, profile.railCarSteps)).toFixed(1)} µs/car on rails`);
+  console.log(`    other             ${perStep(other).padStart(8)} ms/step ${share(other)}`);
+  console.log(`  physics.step        ${perStep(physicsMs).padStart(8)} ms/step`);
+  console.log(`  traffic.postStep    ${perStep(postStepMs).padStart(8)} ms/step`);
+  console.log(
+    `  cars/step: ${driven.toFixed(1)} driven, ${rails.toFixed(1)} on rails, ${settling.toFixed(2)} settling; ` +
+      `${profile.railWakes} woken from the rails`,
+  );
+  console.log(
+    `  driven, why not on rails (cars/step): ` +
+      RAILS_REFUSALS.map((name, i) => [name, profile.drivenWhy[i]! / steps] as const)
+        .filter(([, cars]) => cars >= 0.05)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, cars]) => `${name} ${cars.toFixed(1)}`)
+        .join(', ') +
+      `; tread casts gated on ${(profile.treadGatedCarSteps / steps).toFixed(1)}`,
+  );
+  console.log(`  ms per driven car-step: ${(profile.stepMs / Math.max(1, profile.drivenCarSteps)).toFixed(3)} traffic, ${((profile.stepMs + physicsMs) / Math.max(1, profile.drivenCarSteps)).toFixed(3)} with physics`);
+  console.log(
+    `  queries/step: ${perStep(profile.roadBodyQueries)} road-body, ${perStep(profile.abeamQueries)} abeam, ` +
+      `${perStep(profile.bodyAheadQueries)} body-ahead, ${perStep(profile.railProbes)} rail probes, ${perStep(profile.laneProbes)} lane probes`,
+  );
+  console.log(
+    `  corridor/step: ${perStep(profile.corridorSolves)} solves, ${perStep(profile.corridorCandidates)} candidates, ` +
+      `${perStep(profile.corridorObstacleTests)} obstacle tests`,
+  );
+}
 
 console.log(failures === 0 ? '\nall traffic checks passed' : `\n${failures} traffic check(s) FAILED`);
 if (failures > 0) process.exitCode = 1;

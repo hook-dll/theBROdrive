@@ -3,6 +3,7 @@ import type { InputFrame } from '../core/input';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { PhysicsWorld } from '../core/physics';
 import { SURFACES, SurfaceType } from '../core/surfaces';
+import { trafficProfile } from '../core/trafficprofile';
 import type { RoadConditionBuffer } from '../world/gradient';
 import { type DriveRoad } from '../world/road';
 import { SHOULDER_WIDTH_M, shoulderFallAt } from '../world/roadprofile';
@@ -1896,6 +1897,17 @@ interface RoadBody {
   speed: number;
 }
 
+/** A `CorridorObstacle` this driver rewrites in place; see `Autopilot.pushObstacle`. */
+interface PooledObstacle {
+  s: number;
+  lateral: number;
+  halfWidth: number;
+  speed: number;
+  abeam: boolean;
+  level: boolean;
+  trailing: boolean;
+}
+
 export class Autopilot {
   private modeValue: AutopilotMode = 'sleeper';
   private engagedValue = false;
@@ -1954,8 +1966,37 @@ export class Autopilot {
   private dynamicBlockerKnown = false;
   private dynamicBlockerAnchorX = 0;
   private dynamicBlockerAnchorZ = 0;
-  /** Obstacles handed to the planner each step; a field so the hot path allocates none. */
-  private readonly corridorObstacles: CorridorObstacle[] = [];
+  /**
+   * Obstacles handed to the planner each step, and the records behind them: the first
+   * `corridorObstacles.length` entries of `obstaclePool` are this step's, rewritten in
+   * place, so the hot path allocates none. See `pushObstacle`.
+   */
+  private readonly corridorObstacles: PooledObstacle[] = [];
+  private readonly obstaclePool: PooledObstacle[] = [];
+  /** Appends one obstacle to this step's `corridorObstacles`, reusing a pooled record. */
+  private pushObstacle(
+    s: number,
+    lateral: number,
+    halfWidth: number,
+    speed: number,
+    abeam = false,
+    level = false,
+    trailing = false,
+  ): void {
+    let entry = this.obstaclePool[this.corridorObstacles.length];
+    if (!entry) {
+      entry = { s: 0, lateral: 0, halfWidth: 0, speed: 0, abeam: false, level: false, trailing: false };
+      this.obstaclePool.push(entry);
+    }
+    entry.s = s;
+    entry.lateral = lateral;
+    entry.halfWidth = halfWidth;
+    entry.speed = speed;
+    entry.abeam = abeam;
+    entry.level = level;
+    entry.trailing = trailing;
+    this.corridorObstacles.push(entry);
+  }
   /** Integral cross-track trim, rad/m: the lean on the wheel against wind and camber. */
   private laneTrim = 0;
   /** Last plan: is there a way through, what is in it, and where it puts the car. */
@@ -2215,13 +2256,10 @@ export class Autopilot {
     this.middleQueueEdge = Math.min(this.middleQueueEdge, neighbour.lateral * this.shoulderSideSign);
   };
   /**
-   * Obstacles a line toward or over the crown has to clear, the band each is given, and
-   * which of them count; see CROWN_SLOW_MPS and MIDDLE_PASS_*. Pooled: the entries are
-   * rewritten every step, so the visit allocates nothing.
+   * Which obstacles a line toward or over the crown has to clear, the band each is given,
+   * and which of them count; see CROWN_SLOW_MPS and MIDDLE_PASS_*. The visit adds them to
+   * the step's pooled `corridorObstacles`, so it allocates nothing.
    */
-  private crownObstacles: CorridorObstacle[] | null = null;
-  private readonly crownPool: { s: number; lateral: number; halfWidth: number; speed: number }[] = [];
-  private crownPoolUsed = 0;
   private crownBandHalf = 0;
   private crownSide = -1;
   /** In `crownSide`'s sign: a body nearer the crown than this is on the crown side. */
@@ -2229,20 +2267,10 @@ export class Autopilot {
   /** Through the middle everything counts; past the crown only what is not coming fast. */
   private crownAll = false;
   private readonly visitCrownTraffic = (neighbour: TrafficNeighbour): void => {
-    if (neighbour.s <= 0 || !this.crownObstacles) return;
+    if (neighbour.s <= 0) return;
     if (neighbour.lateral * this.crownSide >= this.crownEdge) return;
     if (!this.crownAll && neighbour.speed < -CROWN_SLOW_MPS) return;
-    let entry = this.crownPool[this.crownPoolUsed];
-    if (!entry) {
-      entry = { s: 0, lateral: 0, halfWidth: 0, speed: 0 };
-      this.crownPool.push(entry);
-    }
-    this.crownPoolUsed++;
-    entry.s = neighbour.s;
-    entry.lateral = neighbour.lateral;
-    entry.halfWidth = this.crownBandHalf;
-    entry.speed = neighbour.speed;
-    this.crownObstacles.push(entry);
+    this.pushObstacle(neighbour.s, neighbour.lateral, this.crownBandHalf, neighbour.speed);
   };
   /** Laterals of the traffic a line over the crown could meet; see STRADDLE_LOOK_S. */
   private readonly straddleLaterals: number[] = [];
@@ -3273,6 +3301,8 @@ export class Autopilot {
 
   private driveControls(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     this.controlledVehicle = vehicle;
+    // Every question this decision asks the traffic is answered from this one view.
+    this.trafficField?.snapshot();
     // Autonomy computes the wheel angle it wants and commands the rack with it. Never
     // let a player's device or assist setting reinterpret that command.
     out.steerMode = 'direct';
@@ -3787,12 +3817,7 @@ export class Autopilot {
       pedestrianGap >= -PEDESTRIAN_RADIUS_M
       && pedestrianGap <= horizon
     ) {
-      obstacles.push({
-        s: pedestrianGap,
-        lateral: pedestrianLateral,
-        halfWidth: PEDESTRIAN_RADIUS_M + AVOID_HYSTERESIS_M,
-        speed: pedestrianSpeed,
-      });
+      this.pushObstacle(pedestrianGap, pedestrianLateral, PEDESTRIAN_RADIUS_M + AVOID_HYSTERESIS_M, pedestrianSpeed);
     }
     // AND WHAT IS BESIDE THE CAR, which no forward ray can answer: the lane probes
     // start four metres past the bumper, so a car level with the door is invisible
@@ -4072,7 +4097,7 @@ export class Autopilot {
         const o = obstacles[i]!;
         if (!o.abeam || o.speed <= CRAWL_SPEED_MPS) continue;
         if ((o.lateral - projection.lateral) * shoulderSide >= 0) continue;
-        obstacles[i] = { ...o, halfWidth: vergeBandHalf };
+        o.halfWidth = vergeBandHalf;
       }
     }
     if (this.middlePassAllowed) {
@@ -4083,7 +4108,7 @@ export class Autopilot {
         if (!o.abeam || o.speed <= CRAWL_SPEED_MPS) continue;
         // The car being passed is on the verge side of this one.
         if ((o.lateral - projection.lateral) * middleSide <= 0) continue;
-        obstacles[i] = { ...o, halfWidth: Math.min(o.halfWidth, middleBandHalf) };
+        o.halfWidth = Math.min(o.halfWidth, middleBandHalf);
       }
     }
     // WHAT IS COMING THE OTHER WAY IS AN OBSTACLE LIKE ANY OTHER, AT ITS REAL LATERAL.
@@ -4104,14 +4129,11 @@ export class Autopilot {
     // for it out there only makes the pass longer.
     if (lanesPerSide === 1 && this.trafficField) {
       const threading = this.middlePassAllowed || this.middlePassingValue;
-      this.crownObstacles = obstacles;
-      this.crownPoolUsed = 0;
       this.crownSide = middleSide;
       this.crownEdge = threading ? Math.max(this.middleLine * middleSide, 0) : 0;
       this.crownAll = threading;
       this.crownBandHalf = middleBandHalf;
       this.trafficField.forEachNear(horizon, 0, this.visitCrownTraffic);
-      this.crownObstacles = null;
     }
     /**
      * The kickdown, and it is the SAME number the crossing gate sizes the manoeuvre
@@ -4167,20 +4189,20 @@ export class Autopilot {
         !leaderMeasured &&
         !Number.isNaN(this.bypassLine) &&
         Math.abs(Math.max(PROBE_START_M, this.bypassTarget.s - this.bypassTarget.halfAlong) - ownLaneGap) < CAR_HALF_LENGTH_M;
-      obstacles.push({
-        s: ownLaneGap,
-        lateral: leaderMeasured
+      this.pushObstacle(
+        ownLaneGap,
+        leaderMeasured
           ? this.shoulderLeaderLateral
           : standingMeasured ? this.bypassTarget.lateral : ownLaneOffset,
-        halfWidth: leaderMeasured
+        leaderMeasured
           ? this.middlePassAllowed
             ? middleBandHalf
             : this.vergeBandHalf(vehicle)
           : standingMeasured
             ? this.bypassTarget.halfAcross + AVOID_HYSTERESIS_M
             : CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
-        speed: ownLaneProbeSpeed,
-      });
+        ownLaneProbeSpeed,
+      );
     }
     if (probeAdjacentLanes) {
       for (const laneCentre of this.laneCentres) {
@@ -4190,12 +4212,7 @@ export class Autopilot {
         if (this.middlePassAllowed && (laneCentre === this.middleLine || laneCentre === -ownLaneOffset)) continue;
         const laneGapForPlan = this.laneProbe(laneCentre, sight);
         if (laneGapForPlan === Infinity) continue;
-        obstacles.push({
-          s: laneGapForPlan,
-          lateral: laneCentre,
-          halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
-          speed: this.probeHitSpeed,
-        });
+        this.pushObstacle(laneGapForPlan, laneCentre, CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M, this.probeHitSpeed);
       }
     }
     /**
@@ -6658,7 +6675,10 @@ export class Autopilot {
     ownLateral: number,
   ): void {
     if (!this.physics || !this.dynamicProximityShape) return;
-    const obstacles = this.corridorObstacles;
+    if (trafficProfile.enabled) trafficProfile.abeamQueries++;
+    this.proximityForwardX = roadForwardX;
+    this.proximityForwardZ = roadForwardZ;
+    this.abeamOwnLateral = ownLateral;
     this.rayOrigin.x = this.position.x - originX;
     this.rayOrigin.y = this.position.y;
     this.rayOrigin.z = this.position.z - originZ;
@@ -6666,34 +6686,41 @@ export class Autopilot {
       this.rayOrigin,
       this.identityRotation,
       this.dynamicProximityShape,
-      (collider) => {
-        const other = collider.translation();
-        const dx = other.x - this.rayOrigin.x;
-        const dz = other.z - this.rayOrigin.z;
-        const along = dx * roadForwardX + dz * roadForwardZ;
-        if (along > ABEAM_AHEAD_M || along < -ABEAM_BEHIND_M) return true;
-        // Positive lateral is LEFT of travel (see `Road.offsetPoint`), and the
-        // road's own forward vector is what that sign is measured against.
-        const across = dx * roadForwardZ - dz * roadForwardX;
-        const parent = collider.parent();
-        const velocity = parent ? parent.linvel() : { x: 0, y: 0, z: 0 };
-        obstacles.push({
-          s: 0,
-          lateral: ownLateral + across,
-          halfWidth: CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
-          speed: velocity.x * roadForwardX + velocity.z * roadForwardZ,
-          abeam: true,
-          level: Math.abs(along) < CAR_HALF_LENGTH_M * 2,
-          trailing: along < 0,
-        });
-        return true;
-      },
+      this.visitAbeam,
       this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
       undefined,
       undefined,
       vehicle.chassis,
     );
   }
+  /** The forward vector of the running proximity query, and the abeam one's own lateral. */
+  private proximityForwardX = 0;
+  private proximityForwardZ = 0;
+  private abeamOwnLateral = 0;
+  private readonly visitAbeam = (collider: RAPIER.Collider): boolean => {
+    const roadForwardX = this.proximityForwardX;
+    const roadForwardZ = this.proximityForwardZ;
+    const other = collider.translation(this.bodyTranslation);
+    const dx = other.x - this.rayOrigin.x;
+    const dz = other.z - this.rayOrigin.z;
+    const along = dx * roadForwardX + dz * roadForwardZ;
+    if (along > ABEAM_AHEAD_M || along < -ABEAM_BEHIND_M) return true;
+    // Positive lateral is LEFT of travel (see `Road.offsetPoint`), and the
+    // road's own forward vector is what that sign is measured against.
+    const across = dx * roadForwardZ - dz * roadForwardX;
+    const velocity = collider.parent()?.linvel(this.bodyVelocity);
+    const speed = velocity ? velocity.x * roadForwardX + velocity.z * roadForwardZ : 0;
+    this.pushObstacle(
+      0,
+      this.abeamOwnLateral + across,
+      CAR_HALF_WIDTH_M + AVOID_HYSTERESIS_M,
+      speed,
+      true,
+      Math.abs(along) < CAR_HALF_LENGTH_M * 2,
+      along < 0,
+    );
+    return true;
+  };
   /**
    * Broad-phase guard for the sensor blind spot created by an angled car or tight
    * bend. Bodies beside or ahead make a blind pull-out unsafe. A body clearly behind
@@ -6709,30 +6736,35 @@ export class Autopilot {
     forwardZ: number,
   ): boolean {
     if (!this.physics || !this.dynamicProximityShape) return false;
+    if (trafficProfile.enabled) trafficProfile.bodyAheadQueries++;
+    this.proximityForwardX = forwardX;
+    this.proximityForwardZ = forwardZ;
     this.rayOrigin.x = this.position.x - originX;
     this.rayOrigin.y = this.position.y;
     this.rayOrigin.z = this.position.z - originZ;
-    let found = false;
+    this.bodyAheadFound = false;
     this.physics.world.intersectionsWithShape(
       this.rayOrigin,
       this.identityRotation,
       this.dynamicProximityShape,
-      (collider) => {
-        const other = collider.translation();
-        const along =
-          (other.x - this.rayOrigin.x) * forwardX +
-          (other.z - this.rayOrigin.z) * forwardZ;
-        if (along < -CAR_HALF_LENGTH_M) return true;
-        found = true;
-        return false;
-      },
+      this.visitBodyAhead,
       this.physics.rapier.QueryFilterFlags.ONLY_DYNAMIC,
       undefined,
       undefined,
       vehicle.chassis,
     );
-    return found;
+    return this.bodyAheadFound;
   }
+  private bodyAheadFound = false;
+  private readonly visitBodyAhead = (collider: RAPIER.Collider): boolean => {
+    const other = collider.translation(this.bodyTranslation);
+    const along =
+      (other.x - this.rayOrigin.x) * this.proximityForwardX +
+      (other.z - this.rayOrigin.z) * this.proximityForwardZ;
+    if (along < -CAR_HALF_LENGTH_M) return true;
+    this.bodyAheadFound = true;
+    return false;
+  };
 
   /**
    * The manoeuvre is a deliberate two-point turn. Reverse holds a substantial lock
@@ -6928,6 +6960,7 @@ export class Autopilot {
     this.roadBodyCount = 0;
     this.routeCount = 0;
     if (!this.physics || !this.roadBodyShape) return;
+    if (trafficProfile.enabled) trafficProfile.roadBodyQueries++;
     this.roadBodyOriginX = originX;
     this.roadBodyOriginZ = originZ;
     // A body's centre may sit half a body beyond the face a probe reports, and a
@@ -7009,6 +7042,7 @@ export class Autopilot {
    */
   private laneProbe(lane: number, sight: number, facing: 1 | -1 = 1): number {
     this.probeHitSpeed = 0;
+    if (trafficProfile.enabled) trafficProfile.laneProbes++;
     let nearest = Infinity;
     for (let i = 0; i < this.roadBodyCount; i++) {
       const body = this.roadBodies[i]!;

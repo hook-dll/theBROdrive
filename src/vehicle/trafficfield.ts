@@ -44,6 +44,12 @@ export interface TrafficNeighbour {
  * condition and sample buffers: read it, never retain it.
  */
 export interface TrafficField {
+  /**
+   * Takes the view the following `forEachNear` calls answer from: the other vehicles
+   * as they are now. A driver calls it once at the start of each decision, so the
+   * decision's many questions are answered from one pass over the traffic.
+   */
+  snapshot(): void;
   /** Inclusive ranges: zero-distance overlap is visited even when either range is zero. */
   forEachNear(ahead: number, behind: number, fn: (neighbour: TrafficNeighbour) => void): void;
 }

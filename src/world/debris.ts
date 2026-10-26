@@ -74,6 +74,27 @@ const SOIL_ANGULAR_DAMPING = 5;
 const SOIL_FRICTION = 1.1;
 
 /**
+ * Side (m) of the square cells `strike` buckets standing props into. A car's swept box
+ * reaches about four metres, so most strikes read one cell and a few read up to four.
+ * World XZ rather than road arclength: the desert scatter's props carry no `s`, and an
+ * absolute grid needs nothing but the prop's own coordinates, which never move.
+ */
+const STRIKE_CELL_METRES = 50;
+/** Cell-z stride in the packed key: room for ±200 000 km of cells on either axis. */
+const STRIKE_CELL_STRIDE = 1 << 22;
+
+function strikeCellKey(cellX: number, cellZ: number): number {
+  return cellX * STRIKE_CELL_STRIDE + cellZ;
+}
+
+function strikeCellKeyOf(prop: BreakableProp): number {
+  return strikeCellKey(
+    Math.floor(prop.x / STRIKE_CELL_METRES),
+    Math.floor(prop.z / STRIKE_CELL_METRES),
+  );
+}
+
+/**
  * What is doing the hitting: an oriented box with a velocity, in ABSOLUTE coordinates.
  *
  * Structural, so this file knows nothing about vehicles. `main.ts` fills one per car
@@ -163,6 +184,14 @@ function geometryLayoutKey(geometry: THREE.BufferGeometry): string {
 
 export class DebrisField {
   private readonly standing = new Map<number, BreakableProp>();
+  /**
+   * The same standing props, by `strikeCellKey`, so a strike reads only the cells its
+   * swept box can reach. An empty cell is dropped rather than kept, so a long drive
+   * does not leave a trail of them.
+   */
+  private readonly cells = new Map<number, BreakableProp[]>();
+  /** Largest standing radius ever registered: the strike reach, never shrunk. */
+  private maxPropRadius = 0;
   private readonly pieces: Piece[] = [];
   /**
    * Invisible non-instanced anchors that hold the piece programs compiled from boot.
@@ -226,11 +255,33 @@ export class DebrisField {
   }
 
   register(prop: BreakableProp): void {
+    if (this.standing.has(prop.id)) this.unstand(prop.id);
     this.standing.set(prop.id, prop);
+    const key = strikeCellKeyOf(prop);
+    const cell = this.cells.get(key);
+    if (cell) cell.push(prop);
+    else this.cells.set(key, [prop]);
+    if (prop.radius > this.maxPropRadius) this.maxPropRadius = prop.radius;
   }
 
   forget(ids: readonly number[]): void {
-    for (const id of ids) this.standing.delete(id);
+    for (const id of ids) this.unstand(id);
+  }
+
+  /** Takes a prop out of `standing` and its cell. Cell order is not kept. */
+  private unstand(id: number): void {
+    const prop = this.standing.get(id);
+    if (!prop) return;
+    this.standing.delete(id);
+    const key = strikeCellKeyOf(prop);
+    const cell = this.cells.get(key)!;
+    const last = cell.length - 1;
+    if (last === 0) {
+      this.cells.delete(key);
+      return;
+    }
+    cell[cell.indexOf(prop)] = cell[last]!;
+    cell.length = last;
   }
 
   /**
@@ -322,9 +373,12 @@ export class DebrisField {
    * collider, stopped dead against it, and stayed there. `key` names the chassis, so
    * each one sweeps from its own previous step.
    *
-   * Linear over the props in the physics band — a couple of hundred, each costing two
-   * subtractions, two dots and two comparisons — which beats asking Rapier for contact
-   * events and needs no event queue threaded through the world step.
+   * Only the grid cells the swept box can reach are read: the box's half-diagonal
+   * grown by the widest standing prop and the skin, around both the previous and the
+   * current centre. Inside them, each prop costs two subtractions, two dots and two
+   * comparisons — which beats asking Rapier for contact events and needs no event
+   * queue threaded through the world step. Reading every prop in the physics band
+   * instead cost 0.31 ms a frame with forty cars on the road.
    *
    * Proximity, not contact, and deliberately a shade generous: the collider must go off
    * just BEFORE the car reaches it, so the car walks through a breakable prop rather
@@ -351,27 +405,45 @@ export class DebrisField {
     const travelZ = prevZ - impactor.z;
     const startAlong = travelX * impactor.fx + travelZ * impactor.fz;
     const startAcross = travelX * rx + travelZ * rz;
-    for (const prop of this.standing.values()) {
-      const dx = prop.x - impactor.x;
-      const dz = prop.z - impactor.z;
-      const along = dx * impactor.fx + dz * impactor.fz;
-      const across = dx * rx + dz * rz;
-      // Sweep the whole chassis rectangle from its previous fixed-step centre to its
-      // current one. Testing only the end pose skipped narrow plants when a fast car
-      // crossed their entire diameter between simulation steps.
-      if (!segmentHitsBox(
-        startAlong - along,
-        startAcross - across,
-        -along,
-        -across,
-        impactor.halfLength + prop.radius + IMPACT_SKIN,
-        impactor.halfWidth + prop.radius + IMPACT_SKIN,
-      )) continue;
-      const minY = Math.min(prevY, impactor.y);
-      const maxY = Math.max(prevY, impactor.y);
-      if (prop.y > maxY + prop.height) continue;
-      if (prop.y + prop.height < minY - 1.5) continue;
-      this.breakProp(prop, impactor);
+    const minY = Math.min(prevY, impactor.y);
+    const maxY = Math.max(prevY, impactor.y);
+    // Every prop the test below can pass lies within this of the swept centre line.
+    const reach = Math.hypot(
+      impactor.halfLength + this.maxPropRadius + IMPACT_SKIN,
+      impactor.halfWidth + this.maxPropRadius + IMPACT_SKIN,
+    );
+    const cellX0 = Math.floor((Math.min(prevX, impactor.x) - reach) / STRIKE_CELL_METRES);
+    const cellX1 = Math.floor((Math.max(prevX, impactor.x) + reach) / STRIKE_CELL_METRES);
+    const cellZ0 = Math.floor((Math.min(prevZ, impactor.z) - reach) / STRIKE_CELL_METRES);
+    const cellZ1 = Math.floor((Math.max(prevZ, impactor.z) + reach) / STRIKE_CELL_METRES);
+    for (let cellX = cellX0; cellX <= cellX1; cellX++) {
+      for (let cellZ = cellZ0; cellZ <= cellZ1; cellZ++) {
+        const cell = this.cells.get(strikeCellKey(cellX, cellZ));
+        if (!cell) continue;
+        // Backwards, because a break swaps the cell's last prop into the broken one's
+        // slot: from this end, that prop has already been tested.
+        for (let index = cell.length - 1; index >= 0; index--) {
+          const prop = cell[index]!;
+          const dx = prop.x - impactor.x;
+          const dz = prop.z - impactor.z;
+          const along = dx * impactor.fx + dz * impactor.fz;
+          const across = dx * rx + dz * rz;
+          // Sweep the whole chassis rectangle from its previous fixed-step centre to its
+          // current one. Testing only the end pose skipped narrow plants when a fast car
+          // crossed their entire diameter between simulation steps.
+          if (!segmentHitsBox(
+            startAlong - along,
+            startAcross - across,
+            -along,
+            -across,
+            impactor.halfLength + prop.radius + IMPACT_SKIN,
+            impactor.halfWidth + prop.radius + IMPACT_SKIN,
+          )) continue;
+          if (prop.y > maxY + prop.height) continue;
+          if (prop.y + prop.height < minY - 1.5) continue;
+          this.breakProp(prop, impactor);
+        }
+      }
     }
   }
 
@@ -396,6 +468,7 @@ export class DebrisField {
     for (const piece of this.pieces) this.removePiece(piece);
     this.pieces.length = 0;
     this.standing.clear();
+    this.cells.clear();
     this.scene.remove(this.pieceWarmup);
     this.pieceWarmup.clear();
   }
@@ -414,7 +487,7 @@ export class DebrisField {
   }
 
   private breakProp(prop: BreakableProp, impactor: Impactor): void {
-    this.standing.delete(prop.id);
+    this.unstand(prop.id);
     this.broken.add(prop.id);
     this.world.apply({ t: 'prop_flatten', propId: prop.id });
 

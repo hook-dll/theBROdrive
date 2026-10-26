@@ -2,8 +2,83 @@
 
 ## Unreleased
 
+### Added
+
+- TRAFFIC COST BREAKDOWN (`core/trafficprofile.ts`, `RoadTraffic.profile`, dev only, off
+  by default; `__bro.traffic.profile.enabled = true` in the console). Where a traffic step's
+  milliseconds go — the coordinator, the drivers' `drive`, the cars' `Vehicle.fixedUpdate`,
+  the rails — with driven and on-rails car-steps, the drivers' shape queries (road bodies,
+  abeam, body ahead, rails probes), lane probes and corridor candidates. One shared record
+  filled in place. `tools/traffic-bench.ts` takes `--cap 6|12|20|40` (the stream's traffic
+  level; Medium's 20 by default), holds the stream to that ceiling instead of a fixed 24,
+  and prints the breakdown over its streamed phase. The bench ran again: its rival race
+  stood the haul's car on the removed `laybyHaulLateral`, now in the post's pick-up slot
+  (`world/haulbay.ts` `postParkingSlot`).
+
 ### Changed
 
+- PROP STRIKES READ ONLY NEARBY CELLS (`world/debris.ts`). `DebrisField` keeps its standing
+  breakable props in 50 m world-XZ cells (`STRIKE_CELL_METRES`), kept in step on register,
+  forget and break, and `strike` reads only the cells the chassis' swept box can reach (its
+  half-diagonal grown by the widest registered prop and the skin) instead of every prop in
+  the physics band. A grid rather than road arclength because the desert scatter's props
+  carry no `s`. Same hit test, same props broken: a throwaway run of the old full scan beside
+  the new one over 480 000 synthetic strikes (4 000 props, churned, broken and moved, at
+  coordinates up to 3 500 km) broke the same 1 033 265 props with none missed, and 37 808
+  in-game strikes found nothing the full scan would have hit outside the cells read.
+  Seed `flick`, km 3, cap 40, floor 1, six alternating 10 s pairs in one tab: the traffic
+  strike callback 0.32–0.33 → 0.021–0.026 ms a frame (about 440 standing props, 0.22 read
+  per strike); the `sim` section, noisier, averaged 3.70 → 3.26 ms. The driven car and
+  traffic both still break props.
+
+- TRAFFIC LEAVING THE PLAYER GOES ON RAILS SOONER (`world/ranges.ts`, `world/traffic.ts`).
+  A car drawing away from the player along the road at 2 m/s or more
+  (`RAILS_RECEDING_MPS`) sleeps from 310 m (`RAILS_RECEDING_SLEEP_M`) instead of 360: the
+  60 m of hysteresis exist for a car pacing him, and one leaving him cannot. Behind a
+  player driving at 5 m/s or more (`RAILS_BEHIND_PLAYER_MPS`) such a car sleeps from 160 m
+  (`RAILS_BEHIND_SLEEP_M`) and stays on rails down to 150 m (`RAILS_BEHIND_WAKE_M`) while it
+  is not closing on him; the player stopping, slowing under 2 m/s, or letting it close
+  wakes it, and everything else wakes it as before. Nothing ahead of him or closing on him
+  is on rails nearer than 300 m. Why cars were driven was measured first: the profile now
+  counts driven car-steps by the rule that kept each off the rails (`RAILS_REFUSALS`:
+  distance band, pass urge, hold-off, lay-by, bypass, foreign body, …), the steps with the
+  tread cast gated, and the wakes. At the 40-car ceiling (seed 42) 9.8 of 13.8 driven cars
+  were inside 360 m, 2.3 of them in the 300–360 m hysteresis band; the pass urge and its
+  hold-off kept 2.6, all in short, active spells (median 1.4–6 s, measured), so they stay
+  driven. `tools/traffic-bench.ts 42`, traffic step and cars per step before → after:
+  cap 12 0.212 → 0.180 ms (5.6 driven / 3.5 on rails → 4.3 / 4.7), cap 20 0.228 → 0.216 ms
+  (5.9 / 5.0 → 5.1 / 6.3), cap 40 0.505 → 0.458 ms (13.8 / 8.4 → 11.2 / 11.1). The stream
+  is chaotic, so one seed's checks move either way: over ten seeds at cap 40 the driven
+  share fell from 59% to 55% and the mean step from 0.538 to 0.509 ms, with 13 streamed
+  contacts against 19 and 19 failed checks against 26 before; `tools/traffic-road.ts`
+  (which differs run to run) over six runs each: 4.0 failed checks against 4.2, 4 stream
+  contacts against 5, wakes 262 against 261, every wake landing within a centimetre.
+  The tread-cast gate was left as it is: it already covered 82% of driven car-steps, and
+  inside its 60 m the player can touch the car.
+- A DRIVER'S DECISION IS CHEAPER AND EXACTLY THE SAME (`vehicle/autopilot.ts`,
+  `vehicle/trafficfield.ts`, `world/traffic.ts`, `vehicle/corridor.ts`). The coordinator's
+  traffic field takes one snapshot per decision (`TrafficField.snapshot`, called at the top
+  of `Autopilot.driveControls`): every other car, in its list order with the player last,
+  already in the driver's frame, so the decision's ten-odd `forEachNear` questions are scans
+  of three number arrays instead of walks of the stream that redo the projection. The
+  corridor obstacles live in one pooled record type rewritten in place (`pushObstacle`;
+  the crown visit's own pool is folded into it, the verge and middle bands are set on the
+  record instead of copied), the abeam and body-ahead proximity queries use visitors held
+  on the driver and Rapier's out-parameters, and the corridor search lost its `nearness`
+  closure. The search's `evaluate` closure and its result object stay: the callers hold
+  three or four plans at once, and the whole search is 6% of a decision. Behaviour is
+  unchanged: `tools/traffic-bench.ts` prints identical output before and after (timings
+  aside) on seeds 42, 7, 99, 2024, 1-6 at cap 40 and 42, 7, 99, 2024, 1 at caps 12 and 20.
+  Means, before → after: cap 40 (ten seeds) drive 45.9 → 43.2 µs a call, 117 → 110 µs a
+  step, 22.9% → 21.9% of the traffic step, step 0.509 → 0.501 ms; cap 20 (five) 49.5 →
+  48.2 µs a call, step 0.281 → 0.282 ms; cap 12 (five) 52.0 → 51.6 µs a call, step 0.149 →
+  0.151 ms. The allocations alone moved nothing measurable (45.6 µs a call at cap 40); the
+  snapshot is the gain. Cutting the lattice itself (a free-road fast path, a lattice
+  narrowed round the last line) was not tried: `drive` stays a fifth of the step against
+  two thirds for `Vehicle.fixedUpdate`, and profiled (`bun --cpu-prof-md`, seed 42, cap 40)
+  the corridor solves are 6% of a decision, against 16% for the racing-line solve, about
+  23% for the speed plan's road samples, 11% for the road-body shape query, 6% each for
+  the driver's own projection and the nose scan.
 - THE CARD MACHINES ARE ARCADE CABINETS, AND GIVE AND TAKE THROUGH A GRID LIKE THE BOOT'S
   (`world/cardmachine.ts`, `world/post.ts`, `world/vending.ts`, `render/trunkview.ts`,
   `vehicle/trunk.ts`, `player/machinefocus.ts`, `game/state.ts`, `save/save.ts`,

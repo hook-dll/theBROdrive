@@ -28,6 +28,8 @@
  * only by driving twenty cars around for ten minutes and hoping.
  */
 
+import { trafficProfile } from '../core/trafficprofile';
+
 /**
  * One thing to stay clear of, in this driver's own road frame: `s` ahead of the
  * car, `lateral` in road coordinates, `halfWidth` already inflated by whatever
@@ -505,6 +507,8 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
     passMarginS = 0,
   } = request;
   const passMeasured = passSeconds !== undefined;
+  const profiling = trafficProfile.enabled;
+  if (profiling) trafficProfile.corridorSolves++;
   let bestLine = laneOffset;
   let bestCost = Number.POSITIVE_INFINITY;
   let bestBlockDistance = Number.POSITIVE_INFINITY;
@@ -549,10 +553,11 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
    */
   let crossingRefused = false;
 
-  const nearness = (distance: number): number =>
-    distance >= horizon ? 0 : 1 - distance / horizon;
-
   const evaluate = (line: number, captureRejected = false): void => {
+    if (profiling) {
+      trafficProfile.corridorCandidates++;
+      trafficProfile.corridorObstacleTests += obstacles.length;
+    }
     const crossesCentre =
       (line - oncomingBoundary) * ownSide < -halfWidth * 0.5;
     // THE PERMISSION TO CROSS IS AN ENTRY RULE TOO. A body already out there is always
@@ -894,8 +899,9 @@ function solveCorridor(request: CorridorRequest, fixedLine?: number): CorridorPl
             : SHOULDER_COST_PER_M) +
         (crossesCentre ? oncomingLaneCost : 0);
       if (blockDistance < Number.POSITIVE_INFINITY) {
-        cost +=
-          Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness(blockDistance);
+        // Fading to nothing at the horizon.
+        const nearness = blockDistance >= horizon ? 0 : 1 - blockDistance / horizon;
+        cost += Math.max(0, desiredSpeed - blockSpeed) * SLOW_COST_PER_MPS * nearness;
       }
       if (abandoned) cost += BLOCK_COST;
       if (Math.abs(line - previousLine) > LINE_STEP_M) cost += SWITCH_COST;

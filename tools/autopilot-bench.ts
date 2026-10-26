@@ -676,6 +676,8 @@ async function checkPassingSafety(): Promise<void> {
   merging.setMode('frantic');
   merging.setSpeedCap(30);
   merging.setTrafficField({
+    // Answered live from the bodies, so there is nothing to take.
+    snapshot() {},
     forEachNear(ahead, behind, visit) {
       const along = rear.translation().z - rig.vehicle.chassis.translation().z;
       const s = Math.sign(along) * Math.max(0, Math.abs(along) - 2.3);
@@ -917,6 +919,8 @@ async function checkShoulderPass(): Promise<void> {
   // The traffic field as the coordinator gives it: the real lead car, plus a car that
   // is always 45 m up the opposing lane and coming at 20 m/s, so the crown never opens.
   chaserPilot.setTrafficField({
+    // Answered live from the bodies, so there is nothing to take.
+    snapshot() {},
     forEachNear(ahead, behind, visit) {
       const c = road.project(chaserPosition.x, chaserPosition.z);
       const l = road.project(leadPosition.x, leadPosition.z);
