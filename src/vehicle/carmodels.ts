@@ -2764,9 +2764,10 @@ function kitEntry([id, source, kit, label, gear]: KitCarRow): Entry {
     clearGlass: true,
     paintStyle: 'solid-paint',
     wheelNodes: KIT_WHEEL_NODES,
-    // Shod from its kind's pool, rescaled to the kit's own tyre: a Niva-family sibling
-    // off-road, the Oka on its own hub, a foreign car (no sibling) on the foreign pool.
-    wheelSetPool: base.wheelSetPool === OFFROAD_WHEEL_SET_POOL
+    // Shod from its kind's pool, rescaled to the kit's own tyre: the Nivas (whose pack
+    // siblings carry no pool of their own) and the UAZes on the Niva pool off-road, the Oka
+    // on its own hub, a foreign car (no sibling) on the foreign pool.
+    wheelSetPool: base.wheelSetPool === OFFROAD_WHEEL_SET_POOL || source === 'sv_niva' || source === 'sv_niva_long'
       ? KIT_OFFROAD_WHEEL_SETS
       : id === 'kit_vaz1111'
         ? KIT_OKA_WHEEL_SETS

@@ -267,7 +267,7 @@ then the off-road family starting with the Pajero II (it needs every new piece o
 Pools (carmodels.ts): Soviet cars `KIT_SOVIET_WHEEL_SETS` (the pack's six, `gw_vaz_steel16`,
 both covers, `gw_alloy_split7`); the Oka `KIT_OKA_WHEEL_SETS` (its own 3x98 wheel half the
 draws, else under a cover); foreign cars `KIT_FOREIGN_WHEEL_SETS` (steel, both covers, the
-8-hole, the cross-spoke); the Niva family `KIT_OFFROAD_WHEEL_SETS` (`sv_niva`, the fan).
+8-hole, the cross-spoke); the Nivas and UAZes `KIT_OFFROAD_WHEEL_SETS` (`sv_niva`, the fan).
 
 | Design | Real wheel (`RimDesign.ref` names the photo; local copies in `build/carshape/_refs/bp/img/wheels`) | Meant for |
 |---|---|---|
