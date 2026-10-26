@@ -25,10 +25,9 @@ import {
 import { hasTag, thingBootFootprint, thingCard, type PostCard, type ThingDef } from '../items/things';
 import { carModel, hasCarModel, type CarModelDef } from '../vehicle/carmodels';
 import { bootHolds } from '../vehicle/trunk';
-import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
+import { buildCardMachine, CardMachine, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
-import { paintSign, SIGN_PLANE } from './market';
 import { placeNameAt } from './placenames';
 import { postId, postStop, type PostStop } from './poststops';
 import { postParkingSlot } from './haulbay';
@@ -45,9 +44,10 @@ import { postParkingSlot } from './haulbay';
  * round. A card prints the thing, where it goes and how far, the pay, its tags, a haul's
  * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
  * that car. The wheel turns through them for as long as the player likes; TAKE gives the
- * one showing, always, fitting or not: the car can be changed. Its thing falls into the
- * tray and the machine lets go of the player so he
- * picks it up. A HAUL gives nothing (§7.8): its load already waits in the first slot of
+ * one showing, always, fitting or not: the car can be changed. Its thing appears in the
+ * machine's GRID, taking its boot footprint's cells, and he takes it from there into
+ * his hands or pack as from a boot; with no room for it there, TAKE refuses and says
+ * so. A HAUL gives nothing (§7.8): its load already waits in the first slot of
  * the post's parking row (world/haulbay.ts, contracts/haulbays.ts), and TAKE binds the
  * contract to it (`haul_take`), which lifts its lock; with no load in the slot (the slot
  * is taken) TAKE refuses. The card it was on falls away and the slot's next offer is
@@ -57,31 +57,32 @@ import { postParkingSlot } from './haulbay';
  * hand-in slot, the middle of its parking row: the one he last drove
  * (`PlayerState.lastDrivenCarId`) when it is there, else
  * the nearest. Its stickers open the fifth card and add `uniquenessBonus` to the pay the
- * cards print. A delivery is paid by the same car's stickers, read when the tray takes
+ * cards print. A delivery is paid by the same car's stickers, read when the grid takes
  * it; with no car on the lay-by, by the car he last drove, wherever it stands.
  *
- * The TRAY takes things too, which its painted label says: clicked with a thing bound
- * here in hand, the machine draws it in and pays into the player's money (§7.7: no
- * envelope, stickers are only bought). A thing this post will not sign for goes back as a
- * RETURN TO SENDER: no pay, the job closed. Worked with a thing in hand, the window shows
- * the HAND-IN card first: what to put in the tray, what it pays, that it is a return, or
- * why the tray will not take it. A haul is handed in by its load, in the second slot
- * (contracts/haulbays.ts), never at the tray.
+ * The GRID takes things in too, as a boot does: a thing bound here, put into a free cell
+ * (its footprint round it), lies there a moment while the machine draws it in, and the
+ * pay goes into the player's money (§7.7: no envelope, stickers are only bought). A thing
+ * this post will not sign for goes in as a RETURN TO SENDER: no pay, the job closed.
+ * Worked with a thing in hand, the window shows the HAND-IN card first: what to put in
+ * the grid, what it pays, that it is a return, or why it will not take it. A haul is
+ * handed in by its load, in the second slot (contracts/haulbays.ts), never at the grid.
  *
  * TAKE refuses while the player already has `ACTIVE_CONTRACT_LIMIT` jobs out, and a haul
  * while he has `ACTIVE_HAUL_LIMIT` hauls out (`activeContracts`); the cards say so.
  *
- * What the machine holds is saved in `WorldState.courierStorage` (`courier_storage`
- * delta, the saved shape of the courier days): see `postStock`. Things an old save left in
- * a courier's boot come back through the tray when the machine is first worked.
+ * The stock is saved in `WorldState.courierStorage` (`courier_storage` delta, the saved
+ * shape of the courier days): see `postStock`. What lies in the grid is saved apart
+ * (`WorldState.machineGrids`): a thing given there is out of the stock, its contract
+ * active and its clock running, which the stock's cells could not say. Things an old
+ * save left in a courier's boot are put into the grid when the machine is built, and
+ * stay in the stock's cells after its offers until the grid has room for them.
  */
 
 const POST_LOOK = {
-  title: 'POST',
   body: 0x3e5f86,
   buttonLabel: 'TAKE',
   buttonColour: 0x3f8a4a,
-  trayLabel: '▼ HAND THINGS IN HERE ▼',
 } as const;
 /** How the card's band reads each property. */
 const CARD_BAND: Readonly<Record<PostCard, string>> = {
@@ -165,7 +166,7 @@ function wontFit(thing: ThingDef, model: CarModelDef): boolean {
   return footprint !== null && !bootHolds(model.trunkGrid, footprint);
 }
 
-/** What the hand-in card calls the thing to put in the tray, with its article: none before a possessive ("dad's tool box"). */
+/** What the hand-in card calls the thing to put in the grid, with its article: none before a possessive ("dad's tool box"). */
 function cargoNoun(item: ContractCargoItem): string {
   const name = contractThing(item).name;
   return (name.includes("'s ") ? name : `the ${name}`).toUpperCase();
@@ -173,7 +174,7 @@ function cargoNoun(item: ContractCargoItem): string {
 
 /**
  * The card the window shows first while the player works the machine with a thing in
- * hand: what to put in the tray for a delivery or a return. `key` tells two apart.
+ * hand: what to put in the grid for a delivery or a return. `key` tells two apart.
  */
 interface HandInCard {
   readonly key: string;
@@ -242,25 +243,12 @@ export function buildPost(
   disposers: Array<() => void>,
 ): void {
   const parts = buildCardMachine(ctx, stop.s, x, z, yaw, POST_LOOK, group, bodies, colliders, disposers);
-  // The office's name on the plate beside the button: painted for this one machine and
-  // disposed with it, not kept in the session's sign cache.
-  const plateMaterial = paintSign(['POST OFFICE', placeNameAt(ctx.world.seed, stop.s).toUpperCase()], '#f2ecd8', '#26221c', 256, 224);
-  disposers.push(() => {
-    plateMaterial.map?.dispose();
-    plateMaterial.dispose();
-  });
-  const plate = new THREE.Mesh(SIGN_PLANE, plateMaterial);
-  plate.scale.set(0.26, 0.23, 1);
-  plate.position.set(PANEL_X, PANEL_Y, -MACHINE_D / 2 - 0.004);
-  plate.rotation.y = Math.PI;
-  parts.root.add(plate);
-
   const slot = postParkingSlot(ctx.world.seed, ctx.road, stop.index, 'handIn');
   const machine = new PostMachine(ctx.world, stop, slot.x, slot.z, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
-/** What the tray would take now: the thing in hand, and whether it is delivered or returned. */
+/** What the grid would take now: the thing in hand, and whether it is delivered or returned. */
 interface Posting {
   readonly item: ContractCargoItem;
   readonly mode: 'deliver' | 'return';
@@ -268,9 +256,10 @@ interface Posting {
 
 class PostMachine extends CardMachine {
   protected readonly title = 'POST';
-  /** The offer standing in each slot (the four, then `SPECIAL_SLOT`), and what an old save left inside. */
+  /** The offer standing in each slot (the four, then `SPECIAL_SLOT`). */
   private readonly offers: ContractCargoItem[];
-  private strays: Item[];
+  /** What an old save left in a courier's boot and the grid has had no room for yet, in order. */
+  private readonly strays: Item[];
   /** The hand-in card, standing first among the cards while the machine is worked. */
   private handIn: HandInCard | null = null;
   /** The model of the car standing on the lay-by when the cards were last painted, or null. */
@@ -284,18 +273,21 @@ class PostMachine extends CardMachine {
   private haulsAtLimit = false;
 
   constructor(
-    private readonly world: GameWorld,
+    world: GameWorld,
     private readonly stop: PostStop,
     /** ABSOLUTE metres of the middle of the post's hand-in slot: the lay-by car and the deliveries measure from it. */
     private readonly haulX: number,
     private readonly haulZ: number,
     parts: CardMachineParts,
   ) {
-    super(`post:${stop.index}`, parts);
+    super(`post:${stop.index}`, parts, world);
     this.findLaybyCar((carId) => world.state.cars[carId] ?? null);
     const stock = postStock(world.state, world.seed, stop.index, this.relics);
     this.offers = stock.offers.slice();
     this.strays = stock.strays.slice();
+    // Into the grid where they fit; saved there with the next change (`save`), and read
+    // the same way from the stock's cells until then.
+    this.settleStrays();
     this.start();
   }
 
@@ -309,9 +301,26 @@ class PostMachine extends CardMachine {
     return this.laybyStickers >= RELIC_STICKERS;
   }
 
-  /** Writes the stock as it stands: the offer in each slot, nothing else. */
-  private saveStock(extra?: { consumedItemId?: string; completedContractId?: string; completedContractKind?: ContractKind }): void {
-    this.world.apply({ t: 'courier_storage', courierId: postId(this.stop.index), cells: this.offers.slice(), ...extra });
+  /** Puts the strays the grid has room for into it, in order. */
+  private settleStrays(): void {
+    for (let k = 0; k < this.strays.length;) {
+      if (this.give(this.strays[k]!)) this.strays.splice(k, 1);
+      else k++;
+    }
+  }
+
+  /**
+   * Writes the stock as it stands — the offer in each slot, then the strays still out of
+   * the grid — and the grid, with what a hand-in consumed and completed.
+   */
+  private save(extra?: { consumedItemId?: string; completedContractId?: string; completedContractKind?: ContractKind }): void {
+    this.world.apply({ t: 'courier_storage', courierId: postId(this.stop.index), cells: [...this.offers, ...this.strays], ...extra });
+    this.saveGrid();
+  }
+
+  protected override gridTaken(): void {
+    this.settleStrays();
+    this.save();
   }
 
   /**
@@ -411,7 +420,7 @@ class PostMachine extends CardMachine {
   }
 
   protected pressButton(ctx: FixtureContext, index: number): FoleyEvent {
-    // TAKE on the hand-in card: it is the tray that takes cargo in.
+    // TAKE on the hand-in card: it is the grid that takes cargo in.
     if (this.handIn && index === 0) return this.refuse();
     const slot = index - this.lead;
     const offer = slot === SPECIAL_SLOT && !this.specialShown ? undefined : this.offers[slot];
@@ -436,7 +445,7 @@ class PostMachine extends CardMachine {
       }
       this.world.apply({ t: 'haul_take', haul: { contract: offer, loadId } });
       this.offers[slot] = nextOffer(this.world.seed, offer, this.relics);
-      this.saveStock();
+      this.save();
       this.cardsChanged();
       this.refreshLimit();
       ctx.toast(haulTakenText(contractThing(offer)));
@@ -444,12 +453,16 @@ class PostMachine extends CardMachine {
       ctx.stepBack();
       return 'mount';
     }
-    // The stock first, so the cargo never exists twice: the slot's next offer stands in.
+    if (this.roomFor(offer) < 0) {
+      ctx.toast(`no room in the grid for the ${contractThing(offer).name} — take out what lies there first`);
+      return this.refuse();
+    }
+    // The stock and the grid in one save, so the cargo never exists twice: the slot's
+    // next offer stands in, and the thing lies in the grid for him to take.
     this.offers[slot] = nextOffer(this.world.seed, offer, this.relics);
-    this.saveStock();
+    this.give(offer);
+    this.save();
     this.cardsChanged();
-    // The thing falls into the tray.
-    this.give(ctx, [offer]);
     this.refreshLimit();
     return 'mount';
   }
@@ -465,12 +478,6 @@ class PostMachine extends CardMachine {
     this.refreshLayby(ctx);
     this.showHandIn(this.handInCard(ctx));
     this.refreshLimit();
-    if (this.strays.length === 0) return;
-    // What a courier's boot held in an old save comes back here, once.
-    const strays = this.strays;
-    this.strays = [];
-    this.saveStock();
-    this.give(ctx, strays);
   }
 
   /** The hand-in card for the thing in hand, or null when he holds none. */
@@ -479,7 +486,7 @@ class PostMachine extends CardMachine {
     if (!posting) return null;
     const item = posting.item;
     const name = contractThing(item).name;
-    const headline = `PUT ${cargoNoun(item)} IN THE TRAY`;
+    const headline = `PUT ${cargoNoun(item)} IN THE GRID`;
     let card: Omit<HandInCard, 'key'>;
     if (posting.mode === 'return') {
       const closed = isContractClosed(item, this.world.state.completedContractIds);
@@ -519,8 +526,8 @@ class PostMachine extends CardMachine {
   }
 
   /**
-   * What the tray would take: the thing in hand, delivered when this post signs for it
-   * (`contractAcceptRefusal`), else taken back as a return to sender — any tray takes any
+   * What the grid would take: the thing in hand, delivered when this post signs for it
+   * (`contractAcceptRefusal`), else taken back as a return to sender — any post takes any
    * thing back, and a delivery always wins over a return. Never a teddy: teddies get off
    * on a shelter's bench (world/shelter.ts).
    */
@@ -532,20 +539,31 @@ class PostMachine extends CardMachine {
     return { item: held, mode: deliver ? 'deliver' : 'return' };
   }
 
-  protected override useTray(ctx: FixtureContext): FoleyEvent | null {
-    if (isPassenger(ctx.held)) {
+  /**
+   * The thing in hand put to a free cell: it goes in where its footprint fits round the
+   * cell, as into a boot, lies there while the machine draws it in (`swallow`), and is
+   * delivered or returned. Anything that is not the post's cargo stays in the hand.
+   */
+  protected override putIn(ctx: FixtureContext, held: Item, cell: number): FoleyEvent | null {
+    if (isPassenger(held)) {
       ctx.toast('teddies get off at a shelter — seat it on the bench');
-      return this.refuse();
+      return 'refused';
     }
+    // `posting` reads the same held thing.
     const posting = this.posting(ctx);
-    if (!posting) return null;
+    if (!posting) {
+      ctx.toast('the post takes only the things it sends');
+      return 'refused';
+    }
     const item = posting.item;
-    if (posting.mode === 'return') return this.takeBack(ctx, item);
+    const anchor = this.putAnchor(ctx, item, cell);
+    if (anchor < 0) return 'refused';
+    if (posting.mode === 'return') return this.takeBack(ctx, item, anchor);
     const stickers = this.deliveryStickers(ctx);
-    this.swingChute(true);
     const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(item.id);
+    this.swallow(item, anchor);
     // The completed id and the ledger first, then the pay, so a crash between cannot pay twice.
-    this.saveStock({ consumedItemId: item.id, completedContractId: item.id, completedContractKind: contractKindOf(item) });
+    this.save({ consumedItemId: item.id, completedContractId: item.id, completedContractKind: contractKindOf(item) });
     ctx.give(item.id);
     ctx.credit(pay);
     this.refreshLimit();
@@ -554,15 +572,15 @@ class PostMachine extends CardMachine {
   }
 
   /**
-   * RETURN TO SENDER: the tray takes `item` back with no pay, and its
+   * RETURN TO SENDER: the grid takes `item` back at `anchor` with no pay, and its
    * contract is closed — recorded in `completedContractIds` without a kind, so the ledger
    * does not count it and it no longer counts against the limit.
    */
-  private takeBack(ctx: FixtureContext, item: ContractCargoItem): FoleyEvent {
+  private takeBack(ctx: FixtureContext, item: ContractCargoItem, anchor: number): FoleyEvent {
     const contractId = contractIdOf(item);
     const open = !this.world.state.completedContractIds.includes(contractId);
-    this.swingChute(true);
-    this.saveStock(open ? { consumedItemId: item.id, completedContractId: contractId } : { consumedItemId: item.id });
+    this.swallow(item, anchor);
+    this.save(open ? { consumedItemId: item.id, completedContractId: contractId } : { consumedItemId: item.id });
     ctx.give(item.id);
     this.showHandIn(this.handInCard(ctx));
     this.refreshLimit();

@@ -37,8 +37,8 @@ const TRAFFIC_HEAR_M = 380;
 const TRAFFIC_CRASH_MIN_MPS = 1.2;
 /** One crash per hit and car: the detector reports every step of a scrape. */
 const TRAFFIC_CRASH_REPEAT_S = 0.35;
-/** How long a crash's own panner lives: the longest take plus its reverb tail. */
-const TRAFFIC_CRASH_LIFE_MS = 4000;
+/** How long a crash's own panner lives: the longest take (crash-2, 4.4 s) and a margin. */
+const TRAFFIC_CRASH_LIFE_MS = 5000;
 
 interface TrafficCandidate {
   id: string;
@@ -279,8 +279,16 @@ export class GameAudio {
   /**
    * Another car's crash, where it happened: a panner of its own for the one take, on
    * the world bus rather than the traffic bus, because a crash is no quieter for being
-   * someone else's — only further away. Air takes the top off with distance, as it
-   * does off a traffic car's engine (trafficaudio.ts).
+   * someone else's — only further away. The panner's inverse law is the spreading
+   * (-26 dB at 200 m), and air takes the top off with distance, as it does off a traffic
+   * car's engine (trafficaudio.ts).
+   *
+   * DRY, NO WORLD REVERB. `playCrash`'s send taps the take before this panner, so it
+   * reached the 2.6 s world reverb at full strength whatever the distance: at 200 m
+   * the wet return (0.15 x 0.55) stood ~4 dB OVER the direct sound (0.05), unfiltered
+   * by the air, and a crash down the road in open desert sounded like one in a hall
+   * (owner, 2026-10-26). Open ground has nothing to ring; what is left is the direct
+   * sound, quieter and duller with distance.
    */
   private trafficCrash(c: TrafficCandidate, impactMps: number): void {
     if (!this.mixer.running) return;
@@ -301,7 +309,7 @@ export class GameAudio {
     air.frequency.value = Math.max(1800, 14000 / (1 + Math.sqrt(c.d2) / 70));
     air.Q.value = 0.6;
     air.connect(panner).connect(this.mixer.world);
-    this.lastTrafficCrash = playCrash(this.mixer, air, impactMps, this.lastTrafficCrash);
+    this.lastTrafficCrash = playCrash(this.mixer, air, impactMps, this.lastTrafficCrash, 0);
     window.setTimeout(() => {
       air.disconnect();
       panner.disconnect();

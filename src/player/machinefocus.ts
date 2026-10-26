@@ -3,6 +3,7 @@ import type { FoleyEvent } from '../audio/foley';
 import type { InputFrame, InputReader } from '../core/input';
 import type { CameraRig } from '../render/cameras';
 import type { FixtureContext, FixtureField, FixtureFocus, WorldFixture } from '../world/fixturefield';
+import type { FixedGridView } from '../vehicle/trunk';
 import type { WorldOrigin } from '../world/origin';
 
 /** Seconds the camera takes to step up to a machine, and back. */
@@ -19,8 +20,10 @@ const WHEEL_NOTCH = 1;
  *  - a press on a part that takes the hand (`WorldFixture.grab`, the wheel) drags it
  *    instead, until the button is let go; the mouse wheel turns it a detent at a time;
  *  - Escape, the right button or a step away (a movement key) let go of it, and the
- *    camera eases back to the eyes; so does the machine itself once it has dropped
- *    something into its tray (`FixtureContext.stepBack`).
+ *    camera eases back to the eyes; so does the machine itself when what it did is out
+ *    in the world (`FixtureContext.stepBack`: a haul's load in its slot);
+ *  - the machine's cell grid (`WorldFixture.grid`, its opening) is drawn while it is
+ *    worked, as a boot's grid is while the boot is open (`grid`, main.ts).
  *
  * A money machine debits or pays the player's money only while it is framed (`onFramed`
  * tells player/interaction.ts which fixture is being worked).
@@ -232,6 +235,11 @@ export class MachineFocus {
   /** This tick's pick direction: the cursor's ray while working, else null (the eye's own). */
   ray(): THREE.Vector3 | null {
     return this.working ? this.rayDir : null;
+  }
+
+  /** The framed machine's cell grid while it is worked, else null. */
+  grid(): FixedGridView | null {
+    return this.working ? this.fixture?.grid?.() ?? null : null;
   }
 
   /** After the interaction tick: the cursor the part under it asks for. */

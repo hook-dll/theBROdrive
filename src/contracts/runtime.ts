@@ -137,6 +137,14 @@ export class ContractRuntime {
         if (isCargo(item)) this.visit(item, 'post', null, 0, onContractItem);
       }
     }
+    // What TAKE gave into a post machine's grid: out of the stock, its clock running.
+    for (const key of Object.keys(state.machineGrids)) {
+      const cells = state.machineGrids[key];
+      if (!cells) continue;
+      for (const item of cells) {
+        if (isCargo(item)) this.visit(item, 'machine', null, 0, onContractItem);
+      }
+    }
     // The hauls taken: the card is the contract, the load is in the world.
     for (const haul of Object.values(state.hauls)) this.visit(haul.contract, 'haul', null, 0, onContractItem);
   }

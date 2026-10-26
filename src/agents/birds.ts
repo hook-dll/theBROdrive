@@ -15,6 +15,11 @@ import type { Terrain } from '../world/terrain';
  * Placement is deterministic by arclength, exactly like POIs: a bird group lives in
  * a hash-derived road slot, so the same seed always puts the same birds in the same
  * place — including after driving away and coming back.
+ *
+ * Perched birds sit on the verge beside the asphalt, never on the road itself. A
+ * flock flushed by the player leaves for good: each bird flies off along its escape
+ * line, climbing, and is retired out of sight (`FLEE_RANGE`); it does not wheel back
+ * to its perch. The slot fills again only after the player has driven away and back.
  */
 
 // ---------------------------------------------------------------------------
@@ -47,6 +52,21 @@ const LAND_FLARE = 4;
  *  projection hint (the group's arclength) never goes stale. */
 const HOME_RADIUS = 60;
 const HOME_RADIUS_SQ = HOME_RADIUS * HOME_RADIUS;
+/**
+ * A bird the player has flushed does not come back. It holds the escape heading it
+ * took off on (with a little drift), climbs, and is retired once it is this far
+ * (horizontal metres) from its perch — at that range a bird is a few pixels against
+ * the sky. The group slot stays registered, so the spot stays empty until the player
+ * has driven `DESPAWN_RADIUS` away and the slot is rebuilt from scratch. Before this,
+ * flushed birds were reeled back by `HOME_RADIUS` and landed on the same perch, where
+ * the still-near car flushed them again: an endless take-off loop on one spot.
+ */
+const FLEE_RANGE = 120;
+const FLEE_RANGE_SQ = FLEE_RANGE * FLEE_RANGE;
+/** Climb (m/s) a fleeing bird keeps on top of its cruise altitude. */
+const FLEE_CLIMB = 1.6;
+/** Maximum drift (rad) of a fleeing bird's heading either side of its escape line. */
+const FLEE_DRIFT = 0.35;
 
 /** Alert radius grows with player speed. At road speed it provides several seconds
  *  of clearance before the car reaches the flock, even after the stagger below. */
@@ -257,6 +277,9 @@ interface Bird {
   landX: number;
   landY: number;
   landZ: number;
+  /** Flushed by the player: flies away along `fleeYaw` and is removed at `FLEE_RANGE`. */
+  fleeing: boolean;
+  fleeYaw: number;
 }
 
 interface FallingBird {
@@ -532,7 +555,11 @@ export class BirdFlock {
     // enough that continuous kinematic simulation is cheaper than hiding that stutter.
     for (let i = 0; i < this.activeCount; i++) {
       const b = this.birds[i]!;
-      this.tickBird(b, dt, px, py, pz, alertRadiusSq);
+      if (this.tickBird(b, dt, px, py, pz, alertRadiusSq)) {
+        this.removeBird(i); // swap-remove: re-visit slot i, which now holds the last bird
+        i--;
+        continue;
+      }
       const rate = CALL_RATE[b.species.name];
       if (rate) {
         const perched = b.state === 'perched' || b.state === 'alerted';
@@ -747,6 +774,8 @@ export class BirdFlock {
     b.landX = px;
     b.landY = perchY;
     b.landZ = pz;
+    b.fleeing = false;
+    b.fleeYaw = 0;
 
     const airborne = !sp.canPerch || hash01(seed, g, k, SALT_AIR) < sp.airborneBias;
     if (airborne) {
@@ -774,7 +803,8 @@ export class BirdFlock {
 
   // -- per-bird simulation ---------------------------------------------------
 
-  private tickBird(b: Bird, dt: number, px: number, py: number, pz: number, alertRadiusSq: number): void {
+  /** Advances one bird; returns true when a fleeing bird has left and must be removed. */
+  private tickBird(b: Bird, dt: number, px: number, py: number, pz: number, alertRadiusSq: number): boolean {
     const sp = b.species;
     b.motionTime += dt;
     let flapActivity = 1.0;
@@ -823,7 +853,11 @@ export class BirdFlock {
         }
         b.flightBudget -= dt;
         this.fly(b, dt);
-        if (b.flightBudget <= 0 && sp.canPerch) {
+        if (b.fleeing) {
+          const fx = b.x - b.perchX;
+          const fz = b.z - b.perchZ;
+          if (fx * fx + fz * fz > FLEE_RANGE_SQ) return true;
+        } else if (b.flightBudget <= 0 && sp.canPerch) {
           b.state = 'landing';
           b.landX = b.perchX;
           b.landY = b.perchY;
@@ -842,6 +876,7 @@ export class BirdFlock {
     if (b.phase > Math.PI * 2) b.phase %= Math.PI * 2;
     const blend = Math.min(1, dt * 6);
     b.flapScale += (flapTarget - b.flapScale) * blend;
+    return false;
   }
 
   private beginTakeoff(b: Bird, px: number, pz: number): void {
@@ -871,6 +906,8 @@ export class BirdFlock {
     const fz = -ax * sf + az * cf;
     b.yaw = Math.atan2(fx, fz);
     b.targetYaw = b.yaw;
+    b.fleeing = true;
+    b.fleeYaw = b.yaw;
     b.vx = fx * b.species.cruiseSpeed;
     b.vz = fz * b.species.cruiseSpeed;
     b.vy = b.species.climbRate;
@@ -878,7 +915,16 @@ export class BirdFlock {
   }
 
   private steer(b: Bird, dt: number): void {
-    if (b.species.behavior === 'circle') {
+    if (b.fleeing) {
+      // Escape line with a slow, bounded drift; no home pull, so it never turns back.
+      b.wanderTimer -= dt;
+      if (b.wanderTimer <= 0) {
+        b.wanderCount++;
+        b.targetYaw =
+          b.fleeYaw + (hash01(this.seed, b.group, b.wanderCount, b.wanderSalt) - 0.5) * 2 * FLEE_DRIFT;
+        b.wanderTimer = 2 + hash01(this.seed, b.group, b.wanderCount, 0x0a) * 2;
+      }
+    } else if (b.species.behavior === 'circle') {
       b.circleAngle += b.circleDir * (b.species.cruiseSpeed / b.circleRadius) * dt;
       const tx = b.circleX + Math.cos(b.circleAngle) * b.circleRadius;
       const tz = b.circleZ + Math.sin(b.circleAngle) * b.circleRadius;
@@ -921,7 +967,9 @@ export class BirdFlock {
     // relative-to-relative and stays frame-consistent.
     const ground = this.terrain.heightAt(b.x + this.origin.x, b.z + this.origin.z, b.sHint);
     const targetY = ground + sp.cruiseAlt;
-    b.vy = clamp((targetY - b.y) * 1.5, -sp.cruiseSpeed * 0.6, sp.cruiseSpeed * 0.6);
+    b.vy = b.fleeing
+      ? Math.max(FLEE_CLIMB, clamp((targetY - b.y) * 1.5, -sp.cruiseSpeed * 0.6, sp.cruiseSpeed * 0.6))
+      : clamp((targetY - b.y) * 1.5, -sp.cruiseSpeed * 0.6, sp.cruiseSpeed * 0.6);
 
     const pitchTarget = clamp(b.vy * 0.12, -0.5, 0.5);
     b.pitch += (pitchTarget - b.pitch) * Math.min(1, dt * 3);
@@ -1167,5 +1215,6 @@ function makeEmptyBird(): Bird {
     targetYaw: 0, wanderTimer: 0, wanderCount: 0, wanderSalt: 0,
     circleX: 0, circleZ: 0, circleRadius: 0, circleAngle: 0, circleDir: 1,
     landX: 0, landY: 0, landZ: 0,
+    fleeing: false, fleeYaw: 0,
   };
 }

@@ -110,6 +110,8 @@ const GRAVEL_GAIN = 0.22;
 const GRAVEL_HIGHPASS_HZ = 650;
 const GRAVEL_WIDTH = 0.12;
 const CRASH_GAIN = 6;
+/** The driven car's own crash into the world reverb: a little of the open country around it. */
+const CRASH_REVERB_SEND = 0.15;
 /**
  * The lever is between the seats, an arm's length from the driver: close and dry.
  * Metered on the car bus with the engine off: 1.4 peaked at -1.3 dBFS and -19 LUFS,
@@ -969,7 +971,7 @@ export class VehicleAudio {
   }
 
   private crash(severityMps: number): void {
-    this.lastCrash = playCrash(this.mixer, this.impacts, severityMps, this.lastCrash);
+    this.lastCrash = playCrash(this.mixer, this.impacts, severityMps, this.lastCrash, CRASH_REVERB_SEND);
   }
 
   /** Lever through the gate, then the driveline taking up the slack. */
@@ -1006,14 +1008,20 @@ export class VehicleAudio {
  * it is hit: the body takes a low blow, the panel crumples (a spray of short mid-band
  * crunches, not one), and the undamaged metal around it rings at inharmonic plate
  * modes. A hard enough hit breaks glass. The driven car voices its own through its
- * body panner; a traffic car through its own (trafficaudio.ts). Returns the take
+ * body panner; a traffic car through its own (gameaudio.ts). Returns the take
  * played, so the next crash of the same car picks a different one.
+ *
+ * `reverbSend` feeds the world reverb straight from the take's level, BEFORE whatever
+ * `destination` does to it: a send cannot know the distance a panner downstream will
+ * take off. So it is only right for a crash at arm's length (`CRASH_REVERB_SEND`, the
+ * driven car); a distant one passes 0 and stays dry. See `GameAudio.trafficCrash`.
  */
 export function playCrash(
   mixer: AudioMixer,
   destination: AudioNode,
   severityMps: number,
   lastTake: SampleName | null,
+  reverbSend: number,
 ): SampleName {
   const s = clamp01(severityMps / 8);
   const gain = IMPACT_GAIN * (0.25 + 0.75 * s);
@@ -1036,7 +1044,7 @@ export function playCrash(
     rate: 1.08 - 0.12 * s,
     spread: 0.04,
     lowpass: 2500 + 14000 * s,
-    send: 0.15,
+    send: reverbSend,
   });
   return take;
 }

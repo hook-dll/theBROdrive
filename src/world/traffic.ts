@@ -18,6 +18,7 @@ import {
   LAYBY_PASS_CLEARANCE_M,
 } from '../vehicle/autopilot';
 import type { TrafficField, TrafficNeighbour } from '../vehicle/trafficfield';
+import { isPass } from '../vehicle/manoeuvre';
 import { TRAFFIC_CAPS, type Settings } from '../game/settings';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import { variantsOfKind, variant, type BodyClass } from '../parts/registry';
@@ -219,6 +220,12 @@ const SPAWN_BODY_ACROSS_M = 2.6;
  * the road width, so this is deliberately a crown test rather than an offset test.
  */
 const CROWN_CROSSING_INTRUSION_M = TRAFFIC_HALF_WIDTH_M * 0.5;
+/**
+ * How far a body's flank may reach over the crown, metres, before the car is reaching
+ * into the other lane (`outOverCrown`): a racing line hugging the paint is not, a
+ * frantic car tailgating with its centre a few decimetres past the crown is.
+ */
+const CROWN_BODY_INTRUSION_M = 0.15;
 const DENSE_SPAWN_INTERVAL_S = 0.5;
 /**
  * A target above this many cars is a busy road: it spawns faster and packs its lanes to
@@ -1418,6 +1425,17 @@ export class RoadTraffic {
    * lane that holds one. Nothing inside either car can price that either: from behind,
    * the passer is simply traffic that has left the lane. The leader is the one who
    * committed first, so the follower waits, which is also what a driver does.
+   *
+   * WHO IS OUT IS READ OFF THE MANOEUVRE, NOT OFF `activity === 'pass'`. That label
+   * is the plan's, and only for the opposing lane or the middle: a frantic car on the
+   * verge reads `avoid`, one committed to a crossing still reads `follow` until its
+   * plan is over the paint, and one straddling the crown with its centre short of
+   * `CROWN_CROSSING_INTRUSION_M` read as nothing at all. Standing by the road, the
+   * stream's contacts were two frantic cars of one queue out on the verge together and
+   * a straddler met head-on by a car whose own pass the rule had not withheld
+   * (2026-10-26). So the opposing half excludes on `outOverCrown`, and the half behind
+   * on any pass or lateral commitment: the follower waits its turn whichever way its
+   * leader went.
    */
   private assignPassPermissions(): void {
     // THE PLAYER COUNTS, AND HE DID NOT USED TO.
@@ -1450,10 +1468,13 @@ export class RoadTraffic {
         this.carList.some(
           (other) =>
             other !== car &&
-            (other.autopilot.activity === 'pass' || this.isAcrossCrown(other)) &&
             (other.direction !== car.direction
-              ? Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M
-              : (other.forwardS - car.forwardS) * car.direction > 0 &&
+              ? this.outOverCrown(other) &&
+                Math.abs(other.forwardS - car.forwardS) < OPPOSING_PASS_EXCLUSION_M
+              : (this.outOverCrown(other) ||
+                  isPass(other.autopilot.manoeuvre) ||
+                  other.autopilot.lateralCommitment !== null) &&
+                (other.forwardS - car.forwardS) * car.direction > 0 &&
                 (other.forwardS - car.forwardS) * car.direction < LEADER_PASS_EXCLUSION_M),
         );
       car.autopilot.setPassingEnabled(!blocked);
@@ -2294,6 +2315,26 @@ export class RoadTraffic {
   /** The sign corrected into a driver's frame makes this a literal crown crossing. */
   private isAcrossCrown(car: TrafficCar): boolean {
     return car.roadLateral * car.direction > CROWN_CROSSING_INTRUSION_M;
+  }
+
+  /**
+   * Out in, or reaching into, the other direction's lane: across the crown, the body's
+   * flank over it by `CROWN_BODY_INTRUSION_M` (a straddle), or committed to a crossing
+   * or the middle. What the opposing half of `assignPassPermissions` excludes on.
+   */
+  private outOverCrown(car: TrafficCar): boolean {
+    const autopilot = car.autopilot;
+    const commitment = autopilot.lateralCommitment;
+    const manoeuvre = autopilot.manoeuvre;
+    return (
+      this.isAcrossCrown(car) ||
+      car.roadLateral * car.direction + car.roadHalfWidth > CROWN_BODY_INTRUSION_M ||
+      autopilot.activity === 'pass' ||
+      commitment === 'crossing' ||
+      commitment === 'middle' ||
+      manoeuvre === 'pass-oncoming' ||
+      manoeuvre === 'pass-middle'
+    );
   }
 
   /** Makes the on-foot player visible to traffic without allocating a synthetic body. */

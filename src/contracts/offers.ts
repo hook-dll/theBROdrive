@@ -50,7 +50,7 @@ const URGENT_SHARE = 0.25;
 /**
  * The urgent clock: the road distance to the destination at `URGENT_KMH`, a brisk but
  * fair average with the stops and the bends in it, plus `URGENT_SLACK_S` for loading and
- * the walk to the tray, rounded up to ten seconds. A 3 km hop is 6:00.
+ * the walk to the machine, rounded up to ten seconds. A 3 km hop is 6:00.
  */
 const URGENT_KMH = 45;
 const URGENT_SLACK_S = 120;
@@ -220,7 +220,7 @@ export interface PostStock {
   readonly offers: readonly ContractCargoItem[];
   /**
    * Things a save from the courier days left in the courier's boot (an envelope, a
-   * stashed part): the machine gives them back through its tray.
+   * stashed part): the machine puts them into its grid (world/post.ts).
    */
   readonly strays: readonly Item[];
 }

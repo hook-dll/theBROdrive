@@ -41,8 +41,13 @@ import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpa
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
 
-/** A post's saved stock (contracts/offers.ts `postStock`): fixed, no car's boot. */
-const POST_STOCK_CELL_COUNT = 8;
+/**
+ * A post's saved stock (contracts/offers.ts `postStock`): its four slots' offers, then
+ * what a courier-era boot of eight cells left that the post's grid has had no room for.
+ */
+const POST_STOCK_CELL_COUNT = 12;
+/** A card machine's grid (world/cardmachine.ts `MACHINE_GRID`, 4 x 2). */
+const MACHINE_GRID_CELL_COUNT = 8;
 
 /**
  * Save files, as both IndexedDB records and shareable text codes.
@@ -173,6 +178,8 @@ export function installVehicleAutosave(
       case 'inventory':
       // A purchase (world/vending.ts, world/keybox.ts): the money and what it bought.
       case 'vend_sold':
+      // Something given into a card machine's grid or taken out (world/cardmachine.ts).
+      case 'machine_grid':
       case 'lot_pay':
       case 'car_buy':
       // A car into or out of the toy box (world/toybox.ts).
@@ -578,8 +585,16 @@ export function migrateState(raw: unknown): WorldState {
   const courierStorage: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(courierStorageRaw)) {
     // A post's stock (contracts/offers.ts `postStock`); a courier-era boot of eight
-    // cells reads the same way, its leftovers handed back through the post's tray.
+    // cells reads the same way, its leftovers put into the post's grid.
     courierStorage[id] = migrateStorage(value, POST_STOCK_CELL_COUNT, `post "${id}" stock`);
+  }
+
+  // What lies in a card machine's grid; the machine drops what does not fit its anchor
+  // (world/cardmachine.ts), as a boot does (`normalizeBoot`).
+  const machineGrids: Record<string, (Item | null)[]> = {};
+  for (const [id, value] of Object.entries(recordField(obj.machineGrids, 'machineGrids'))) {
+    const cells = migrateStorage(value, MACHINE_GRID_CELL_COUNT, `machine "${id}" grid`);
+    if (cells.some((item) => item !== null)) machineGrids[id] = cells;
   }
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
@@ -632,6 +647,7 @@ export function migrateState(raw: unknown): WorldState {
     looseItems,
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
+    machineGrids,
   };
 }
 

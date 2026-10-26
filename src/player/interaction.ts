@@ -731,10 +731,6 @@ export class Interaction {
       debit: (rubles: number) => self.focusedFixture !== null && debit(self.world, rubles),
       credit: (rubles: number) => credit(self.world, rubles),
       give: (itemId: string) => self.inventory.remove(itemId),
-      drop: (item: Item, x: number, y: number, z: number) => {
-        if (item.type === 'part') self.loose.spawn(item.part, x, y, z);
-        else self.loose.spawnItem(item, x, y, z);
-      },
       stepBack: () => self.hooks.stepBack(),
       probe: (postIndex: number, x: number, z: number) => {
         const probe = self.deliveryProbeValue;

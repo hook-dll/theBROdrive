@@ -679,7 +679,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   /**
    * `thing(id, urgent?, raceLegs?)`: a contract for catalogue thing `id` (items/things.ts,
    * e.g. 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound
-   * for the next, dropped in front of him as the post machine's tray would release it. A
+   * for the next, dropped loose in front of him (the post machine itself gives into its grid). A
    * haul is taken there and then: its load stood in that post's pick-up slot, the first
    * of its parking row (whatever stands there already), and bound to it, as TAKE does
    * (contracts/world.ts). `urgent` gives it the urgent clock; `raceLegs` (1 or 2) makes

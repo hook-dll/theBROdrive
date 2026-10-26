@@ -25,7 +25,7 @@ export const ACTIVE_HAUL_LIMIT = 1;
  * A contract item whose contract is closed: broken (`isBrokenThing`), or its contract
  * (`contractIdOf`) already completed or returned (`completedContractIds`). It is only a
  * souvenir: no post pays for it, it is not counted against the limit, and any post's
- * tray takes it to be rid of it.
+ * grid takes it to be rid of it.
  */
 export function isContractClosed(item: ContractCargoItem, completedIds: readonly string[]): boolean {
   return isBrokenThing(item) || completedIds.includes(contractIdOf(item));
@@ -33,8 +33,9 @@ export function isContractClosed(item: ContractCargoItem, completedIds: readonly
 
 /**
  * THE definition of an active contract (game-design2.md §7.4): a thing's contract item out
- * of a post's stock — in the hands or the pack, in any car's boot or cabin, or lying
- * loose — that is not closed (`isContractClosed`), and every haul taken and not yet
+ * of a post's stock — in the hands or the pack, in any car's boot or cabin, lying loose,
+ * or given into a post machine's grid and not taken out yet — that is not closed
+ * (`isContractClosed`), and every haul taken and not yet
  * handed in or returned (`WorldState.hauls`: a haul has no item, its load is the
  * contract). A teddy party is one contract however many of its teddies are out. Returns
  * the active contracts' ids (`contractIdOf`), all of them and the hauls among them: their
@@ -53,6 +54,7 @@ export function activeContracts(state: WorldState): { all: Set<string>; hauls: S
     car.cabin.forEach(consider);
   }
   for (const loose of Object.values(state.looseItems)) consider(loose.item);
+  for (const grid of Object.values(state.machineGrids)) grid.forEach(consider);
   for (const id of Object.keys(state.hauls)) {
     all.add(id);
     hauls.add(id);
@@ -112,10 +114,10 @@ export function contractKindRefusal(item: ContractCargoItem, probe: DeliveryProb
 }
 
 /**
- * Why this post's tray may not sign for the thing as a delivery, or null. A broken
+ * Why this post's grid may not sign for the thing as a delivery, or null. A broken
  * thing's contract is closed and no post signs for it; otherwise the destination rule
  * (`contractDestinationRefusal`) and the kind's own. A thing it will not sign for any
- * tray takes back as a return to sender, with no pay.
+ * post takes back as a return to sender, with no pay.
  *
  * `probe` is the world at the accepting post, built by the post machine and
  * handed to the prompt and the commit alike.

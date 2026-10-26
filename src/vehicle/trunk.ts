@@ -176,6 +176,47 @@ export interface TrunkViewState {
 }
 
 /**
+ * What a drawn grid is laid out by, in its root's frame (render/trunkview.ts): a car's
+ * compartment (`storageLayout`), or a grid of its own standing still in the world — a
+ * card machine's opening (world/cardmachine.ts `MACHINE_GRID_LAYOUT`).
+ */
+export interface GridLayout {
+  readonly count: number;
+  /**
+   * The grid a thing takes cells of by its footprint (`bootOwner`), its cells upright
+   * and facing -Z; null for a bonnet's cells, one part each, lying flat in their rooms.
+   */
+  readonly grid: TrunkGrid | null;
+  /** Writes one cell's box centre and full size without allocating; false when there is no such cell. */
+  cellBox(cell: number, centre: THREE.Vector3, size: THREE.Vector3): boolean;
+}
+
+/** A car's compartment as a `GridLayout`, chassis-local. Allocates: build it once per shape. */
+export function storageLayout(shape: StorageGridShape, side: StorageSide): GridLayout {
+  return {
+    count: storageCellCount(shape, side),
+    grid: side === 'trunk' ? shape.trunkGrid : null,
+    cellBox: (cell, centre, size) => storageCellBox(cell, shape, side, centre, size),
+  };
+}
+
+/**
+ * A grid standing still in the world, handed to the renderer while it is worked: a card
+ * machine's opening (world/cardmachine.ts), the boot's twin.
+ */
+export interface FixedGridView {
+  readonly layout: GridLayout;
+  /** What lies in it, by anchor cell (`bootOwner`). */
+  readonly cells: readonly (Item | null)[];
+  readonly selectedCell: number | null;
+  /** ABSOLUTE metres of the layout's origin, and the yaw its -Z front is turned by. */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/**
  * A kit body's lids over each compartment, by rig channel (carkit/kit.ts `shellMotion`):
  * the bonnet, and the boot lid or tailgate behind (either leaf of a split one), whichever
  * the body has. A compartment's grid is reached only with one of its lids open.

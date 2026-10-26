@@ -1135,6 +1135,14 @@ const MIDDLE_PASS_MIN_SHIFT_M = 0.3;
  * A line whose body reaches over the crown is allowed only clear of every car coming
  * the other way that it could meet within this many seconds, by `STRADDLE_GAP_M` of
  * air between the two real flanks. See `straddleAllowed` in the corridor.
+ *
+ * THE WINDOW IS SECONDS, SO THE SCAN IS NOT THE CORRIDOR'S HORIZON. It used to read the
+ * field only out to that horizon, 60-70 m at 65 km/h, while two cars meeting at that
+ * pace close 45 m a second between them: a frantic car tailgating with its body half
+ * over the crown kept the line until the oncoming car was 68 m and 1.5 s off rather than
+ * 4 s, and was met in the other driver's lane (seed 42, standing by the road,
+ * 2026-10-26). The scan now reaches as far as the oncoming one (`ONCOMING_FIELD_LOOK_M`);
+ * `visitStraddle` keeps what the seconds allow.
  */
 const STRADDLE_LOOK_S = 4;
 const STRADDLE_LOOK_MIN_M = 30;
@@ -4463,7 +4471,7 @@ export class Autopilot {
     this.straddleSpeed = speed;
     this.straddleOwnHalf = vehicle.modelMeasure.halfExtents[0];
     this.straddleSide = Math.sign(ownLaneOffset) || -1;
-    this.trafficField?.forEachNear(horizon, 0, this.visitStraddle);
+    this.trafficField?.forEachNear(Math.max(horizon, ONCOMING_FIELD_LOOK_M), 0, this.visitStraddle);
     // CAUGHT ON THE WRONG SIDE BY SOMETHING COMING, THE WAY HOME IS TAKEN. The rear-entry
     // rule refuses a line that would make a follower brake harder than a stranger may be
     // asked to, and a car out over the crown with a car coming at it in that lane is the
@@ -4471,8 +4479,17 @@ export class Autopilot {
     // car held a line 0.7 m past the crown for two seconds, on the 1.4 s reflex brake
     // alone, and met the car coming the other way at 21 m/s.) The abeam veto still holds
     // — that is a car beside us, not behind — and the drop-back below opens it.
+    //
+    // OUT THERE IS THE BODY, NOT THE CENTRE. The test used to be the crossing's own (the
+    // centre half a padded width past the crown), which a straddle never meets: a frantic
+    // car tailgating on a line 0.25-0.5 m past the crown has a metre of body in the other
+    // lane and its centre short of that mark. Its straddle withdrawn by a car coming, its
+    // way home refused by the follower that had closed up behind, it held the only lines
+    // left — abandoned ones, over the crown — and was hit head-on at 26 km/h by a car
+    // braking in its own lane (seed 42, standing by the road, 2026-10-26).
     const escapeHome =
-      headOn && projection.lateral * Math.sign(ownLaneOffset || -1) < -CAR_HALF_WIDTH_M * 0.5;
+      headOn &&
+      projection.lateral * Math.sign(ownLaneOffset || -1) < vehicle.modelMeasure.halfExtents[0];
     const corridorRequest = {
       ownLateral: projection.lateral,
       previousLine: this.planLine,

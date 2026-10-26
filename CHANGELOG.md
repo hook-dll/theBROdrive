@@ -4,6 +4,38 @@
 
 ### Changed
 
+- THE CARD MACHINES ARE ARCADE CABINETS, AND GIVE AND TAKE THROUGH A GRID LIKE THE BOOT'S
+  (`world/cardmachine.ts`, `world/post.ts`, `world/vending.ts`, `render/trunkview.ts`,
+  `vehicle/trunk.ts`, `player/machinefocus.ts`, `game/state.ts`, `save/save.ts`,
+  `contracts/registry.ts`, `contracts/runtime.ts`, `world/devlook.ts`, `ui/menu.ts`,
+  `main.ts`, `world/settlement.ts`). The owner picked the arcade design, and wanted it
+  leaner and the hand-off to work as the boot does (2026-10-26). The `soda` and `safe`
+  designs, `devLook.machine` and the dev menu's "Machine style" button are gone; the
+  toy box's stand switch stays. Gone from the front too: the two red lamps of the coin
+  door beside the window, the title board (POST / SHOP), the post's POST OFFICE plate
+  with the place name, and the tray, chute flap and trough with their colliders and
+  painted label. The marquee stays as a plain hood with the cheeks' three art stripes
+  across its face over the lit strip and the bulbs, so the top still reads as an arcade
+  cabinet without text. Low on the front is a dark flat plate in a dark metal frame: the
+  dispenser's opening. Over it lies a GRID of 4 x 2 cells (0.29 x 0.26 m each), drawn
+  while the machine is framed by a second `TrunkView` (`updateFixed`: the same panels,
+  borders, selection and item poses as a boot, at a fixed world pose) and picked by the
+  machine's own `aim`. A thing takes its boot footprint's cells (`vehicle/trunk.ts`
+  occupancy; the carpet, which no boot takes, one cell), so the TV set and the aquarium
+  take 2 x 2 and the fishing rods and the sledge a whole row. TAKE and BUY lay what they
+  give in the grid; a click on it takes it whole into the hands or the pack ("hands full"
+  when they are); with no room for it, the button refuses and says so, and BUY takes no
+  money first. A post's cargo is handed in with a click on a free cell, its footprint
+  fitted round the cell as in a boot (or the toast says why not); it lies there 0.6 s
+  while the machine draws it in, and pays or goes back as a return as before. Things
+  that are not the post's own cargo stay in the hand. What lies in a grid is saved in the
+  new `WorldState.machineGrids` by fixture id (`machine_grid` delta, autosaved): a thing
+  given there is out of the post's stock (`courierStorage`, kept for the offers), counts
+  as an active contract and runs its urgent clock (`ContractPlace` `machine`). Things an
+  old save left in a courier's boot are put into the grid, the rest kept after the offers
+  in the stock until there is room. `FixtureContext.drop` is gone. The post and the shop
+  keep 0.7 x 0.8 m clear (was 0.75 x 0.9): the pod reaches 0.77 m from the middle now
+  the 0.38 m trough is gone.
 - THE TOY BOX IS A STAND WITH A TURNTABLE, AND CARS ARE SWAPPED ONLY IN ITS MARKED BAY
   (`world/toybox.ts`, `world/toystand.ts`, `ui/diecastshop.ts`, `world/settlement.ts`,
   `app/devtools.ts`, `tools/toybox-check.ts`). The owner wanted "a nice pedestal where
@@ -466,6 +498,26 @@
 
 ### Fixed
 
+- Traffic crashed into itself on an open road (owner, standing by the road at night,
+  2026-10-26). Headless, a stationary player for ten minutes on eight seeds: 15 traffic
+  impacts over 1.2 m/s (the crash sound's threshold) in 27 car-car contacts, among them
+  a 37 m/s head-on; after, 2 impacts (one rear-end at 3.9 m/s) in 8 contacts. Three
+  causes. The coordinator's one-pass-at-a-time rule (`world/traffic.ts`
+  `assignPassPermissions`) only saw cars whose plan read `activity === 'pass'`, so a
+  frantic car on the verge, one committed to a crossing that had not yet reached the
+  paint, and one straddling the crown were invisible: queues sent two verge passers out
+  together and oncoming racers out into a straddler. It now reads the manoeuvre and the
+  body (`outOverCrown`, `CROWN_BODY_INTRUSION_M`). The straddle gate
+  (`vehicle/autopilot.ts` `visitStraddle`) scanned only the corridor horizon, 60-70 m
+  at 65 km/h, for a 4 s window; it now scans `ONCOMING_FIELD_LOOK_M`. And the escape
+  home past the follower behind (`escapeHome`) needed the centre half a car past the
+  crown, which a straddle never reaches; it now needs the body's flank over it.
+- A traffic crash far down the road sounded like one in a hall (owner, 2026-10-26):
+  `playCrash` sent the take into the 2.6 s world reverb before the crash's own panner
+  took the distance off, so at 200 m the wet return stood ~4 dB over the direct sound
+  and unfiltered by the air. The send is now the caller's (`playCrash(..., reverbSend)`):
+  the driven car keeps its 0.15, another car's crash is dry, only quieter and duller
+  with distance (`audio/gameaudio.ts` `trafficCrash`).
 - A coupled rig (two cars on a tow bar, or a car with a trailer on its ball) was held
   live at any distance from the player, so one left more than a kilometre behind stood
   on bodies whose ground streamed out from under it: a UAZ-469 towing a GAZ-24, resumed

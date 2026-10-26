@@ -38,10 +38,12 @@ export const CONTRACT_KIND_IDS: Record<ContractKind, true> = {
 };
 
 /**
- * Where a contract is now: `post` is an offer still in a post's stock, `haul` a haul taken
- * and not yet handed in (`WorldState.hauls`), the rest where a thing's item lies.
+ * Where a contract is now: `post` is an offer still in a post's stock, `machine` a thing
+ * TAKE gave into the post machine's grid and the player has not taken out yet
+ * (`WorldState.machineGrids`), `haul` a haul taken and not yet handed in
+ * (`WorldState.hauls`), the rest where a thing's item lies.
  */
-export type ContractPlace = 'post' | 'hand' | 'car' | 'loose' | 'haul';
+export type ContractPlace = 'post' | 'machine' | 'hand' | 'car' | 'loose' | 'haul';
 
 /** What a contract remembers, saved on the item. */
 export interface ContractProgress {
@@ -142,7 +144,7 @@ export interface ContractKindDef {
   readonly kind: ContractKind;
   /**
    * The kind's own reason the contract may not be handed in now, or null. A thing's is
-   * asked at the post's tray after the base rule (a post never signs for cargo from
+   * asked at the post's grid after the base rule (a post never signs for cargo from
    * itself or further down the road); a haul's when its load stands right in a bay
    * (contracts/haulbays.ts), before the bay decides delivery or return.
    */

@@ -2,11 +2,23 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { SurfaceType } from '../core/surfaces';
-import type { Item } from '../items/items';
+import type { GameWorld } from '../game/state';
+import { contractThing, itemLabel, type Item } from '../items/items';
+import type { BootFootprint } from '../items/things';
+import {
+  bootAnchorAt,
+  bootFits,
+  bootFootprint,
+  bootFreeAnchor,
+  bootOwner,
+  trunkCellCount,
+  type FixedGridView,
+  type GridLayout,
+  type TrunkGrid,
+} from '../vehicle/trunk';
 import type { ChunkContext } from './chunks';
-import { devLook, type MachineStyle } from './devlook';
 import { rayBox, type FixtureContext, type FixtureFocus, type WorldFixture } from './fixturefield';
-import { paintSign, registerAtlasSign, SIGN_PLANE, signMesh } from './market';
+import { paintSign, registerAtlasSign, signMesh } from './market';
 import { fillGameText } from '../ui/balls';
 import { box, C, cylinder, mergeKitStatics, type V3 } from './poi/kit';
 import { addStatic, yawRotation } from './props/scatter';
@@ -17,38 +29,35 @@ import { addStatic, yawRotation } from './props/scatter';
  *
  * F on it frames it in the camera and frees the cursor; from then on nothing is written
  * on the screen, the machine itself is the text. Then:
- *  - the WHEEL on the front, right of the card window as the viewer stands, is dragged
- *    round about its axle (local Z, facing him), without end and without a stop. Every
- *    detent is one card (a spoke's step on the handwheels, a tick pair on the dial):
- *    the card window is a split flap, so the top half of the card showing falls toward
- *    the viewer and the next card is there under it. Turned back, the cards come round
- *    the other way. The mouse wheel turns it a detent at a time too, and a click on the
- *    wheel is one card on.
- *  - the BUTTON under the wheel takes what the card offers (the post's TAKE, the shop's
- *    BUY): it drops out of the chute into the TRAY, and the machine lets go of the
- *    player (`stepBack`) so he sees it lying there and picks it up. Nothing a machine
- *    gives goes to the hand.
- *  - the TRAY is the machine's one opening: what it gives lies in it, and what it takes
- *    (a post's cargo) is put into it.
+ *  - the DIAL on the control pod's deck, right of the card window as the viewer stands,
+ *    is dragged round about its axle (square to the deck, facing him), without end and
+ *    without a stop. Every long tick, 45°, is one card: the card window is a split flap,
+ *    so the top half of the card showing falls toward the viewer and the next card is
+ *    there under it. Turned back, the cards come round the other way. The mouse wheel
+ *    turns it a detent at a time too, and a click on the dial is one card on.
+ *  - the BUTTON beside the dial on the deck takes what the card offers (the post's TAKE,
+ *    the shop's BUY): it appears in the GRID.
+ *  - the GRID is the machine's one opening, the boot's twin (vehicle/trunk.ts, drawn by
+ *    render/trunkview.ts while the machine is framed, `grid`): `MACHINE_GRID` cells over
+ *    a dark plate low on the front, each thing taking its boot footprint's cells
+ *    (`machineFootprint`). What the machine gives lies there; a click on it takes it into
+ *    the hands or the pack, as from a boot ("hands full" when they are). What it takes
+ *    in (a post's cargo) is put in with a click on a free cell, where its footprint fits
+ *    round it, as into a boot, and lies there a moment while the machine draws it in.
+ *    With no room for what it would give, the button refuses and says so. What lies in
+ *    the grid is saved (`WorldState.machineGrids`, by the fixture's id).
  *  - MONEY: what it sells is debited straight from the player's money; short, the
  *    button rattles and gives nothing.
  *
- * The cabinet is one of three trial designs the owner picks between (world/devlook.ts
- * `devLook.machine`, 2026-10-26), all on the same front layout and the same mechanics:
- *  - `soda`: a Soviet soda fountain (АГВ): an enamelled cabinet with chamfered edges in
- *    the look's colour, chrome mouldings, a visor over the title, a coin plate, and a
- *    chrome ship's wheel of six spokes with black knobs. A card per spoke, 60°.
- *  - `arcade`: an arcade cabinet: black cheeks with art stripes, a marquee overhanging
- *    the top with its title lit and a row of bulbs, the window in a black bezel, and a
- *    control pod under the wheel's side whose sloped deck carries a knurled dial with
- *    a finger knob and tick marks, and the button. A card per long tick, 45°.
- *  - `safe`: a riveted post-office safe: the steel door framed in rivet rows and hung on
- *    two hinges, brass trim, a brass title plate, a keyhole, and a safe's handwheel of
- *    four spoke handles over a numbered dial ring. A card per quarter turn.
+ * The cabinet is an arcade cabinet, the owner's pick of three trial designs (2026-10-26):
+ * black cheeks with art stripes and a T-moulding, a hood overhanging the top with the
+ * stripes across its face, a lit strip and a row of bulbs under it, the window in a black
+ * bezel, and a control pod standing out under the wheel's side whose sloped deck carries
+ * a knurled dial with a finger post over tick marks, and the button. No title board, no
+ * coin door: the kind's colour, the button's name and the cards say what it is.
  *
  * The cards are painted on two canvases in turn, so a machine owns two sign-shaped
- * materials (the program `marketProgramAnchor` links at boot) and repaints them in place;
- * the safe's dial ring is one more of that shape, painted once and shared by every safe.
+ * materials (the program `marketProgramAnchor` links at boot) and repaints them in place.
  * Everything else is POI kit boxes and cylinders in the flat palette. Local metres: base
  * centre at the origin, front facing -Z, so the viewer's left is local +X.
  */
@@ -71,26 +80,9 @@ const CARD_Z = FRONT - 0.02;
 const CARD_PX_W = 660;
 const CARD_PX_H = 460;
 
-/** The wheel's column, right of the window as the viewer stands: the wheel at hand height, the button under it. */
-const WHEEL_X = -0.41;
-const WHEEL_Y = 1.24;
-const BUTTON_Y = 0.9;
 /** A plate or showcase under the window, on the flat front. */
 export const PANEL_X = CARD_X;
 export const PANEL_Y = 1.0;
-
-/** The trough standing out of the front at the bottom, and the chute mouth above it. */
-const TRAY_W = 0.9;
-const TRAY_D = 0.38;
-const TRAY_FLOOR = 0.4;
-const TRAY_WALL = 0.18;
-const TRAY_Z = FRONT - TRAY_D / 2;
-const MOUTH_W = TRAY_W - 0.1;
-const MOUTH_H = 0.3;
-const MOUTH_Y = TRAY_FLOOR + 0.04 + MOUTH_H / 2;
-
-/** The tray's painted label, over the chute mouth and under the panel. */
-const TRAY_LABEL_Y = 0.8;
 
 /** The button cap's face at rest, out from the face it stands on. */
 const BUTTON_REST = -0.03;
@@ -98,24 +90,32 @@ const BUTTON_REST = -0.03;
 /** Timelines, seconds. */
 const FLIP_S = 0.26;
 const BUTTON_S = 0.3;
-const CHUTE_S = 0.6;
 const REFUSE_S = 0.4;
+/** How long a thing put into the grid lies there before the machine has drawn it in. */
+const SWALLOW_S = 0.6;
 
-/** The camera's place to work the machine, local metres: in front, a little to the wheel's side and above. */
+/**
+ * The camera's place to work the machine, local metres: in front, a little to the
+ * dial's side and above; the grid low in the frame.
+ */
 const FOCUS_EYE: readonly [number, number, number] = [-0.3, 1.8, FRONT - 2.2];
 const FOCUS_LOOK: readonly [number, number, number] = [-0.06, 1.18, FRONT];
 const FOCUS_FOV = 50;
 
-/** Finishes the designs share. */
 const CHROME = 0xd3d7d6;
-const BRASS = 0xb8913f;
-const BRASS_DARK = 0x7d6128;
-const BAKELITE = 0x1c1a18;
-const STEEL = 0x434847;
 const CABINET_BLACK = 0x18191c;
 const GLASS_DARK = 0x111314;
+/** The art stripes, bottom up: gold, orange, red. */
+const STRIPES = [0xd9a52b, 0xd2622a, 0xb03a2e] as const;
+const MOULDING = STRIPES[0];
 
-/** The arcade's control pod: across the wheel's column, its sloped deck rising back to the front. */
+/** The cheeks' thickness, each side of the body. */
+const CHEEK = 0.04;
+/** The hood over the top: its height, and how far it overhangs the front. */
+const HOOD_H = 0.3;
+const HOOD_OVER = 0.12;
+
+/** The control pod: across the dial's side, its sloped deck rising back to the front. */
 const POD_X = -0.38;
 const POD_HALF_W = 0.26;
 const POD_D = 0.24;
@@ -130,86 +130,69 @@ const DECK_Z = FRONT - POD_D / 2;
 /** Lean of what stands on the deck: its face's normal is up the slope's perpendicular. */
 const DECK_TILT = Math.PI / 2 - POD_SLOPE;
 
-/** The safe's dial ring behind its handwheel: its radius and its painted face's square, inside it. */
-const DIAL_R = 0.19;
-const DIAL_FACE = (DIAL_R - 0.056) * Math.SQRT2;
+/** The dial's mount on the deck (its axle's foot), and out from the axle to the finger post: the hand's target. */
+const WHEEL_AT: V3 = [POD_X - 0.11, DECK_Y, DECK_Z];
+const WHEEL_REACH = 0.145;
+/** One card's turn: a long tick. */
+const DETENT = Math.PI / 4;
+const BUTTON_AT: V3 = [POD_X + 0.16, DECK_Y, DECK_Z];
+/** The button's name plate, on the pod's front under it. */
+const BUTTON_LABEL_AT: V3 = [POD_X + 0.16, (POD_BOTTOM + POD_LOW) / 2, FRONT - POD_D - 0.003];
 
-type Part = 'body' | 'cards' | 'wheel' | 'button' | 'tray';
+/**
+ * THE GRID: `columns` across the opening by `rows` up, as the boot's (vehicle/trunk.ts
+ * `TrunkGrid`). Four across lay the fishing rods and the sledge, two up the TV set and
+ * the aquarium: every thing the boy sends fits it empty.
+ */
+export const MACHINE_GRID: TrunkGrid = { columns: 4, rows: 2 };
+const GRID_CELLS = trunkCellCount(MACHINE_GRID);
+/** A cell's width and height, the grid's middle height, and the plane its cells stand in. */
+const CELL_W = 0.29;
+const CELL_H = 0.26;
+const GRID_Y = 0.42;
+const GRID_Z = FRONT - 0.03;
+/**
+ * The dark plate the grid lies over, standing for the dispenser's opening. Its top
+ * keeps under the pod's foot, which hides the front above 0.72 m from the framing camera.
+ */
+const PLATE_W = MACHINE_GRID.columns * CELL_W + 0.06;
+const PLATE_H = MACHINE_GRID.rows * CELL_H + 0.06;
 
-/** A title board's paint and canvas size, as `registerAtlasSign` takes them. */
-type Board = readonly [bg: string, fg: string, width: number, height: number];
-
-/** What tells the three designs apart on the shared front. */
-interface Design {
-  /** The wheel's mount: its axle's foot on the face it stands on, and its lean back off upright (rad about local X). */
-  readonly wheel: V3;
-  readonly wheelTilt: number;
-  /** Out from the axle to the farthest knob or rim: the hand's target. */
-  readonly wheelReach: number;
-  /** One card's turn. */
-  readonly detent: number;
-  readonly button: V3;
-  readonly buttonTilt: number;
-  /** The button's name plate's centre. */
-  readonly buttonLabel: V3;
-  readonly trayLabelX: number;
-  readonly frame: number;
-  readonly title: Board;
-  /** The title board's size and centre. */
-  readonly titleSize: readonly [number, number];
-  readonly titleAt: V3;
+/** Cell `cell`'s centre across (local X) and up (local Y). */
+function cellX(cell: number): number {
+  const column = cell % MACHINE_GRID.columns;
+  // Counted from the viewer's left (+X), as a boot's cells are from behind the car.
+  return -(column - (MACHINE_GRID.columns - 1) / 2) * CELL_W;
+}
+function cellY(cell: number): number {
+  const row = Math.floor(cell / MACHINE_GRID.columns);
+  return GRID_Y + ((MACHINE_GRID.rows - 1) / 2 - row) * CELL_H;
 }
 
-const DESIGNS: Readonly<Record<MachineStyle, Design>> = {
-  soda: {
-    wheel: [WHEEL_X, WHEEL_Y, FRONT],
-    wheelTilt: 0,
-    wheelReach: 0.21,
-    detent: Math.PI / 3,
-    button: [WHEEL_X, BUTTON_Y, FRONT],
-    buttonTilt: 0,
-    buttonLabel: [WHEEL_X, BUTTON_Y - 0.11, FRONT - 0.003],
-    trayLabelX: 0,
-    frame: CHROME,
-    title: ['#f4ecd6', '#a3271b', 512, 128],
-    titleSize: [0.84, 0.19],
-    titleAt: [0, 1.97, FRONT - 0.016],
-  },
-  arcade: {
-    wheel: [POD_X - 0.11, DECK_Y, DECK_Z],
-    wheelTilt: DECK_TILT,
-    wheelReach: 0.145,
-    detent: Math.PI / 4,
-    button: [POD_X + 0.16, DECK_Y, DECK_Z],
-    buttonTilt: DECK_TILT,
-    buttonLabel: [POD_X + 0.16, (POD_BOTTOM + POD_LOW) / 2, FRONT - POD_D - 0.003],
-    // Clear of the pod, which would hide it from the framing camera.
-    trayLabelX: 0.2,
-    frame: CABINET_BLACK,
-    title: ['#ffd35a', '#1b1420', 512, 128],
-    titleSize: [1.0, 0.24],
-    titleAt: [0, 1.95, FRONT - 0.124],
-  },
-  safe: {
-    wheel: [WHEEL_X, WHEEL_Y, FRONT],
-    wheelTilt: 0,
-    wheelReach: 0.235,
-    detent: Math.PI / 2,
-    button: [WHEEL_X, BUTTON_Y, FRONT],
-    buttonTilt: 0,
-    buttonLabel: [WHEEL_X, BUTTON_Y - 0.11, FRONT - 0.003],
-    trayLabelX: 0,
-    frame: BRASS,
-    title: ['#c9a44e', '#2b1d08', 512, 128],
-    titleSize: [0.6, 0.12],
-    titleAt: [0, 1.91, FRONT - 0.01],
+/** The grid's cells in the machine's frame, for the renderer (render/trunkview.ts). */
+export const MACHINE_GRID_LAYOUT: GridLayout = {
+  count: GRID_CELLS,
+  grid: MACHINE_GRID,
+  cellBox(cell, centre, size) {
+    if (cell < 0 || cell >= GRID_CELLS) return false;
+    centre.set(cellX(cell), cellY(cell), GRID_Z);
+    size.set(CELL_W, CELL_H, 0);
+    return true;
   },
 };
 
-/** This session's design (read once at load: the stops are built as their chunks stream in). */
-const STYLE = devLook.machine;
-const DESIGN = DESIGNS[STYLE];
-const DETENT = DESIGN.detent;
+const ONE_CELL: BootFootprint = { columns: 1, rows: 1 };
+
+/**
+ * The cells `item` takes in the grid: its boot footprint (vehicle/trunk.ts
+ * `bootFootprint`); the carpet, which no boot takes, lies rolled up in one, as
+ * `bootOwner` already reads a thing with none.
+ */
+export function machineFootprint(item: Item): BootFootprint {
+  return bootFootprint(item) ?? ONE_CELL;
+}
+
+type Part = 'body' | 'cards' | 'wheel' | 'button' | 'grid';
 
 /** Half a card: a unit plane's top or bottom, its UVs the matching half of the canvas. */
 function halfCard(top: boolean): THREE.BufferGeometry {
@@ -225,18 +208,15 @@ const HALF_BOTTOM = halfCard(false);
 
 /** What a machine kind dresses the common cabinet with. */
 export interface CardMachineLook {
-  readonly title: string;
   readonly body: number;
   readonly buttonLabel: string;
   readonly buttonColour: number;
-  /** Painted over the chute mouth, when the tray takes something in (the post's cargo). */
-  readonly trayLabel?: string;
 }
 
 /** The moving and repainted parts the builder hands the machine. */
 export interface CardMachineParts {
   readonly root: THREE.Group;
-  /** The wheel's rotor, turning about its own local Z. */
+  /** The dial's rotor, turning about its own local Z. */
   readonly wheel: THREE.Object3D;
   readonly flap: THREE.Object3D;
   readonly flapFront: THREE.Mesh;
@@ -246,7 +226,6 @@ export interface CardMachineParts {
   readonly cards: readonly [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial];
   /** The button's cap, pushed in along its own local Z. */
   readonly buttonCap: THREE.Object3D;
-  readonly chute: THREE.Object3D;
   /** ABSOLUTE metres of the cabinet's base centre, and its yaw. */
   readonly x: number;
   readonly y: number;
@@ -254,27 +233,15 @@ export interface CardMachineParts {
   readonly yaw: number;
 }
 
-/** The boards' paint and canvas size: button plate, tray label (the title's is the design's). */
+/** The button plate's paint and canvas size. */
 const BUTTON_BOARD = ['#f2ecd8', '#26221c', 256, 64] as const;
-const TRAY_BOARD = ['#f2ecd8', '#7a1f12', 512, 64] as const;
 
 /**
- * Puts a machine kind's boards on the sign atlas (world/market.ts `registerAtlasSign`), so
- * they draw as one. Call at module load, beside the kind's look.
+ * Puts a machine kind's button plate on the sign atlas (world/market.ts
+ * `registerAtlasSign`), so the plates draw as one. Call at module load, beside the kind's look.
  */
 export function registerCardMachineSigns(look: CardMachineLook): void {
-  registerAtlasSign([look.title], ...DESIGN.title);
   registerAtlasSign([look.buttonLabel], ...BUTTON_BOARD);
-  if (look.trayLabel) registerAtlasSign([look.trayLabel], ...TRAY_BOARD);
-}
-
-/** A ring of `segments` boxes in the XY plane round (0, 0, `z`): a rim, a bezel. */
-function ring(parent: THREE.Object3D, r: number, band: number, depth: number, segments: number, z: number, colour: number): void {
-  const chord = 2 * r * Math.tan(Math.PI / segments) + band * 0.3;
-  for (let k = 0; k < segments; k++) {
-    const a = (k / segments) * Math.PI * 2;
-    box(parent, [chord, band, depth], [Math.cos(a) * r, Math.sin(a) * r, z], colour, [0, 0, a + Math.PI / 2]);
-  }
 }
 
 /** A round bar in the XY plane from `r0` to `r1` out along angle `a` (from +X toward +Y), at `z`. */
@@ -288,120 +255,38 @@ function disc(parent: THREE.Object3D, r: number, depth: number, segments: number
   return cylinder(parent, r, r, depth, segments, at, colour, [Math.PI / 2, 0, 0]);
 }
 
-/**
- * A box with its four vertical edges chamfered by `c`: two crossed boxes and a diamond
- * filling each notch. The soda fountain's cabinet reads rounded from these.
- */
-function chamferBox(parent: THREE.Object3D, size: V3, at: V3, c: number, colour: number): void {
-  const [w, h, d] = size;
-  box(parent, [w, h, d - 2 * c], at, colour);
-  box(parent, [w - 2 * c, h, d], at, colour);
-  const s = c * Math.SQRT2;
+/** The cheeks and stripes, the hood, the bezel, the opening's plate, and the pod under the dial's side. */
+function dressCabinet(root: THREE.Group, look: CardMachineLook): void {
+  box(root, [W - 2 * CHEEK, H - HOOD_H, D], [0, (H - HOOD_H) / 2, 0], look.body);
   for (const sx of [-1, 1]) {
-    for (const sz of [-1, 1]) box(parent, [s, h, s], [at[0] + sx * (w / 2 - c), at[1], at[2] + sz * (d / 2 - c)], colour, [0, Math.PI / 4, 0]);
-  }
-}
-
-/** The safe's dial ring's face: numbers 0-90 and ticks, light on dark steel. Shared by every safe, kept for the session. */
-let dialFace: THREE.MeshStandardMaterial | null = null;
-function safeDialFace(): THREE.MeshStandardMaterial {
-  if (dialFace) return dialFace;
-  dialFace = paintSign([''], '#24272a', '#e9dfc4', 256, 256);
-  const canvas: unknown = dialFace.map?.image;
-  // Headless (the tools' builds), the face is a blank data texture.
-  if (typeof HTMLCanvasElement === 'undefined' || !(canvas instanceof HTMLCanvasElement)) return dialFace;
-  const g = canvas.getContext('2d');
-  if (!g) return dialFace;
-  const half = canvas.width / 2;
-  g.fillStyle = '#24272a';
-  g.fillRect(0, 0, canvas.width, canvas.height);
-  g.strokeStyle = '#e9dfc4';
-  g.fillStyle = '#e9dfc4';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.font = `bold ${Math.round(half * 0.2)}px sans-serif`;
-  for (let k = 0; k < 50; k++) {
-    // Clockwise from the top, as a safe's numbers run.
-    const a = -Math.PI / 2 + (k / 50) * Math.PI * 2;
-    const major = k % 5 === 0;
-    g.lineWidth = major ? 5 : 2;
-    g.beginPath();
-    g.moveTo(half + Math.cos(a) * half * (major ? 0.8 : 0.88), half + Math.sin(a) * half * (major ? 0.8 : 0.88));
-    g.lineTo(half + Math.cos(a) * half * 0.97, half + Math.sin(a) * half * 0.97);
-    g.stroke();
-    if (major) g.fillText(String(k * 2), half + Math.cos(a) * half * 0.6, half + Math.sin(a) * half * 0.6);
-  }
-  dialFace.map!.needsUpdate = true;
-  return dialFace;
-}
-
-/** The soda fountain's cabinet, visor and coin plate. */
-function dressSoda(root: THREE.Group, look: CardMachineLook): void {
-  const c = 0.06;
-  chamferBox(root, [W + 0.04, 0.1, D + 0.04], [0, 0.05, 0], c + 0.02, C.darkMetal);
-  chamferBox(root, [W, 1.76, D], [0, 0.1 + 0.88, 0], c, look.body);
-  // The head over the chrome band, a little proud, with the title under the visor.
-  chamferBox(root, [W + 0.03, 0.03, D + 0.03], [0, 1.875, 0], c, CHROME);
-  chamferBox(root, [W + 0.02, 0.21, D + 0.02], [0, 1.995, 0], c, look.body);
-  chamferBox(root, [W - 0.06, 0.04, D - 0.06], [0, H + 0.02, 0], c, look.body);
-  // The visor: a slab leaning down toward the viewer, a chrome lip along its edge.
-  const visorD = 0.26;
-  const lean = 0.18;
-  box(root, [W + 0.1, 0.035, visorD], [0, H - 0.01, FRONT - visorD / 2 + 0.03], look.body, [-lean, 0, 0]);
-  cylinder(root, 0.02, 0.02, W + 0.12, 12, [0, H - 0.01 - (visorD / 2) * Math.sin(lean), FRONT - visorD + 0.03], CHROME, [0, 0, Math.PI / 2]);
-  // Chrome strips down the front chamfers, and along the plinth.
-  for (const sx of [-1, 1]) {
-    const x = sx * (W / 2 - c / 2 + 0.004);
-    cylinder(root, 0.013, 0.013, 1.76, 8, [x, 0.1 + 0.88, FRONT + c / 2 - 0.004], CHROME);
-  }
-  box(root, [W - 2 * c, 0.02, 0.02], [0, 0.1, FRONT - 0.01], CHROME);
-  // The coin plate over the wheel: a chrome escutcheon and its slot.
-  box(root, [0.09, 0.13, 0.015], [WHEEL_X, 1.6, FRONT - 0.007], CHROME);
-  box(root, [0.012, 0.06, 0.006], [WHEEL_X, 1.61, FRONT - 0.016], BAKELITE);
-}
-
-/** The ship's wheel: a chrome hub, rim and six spokes running on to black knobs. */
-function sodaWheel(mount: THREE.Object3D, rotor: THREE.Object3D): void {
-  disc(mount, 0.08, 0.03, 20, [0, 0, -0.015], C.darkMetal);
-  disc(rotor, 0.045, 0.05, 16, [0, 0, -0.05], CHROME);
-  disc(rotor, 0.03, 0.02, 12, [0, 0, -0.085], CHROME);
-  ring(rotor, 0.14, 0.02, 0.03, 18, -0.07, CHROME);
-  for (let k = 0; k < 6; k++) {
-    const a = Math.PI / 2 + (k / 6) * Math.PI * 2;
-    spoke(rotor, 0.035, 0.165, 0.011, a, -0.07, CHROME);
-    spoke(rotor, 0.162, 0.21, 0.018, a, -0.07, BAKELITE);
-  }
-}
-
-/** The arcade's cheeks and stripes, marquee, bezel and coin door, and the pod under the wheel's column. */
-function dressArcade(root: THREE.Group, look: CardMachineLook): void {
-  const cheek = 0.04;
-  box(root, [W - 2 * cheek, H - 0.3, D], [0, (H - 0.3) / 2, 0], look.body);
-  for (const sx of [-1, 1]) {
-    const x = sx * (W / 2 - cheek / 2);
-    box(root, [cheek, H, D], [x, H / 2, 0], CABINET_BLACK);
+    const x = sx * (W / 2 - CHEEK / 2);
+    box(root, [CHEEK, H, D], [x, H / 2, 0], CABINET_BLACK);
     // T-moulding up the cheek's front edge.
-    box(root, [cheek + 0.008, H, 0.014], [x, H / 2, FRONT - 0.003], 0xd9a52b);
+    box(root, [CHEEK + 0.008, H, 0.014], [x, H / 2, FRONT - 0.003], MOULDING);
     // Art stripes along the flank, leaning up toward the front.
-    const stripes = [0xd9a52b, 0xd2622a, 0xb03a2e];
-    stripes.forEach((colour, k) => {
+    STRIPES.forEach((colour, k) => {
       box(root, [0.006, 0.07, 0.98], [sx * (W / 2 + 0.003), 0.62 + k * 0.13, 0], colour, [0.4, 0, 0]);
       box(root, [0.006, 0.05, 0.98], [sx * (W / 2 + 0.003), 1.42 + k * 0.1, 0], colour, [0.4, 0, 0]);
     });
   }
-  box(root, [W - 2 * cheek, 0.1, 0.02], [0, 0.05, FRONT - 0.01], CABINET_BLACK);
-  // The marquee overhanging the top, its underside a lit strip and bulbs along its foot.
-  const over = 0.12;
-  box(root, [W - 2 * cheek, 0.3, D + over], [0, H - 0.15, -over / 2], CABINET_BLACK);
-  box(root, [W - 2 * cheek - 0.06, 0.012, over - 0.02], [0, H - 0.3 - 0.006, FRONT - over / 2], 0xfff1b8);
+  box(root, [W - 2 * CHEEK, 0.1, 0.02], [0, 0.05, FRONT - 0.01], CABINET_BLACK);
+  // The hood overhanging the top: the flank's stripes run across its face, top down, and
+  // its underside is a lit strip with bulbs along its foot.
+  box(root, [W - 2 * CHEEK, HOOD_H, D + HOOD_OVER], [0, H - HOOD_H / 2, -HOOD_OVER / 2], CABINET_BLACK);
+  const hoodFace = FRONT - HOOD_OVER - 0.003;
+  STRIPES.forEach((colour, k) => {
+    box(root, [W - 2 * CHEEK - 0.12, 0.034, 0.006], [0, H - 0.07 - k * 0.055, hoodFace], colour);
+  });
+  box(root, [W - 2 * CHEEK - 0.06, 0.012, HOOD_OVER - 0.02], [0, H - HOOD_H - 0.006, FRONT - HOOD_OVER / 2], 0xfff1b8);
   for (let k = 0; k < 11; k++) {
-    disc(root, 0.011, 0.014, 8, [-0.55 + k * 0.11, H - 0.285, FRONT - over - 0.007], 0xfff3c4);
+    disc(root, 0.011, 0.014, 8, [-0.55 + k * 0.11, H - HOOD_H + 0.015, FRONT - HOOD_OVER - 0.007], 0xfff3c4);
   }
   // The window's black bezel.
   box(root, [CARD_W + 0.14, CARD_H + 0.16, 0.012], [CARD_X, CARD_Y, FRONT - 0.006], CABINET_BLACK);
-  // The coin door over the pod: a red-lit plate with two slots.
-  box(root, [0.11, 0.17, 0.016], [WHEEL_X, 1.45, FRONT - 0.008], 0x2a2a2e);
-  for (const dx of [-0.025, 0.025]) box(root, [0.035, 0.06, 0.006], [WHEEL_X + dx, 1.47, FRONT - 0.018], 0xc0392b);
+  // The dispenser's opening: a dark plate in a dark metal frame, flat on the front, the
+  // grid's cells over it.
+  box(root, [PLATE_W + 0.04, PLATE_H + 0.04, 0.012], [0, GRID_Y, FRONT - 0.006], C.darkMetal);
+  box(root, [PLATE_W, PLATE_H, 0.008], [0, GRID_Y, FRONT - 0.014], 0x0e1011);
 
   // The pod: a block standing out of the front, and its deck sloping up back to it.
   const podH = POD_LOW - POD_BOTTOM;
@@ -415,11 +300,11 @@ function dressArcade(root: THREE.Group, look: CardMachineLook): void {
     look.body,
     [-POD_SLOPE, 0, 0],
   );
-  box(root, [POD_HALF_W * 2 + 0.01, 0.02, 0.02], [POD_X, POD_LOW, FRONT - POD_D], 0xd9a52b);
+  box(root, [POD_HALF_W * 2 + 0.01, 0.02, 0.02], [POD_X, POD_LOW, FRONT - POD_D], MOULDING);
 }
 
-/** The arcade dial: a knurled knob with a finger post, over tick marks on the deck. */
-function arcadeWheel(mount: THREE.Object3D, rotor: THREE.Object3D): void {
+/** The dial: a knurled knob with a finger post, over tick marks on the deck. */
+function dressDial(mount: THREE.Object3D, rotor: THREE.Object3D): void {
   disc(mount, 0.118, 0.012, 24, [0, 0, -0.006], 0x0e0f11);
   for (let k = 0; k < 16; k++) {
     const a = Math.PI / 2 + (k / 16) * Math.PI * 2;
@@ -433,86 +318,14 @@ function arcadeWheel(mount: THREE.Object3D, rotor: THREE.Object3D): void {
     box(rotor, [0.008, 0.008, 0.04], [Math.cos(a) * 0.106, Math.sin(a) * 0.106, -0.03], 0x3c3d42, [0, 0, a]);
   }
   disc(rotor, 0.085, 0.006, 24, [0, 0, -0.055], CHROME);
-  box(rotor, [0.008, 0.05, 0.004], [0, 0.055, -0.059], 0xb03a2e);
-  disc(rotor, 0.018, 0.04, 12, [0, 0.068, -0.078], 0xb03a2e);
+  box(rotor, [0.008, 0.05, 0.004], [0, 0.055, -0.059], STRIPES[2]);
+  disc(rotor, 0.018, 0.04, 12, [0, 0.068, -0.078], STRIPES[2]);
 }
-
-/** The safe's steel, rivet rows, hinges, cornice, title plate and keyhole. */
-function dressSafe(root: THREE.Group, look: CardMachineLook): void {
-  box(root, [W + 0.06, 0.08, D + 0.06], [0, 0.04, 0], C.darkMetal);
-  box(root, [W, H - 0.2, D], [0, 0.08 + (H - 0.2) / 2, 0], look.body);
-  // The cornice, with a brass edge.
-  box(root, [W + 0.08, 0.12, D + 0.08], [0, H - 0.06, 0], STEEL);
-  box(root, [W + 0.08, 0.018, 0.008], [0, H - 0.11, FRONT - 0.044], BRASS);
-  // The door's frame: four heavy bars proud of the front, and rivets along each.
-  const bar = 0.05;
-  const doorTop = 1.82;
-  const doorBottom = 0.1;
-  const proud = 0.025;
-  const frameZ = FRONT - proud / 2;
-  for (const sx of [-1, 1]) box(root, [bar, doorTop - doorBottom, proud], [sx * (W / 2 - bar / 2), (doorTop + doorBottom) / 2, frameZ], STEEL);
-  box(root, [W, bar, proud], [0, doorTop, frameZ], STEEL);
-  box(root, [W, bar, proud], [0, doorBottom, frameZ], STEEL);
-  const rivet = (at: V3, axis: 'z' | 'x'): void => {
-    cylinder(root, 0.011, 0.011, 0.012, 6, at, 0x6a6f6d, axis === 'z' ? [Math.PI / 2, 0, 0] : [0, 0, Math.PI / 2]);
-  };
-  for (let y = 0.2; y < doorTop - 0.05; y += 0.115) {
-    for (const sx of [-1, 1]) rivet([sx * (W / 2 - bar / 2), y, FRONT - proud - 0.004], 'z');
-  }
-  for (let x = -0.55; x <= 0.551; x += 0.1375) rivet([x, doorTop, FRONT - proud - 0.004], 'z');
-  // The flanks: a rivet row down each edge.
-  for (const sx of [-1, 1]) {
-    for (let y = 0.2; y < H - 0.15; y += 0.14) {
-      for (const z of [FRONT + 0.04, -FRONT - 0.04]) rivet([sx * (W / 2 + 0.004), y, z], 'x');
-    }
-  }
-  // Two hinges on the viewer's left, where the door would swing.
-  for (const y of [0.45, 1.5]) cylinder(root, 0.035, 0.035, 0.2, 12, [W / 2 + 0.012, y, FRONT + 0.03], C.darkMetal);
-  // The title plate's dark brass frame, and the keyhole over the wheel.
-  box(root, [DESIGN.titleSize[0] + 0.04, DESIGN.titleSize[1] + 0.04, 0.012], [0, DESIGN.titleAt[1], FRONT - 0.004], BRASS_DARK);
-  box(root, [0.07, 0.11, 0.012], [WHEEL_X, 1.6, FRONT - 0.006], BRASS);
-  disc(root, 0.012, 0.004, 10, [WHEEL_X, 1.615, FRONT - 0.014], BAKELITE);
-  box(root, [0.008, 0.03, 0.004], [WHEEL_X, 1.595, FRONT - 0.014], BAKELITE);
-}
-
-/** The safe's handwheel: a brass hub and four steel spokes with brass knobs, over the numbered ring. */
-function safeWheel(mount: THREE.Object3D, rotor: THREE.Object3D): void {
-  disc(mount, DIAL_R, 0.012, 32, [0, 0, -0.006], 0x24272a);
-  const face = new THREE.Mesh(SIGN_PLANE, safeDialFace());
-  face.scale.set(DIAL_FACE, DIAL_FACE, 1);
-  face.position.set(0, 0, -0.0125);
-  face.rotation.y = Math.PI;
-  mount.add(face);
-  ring(mount, DIAL_R, 0.016, 0.022, 24, -0.011, BRASS);
-  for (let k = 0; k < 10; k++) {
-    const a = Math.PI / 2 - (k / 10) * Math.PI * 2;
-    spoke(mount, DIAL_FACE / 2 + 0.008, DIAL_R - 0.012, 0.004, a, -0.013, BRASS);
-  }
-  box(mount, [0.018, 0.022, 0.008], [0, DIAL_R + 0.02, -0.004], BRASS);
-  disc(rotor, 0.055, 0.06, 16, [0, 0, -0.045], BRASS);
-  disc(rotor, 0.035, 0.02, 12, [0, 0, -0.082], BRASS_DARK);
-  for (let k = 0; k < 4; k++) {
-    const a = Math.PI / 4 + (k / 4) * Math.PI * 2;
-    spoke(rotor, 0.04, 0.205, 0.016, a, -0.065, STEEL);
-    disc(rotor, 0.03, 0.045, 14, [Math.cos(a) * 0.205, Math.sin(a) * 0.205, -0.065], BRASS);
-  }
-}
-
-const DRESS: Readonly<Record<MachineStyle, (root: THREE.Group, look: CardMachineLook) => void>> = {
-  soda: dressSoda,
-  arcade: dressArcade,
-  safe: dressSafe,
-};
-const WHEELS: Readonly<Record<MachineStyle, (mount: THREE.Object3D, rotor: THREE.Object3D) => void>> = {
-  soda: sodaWheel,
-  arcade: arcadeWheel,
-  safe: safeWheel,
-};
 
 /**
  * Builds the cabinet at ABSOLUTE (`x`, `z`) on the sand, its front turned by `yaw`, on the
- * lowest ground under it and its tray. In the physics band it is solid and its tray holds
- * what falls into it. `disposers` gets the two card materials.
+ * lowest ground under it. In the physics band it is solid, its pod too. `disposers` gets
+ * the two card materials.
  */
 export function buildCardMachine(
   ctx: ChunkContext,
@@ -530,7 +343,7 @@ export function buildCardMachine(
   const sn = Math.sin(yaw);
   const local = (lx: number, lz: number): [number, number] => [x + c * lx + sn * lz, z - sn * lx + c * lz];
   let y = Infinity;
-  for (const [lx, lz] of [[-W / 2, FRONT - TRAY_D], [W / 2, FRONT - TRAY_D], [-W / 2, -FRONT], [W / 2, -FRONT]] as const) {
+  for (const [lx, lz] of [[-W / 2, FRONT], [W / 2, FRONT], [-W / 2, -FRONT], [W / 2, -FRONT]] as const) {
     const [wx, wz] = local(lx, lz);
     y = Math.min(y, ctx.terrain.heightAt(wx, wz, s));
   }
@@ -540,20 +353,15 @@ export function buildCardMachine(
   root.name = 'card-machine';
   root.position.set(x - ctx.originX, y, z - ctx.originZ);
   root.rotation.y = yaw;
-  DRESS[STYLE](root, look);
-  const board = signMesh([look.title], ...DESIGN.title);
-  board.scale.set(DESIGN.titleSize[0], DESIGN.titleSize[1], 1);
-  board.position.set(...DESIGN.titleAt);
-  board.rotation.y = Math.PI;
-  root.add(board);
+  dressCabinet(root, look);
 
   // The card window: a dark back, a frame standing proud of it, and the hinge across.
   box(root, [CARD_W + 0.02, CARD_H + 0.02, 0.01], [CARD_X, CARD_Y, FRONT - 0.005], GLASS_DARK);
   const frameZ = FRONT - 0.035;
-  box(root, [CARD_W + 0.12, 0.05, 0.07], [CARD_X, CARD_Y + CARD_H / 2 + 0.025, frameZ], DESIGN.frame);
-  box(root, [CARD_W + 0.12, 0.05, 0.07], [CARD_X, CARD_Y - CARD_H / 2 - 0.025, frameZ], DESIGN.frame);
-  box(root, [0.05, CARD_H, 0.07], [CARD_X + CARD_W / 2 + 0.035, CARD_Y, frameZ], DESIGN.frame);
-  box(root, [0.05, CARD_H, 0.07], [CARD_X - CARD_W / 2 - 0.035, CARD_Y, frameZ], DESIGN.frame);
+  box(root, [CARD_W + 0.12, 0.05, 0.07], [CARD_X, CARD_Y + CARD_H / 2 + 0.025, frameZ], CABINET_BLACK);
+  box(root, [CARD_W + 0.12, 0.05, 0.07], [CARD_X, CARD_Y - CARD_H / 2 - 0.025, frameZ], CABINET_BLACK);
+  box(root, [0.05, CARD_H, 0.07], [CARD_X + CARD_W / 2 + 0.035, CARD_Y, frameZ], CABINET_BLACK);
+  box(root, [0.05, CARD_H, 0.07], [CARD_X - CARD_W / 2 - 0.035, CARD_Y, frameZ], CABINET_BLACK);
   cylinder(root, 0.008, 0.008, CARD_W + 0.06, 8, [CARD_X, CARD_Y, CARD_Z - 0.006], C.metal, [0, 0, Math.PI / 2]);
 
   const cardA = paintSign([''], '#efe6cf', '#2a2620', CARD_PX_W, CARD_PX_H);
@@ -590,22 +398,21 @@ export function buildCardMachine(
   flap.add(flapFront, flapBack);
   root.add(flap);
 
-  // The wheel: a mount on the face it stands on (its -Z out of that face), what is fixed
-  // there, and the rotor turning about the mount's Z.
+  // The dial: a mount on the deck (its -Z out of the deck), what is fixed there, and the
+  // rotor turning about the mount's Z.
   const wheelMount = new THREE.Group();
-  wheelMount.position.set(...DESIGN.wheel);
-  wheelMount.rotation.x = DESIGN.wheelTilt;
+  wheelMount.position.set(...WHEEL_AT);
+  wheelMount.rotation.x = DECK_TILT;
   const wheel = new THREE.Group();
-  WHEELS[STYLE](wheelMount, wheel);
+  dressDial(wheelMount, wheel);
   wheelMount.add(wheel);
   root.add(wheelMount);
 
   // The button: a bezel and a mushroom cap that goes in when pressed, and its name.
   const buttonMount = new THREE.Group();
-  buttonMount.position.set(...DESIGN.button);
-  buttonMount.rotation.x = DESIGN.buttonTilt;
-  if (STYLE === 'safe') box(buttonMount, [0.17, 0.17, 0.03], [0, 0, -0.012], BRASS);
-  else disc(buttonMount, STYLE === 'arcade' ? 0.078 : 0.088, 0.024, 24, [0, 0, -0.012], STYLE === 'arcade' ? CABINET_BLACK : CHROME);
+  buttonMount.position.set(...BUTTON_AT);
+  buttonMount.rotation.x = DECK_TILT;
+  disc(buttonMount, 0.078, 0.024, 24, [0, 0, -0.012], CABINET_BLACK);
   const buttonCap = new THREE.Group();
   buttonCap.position.set(0, 0, BUTTON_REST);
   cylinder(buttonCap, 0.03, 0.03, 0.04, 12, [0, 0, -0.01], C.darkMetal, [Math.PI / 2, 0, 0]);
@@ -614,35 +421,9 @@ export function buildCardMachine(
   root.add(buttonMount);
   const buttonPlate = signMesh([look.buttonLabel], ...BUTTON_BOARD);
   buttonPlate.scale.set(0.17, 0.045, 1);
-  buttonPlate.position.set(...DESIGN.buttonLabel);
+  buttonPlate.position.set(...BUTTON_LABEL_AT);
   buttonPlate.rotation.y = Math.PI;
   root.add(buttonPlate);
-
-  // The chute's dark mouth and its flap hanging over it, and the trough before it.
-  const trim = STYLE === 'soda' ? CHROME : STYLE === 'safe' ? STEEL : C.darkMetal;
-  box(root, [MOUTH_W + 0.05, MOUTH_H + 0.05, 0.02], [0, MOUTH_Y, FRONT - 0.006], trim);
-  box(root, [MOUTH_W, MOUTH_H, 0.01], [0, MOUTH_Y, FRONT - 0.017], 0x0e1011);
-  const chute = new THREE.Group();
-  chute.position.set(0, MOUTH_Y + MOUTH_H / 2, FRONT - 0.026);
-  box(chute, [MOUTH_W - 0.02, MOUTH_H - 0.01, 0.012], [0, -MOUTH_H / 2, 0], C.metal);
-  box(chute, [0.14, 0.02, 0.025], [0, -MOUTH_H + 0.03, -0.012], C.darkMetal);
-  root.add(chute);
-  const trayBody = STYLE === 'arcade' ? CABINET_BLACK : look.body;
-  box(root, [TRAY_W, 0.03, TRAY_D], [0, TRAY_FLOOR - 0.015, TRAY_Z], C.darkMetal);
-  box(root, [0.025, TRAY_WALL, TRAY_D], [TRAY_W / 2, TRAY_FLOOR + TRAY_WALL / 2, TRAY_Z], trayBody);
-  box(root, [0.025, TRAY_WALL, TRAY_D], [-TRAY_W / 2, TRAY_FLOOR + TRAY_WALL / 2, TRAY_Z], trayBody);
-  box(root, [TRAY_W + 0.025, 0.07, 0.025], [0, TRAY_FLOOR + 0.035, FRONT - TRAY_D], trayBody);
-  box(root, [TRAY_W + 0.04, TRAY_FLOOR - 0.03, TRAY_D], [0, (TRAY_FLOOR - 0.03) / 2, TRAY_Z], trayBody);
-  // The trough's lip in the design's trim.
-  box(root, [TRAY_W + 0.045, 0.012, 0.03], [0, TRAY_FLOOR + 0.076, FRONT - TRAY_D], trim);
-  // The tray's label: what goes in, and where.
-  if (look.trayLabel) {
-    const label = signMesh([look.trayLabel], ...TRAY_BOARD);
-    label.scale.set(0.5, 0.0625, 1);
-    label.position.set(DESIGN.trayLabelX, TRAY_LABEL_Y, FRONT - 0.003);
-    label.rotation.y = Math.PI;
-    root.add(label);
-  }
 
   // The cabinet's boxes in one draw per finish, each moving part's in one of its own.
   mergeKitStatics(root);
@@ -650,21 +431,22 @@ export function buildCardMachine(
 
   if (ctx.hasPhysics) {
     addStatic(ctx, bodies, colliders, x, y + H / 2, z, RAPIER.ColliderDesc.cuboid(W / 2, H / 2, D / 2), SurfaceType.Concrete, yawRotation(yaw));
-    const solid = (lx: number, ly: number, lz: number, hx: number, hy: number, hz: number): void => {
-      const [wx, wz] = local(lx, lz);
-      addStatic(ctx, bodies, colliders, wx, y + ly, wz, RAPIER.ColliderDesc.cuboid(hx, hy, hz), SurfaceType.Concrete, yawRotation(yaw));
-    };
-    solid(0, (TRAY_FLOOR) / 2, TRAY_Z, TRAY_W / 2 + 0.02, TRAY_FLOOR / 2, TRAY_D / 2);
-    solid(TRAY_W / 2, TRAY_FLOOR + TRAY_WALL / 2, TRAY_Z, 0.0125, TRAY_WALL / 2, TRAY_D / 2);
-    solid(-TRAY_W / 2, TRAY_FLOOR + TRAY_WALL / 2, TRAY_Z, 0.0125, TRAY_WALL / 2, TRAY_D / 2);
-    solid(0, TRAY_FLOOR + 0.035, FRONT - TRAY_D, TRAY_W / 2, 0.035, 0.0125);
-    if (STYLE === 'arcade') {
-      solid(POD_X, (POD_BOTTOM + POD_HIGH) / 2, FRONT - POD_D / 2, POD_HALF_W, (POD_HIGH - POD_BOTTOM) / 2, POD_D / 2);
-    }
+    const [px, pz] = local(POD_X, FRONT - POD_D / 2);
+    addStatic(
+      ctx,
+      bodies,
+      colliders,
+      px,
+      y + (POD_BOTTOM + POD_HIGH) / 2,
+      pz,
+      RAPIER.ColliderDesc.cuboid(POD_HALF_W, (POD_HIGH - POD_BOTTOM) / 2, POD_D / 2),
+      SurfaceType.Concrete,
+      yawRotation(yaw),
+    );
   }
 
   return {
-    root, wheel, flap, flapFront, flapBack, staticTop, staticBottom, cards: [cardA, cardB], buttonCap, chute, x, y, z, yaw,
+    root, wheel, flap, flapFront, flapBack, staticTop, staticBottom, cards: [cardA, cardB], buttonCap, x, y, z, yaw,
   };
 }
 
@@ -684,15 +466,28 @@ function mountBox(at: V3, tilt: number, out: number, reach: number, depth: numbe
     reach * Math.abs(Math.sin(tilt)) + depth * Math.abs(Math.cos(tilt)),
   ];
 }
-const WHEEL_AIM = mountBox(DESIGN.wheel, DESIGN.wheelTilt, 0.05, DESIGN.wheelReach, 0.06);
-const BUTTON_AIM = mountBox(DESIGN.button, DESIGN.buttonTilt, 0.04, 0.09, 0.045);
+const WHEEL_AIM = mountBox(WHEEL_AT, DECK_TILT, 0.05, WHEEL_REACH, 0.06);
+const BUTTON_AIM = mountBox(BUTTON_AT, DECK_TILT, 0.04, 0.09, 0.045);
+
+/** The renderer's view of a machine's grid (`grid`), reused in place. */
+interface GridViewState {
+  readonly layout: GridLayout;
+  readonly cells: readonly (Item | null)[];
+  selectedCell: number | null;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
 
 /**
  * A card machine's mechanics; the kind decides what the cards are, what the button
- * does and what the tray takes.
+ * gives and what the grid takes in.
  */
 export abstract class CardMachine implements WorldFixture {
   private part: Part | null = null;
+  /** The grid's cell under the cursor when `part` is the grid, else -1. */
+  private aimedCell = -1;
   protected focused = false;
   /** The card the wheel has selected (-1 with no cards); the window catches up with it. */
   protected selected = -1;
@@ -710,12 +505,24 @@ export abstract class CardMachine implements WorldFixture {
   /** Radians the hand has turned it since it took hold: a click turns none. */
   private gripTravel = 0;
   private buttonT = -1;
-  private chuteT = -1;
-  private chuteIn = false;
   private refuseT = 0;
   private readonly focusPose: FixtureFocus;
+  /**
+   * What lies in the grid, by anchor cell (vehicle/trunk.ts occupancy over
+   * `MACHINE_GRID`, footprints by `machineFootprint`): what the machine gave and the
+   * player has not taken, and, for `SWALLOW_S`, what he put in.
+   */
+  protected readonly cells: (Item | null)[] = new Array<Item | null>(GRID_CELLS).fill(null);
+  /** The anchor of what is being drawn in (-1: nothing), and the seconds it still lies there. */
+  private swallowAt = -1;
+  private swallowT = 0;
+  private readonly gridView: GridViewState;
 
-  constructor(readonly id: string, protected readonly parts: CardMachineParts) {
+  constructor(
+    readonly id: string,
+    protected readonly parts: CardMachineParts,
+    protected readonly world: GameWorld,
+  ) {
     const c = Math.cos(parts.yaw);
     const s = Math.sin(parts.yaw);
     const abs = (p: readonly [number, number, number]): [number, number, number] => [
@@ -726,6 +533,14 @@ export abstract class CardMachine implements WorldFixture {
     const [eyeX, eyeY, eyeZ] = abs(FOCUS_EYE);
     const [lookX, lookY, lookZ] = abs(FOCUS_LOOK);
     this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
+    // What lay in it when it was last worked: anything that does not fit at its anchor
+    // is dropped, earlier anchors first, as a boot read from a save (`normalizeBoot`).
+    const saved = world.state.machineGrids[id] ?? [];
+    for (let anchor = 0; anchor < Math.min(saved.length, GRID_CELLS); anchor++) {
+      const item = saved[anchor];
+      if (item && bootFits(this.cells, MACHINE_GRID, anchor, machineFootprint(item))) this.cells[anchor] = item;
+    }
+    this.gridView = { layout: MACHINE_GRID_LAYOUT, cells: this.cells, selectedCell: null, x: parts.x, y: parts.y, z: parts.z, yaw: parts.yaw };
   }
 
   /** Cards the wheel turns through now. */
@@ -734,11 +549,21 @@ export abstract class CardMachine implements WorldFixture {
   protected abstract paintCard(g: CanvasRenderingContext2D, w: number, h: number, index: number): void;
   /** The button is pressed with card `index` selected: the sound (a `refuse` rattle, or what it did). */
   protected abstract pressButton(ctx: FixtureContext, index: number): FoleyEvent;
-  /** A click on the tray. */
-  protected useTray(_ctx: FixtureContext): FoleyEvent | null {
-    return null;
+  /**
+   * `held` is put to the free grid cell `cell`: the kind takes it in (`swallow`) or
+   * refuses it. The default takes nothing in.
+   */
+  protected putIn(_ctx: FixtureContext, _held: Item, _cell: number): FoleyEvent | null {
+    return 'refused';
   }
-  /** The machine was framed: anything it holds for the player can come out now. */
+  /**
+   * Something was taken out of the grid into the hands or the pack: the kind writes the
+   * grid with whatever of its own goes with it. The default writes the grid alone.
+   */
+  protected gridTaken(): void {
+    this.saveGrid();
+  }
+  /** The machine was framed. */
   protected onFocused(_ctx: FixtureContext): void {}
   /** The window starts showing card `index` (as its flip begins). */
   protected onShown(_index: number): void {}
@@ -768,36 +593,89 @@ export abstract class CardMachine implements WorldFixture {
     return 'refused';
   }
 
+  /** The first anchor in the grid where `item` fits now, or -1: no room for it. */
+  protected roomFor(item: Item): number {
+    return bootFreeAnchor(this.cells, MACHINE_GRID, machineFootprint(item));
+  }
+
   /**
-   * Drops `items` out of the chute into the tray, spread across it, and lets go of the
-   * player: the camera steps back so he sees them lying there and picks them up.
+   * Puts `item` into the grid where it fits (`roomFor`): what the machine gives. False,
+   * and nothing given, with no room. The kind saves the grid with its own state (`saveGrid`).
    */
-  protected give(ctx: FixtureContext, items: readonly Item[]): void {
-    if (items.length === 0) return;
-    items.forEach((item, k) => {
-      const at = this.trayPoint(k, items.length);
-      ctx.drop(item, at.x, at.y, at.z);
-    });
-    this.swingChute(false);
-    ctx.stepBack();
+  protected give(item: Item): boolean {
+    const anchor = this.roomFor(item);
+    if (anchor < 0) return false;
+    this.cells[anchor] = item;
+    return true;
   }
 
-  /** Swings the chute's flap: out for something given, in for something taken. */
-  protected swingChute(inward: boolean): void {
-    this.chuteT = 0;
-    this.chuteIn = inward;
+  /**
+   * Where `item` goes when put to the free cell `cell`: the anchor its footprint fits at
+   * round it, as into a boot (`bootAnchorAt`). -1 when none does, and the HUD says why,
+   * as a boot's prompt does (player/interaction.ts `bootRefusal`).
+   */
+  protected putAnchor(ctx: FixtureContext, item: Item, cell: number): number {
+    const footprint = machineFootprint(item);
+    const anchor = bootAnchorAt(this.cells, MACHINE_GRID, cell, footprint);
+    if (anchor >= 0) return anchor;
+    const name = item.type === 'contract_cargo' ? contractThing(item).name : itemLabel(item);
+    const size = `${footprint.columns}×${footprint.rows} cells`;
+    ctx.toast(bootFreeAnchor(this.cells, MACHINE_GRID, footprint) >= 0
+      ? `the ${name} takes ${size} — aim where they are free`
+      : `no room for the ${name}: it takes ${size} — take out what lies there`);
+    return -1;
   }
 
-  /** A point over the tray's floor, ABSOLUTE metres; `k` of `of` spreads several across. */
-  protected trayPoint(k: number, of: number): { x: number; y: number; z: number } {
-    const lx = of > 1 ? (k - (of - 1) / 2) * Math.min(0.2, (TRAY_W - 0.16) / (of - 1)) : 0;
-    const c = Math.cos(this.parts.yaw);
-    const s = Math.sin(this.parts.yaw);
-    return {
-      x: this.parts.x + c * lx + s * (TRAY_Z + 0.04),
-      y: this.parts.y + TRAY_FLOOR + 0.14,
-      z: this.parts.z - s * lx + c * (TRAY_Z + 0.04),
-    };
+  /**
+   * Lays `item`, put in at `anchor`, in the grid for `SWALLOW_S` while the machine draws
+   * it in. It is the machine's already: the save never holds it (`gridCells`), and a
+   * click on it takes nothing.
+   */
+  protected swallow(item: Item, anchor: number): void {
+    this.finishSwallow();
+    this.cells[anchor] = item;
+    this.swallowAt = anchor;
+    this.swallowT = SWALLOW_S;
+  }
+
+  private finishSwallow(): void {
+    if (this.swallowAt >= 0) this.cells[this.swallowAt] = null;
+    this.swallowAt = -1;
+    this.swallowT = 0;
+  }
+
+  /** The grid as the save holds it: what is being drawn in is gone already. */
+  protected gridCells(): (Item | null)[] {
+    const cells = this.cells.slice();
+    if (this.swallowAt >= 0) cells[this.swallowAt] = null;
+    return cells;
+  }
+
+  /** Writes the grid into the save (`machine_grid`). */
+  protected saveGrid(): void {
+    this.world.apply({ t: 'machine_grid', machineId: this.id, cells: this.gridCells() });
+  }
+
+  /**
+   * A click on grid cell `cell`, as on a boot's (player/interaction.ts
+   * `operateTrunkCell`): what covers it comes out into the hands or the pack, whole,
+   * even with something held; a free cell takes what is held, if the kind takes it in.
+   */
+  private useCell(ctx: FixtureContext, cell: number): FoleyEvent | null {
+    const at = bootOwner(this.cells, MACHINE_GRID, cell);
+    if (at >= 0) {
+      if (at === this.swallowAt) return null;
+      const item = this.cells[at]!;
+      if (!ctx.inventory.add(item)) {
+        ctx.toast('hands full');
+        return 'refused';
+      }
+      this.cells[at] = null;
+      this.gridTaken();
+      return 'pickup';
+    }
+    const held = ctx.held;
+    return held ? this.putIn(ctx, held, cell) : null;
   }
 
   private paint(canvasIndex: number, cardIndex: number): void {
@@ -819,10 +697,15 @@ export abstract class CardMachine implements WorldFixture {
 
   setFocused(focused: boolean, ctx: FixtureContext): void {
     const was = this.focused;
-    // Set first: what `onFocused` gives may let go of the machine again at once.
     this.focused = focused;
     if (!focused) this.release();
     else if (!was) this.onFocused(ctx);
+  }
+
+  grid(): FixedGridView | null {
+    if (!this.focused) return null;
+    this.gridView.selectedCell = this.part === 'grid' && this.aimedCell >= 0 ? this.aimedCell : null;
+    return this.gridView;
   }
 
   /** The cursor or eye ray in the machine's frame, or null when it misses the plane. */
@@ -838,6 +721,7 @@ export abstract class CardMachine implements WorldFixture {
     const [ox, oy, oz, lx, lz] = this.toLocal(originX, originZ, eyeX, eyeY, eyeZ, dx, dz);
     let best = rayBox(ox, oy, oz, lx, dy, lz, 0, H / 2, 0, W / 2, H / 2, D / 2);
     let part: Part = 'body';
+    let aimedCell = -1;
     const test = (p: Part, cx: number, cy: number, cz: number, hx: number, hy: number, hz: number): void => {
       const t = rayBox(ox, oy, oz, lx, dy, lz, cx, cy, cz, hx, hy, hz);
       if (t < best) {
@@ -848,16 +732,22 @@ export abstract class CardMachine implements WorldFixture {
     test('cards', CARD_X, CARD_Y, FRONT - 0.04, CARD_W / 2 + 0.06, CARD_H / 2 + 0.05, 0.045);
     test('wheel', ...WHEEL_AIM);
     test('button', ...BUTTON_AIM);
-    // The trough's floor and the chute mouth, not the air over them: what lies in the
-    // tray is aimed at before the tray itself.
-    test('tray', 0, TRAY_FLOOR - 0.015, TRAY_Z, TRAY_W / 2, 0.03, TRAY_D / 2);
-    test('tray', 0, MOUTH_Y, FRONT - 0.02, MOUTH_W / 2, MOUTH_H / 2, 0.02);
+    // The grid's cells, in the plane they are drawn in over the plate.
+    for (let cell = 0; cell < GRID_CELLS; cell++) {
+      const t = rayBox(ox, oy, oz, lx, dy, lz, cellX(cell), cellY(cell), GRID_Z, CELL_W / 2, CELL_H / 2, 0.02);
+      if (t < best) {
+        best = t;
+        part = 'grid';
+        aimedCell = cell;
+      }
+    }
     this.part = best > range ? null : part;
+    this.aimedCell = this.part === 'grid' ? aimedCell : -1;
     return best > range ? Infinity : best;
   }
 
   prompt(_ctx: FixtureContext): string | null {
-    // Worked up close it says nothing: the cards, the showcase and the tray are the text.
+    // Worked up close it says nothing: the cards, the showcase and the grid are the text.
     if (this.focused || this.part === null) return null;
     return `[F] ${this.title}`;
   }
@@ -870,8 +760,8 @@ export abstract class CardMachine implements WorldFixture {
       case 'wheel':
         // A click without a drag still turns it one card.
         return this.turnBy(1);
-      case 'tray':
-        return this.useTray(ctx);
+      case 'grid':
+        return this.aimedCell >= 0 ? this.useCell(ctx, this.aimedCell) : null;
       default:
         return null;
     }
@@ -888,15 +778,15 @@ export abstract class CardMachine implements WorldFixture {
   pivot(): { x: number; y: number; z: number } {
     const c = Math.cos(this.parts.yaw);
     const s = Math.sin(this.parts.yaw);
-    const [lx, ly, lz] = DESIGN.wheel;
+    const [lx, ly, lz] = WHEEL_AT;
     return { x: this.parts.x + c * lx + s * lz, y: this.parts.y + ly, z: this.parts.z - s * lx + c * lz };
   }
 
   drag(turn: number): FoleyEvent | null {
     if (!this.gripping) return null;
     // The rotor follows the hand round its axle as the screen shows it: `turn` is
-    // clockwise on the screen, and the framing camera looks at the wheel's face along its
-    // +Z, where a rising rotation.z turns clockwise too. The spokes need not be under the
+    // clockwise on the screen, and the framing camera looks at the dial's face along its
+    // +Z, where a rising rotation.z turns clockwise too. The knob need not be under the
     // cursor to be turned, and nothing stops it.
     this.gripTravel += Math.abs(turn);
     this.wheelTarget += turn;
@@ -947,7 +837,7 @@ export abstract class CardMachine implements WorldFixture {
   cursor(): 'grab' | 'grabbing' | 'pointer' | null {
     if (this.gripping) return 'grabbing';
     if (this.part === 'wheel') return 'grab';
-    if (this.part === 'button' || this.part === 'tray') return 'pointer';
+    if (this.part === 'button' || this.part === 'grid') return 'pointer';
     return null;
   }
 
@@ -995,19 +885,15 @@ export abstract class CardMachine implements WorldFixture {
     }
     this.parts.buttonCap.position.z = BUTTON_REST + push;
 
-    let chute = 0;
-    if (this.chuteT >= 0) {
-      this.chuteT += dt;
-      chute = (this.chuteIn ? -1.1 : 0.9) * Math.sin(Math.PI * Math.min(1, this.chuteT / CHUTE_S));
-      if (this.chuteT >= CHUTE_S) this.chuteT = -1;
+    if (this.swallowAt >= 0) {
+      this.swallowT -= dt;
+      if (this.swallowT <= 0) this.finishSwallow();
     }
-    this.parts.chute.rotation.x = chute;
     // The chunk froze every matrix when it was placed (world/chunks.ts
     // `freezeStaticSubtree`): the moving parts write their own.
     this.parts.wheel.updateMatrix();
     this.parts.flap.updateMatrix();
     this.parts.buttonCap.updateMatrix();
-    this.parts.chute.updateMatrix();
   }
 }
 

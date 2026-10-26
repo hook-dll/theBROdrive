@@ -391,6 +391,13 @@ export interface WorldState {
    * given out, so an emptied slot stays empty. Machines never restock.
    */
   vendingSold: Record<string, number[]>;
+  /**
+   * What lies in a card machine's grid (world/cardmachine.ts), by the machine's fixture
+   * id (`post:<index>`, `vend:<poi>`), by anchor cell: what it gave and the player has
+   * not taken yet. A thing lying there is out of the post's stock, its contract active
+   * (contracts/registry.ts `activeContracts`). Absent: an empty grid.
+   */
+  machineGrids: Record<string, (Item | null)[]>;
 }
 
 export type WorldDelta =
@@ -488,6 +495,8 @@ export type WorldDelta =
   | { t: 'weather_begin'; playedSeconds: number }
   /** A vending machine slot paid for and dispensed (world/vending.ts). */
   | { t: 'vend_sold'; machineId: string; slot: number }
+  /** A card machine's grid rewritten (world/cardmachine.ts): something given into it or taken out. */
+  | { t: 'machine_grid'; machineId: string; cells: readonly (Item | null)[] }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
   /** Rubles paid into a lot car's key box (world/keybox.ts): its `lotPaid` rises by `rubles`. */
@@ -545,6 +554,7 @@ export function newWorldState(seed: number): WorldState {
     looseItems: {},
     flattenedProps: [],
     vendingSold: {},
+    machineGrids: {},
   };
 }
 
@@ -644,6 +654,11 @@ export class GameWorld {
     }
     for (const storage of Object.values(state.courierStorage)) {
       for (const item of storage) {
+        if (item) bump(item.id);
+      }
+    }
+    for (const grid of Object.values(state.machineGrids)) {
+      for (const item of grid) {
         if (item) bump(item.id);
       }
     }
@@ -944,6 +959,10 @@ export class GameWorld {
         if (!sold.includes(delta.slot)) sold.push(delta.slot);
         break;
       }
+      case 'machine_grid':
+        if (delta.cells.some((item) => item !== null)) s.machineGrids[delta.machineId] = delta.cells.slice();
+        else delete s.machineGrids[delta.machineId];
+        break;
       case 'car_buy': {
         const car = s.cars[delta.carId];
         if (car) {

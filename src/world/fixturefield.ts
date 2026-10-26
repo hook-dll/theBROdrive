@@ -2,6 +2,7 @@ import type { FoleyContinuous, FoleyEvent } from '../audio/foley';
 import type { DeliveryProbe } from '../contracts/types';
 import type { GameWorld } from '../game/state';
 import type { Inventory, Item } from '../items/items';
+import type { FixedGridView } from '../vehicle/trunk';
 import type { PumpNozzle } from './pumps';
 
 /**
@@ -35,13 +36,9 @@ export interface FixtureContext {
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;
   /**
-   * Lets a real loose item fall at an ABSOLUTE world point: what a machine gives always
-   * lies in its tray or drawer for the player to pick up, never in the hands.
-   */
-  drop(item: Item, x: number, y: number, z: number): void;
-  /**
    * Lets go of the machine being worked (player/machinefocus.ts): the camera steps back
-   * so the player sees what fell into the tray.
+   * so the player sees what the machine did out in the world (a key in a drawer, a haul's
+   * load in its slot).
    */
   stepBack(): void;
   /**
@@ -121,6 +118,12 @@ export interface WorldFixture {
   scroll?(notches: number): FoleyEvent | null;
   /** The cursor to show over the part the last `aim` hit while framed, or null for the arrow. */
   cursor?(): 'grab' | 'grabbing' | 'pointer' | null;
+  /**
+   * The machine's cell grid while it is framed, for the renderer to draw as a boot's
+   * (world/cardmachine.ts, render/trunkview.ts `updateFixed`); omitted for a fixture
+   * with none. Read every frame: the object may be reused in place.
+   */
+  grid?(): FixedGridView | null;
 }
 
 /** Where the camera stands to work a machine: ABSOLUTE metres and a field of view. */

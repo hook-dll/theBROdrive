@@ -19,9 +19,12 @@ import { box, C, mergeKitStatics } from './poi/kit';
  *
  * A card machine (world/cardmachine.ts), the post's twin: the wheel turns through a card
  * for each thing still in it, the showcase under the window holds the one the card
- * names, and BUY takes its price from the player's money and drops
- * it into the tray. Short, the button springs back with a rattle, nothing drops, and the
- * card says the money is short.
+ * names, and BUY takes its price from the player's money and lays the thing in the
+ * machine's grid, where he takes it as from a boot. Short, the button springs back with
+ * a rattle, nothing is given, and the card says the money is short; with no room left in
+ * the grid (eight things bought and not taken), it refuses before taking any money.
+ * What lies in the grid is saved (`WorldState.machineGrids`), so a thing paid for and
+ * left there waits for him.
  *
  * What a machine holds is a pure function of the stop's seed, so it needs no saved stock
  * of its own: `vendingSold` records which slots were paid for, and those stay empty for
@@ -148,7 +151,7 @@ function vendingStock(
   return { items, wares };
 }
 
-const SHOP_LOOK = { title: 'SHOP', body: C.fadedBlue, buttonLabel: 'BUY', buttonColour: 0xb03a2e } as const;
+const SHOP_LOOK = { body: C.fadedBlue, buttonLabel: 'BUY', buttonColour: 0xb03a2e } as const;
 registerCardMachineSigns(SHOP_LOOK);
 
 /** What the card says a ware is, and the colour of its band. */
@@ -232,7 +235,7 @@ class ShopMachine extends CardMachine {
   private short: number | null = null;
 
   constructor(
-    private readonly world: GameWorld,
+    world: GameWorld,
     id: string,
     /** Kilometres from home: the price's argument. */
     private readonly km: number,
@@ -241,7 +244,7 @@ class ShopMachine extends CardMachine {
     private readonly products: readonly (THREE.Object3D | null)[],
     parts: CardMachineParts,
   ) {
-    super(id, parts);
+    super(id, parts, world);
     const sold = world.state.vendingSold[id] ?? [];
     this.available = [];
     for (let slot = 0; slot < SHOP_SLOTS; slot++) {
@@ -310,6 +313,10 @@ class ShopMachine extends CardMachine {
   protected pressButton(ctx: FixtureContext, index: number): FoleyEvent {
     const at = this.itemAt(index);
     if (!at) return this.refuse();
+    if (this.roomFor(at.item) < 0) {
+      ctx.toast('the grid is full — take out what you bought first');
+      return this.refuse();
+    }
     const price = itemPrice(at.item, this.km);
     if (!ctx.debit(price)) {
       // The card says why, painted afresh in place.
@@ -323,7 +330,9 @@ class ShopMachine extends CardMachine {
     const product = this.products[at.slot];
     if (product) product.visible = false;
     this.cardsChanged();
-    this.give(ctx, [at.item]);
+    // Into the grid, where he takes it from as from a boot.
+    this.give(at.item);
+    this.saveGrid();
     return 'drop';
   }
 }

@@ -795,10 +795,10 @@ export interface PauseHooks {
   /** POI scenery receiving shadows (world/poi.ts `setPoiReceiveShadows`): off, it only casts them. Dev only. */
   poiShadows?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
-   * The trial designs of the card machines and the toy box's stand (world/devlook.ts):
-   * `cycle` saves the drive, writes the next one and reloads. Dev only.
+   * The trial designs of the toy box's stand (world/devlook.ts): `cycle` saves the drive,
+   * writes the next one and reloads. Dev only.
    */
-  devLook?: { readonly machine: string; readonly stand: string; cycle(which: 'machine' | 'stand'): void };
+  devLook?: { readonly stand: string; cycle(): void };
   /**
    * The traffic stream's two knobs (world/traffic.ts `cap`, `floor`): the ceiling in cars
    * and the quiet end of the density draw as a share of it. `null` hands either back to
@@ -2853,11 +2853,10 @@ export class MainMenu {
             if (btn) btn.textContent = label();
           });
         }
-        // A reload each: the stops are built as their chunks stream in.
+        // A reload: the stops are built as their chunks stream in.
         if (import.meta.env.DEV && hooks.devLook) {
           const look = hooks.devLook;
-          devButton(`Machine style: ${look.machine} (next, reloads)`, () => look.cycle('machine'));
-          devButton(`Toy box stand: ${look.stand} (next, reloads)`, () => look.cycle('stand'));
+          devButton(`Toy box stand: ${look.stand} (next, reloads)`, () => look.cycle());
         }
         if (import.meta.env.DEV && hooks.jumpToLake) {
           // Cycles through the first sites on each press rather than opening a screen

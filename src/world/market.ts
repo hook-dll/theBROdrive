@@ -129,10 +129,10 @@ function drawSign(
 // ---------------------------------------------------------------------------
 
 /**
- * The boards whose text is known before the drive starts (a card machine's title, button
- * and tray, a drum's stencil), painted side by side on one canvas: they draw in one
- * material, so a machine's three boards merge into one draw (poi/kit.ts `mergeKitStatics`)
- * instead of three, each with a texture of its own.
+ * The boards whose text is known before the drive starts (a card machine's button plate,
+ * a drum's stencil), painted side by side on one canvas: they draw in one material, so
+ * a machine's boards merge into the cabinet's draw (poi/kit.ts `mergeKitStatics`)
+ * instead of each drawing with a texture of its own.
  *
  * Registered at module load (`registerAtlasSign`) and painted once, on the first board
  * asked for, so the texture is uploaded once and never repainted: a board with a text

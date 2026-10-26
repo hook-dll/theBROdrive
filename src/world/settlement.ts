@@ -227,11 +227,12 @@ export const SIGNPOST_OUT_M = 1.0;
  * against these.
  */
 export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
-  // The card machines (world/cardmachine.ts), 1.36 x 1.0 m: the safe's hinges on one
-  // flank, the tray 0.38 m out of the front. They stand 1.3 m in (1.2 when they were
-  // 0.8 m deep), so their backs keep to the same line.
-  post: [0.75, 0.9],
-  shop: [0.75, 0.9],
+  // The card machines (world/cardmachine.ts), 1.36 x 1.0 m and the control pod standing
+  // out of the front to 0.77 m from the middle, the cheeks' stripes on the flanks (the
+  // tray and its 0.38 m trough are gone: the opening is a flat plate). They stand 1.3 m
+  // in (1.2 when they were 0.8 m deep), so their backs keep to the same line.
+  post: [0.7, 0.8],
+  shop: [0.7, 0.8],
   // The toy box's stand (world/toybox.ts), its largest variant: the podium or the
   // carousel, 1.44 m across, and the lectern at its front corner with the handwheel
   // standing out of it. Its back 0.4 m in from the asphalt's edge.

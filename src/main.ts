@@ -489,6 +489,9 @@ async function boot(): Promise<void> {
     },
   );
   const trunkView = new TrunkView(renderer.scene);
+  // The framed card machine's opening (world/cardmachine.ts), drawn as a boot's grid;
+  // its own instance, so an open boot on the lay-by stays drawn beside it.
+  const machineGridView = new TrunkView(renderer.scene, 'machine-grid');
   /** The car currently showing a sticker being tried on, so it can be cleared. */
   let stickerPreviewCarId: string | null = null;
   // Sand/gravel spray lives for the session like the other view systems; its
@@ -1298,7 +1301,7 @@ async function boot(): Promise<void> {
     {
       toast: (text) => hud.setToast(text),
       focus: (fixtureId) => machineFocus.enter(fixtureId),
-      // A machine that dropped something in its tray lets go, so the player sees it.
+      // A machine whose work is out in the world (a haul's load) lets go, so the player sees it.
       stepBack: () => machineFocus.leave(true),
     },
   );
@@ -3010,6 +3013,14 @@ async function boot(): Promise<void> {
       sky.dayFactor,
       renderer.camera.position,
     );
+    machineGridView.updateFixed(
+      machineFocus.grid(),
+      origin.x,
+      origin.z,
+      s.timeOfDay,
+      sky.dayFactor,
+      renderer.camera.position,
+    );
     hud.setInventory(
       inventory.all,
       inventory.selectedIndex,
@@ -3279,10 +3290,9 @@ async function boot(): Promise<void> {
       : undefined,
     devLook: import.meta.env.DEV
       ? {
-          machine: devLook.machine,
           stand: devLook.stand,
-          cycle: (which: 'machine' | 'stand') => {
-            cycleDevLook(which);
+          cycle: () => {
+            cycleDevLook('stand');
             // Saved and marked for resume first, as a profile reload is: back where he stood.
             const state = stateForSave();
             const slot = `slot-${state.seed}`;

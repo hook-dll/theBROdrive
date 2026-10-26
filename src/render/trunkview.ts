@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import { createItemMesh, disposeItemMeshResources, setPocketWatchState } from './partmesh';
 import { setPartCondition } from './materials';
-import { isBrokenThing } from '../items/items';
+import { isBrokenThing, type Item } from '../items/items';
 import type { Vehicle } from '../vehicle/vehicle';
 import {
   bootFootprint,
   bootOwner,
-  storageCellBox,
-  storageCellCount,
+  storageLayout,
   TRUNK_MAX_CELL_COUNT,
+  type FixedGridView,
+  type GridLayout,
   type StorageGridShape,
   type TrunkViewState,
 } from '../vehicle/trunk';
@@ -44,10 +45,14 @@ const POSE_FLAT = new THREE.Euler(0.22, 0.52, 0.08);
 const _box = new THREE.Box3();
 const _size = new THREE.Vector3();
 const _centre = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 
 /**
  * World-space storage cells with real item meshes and no labels: the trunk's grid plane
  * behind the car, or the bonnet's cells lying in the engine bay at their parts' places.
+ * One instance draws one grid at a time; a card machine's opening (world/cardmachine.ts)
+ * is drawn by an instance of its own (`updateFixed`), in the same panels and the same
+ * item poses, so it reads as the boot does.
  */
 export class TrunkView {
   private readonly root = new THREE.Group();
@@ -88,14 +93,17 @@ export class TrunkView {
   private readonly farSize = new THREE.Vector3();
 
   private itemSignature = '';
+  /** The car shape and side `carLayout` was built for; a change builds it again. */
+  private carShape: StorageGridShape | null = null;
+  private carSide: TrunkViewState['side'] | null = null;
+  private carLayout: GridLayout | null = null;
   /** What the panels were last laid out for; any change lays them out again. */
-  private layoutShape: StorageGridShape | null = null;
-  private layoutSide: TrunkViewState['side'] | null = null;
+  private laidFor: GridLayout | null = null;
   /** Which panels the last layout placed: a bonnet has fewer cells than the trunk. */
   private readonly laidOut: boolean[] = new Array<boolean>(TRUNK_MAX_CELL_COUNT).fill(false);
 
-  constructor(private readonly scene: THREE.Scene) {
-    this.root.name = 'vehicle-storage-grid';
+  constructor(private readonly scene: THREE.Scene, name = 'vehicle-storage-grid') {
+    this.root.name = name;
     this.root.visible = false;
     for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
       const panel = new THREE.Mesh(this.panelGeometry, this.panelMaterial);
@@ -129,43 +137,79 @@ export class TrunkView {
 
     const shape: StorageGridShape = vehicle.storageShape;
     vehicle.interpolatedTransform(alpha, this.posePosition, this.poseQuaternion);
+    if (shape !== this.carShape || view.side !== this.carSide || !this.carLayout) {
+      this.carShape = shape;
+      this.carSide = view.side;
+      this.carLayout = storageLayout(shape, view.side);
+    }
+    this.draw(this.carLayout, view.cells, view.selectedCell, timeOfDay, dayFactor, eye);
+  }
 
+  /**
+   * A grid standing still in the world (a card machine's opening), or null to hide it.
+   * `originX`/`originZ`: the floating origin its ABSOLUTE place is drawn against.
+   */
+  updateFixed(
+    view: FixedGridView | null,
+    originX: number,
+    originZ: number,
+    timeOfDay: number,
+    dayFactor: number,
+    eye: THREE.Vector3,
+  ): void {
+    if (!view) {
+      this.root.visible = false;
+      return;
+    }
+    this.posePosition.set(view.x - originX, view.y, view.z - originZ);
+    this.poseQuaternion.setFromAxisAngle(UP, view.yaw);
+    this.draw(view.layout, view.cells, view.selectedCell, timeOfDay, dayFactor, eye);
+  }
+
+  /** Draws `cells` laid out by `layout` at the pose in `posePosition`/`poseQuaternion`. */
+  private draw(
+    layout: GridLayout,
+    cells: readonly (Item | null)[],
+    selectedCell: number | null,
+    timeOfDay: number,
+    dayFactor: number,
+    eye: THREE.Vector3,
+  ): void {
     this.root.visible = true;
     this.root.position.copy(this.posePosition);
     this.root.quaternion.copy(this.poseQuaternion);
-    if (shape !== this.layoutShape || view.side !== this.layoutSide) {
-      this.layoutShape = shape;
-      this.layoutSide = view.side;
-      this.layout(shape, view.side);
+    if (layout !== this.laidFor) {
+      this.laidFor = layout;
+      this.layout(layout);
       this.itemSignature = '';
     }
 
     // A thing of several boot cells lights all of them when one is aimed at.
-    const trunk = view.side === 'trunk';
-    const selectedOwner = trunk && view.selectedCell !== null ? bootOwner(view.cells, shape.trunkGrid, view.selectedCell) : -1;
+    const grid = layout.grid;
+    const selectedOwner = grid && selectedCell !== null ? bootOwner(cells, grid, selectedCell) : -1;
     for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
-      const visible = this.laidOut[cell]! && cell < view.cells.length;
+      const visible = this.laidOut[cell]! && cell < cells.length;
       this.panels[cell]!.visible = visible;
       this.borders[cell]!.visible = visible;
-      const selected = visible && (cell === view.selectedCell
-        || (selectedOwner >= 0 && bootOwner(view.cells, shape.trunkGrid, cell) === selectedOwner));
+      const selected = visible && (cell === selectedCell
+        || (grid !== null && selectedOwner >= 0 && bootOwner(cells, grid, cell) === selectedOwner));
       this.panels[cell]!.material = selected ? this.selectedPanelMaterial : this.panelMaterial;
       this.borders[cell]!.material = selected ? this.selectedBorderMaterial : this.borderMaterial;
     }
 
-    const itemSignature = view.cells.map((item) =>
+    const itemSignature = cells.map((item) =>
       item?.type === 'part'
         ? `${item.id}:${item.part.destroyed ? 1 : 0}:${item.part.dirt}:${item.part.rust}`
         : `${item?.id ?? ''}${isBrokenThing(item) ? ':broken' : ''}`,
     ).join('|');
     if (itemSignature !== this.itemSignature) {
       this.itemSignature = itemSignature;
-      this.rebuildItems(view, shape);
+      this.rebuildItems(cells, layout);
     }
     for (const watch of this.pocketWatches) {
       setPocketWatchState(watch, timeOfDay, dayFactor);
     }
-    if (view.side === 'bonnet') return;
+    if (grid === null) return;
     // `lookAt` resolves the parent's world transform itself, so a holder under the
     // tilted car still aims straight at the eye with world up kept up.
     this.root.updateMatrixWorld();
@@ -173,19 +217,19 @@ export class TrunkView {
   }
 
   /**
-   * Places every cell's panel and border: upright in the trunk's plane facing the
-   * player behind the car, or flat in a bonnet cell facing up out of the bay, the panel
-   * on its floor and the outline round its top.
+   * Places every cell's panel and border: upright in the grid's plane facing the player
+   * (a boot behind the car, a machine's opening), or flat in a bonnet cell facing up out
+   * of the bay, the panel on its floor and the outline round its top.
    */
-  private layout(shape: StorageGridShape, side: TrunkViewState['side']): void {
-    const count = storageCellCount(shape, side);
+  private layout(layout: GridLayout): void {
+    const flat = layout.grid === null;
     for (let cell = 0; cell < TRUNK_MAX_CELL_COUNT; cell++) {
-      const placed = cell < count && storageCellBox(cell, shape, side, this.cellPosition, this.cellSize);
+      const placed = cell < layout.count && layout.cellBox(cell, this.cellPosition, this.cellSize);
       this.laidOut[cell] = placed;
       if (!placed) continue;
       const panel = this.panels[cell]!;
       const border = this.borders[cell]!;
-      if (side === 'bonnet') {
+      if (flat) {
         border.position.copy(this.cellPosition);
         border.position.y += this.cellSize.y * 0.5 - BONNET_BORDER_DROP;
         border.rotation.set(-Math.PI / 2, 0, 0);
@@ -206,20 +250,20 @@ export class TrunkView {
     }
   }
 
-  private rebuildItems(view: TrunkViewState, shape: StorageGridShape): void {
+  private rebuildItems(cells: readonly (Item | null)[], layout: GridLayout): void {
     this.clearItems();
-    const bonnet = view.side === 'bonnet';
-    for (let cell = 0; cell < view.cells.length; cell++) {
-      const item = view.cells[cell];
+    const grid = layout.grid;
+    for (let cell = 0; cell < cells.length; cell++) {
+      const item = cells[cell];
       if (!item) continue;
-      if (!storageCellBox(cell, shape, view.side, this.cellPosition, this.cellSize)) continue;
+      if (!layout.cellBox(cell, this.cellPosition, this.cellSize)) continue;
       // A thing of several boot cells is drawn once, across all of them: its anchor cell
       // (the top-left) joined with the far corner of its footprint.
-      const footprint = bonnet ? null : bootFootprint(item);
-      const spans = footprint !== null && (footprint.columns > 1 || footprint.rows > 1);
+      const footprint = grid ? bootFootprint(item) : null;
+      const spans = grid !== null && footprint !== null && (footprint.columns > 1 || footprint.rows > 1);
       if (spans) {
-        const far = cell + (footprint.rows - 1) * shape.trunkGrid.columns + footprint.columns - 1;
-        if (storageCellBox(far, shape, view.side, this.farPosition, this.farSize)) {
+        const far = cell + (footprint.rows - 1) * grid.columns + footprint.columns - 1;
+        if (layout.cellBox(far, this.farPosition, this.farSize)) {
           const minX = Math.min(this.cellPosition.x - this.cellSize.x / 2, this.farPosition.x - this.farSize.x / 2);
           const maxX = Math.max(this.cellPosition.x + this.cellSize.x / 2, this.farPosition.x + this.farSize.x / 2);
           const minY = Math.min(this.cellPosition.y - this.cellSize.y / 2, this.farPosition.y - this.farSize.y / 2);
@@ -232,7 +276,7 @@ export class TrunkView {
       if (item.type === 'part') setPartCondition(mesh, item.part);
       const holder = new THREE.Group();
       holder.add(mesh);
-      if (bonnet) {
+      if (!grid) {
         this.fitToCell(mesh, holder);
       } else {
         const flat = item.type === 'photograph' || item.type === 'pocket_watch' || item.type === 'contract_cargo';

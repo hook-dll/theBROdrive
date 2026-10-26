@@ -192,11 +192,31 @@ function triangulate(points: readonly P2[], holes: readonly (readonly P2[])[] = 
 let bodyMaterial: THREE.MeshStandardMaterial | null = null;
 let glassMaterial: THREE.MeshStandardMaterial | null = null;
 
-/** The one body material every dwelling shares: vertex colour, comic banding. */
+/**
+ * The comic treatment a dwelling takes: the scenery's warm shade, but NO banded light
+ * (`lightingStrength` 0), no contours and no stipple.
+ *
+ * The banding quantises the lit colour's luminance into five steps, and a facade is full
+ * of fine two-tone paint: siding's 3.5 cm shadow line at 0.8 of the wall's tone, stone
+ * courses, battens, frames. Wherever a lit wall sat near a band edge the wall went to one
+ * band and its lines to the next, doubling a 20 % difference, and lines that were under a
+ * pixel wide aliased into moiré: dashed arcs across every clapboard wall at dusk, and at
+ * night, as each passing car's headlamp falloff slid the band edges over the houses,
+ * blotches and arcs that crawled with the car. The owner read them as ugly shadows
+ * (2026-10-26); they were not shadows at all (switching every house's `receiveShadow`
+ * off left them exactly as they were), and with the banding off they are gone.
+ *
+ * A house loses no outline by it: its faces are flat, so the sun already shades each
+ * one evenly, and the terminator the banding exists to draw on a dune is the house's
+ * own edges. Uniforms only, so the program is the other comic scenery's.
+ */
+const DWELLING_COMIC = { lightingStrength: 0, contourStrength: 0, stippleStrength: 0 } as const;
+
+/** The one body material every dwelling shares: vertex colour, the scenery's warm shade. */
 export function dwellingBodyMaterial(): THREE.MeshStandardMaterial {
   bodyMaterial ??= applyComicShading(
     new THREE.MeshStandardMaterial({ name: 'dwelling-body', vertexColors: true, roughness: 0.86, metalness: 0 }),
-    { contourStrength: 0, stippleStrength: 0 },
+    DWELLING_COMIC,
   );
   return bodyMaterial;
 }
@@ -220,7 +240,7 @@ export function dwellingSkinMaterial(): THREE.MeshStandardMaterial {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -4,
     }),
-    { contourStrength: 0, stippleStrength: 0 },
+    DWELLING_COMIC,
   );
   return skinMaterial;
 }
