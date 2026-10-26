@@ -154,6 +154,18 @@ const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> =
   kit_vaz1111: SLOW_CAR,
 };
 /**
+ * The stream's expected `[sleeper, hurried, frantic]` mix under `DRIVER_ODDS`: bodies
+ * are drawn uniformly from `CAR_MODELS`, so it is the plain mean of their odds.
+ */
+export const PER_CAR_DRIVER_MIX: readonly [number, number, number] = (() => {
+  const sum = [0, 0, 0];
+  for (const model of CAR_MODELS) {
+    const odds = DRIVER_ODDS[model.id] ?? FAST_CAR;
+    for (let k = 0; k < 3; k++) sum[k]! += odds[k]!;
+  }
+  return [sum[0]! / CAR_MODELS.length, sum[1]! / CAR_MODELS.length, sum[2]! / CAR_MODELS.length];
+})();
+/**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
  * a hurry in whatever he owns — with the power dealt with by fitting one: the BMW M30,
@@ -3167,6 +3179,7 @@ export class RoadTraffic {
       this.scene,
       this.origin,
     );
+    if (cargoKg > 0) vehicle.setCarriedMass(cargoKg);
     // The AI's cars run the wheel loop at 240 Hz, the player's at 480 (vehicletuning.ts).
     vehicle.setWheelSubsteps(TRAFFIC_WHEEL_SUBSTEPS);
     const autopilot = new Autopilot(
@@ -3179,7 +3192,6 @@ export class RoadTraffic {
     // bench read - correctly - as "18 of 19 cars lit".
     vehicle.setHeadlights('low');
     autopilot.setPassingEnabled(true);
-    if (cargoKg > 0) vehicle.setCarriedMass(cargoKg);
     autopilot.setFollowingHeadway(request.headwayS);
     autopilot.setMode(request.mode);
     autopilot.setSpeedCap(request.speedCap);
@@ -3582,7 +3594,7 @@ export class RoadTraffic {
     speedCap: number;
     pace: number;
   } {
-    const [sleeperOdds, hurriedOdds] = DRIVER_ODDS[modelId] ?? FAST_CAR;
+    const [sleeperOdds, hurriedOdds] = this.mixOverride ?? DRIVER_ODDS[modelId] ?? FAST_CAR;
     const styleRoll = this.random();
     if (styleRoll < sleeperOdds) {
       const first = !this.carList.some((car) => !car.rival && car.direction === direction);
@@ -3675,14 +3687,17 @@ export class RoadTraffic {
 
   set cap(value: number | null) {
     this.capOverride = value === null ? null : Math.min(64, Math.max(0, Math.round(value)));
+    // Rescaled now, not on the next step, so a paused menu reads the new target.
+    this.desiredCount = this.scaleDesiredCount(this.trafficCap);
   }
 
   private floorOverride: number | null = null;
 
   /**
    * The quiet end of the density draw as a fraction of the cap: `DENSITY_FLOOR`, or the
-   * dev menu's override (`null` hands it back). A change re-rolls at once, so the knob
-   * is seen on the road now rather than at the next 36-72 s rotation.
+   * dev menu's override (`null` hands it back). A change does not re-roll: the present
+   * target holds, raised to the new floor if it now lies under it, so dragging the knob
+   * moves the range and nothing random.
    */
   get floor(): number {
     return this.floorOverride ?? DENSITY_FLOOR;
@@ -3690,8 +3705,48 @@ export class RoadTraffic {
 
   set floor(value: number | null) {
     this.floorOverride = value === null ? null : Math.min(1, Math.max(0, value));
-    this.redrawDesiredCount();
-    this.densityTimer = this.drawDensityInterval();
+    const cap = this.trafficCap;
+    this.desiredCount = this.scaleDesiredCount(cap);
+    this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
+  }
+
+  private mixOverride: readonly [number, number, number] | null = null;
+
+  /**
+   * The `[sleeper, hurried, frantic]` shares new spawns are drawn with: the per-car
+   * odds' mean (`PER_CAR_DRIVER_MIX`), or the dev menu's override, which then applies
+   * to every body alike. `null` hands it back to the per-car odds. Cars already on the
+   * road keep their drivers; the stream turns over to the new mix as it recycles.
+   */
+  get driverMix(): readonly [number, number, number] {
+    return this.mixOverride ?? PER_CAR_DRIVER_MIX;
+  }
+
+  /** True while the dev override, not the per-car odds, picks the drivers. */
+  get driverMixOverridden(): boolean {
+    return this.mixOverride !== null;
+  }
+
+  set driverMix(value: readonly [number, number, number] | null) {
+    if (value === null) {
+      this.mixOverride = null;
+      return;
+    }
+    const clean = value.map((share) => Math.max(0, share));
+    const total = clean[0]! + clean[1]! + clean[2]!;
+    this.mixOverride = total > 0
+      ? [clean[0]! / total, clean[1]! / total, clean[2]! / total]
+      : PER_CAR_DRIVER_MIX;
+  }
+
+  /** The fewest cars a density draw can ask for against the present cap. */
+  get floorCount(): number {
+    return this.minDesiredCount(this.trafficCap);
+  }
+
+  private minDesiredCount(cap: number): number {
+    if (cap <= 0) return 0;
+    return Math.min(cap, Math.max(1, Math.ceil(cap * this.floor)));
   }
 
   /** Re-roll at the established cadence against the present cap. */
@@ -3703,7 +3758,7 @@ export class RoadTraffic {
 
   private scaleDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    return Math.min(cap, Math.max(1, Math.round(cap * this.densityFraction)));
+    return Math.min(cap, Math.max(this.minDesiredCount(cap), Math.round(cap * this.densityFraction)));
   }
 
   /**
@@ -3715,8 +3770,7 @@ export class RoadTraffic {
    */
   private drawDesiredCount(cap: number): number {
     if (cap <= 0) return 0;
-    if (cap === 1) return 1;
-    const floor = Math.max(1, Math.ceil(cap * this.floor));
+    const floor = this.minDesiredCount(cap);
     return floor + Math.floor(this.random() * (cap - floor + 1));
   }
 

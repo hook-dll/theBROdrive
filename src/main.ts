@@ -3229,6 +3229,9 @@ async function boot(): Promise<void> {
           get floor() {
             return traffic.floor;
           },
+          get floorCount() {
+            return traffic.floorCount;
+          },
           get target() {
             return traffic.status.target;
           },
@@ -3240,6 +3243,19 @@ async function boot(): Promise<void> {
           },
           setFloor: (value: number | null) => {
             traffic.floor = value;
+          },
+          get driverMix() {
+            return traffic.driverMix;
+          },
+          get driverMixOverridden() {
+            return traffic.driverMixOverridden;
+          },
+          get liveMix() {
+            const status = traffic.status;
+            return [status.sleeper, status.hurried, status.frantic] as const;
+          },
+          setDriverMix: (value: readonly [number, number, number] | null) => {
+            traffic.driverMix = value;
           },
         }
       : undefined,
