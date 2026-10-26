@@ -1,16 +1,26 @@
 /**
- * THE HAUL BAYS AT WORK (game-design2.md §7.8): a haul's load waits in its source post's
- * PICK-UP slot (the first of its lay-by's parking row, world/haulbay.ts) before its card
+ * THE HAUL BAYS AT WORK (game-design2.md §7.8): a post's haul (contracts/hauls.ts) waits
+ * in its PICK-UP slot (the first of its lay-by's parking row, world/haulbay.ts) until it
  * is taken, and is handed in by reversing it into another post's HAND-IN slot (the
  * second). Both are the "bays" below; the third slot is the car for sale's.
  *
- * WAITING. While a post's bulky card (`HAUL_SLOT`) shows a haul, its machine is streamed in
- * (the chunk is solid), the player is within `SPAWN_M` and the pick-up slot is empty
- * (`bayOccupied`: no car, trailer or player on it), the load is stood in it as if
- * reversed in (contracts/world.ts `spawnHaulLoad`), from the offer alone. A waiting load
- * the player has left `WAITING_CLEAR_M` behind is taken out of the world again, and comes
- * back the same when he returns. A taken card's next haul appears only once the pick-up
+ * WAITING. While a post's machine is streamed in (the chunk is solid), the player is
+ * within `SPAWN_M` and the pick-up slot is empty (`bayOccupied`: no car, trailer or
+ * player on it), the post's waiting haul (`waitingHaul`) is stood in it as if reversed
+ * in (contracts/world.ts `spawnHaulLoad`), from its round alone. A waiting load the
+ * player has left `WAITING_CLEAR_M` behind is taken out of the world again, and comes
+ * back the same when he returns. A taken haul's next round appears only once the pick-up
  * slot is empty again.
+ *
+ * LEFT BEHIND. A taken haul's load that nothing couples (no ball, no tow bar), that the
+ * player does not sit in and that does not stand at its destination's hand-in slot is
+ * ABANDONED once the player is `ABANDON_M` from it in a straight line, live or streamed
+ * out (its saved pose): the contract closes undelivered (`haul_abandon`), the load goes
+ * out of the world and the job is FINED `FINE_SHELLS`, in that order, so a reload finds it
+ * closed and never fines it twice — unless it was left standing in one of its own source
+ * post's slots: the boy only changed his mind, no fine. Its post's pick-up slot is on
+ * its next round already (it moved on at the take). Unhitching for a moment to hitch
+ * again is far inside it.
  *
  * THE HAND-IN, every tick for each taken haul's load while it is live:
  *  - it stands at a hand-in slot: its footprint (`loadFootprint`) within `NEAR_M` of it;
@@ -30,10 +40,11 @@
  * DESTINATION OR RETURN. The same reverse-in at a post that may sign for the haul
  * (`contractDestinationRefusal`: any post past its source) is a DELIVERY and pays
  * `contractPay` (the route's kilometres in shells, twice that urgent and on time); at ANY
- * other post, its source included, it is a RETURN TO SENDER: no pay, the contract closed
- * undelivered and FINED `FINE_SHELLS` (economy/economy.ts `fine`) right after the
- * `haul_close` that a reload finds, so never twice. A post's hand-in slot is the one or
- * the other, never both: the destination always wins.
+ * other post it is a RETURN TO SENDER: no pay, the contract closed undelivered and FINED
+ * `FINE_SHELLS` (economy/economy.ts `fine`) right after the `haul_close` that a reload
+ * finds, so never twice — except at its own source post, where the boy only changed his
+ * mind: closed, no pay, no fine. A post's hand-in slot is the one or the other, never
+ * both: the destination always wins.
  *
  * While the load stands still at a hand-in slot and is not accepted, the reason is told
  * once in a toast (again after `RETELL_S`): back it in, straighten up, all the way in,
@@ -43,13 +54,14 @@
 
 import { contractPay, credit, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
 import type { GameWorld, WorldState } from '../game/state';
-import { contractKindOf, contractThing, isHaul } from '../items/items';
+import { contractKindOf, contractThing } from '../items/items';
 import { carModelMeasure } from '../render/carmodel';
 import { hasCarModel } from '../vehicle/carmodels';
 import { TRAILER_BALL_Z, TRAILER_HALF_WIDTH, trailerTailZ } from '../vehicle/trailer';
-import { postParkingSlots, type ParkingSlot } from '../world/haulbay';
+import { postParkingSlot, postParkingSlots, type ParkingSlot } from '../world/haulbay';
 import { postStopsBetween } from '../world/poststops';
-import { HAUL_SLOT, postStock } from './offers';
+import { waitingHaul } from './hauls';
+import { offerDestinationIndex } from './offers';
 import { contractDestinationRefusal, contractKindRefusal } from './registry';
 import type { DeliveryProbe } from './types';
 import { boundHaul, haulLoadId, isHaulLoadId, spawnHaulLoad, type ContractWorldDeps } from './world';
@@ -86,6 +98,8 @@ const SEEN_SPAWN_M = 200;
 const SCAN_S = 0.5;
 /** The floor counts as taken this far past its walls, m. */
 const OCCUPIED_MARGIN_M = 0.2;
+/** A taken load left this far from the player, straight line, is abandoned, m. */
+const ABANDON_M = 300;
 
 const BACK_IT_IN = 'back it in';
 const STRAIGHTEN = "doesn't fit — straighten up";
@@ -312,6 +326,7 @@ export class HaulBays {
       this.refreshBays(s);
       this.spawnWaiting(x, z);
       this.clearAway(x, z);
+      this.judgeLeftBehind(x, z);
     }
     if (this.bays.size === 0) {
       this.watches.clear();
@@ -375,11 +390,10 @@ export class HaulBays {
       if (d > SPAWN_M || !this.host.postLive(index)) continue;
       // Nothing appears where it is seen up close: it waits for a look away.
       if (d < SEEN_SPAWN_M && this.host.inView(bay.x, this.deps.terrain.heightAt(bay.x, bay.z, bay.s) + 1, bay.z, 4)) continue;
-      const offer = postStock(state, this.world.seed, index, false).offers[HAUL_SLOT];
-      if (!offer || !isHaul(offer) || state.hauls[offer.id] || state.completedContractIds.includes(offer.id)) continue;
-      const id = haulLoadId(offer);
+      const haul = waitingHaul(state, this.world.seed, index);
+      const id = haulLoadId(haul);
       if (state.trailers[id] || state.cars[id] || this.bayOccupied(bay, x, z)) continue;
-      spawnHaulLoad(this.deps, offer);
+      spawnHaulLoad(this.deps, haul);
     }
   }
 
@@ -401,6 +415,40 @@ export class HaulBays {
       if (!this.poseOf(id, this.pose) || Math.hypot(this.pose.x - x, this.pose.z - z) <= WAITING_CLEAR_M) continue;
       gone(id);
     }
+  }
+
+  /** Abandons each taken haul's load the player has left `ABANDON_M` behind; see the header. */
+  private judgeLeftBehind(x: number, z: number): void {
+    const state = this.state;
+    const seed = this.world.seed;
+    const road = this.deps.road;
+    for (const [contractId, haul] of Object.entries(state.hauls)) {
+      const id = haul.loadId;
+      if (state.player.drivingCarId === id || (state.trailers[id]?.hitchedTo ?? null) !== null || (state.cars[id]?.towedBy ?? null) !== null) continue;
+      if (!this.poseOf(id, this.pose) || Math.hypot(this.pose.x - x, this.pose.z - z) < ABANDON_M) continue;
+      const foot = loadFootprint(state, id);
+      const at = (index: number, role: 'pickup' | 'handIn'): boolean =>
+        foot !== null && footprintTouchesBay(postParkingSlot(seed, road, index, role), this.pose, foot, NEAR_M);
+      if (at(offerDestinationIndex(haul.contract), 'handIn')) continue;
+      const source = haul.contract.sourceCourierIndex;
+      this.abandon(contractId, !at(source, 'pickup') && !at(source, 'handIn'));
+    }
+  }
+
+  /**
+   * The load of `contractId` left behind: closed undelivered, taken out of the world, and
+   * `fined` — not when it was left standing at its own source post, where the boy only
+   * changed his mind.
+   */
+  private abandon(contractId: string, fined: boolean): void {
+    const haul = this.state.hauls[contractId]!;
+    this.world.apply({ t: 'haul_abandon', contractId });
+    if (this.state.trailers[haul.loadId]) this.world.apply({ t: 'trailer_remove', trailerId: haul.loadId });
+    else this.world.apply({ t: 'car_remove', carId: haul.loadId });
+    this.watches.delete(haul.loadId);
+    const name = contractThing(haul.contract).name;
+    if (fined) this.host.toast(`left the ${name} behind — ${formatFine(fine(this.world, FINE_SHELLS))}`);
+    else this.host.toast(`the ${name} stays at its post — the job is off, no fine`);
   }
 
   /** The post whose hand-in slot a footprint at `pose` is at (within `NEAR_M`), or -1. */
@@ -515,7 +563,10 @@ export class HaulBays {
     return probe;
   }
 
-  /** Accepts the load of `contractId` in post `index`'s hand-in bay: delivered, or returned to its sender and fined. */
+  /**
+   * Accepts the load of `contractId` in post `index`'s hand-in bay: delivered, or returned
+   * to its sender — fined, unless this is its own source post.
+   */
   private accept(contractId: string, index: number): void {
     const haul = this.state.hauls[contractId]!;
     const contract = haul.contract;
@@ -530,6 +581,8 @@ export class HaulBays {
     if (delivered) {
       credit(this.world, pay);
       this.host.toast(`${name} handed in — ${formatPay(pay)}`);
+    } else if (index === contract.sourceCourierIndex) {
+      this.host.toast(`${name} back where it came from — no pay`);
     } else {
       this.host.toast(`${name} back to the sender — ${formatFine(fine(this.world, FINE_SHELLS))}`);
     }

@@ -8,10 +8,11 @@
  * knocks the car it rides in takes, the harsh driving of the car the player drives
  * (trip/ride.ts) and its drops to the ground wear it down. What reaches it through a car
  * is softened by that car's comfort (`comfortFactor`, §11.2). Below `BROKEN_BELOW` it is
- * broken: the contract closes there and then, undelivered, and is FINED
+ * broken: the contract closes there and then, undelivered, and a FRAGILE thing's is FINED
  * (economy/economy.ts `fine`, `FINE_SHELLS`) in the same step — the break is saved on the
  * item (`progress.broken`) and is found already made after a reload, so it is never fined
- * twice; the thing stays a souvenir, and handing it back later fines nothing more. The
+ * twice. Any other thing that breaks only loses its pay: no fine. The thing stays a
+ * souvenir, and handing it back later fines nothing more. The
  * tick scans state rather than holding its own list of contracts, so an item picked up,
  * swapped into another boot or dropped is followed with no bookkeeping.
  */
@@ -19,7 +20,7 @@
 import { fine, FINE_SHELLS, formatFine } from '../economy/economy';
 import type { CarState, GameWorld } from '../game/state';
 import { contractIdOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
-import { thingWears, thingWearShare } from '../items/things';
+import { hasTag, thingWears, thingWearShare } from '../items/things';
 import type { RideMeter } from '../trip/ride';
 import { carModel, comfortFactor, type CarComfort } from '../vehicle/carmodels';
 import { BROKEN_BELOW, defaultProgress, type ContractPlace } from './types';
@@ -154,7 +155,7 @@ export class ContractRuntime {
         if (isCargo(item)) this.visit(item, 'machine', null, 0, onContractItem);
       }
     }
-    // The hauls taken: the card is the contract, the load is in the world.
+    // The hauls taken: the contract is kept in state, the load is in the world.
     for (const haul of Object.values(state.hauls)) this.visit(haul.contract, 'haul', null, 0, onContractItem);
   }
 
@@ -192,9 +193,11 @@ export class ContractRuntime {
     this.lastPlace.set(item.id, place);
     const dropped = place === 'loose' && (previous === 'hand' || previous === 'car');
     if (!wearThing(item, (carWear + (dropped ? DROP_WEAR : 0)) * thingWearShare(thing))) return;
-    // Broken: its job closed undelivered there and then, and fined with the break — unless
-    // the job was closed already and this is only its souvenir.
+    // Broken: its job closed undelivered there and then, a fragile thing's fined with the
+    // break — unless the job was closed already and this is only its souvenir.
     if (this.world.state.completedContractIds.includes(contractIdOf(item))) return;
-    this.notify(`the ${thing.name} broke — the job is off, ${formatFine(fine(this.world, FINE_SHELLS))}`);
+    this.notify(hasTag(thing, 'fragile')
+      ? `the ${thing.name} broke — the job is off, ${formatFine(fine(this.world, FINE_SHELLS))}`
+      : `the ${thing.name} broke — the job is off, no pay`);
   }
 }

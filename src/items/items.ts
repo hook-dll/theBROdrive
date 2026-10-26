@@ -214,8 +214,9 @@ export type { StickerKind } from './stickercatalog';
 /**
  * A contract: one of the boy's things (items/things.ts) sent from a post. Its source
  * index is the complete delivery contract; its thing decides the name, the tags, the
- * mass, where it rides and the pay. A thing's is an item in the world; a haul's is only a
- * post's offer and, once taken, the card kept in `WorldState.hauls` (its load is the job).
+ * mass, where it rides and the pay. A thing's is an item in the world; a haul's is only
+ * drawn for a post's pick-up slot and, once taken, kept in `WorldState.hauls` (its load is
+ * the job).
  */
 export interface ContractCargoItem {
   readonly type: 'contract_cargo';

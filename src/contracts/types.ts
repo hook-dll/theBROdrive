@@ -3,7 +3,7 @@
  *
  * A contract is not a journal entry: a thing's is a `contract_cargo` item that exists in
  * one physical place (a post's stock, a hand, a car boot, the ground), and a haul's is its
- * load, a trailer or a car, with the card it was taken on kept in `WorldState.hauls`
+ * load, a trailer or a car, with its contract kept in `WorldState.hauls` once taken
  * (game-design2.md §7.8). What it is, is its THING (items/things.ts): one of the boy's
  * things, whose place decides the machinery it rides on — its `ContractKind`, whose
  * behaviour lives in its own module under `kinds/` behind `ContractKindDef`
@@ -13,7 +13,7 @@
  * NOTHING IS SCORED ON THE WAY but a thing's condition: knocks to the car it rides in,
  * drops to the ground and harsh driving wear it down (contracts/runtime.ts); its pay does
  * not (economy/economy.ts `contractPay`). Below `BROKEN_BELOW` it is broken: the contract
- * is closed undelivered (and fined) and the thing stays a souvenir.
+ * is closed undelivered (a fragile thing's fined) and the thing stays a souvenir.
  */
 
 import type { CarState } from '../game/state';

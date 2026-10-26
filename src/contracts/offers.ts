@@ -1,13 +1,14 @@
 /**
  * Post offer generation: three per post stop, drawn deterministically from the world
  * seed, ONE CARD PER PROPERTY by slot (game-design2.md §7.2, items/things.ts
- * `POST_CARDS`): slot 0 an ordinary thing, slot 1 a fragile thing, slot 2 a bulky thing
- * or a haul (a trailer, a towed car, a car to drive over). The thing is drawn evenly
- * among the things its card offers. A fourth slot, `SPECIAL_SLOT`, holds a special
- * thing (§12, items/things.ts `specialThings`), relics among them when asked; the post
- * shows it only to a car with stickers (world/post.ts), and its round is kept while it
- * is hidden. The teddies are no card's: they wait in the shelter (contracts/shelters.ts),
- * whose party is made here too (`makeContract`).
+ * `POST_CARDS`): slot 0 an ordinary thing, slot 1 a fragile thing, slot 2 a bulky thing.
+ * The thing is drawn evenly among the things its card offers. A fourth slot,
+ * `SPECIAL_SLOT`, holds a special thing (§12, items/things.ts `specialThings`), relics
+ * among them when asked; the post shows it only to a car with stickers (world/post.ts),
+ * and its round is kept while it is hidden. The teddies are no card's: they wait in the
+ * shelter (contracts/shelters.ts), whose party is made here too (`makeContract`). Nor
+ * are the HAULS (a trailer, a towed car, a car to drive over): each post's pick-up slot
+ * holds one by itself, round after round (`postHaul`, contracts/hauls.ts).
  *
  * The offer is a plain `contract_cargo` item with its thing, destination (always the
  * next post), seed and fresh progress already on it.
@@ -26,7 +27,7 @@
 import { hash, hash01 } from '../core/rng';
 import type { WorldState } from '../game/state';
 import type { ContractCargoItem, Item } from '../items/items';
-import { cardThings, POST_CARDS, specialThings, type ThingId } from '../items/things';
+import { cardThings, POST_CARDS, specialThings, THINGS, type ThingDef, type ThingId } from '../items/things';
 import { placeNameAt } from '../world/placenames';
 import { postId, postStop } from '../world/poststops';
 import { dressContractOffer } from './registry';
@@ -47,8 +48,9 @@ const URGENT_KMH = 45;
 const URGENT_SLACK_S = 120;
 /** Offers a post holds by property: one per card. */
 export const POST_OFFER_COUNT = POST_CARDS.length;
-/** The bulky card's slot: its offer may be a haul, whose load waits in the bay (§7.8). */
-export const HAUL_SLOT = POST_CARDS.indexOf('bulky');
+/** The pick-up slot's haul draws, apart from every card's. */
+const HAUL_DOMAIN = 0x48414c31; // 'HAL1'
+const HAUL_KIND_DOMAIN = 0x48414b31; // 'HAK1'
 /** The slot after the three: the special thing (§12). */
 export const SPECIAL_SLOT = POST_OFFER_COUNT;
 /** Slots a post's stock keeps a round for: the three and the special one. */
@@ -146,6 +148,49 @@ export function redrawOffer(seed: number, offer: ContractCargoItem, relics: bool
   const at = parseOfferId(offer.sourceCourierIndex, offer.id);
   if (!at) throw new Error(`redrawOffer: ${offer.id} is not a post offer`);
   return generateContractOffer(seed, offer.sourceCourierIndex, at.slot, at.round, relics);
+}
+
+/** The haul things by kind, in catalogue order: a pick-up slot draws its load among them. */
+const HAUL_POOLS: readonly (readonly ThingDef[])[] = (['trailer', 'tow', 'transfer'] as const).map((place) =>
+  THINGS.filter((def) => def.place === place),
+);
+
+/**
+ * The contract id of round `round` of the haul waiting in post `index`'s pick-up slot.
+ * Saved: never changed.
+ */
+export function postHaulId(index: number, round: number): string {
+  return `haul:${index}:${round}`;
+}
+
+/** The (post, round) a pick-up slot haul's id names, or null for any other id. */
+export function parsePostHaulId(id: string): { index: number; round: number } | null {
+  const match = /^haul:(\d+):(\d+)$/.exec(id);
+  return match ? { index: Number(match[1]), round: Number(match[2]) } : null;
+}
+
+/**
+ * Which of `HAUL_POOLS` round `round` of post `index` draws from. Each round steps on by
+ * one kind or two, drawn: never the same kind twice running, and no fixed cycle.
+ */
+function haulKind(seed: number, index: number, round: number): number {
+  let kind = Math.floor(hash01(seed, HAUL_KIND_DOMAIN, index, 0) * HAUL_POOLS.length) % HAUL_POOLS.length;
+  for (let r = 1; r <= round; r++) {
+    kind = (kind + (hash01(seed, HAUL_KIND_DOMAIN, index, r) < 0.5 ? 1 : 2)) % HAUL_POOLS.length;
+  }
+  return kind;
+}
+
+/**
+ * Round `round` of the haul waiting in post `courierIndex`'s pick-up slot (§7.8): a
+ * trailer load, a broken car to tow or a car to drive over (`haulKind`), its thing drawn
+ * evenly in its kind, bound for the next post, urgent or not at the cards' share.
+ */
+export function postHaul(seed: number, courierIndex: number, round: number): ContractCargoItem {
+  const pool = HAUL_POOLS[haulKind(seed, courierIndex, round)]!;
+  const thing = pool[Math.min(pool.length - 1, Math.floor(hash01(seed, THING_DOMAIN, HAUL_DOMAIN, courierIndex, round) * pool.length))]!;
+  const urgent = hash01(seed, URGENT_DOMAIN, HAUL_DOMAIN, courierIndex, round) < URGENT_SHARE;
+  return makeContract(seed, postHaulId(courierIndex, round), courierIndex, thing.id, hash(seed, OFFER_DOMAIN, HAUL_DOMAIN, courierIndex, round), urgent);
 }
 
 /** The shelter's party draws, apart from every card's. */

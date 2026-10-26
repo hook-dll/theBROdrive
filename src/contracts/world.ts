@@ -2,19 +2,18 @@
  * The world objects a haul is about (game-design2.md §7.8): the loaded trailer of a
  * trailer load, and the car of a car to tow or to drive over.
  *
- * A haul names its load after the offer (`generatedSeed`), so the same trailer or car is
+ * A haul names its load after its contract (`haulLoadId`), so the same trailer or car is
  * the same object across a session, a save and a reload, with nothing extra stored:
- * `contract-trailer:<seed>` and `contract-car:<seed>` are in world state like any other
- * trailer or car.
+ * `contract-trailer:…` and `contract-car:…` are in world state like any other trailer or
+ * car.
  *
- * THE LOAD WAITS IN THE SOURCE PICK-UP SLOT. While a post's bulky card shows a haul and
- * the first slot of its parking row (world/haulbay.ts) is empty, the load stands in it
- * nose out, as if reversed in (`spawnHaulLoad`, called by contracts/haulbays.ts as the
- * post streams in). Its LOCK is
- * derived from state alone (`haulLoadLock`): a haul load no taken haul is bound to
- * (`WorldState.hauls`) waits for its card and cannot be hitched, towed, opened or sat in;
- * TAKE binds it and the lock lifts; handed in (`WorldState.handedInLoads`) it is locked
- * for good, until it is cleared away.
+ * THE LOAD WAITS IN THE SOURCE PICK-UP SLOT. While the first slot of a post's parking
+ * row (world/haulbay.ts) is empty, the post's waiting haul (contracts/hauls.ts) stands in
+ * it nose out, as if reversed in (`spawnHaulLoad`, called by contracts/haulbays.ts as the
+ * post streams in). It is free to hitch, tow, open and sit in: hitching it, putting it on
+ * the tow bar or sitting at its wheel TAKES it (contracts/hauls.ts `takeHaulLoads`).
+ * Handed in (`WorldState.handedInLoads`) it is LOCKED for good (`haulLoadLock`), until it
+ * is cleared away.
  */
 
 import { pick } from '../core/rng';
@@ -40,9 +39,7 @@ const CAR_MODEL_DOMAIN = 0x43544331;
  */
 const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
-/** What a waiting load says to a hand put on it (player/interaction.ts). */
-const WAITING_TEXT = 'waits for its job — take the card at the post';
-/** What a handed-in load says. */
+/** What a handed-in load says to a hand put on it (player/interaction.ts). */
 const HANDED_IN_TEXT = 'handed in — it stays with the post';
 
 export interface ContractWorldDeps {
@@ -54,10 +51,23 @@ export interface ContractWorldDeps {
 const CONTRACT_TRAILER_PREFIX = 'contract-trailer:';
 const CONTRACT_CAR_PREFIX = 'contract-car:';
 
-/** The trailer or the car a haul offer is about. */
+/**
+ * The trailer or the car a haul is about: named after its contract id for a pick-up
+ * slot's haul (contracts/offers.ts `postHaulId`), so the load tells which post and round
+ * it waits for (contracts/hauls.ts `waitingHaulOfLoad`); after its seed for any other (a
+ * haul taken off a post card before the cards stopped offering them, a dev haul).
+ */
 export function haulLoadId(item: ContractCargoItem): string {
   const prefix = contractKindOf(item) === 'trailer' ? CONTRACT_TRAILER_PREFIX : CONTRACT_CAR_PREFIX;
-  return `${prefix}${item.generatedSeed.toString(36)}`;
+  return `${prefix}${item.id.startsWith('haul:') ? item.id : item.generatedSeed.toString(36)}`;
+}
+
+/** The contract id a load named by `haulLoadId` carries, or null for one named after its seed. */
+export function haulLoadContractId(loadId: string): string | null {
+  const rest = loadId.startsWith(CONTRACT_TRAILER_PREFIX)
+    ? loadId.slice(CONTRACT_TRAILER_PREFIX.length)
+    : loadId.startsWith(CONTRACT_CAR_PREFIX) ? loadId.slice(CONTRACT_CAR_PREFIX.length) : null;
+  return rest !== null && rest.startsWith('haul:') ? rest : null;
 }
 
 /** A car that is itself a haul's load (a car to tow or to drive over), not one of the player's. */
@@ -80,19 +90,18 @@ export function boundHaul(state: WorldState, loadId: string): HaulState | null {
 
 /**
  * Why the player may not hitch, tow, open or sit in `id`, or null when he may: a haul's
- * load that no taken haul is bound to waits for its card, and one handed in stays with
- * its post. Anything that is not a haul's load is never locked here.
+ * load handed in stays with its post. A waiting load is free (taking it is
+ * contracts/hauls.ts `takeHaulLoads`), and anything that is not a haul's load is never
+ * locked here.
  */
 export function haulLoadLock(state: WorldState, id: string): string | null {
-  if (!isHaulLoadId(id)) return null;
-  if (state.handedInLoads[id] !== undefined) return HANDED_IN_TEXT;
-  return boundHaul(state, id) ? null : WAITING_TEXT;
+  return isHaulLoadId(id) && state.handedInLoads[id] !== undefined ? HANDED_IN_TEXT : null;
 }
 
 /**
- * Stands the load of haul offer `item` in its source post's pick-up slot, nose out, as
- * if reversed in. Idempotent: a load already in state is left where it is. The caller
- * has seen the slot empty and its chunk solid.
+ * Stands the load of haul `item` in its source post's pick-up slot, nose out, as if
+ * reversed in. Idempotent: a load already in state is left where it is. The caller has
+ * seen the slot empty and its chunk solid, or is the dev tools.
  */
 export function spawnHaulLoad(deps: ContractWorldDeps, item: ContractCargoItem): void {
   const bay = postParkingSlot(deps.world.seed, deps.road, item.sourceCourierIndex, 'pickup');

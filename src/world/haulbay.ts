@@ -18,8 +18,9 @@ import {
  * a slot nose first; a load is reversed in against the traffic and leaves forward. Each
  * slot is 3.5 m wide, room to walk between two cars parked side by side.
  *
- *  1. PICK-UP, the first a driver reaches: a haul's load waits in it before its card is
- *     taken, nose out, as if reversed in (contracts/world.ts `spawnHaulLoad`).
+ *  1. PICK-UP, the first a driver reaches: the post's haul load waits in it until it is
+ *     taken, nose out, as if reversed in (contracts/world.ts `spawnHaulLoad`); a sign
+ *     beside it says where it goes (world/haulsign.ts).
  *  2. HAND-IN: a haul's load is handed in by reversing it into the destination post's
  *     second slot (contracts/haulbays.ts).
  *  3. SALE: the settlement's car for sale, when it has one (world/poi.ts `buildLot`);

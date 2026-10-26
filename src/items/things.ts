@@ -191,19 +191,20 @@ export function thingBootFootprint(def: ThingDef): BootFootprint | null {
 
 /**
  * The three cards of a post (§7.2), one per property: an ordinary thing, a fragile
- * thing, a bulky thing or a haul. A bulky thing that is fragile too (the TV, the
- * aquarium) is a bulky card's. The fourth card, `special`, offers the special things and
- * relics, and only to a car with stickers (§12, contracts/offers.ts `SPECIAL_SLOT`). The
- * teddies are no card's: they wait in the teddy shelter (§10, contracts/shelters.ts).
+ * thing, a bulky thing. A bulky thing that is fragile too (the TV, the aquarium) is a
+ * bulky card's. The fourth card, `special`, offers the special things and relics, and
+ * only to a car with stickers (§12, contracts/offers.ts `SPECIAL_SLOT`). The teddies are
+ * no card's: they wait in the teddy shelter (§10, contracts/shelters.ts); nor are the
+ * hauls, which wait in a post's pick-up slot by themselves (§7.8, contracts/hauls.ts).
  */
 export type PostCard = 'ordinary' | 'fragile' | 'bulky' | 'special';
 export const POST_CARDS: readonly PostCard[] = ['ordinary', 'fragile', 'bulky'];
 
-/** The card that offers `def`, or null for the teddies, who wait in the shelter. */
+/** The card that offers `def`, or null for the teddies and the hauls, which no card offers. */
 export function thingCard(def: ThingDef): PostCard | null {
-  if (def.place === 'seats') return null;
+  if (def.place === 'seats' || isHaulThing(def)) return null;
   if (hasTag(def, 'special') || hasTag(def, 'relic')) return 'special';
-  if (isHaulThing(def) || hasTag(def, 'bulky')) return 'bulky';
+  if (hasTag(def, 'bulky')) return 'bulky';
   if (hasTag(def, 'fragile')) return 'fragile';
   return 'ordinary';
 }

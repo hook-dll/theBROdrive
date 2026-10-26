@@ -3,6 +3,7 @@ import type { PhysicsWorld } from '../core/physics';
 
 import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
 import type { DeliveryProbe } from '../contracts/types';
+import { takeHaulLoads, waitingHaulOfLoad } from '../contracts/hauls';
 import { haulLoadLock } from '../contracts/world';
 import { TOW_COUPLE_RANGE_M, towEyeWorld, type CarTowField } from '../vehicle/cartow';
 import type { InputFrame } from '../core/input';
@@ -941,7 +942,7 @@ export class Interaction {
       // of the car. The held item is never used from a seat.
       if (pressed) {
         if (aimed && active && rig) this.workKitPart(active.vehicle, rig, aimed.control);
-        else if (seat) this.world.apply({ t: 'enter_car', carId: this.world.state.player.drivingCarId, seat });
+        else if (seat) this.moveSeat(seat);
         else this.tryExit(roadS);
       }
       return {
@@ -1285,8 +1286,7 @@ export class Interaction {
       return atJoin(aRear, bFront) ? { towerId: first, towedId: second, hitch: false } : null;
     }
     if (towerOfFirst !== null || towerOfSecond !== null) return null;
-    // A haul's load that is not the player's to take (waiting for its card, or handed in)
-    // takes no bar; the car itself says why when it is looked at.
+    // A haul's load handed in takes no bar; the car itself says why when it is looked at.
     if (haulLoadLock(this.world.state, first) !== null || haulLoadLock(this.world.state, second) !== null) return null;
     const qa = a.chassis.rotation();
     const qb = b.chassis.rotation();
@@ -1323,7 +1323,30 @@ export class Interaction {
     if (!action.hitch) return `[F] unhitch the tow bar — ${label}`;
     const tower = this.world.state.cars[action.towerId];
     const towerLabel = tower ? carModel(tower.modelId).label : 'car';
-    return `[F] hitch the ${label} behind the ${towerLabel}`;
+    return `[F] hitch the ${label} behind the ${towerLabel}${this.waitingNote([action.towedId, action.towerId])}`;
+  }
+
+  /** What the prompt adds for a waiting haul load among `ids`, which the action takes: where it goes. */
+  private waitingNote(ids: readonly string[]): string {
+    for (const id of ids) {
+      const haul = waitingHaulOfLoad(this.world.state, this.world.seed, id);
+      if (haul) return ` — the job to ${haul.destination ?? 'the next post'}`;
+    }
+    return '';
+  }
+
+  /** Takes the waiting hauls among `ids` an action is about to couple or sit in (contracts/hauls.ts); false, refused, when it may not go on. */
+  private takeHauls(ids: readonly string[]): boolean {
+    if (takeHaulLoads(this.world, ids, (text) => this.hooks.toast(text))) return true;
+    this.sound = 'refused';
+    return false;
+  }
+
+  /** Moves the seated player into `seat` of the car he sits in; the driver's seat of a waiting haul car takes it. */
+  private moveSeat(seat: PlayerSeat): void {
+    const carId = this.world.state.player.drivingCarId;
+    if (carId === null || (seat === 'driver' && !this.takeHauls([carId]))) return;
+    this.world.apply({ t: 'enter_car', carId, seat });
   }
 
   private applyTowAction(action: TowAction): void {
@@ -1335,7 +1358,7 @@ export class Interaction {
     }
     const tower = this.carLookup.vehicle(action.towerId);
     const towed = this.carLookup.vehicle(action.towedId);
-    if (!tower || !towed) return;
+    if (!tower || !towed || !this.takeHauls([action.towerId, action.towedId])) return;
     this.towField.hitch(tower, action.towerId, towed, action.towedId);
     this.sound = 'mount';
     this.towActionValue = null;
@@ -1611,9 +1634,9 @@ export class Interaction {
       // eye ray goes in through the door's opening, as the arm does.
       const rig = vehicle.kit;
       // A car still for sale stays locked: no door, lid, flap or compartment answers
-      // until its key is bought (world/keybox.ts); and so does a haul's car that is not
-      // the player's to take (contracts/world.ts `haulLoadLock`). Only its body is aimed,
-      // for the price or the reason.
+      // until its key is bought (world/keybox.ts); and so does a haul's car handed in
+      // (contracts/world.ts `haulLoadLock`). Only its body is aimed, for the price or the
+      // reason.
       locked = this.world.state.cars[carId]?.lotPrice !== undefined || haulLoadLock(this.world.state, carId) !== null;
       let inCompartment = false;
       for (const side of locked ? [] : ['trunk', 'bonnet'] as const) {
@@ -2394,7 +2417,7 @@ export class Interaction {
       if (already && already.id !== t.trailerId) return 'that car is already towing';
       const carLock = haulLoadLock(this.world.state, resolved.carId);
       if (carLock) return `${carModel(this.world.state.cars[resolved.carId]!.modelId).label} — ${carLock}`;
-      return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}`;
+      return `[F] hitch to ${carModel(this.world.state.cars[resolved.carId]!.modelId).label}${this.waitingNote([t.trailerId, resolved.carId])}`;
     }
 
     // A kit car says nothing about its doors and seats: the crosshair lights on a seat
@@ -2819,7 +2842,7 @@ export class Interaction {
     if (t.kind === 'trailer') {
       const trailer = this.trailers.get(t.trailerId);
       if (!trailer) return;
-      // A haul's trailer that is not the player's to take only refuses (`promptFor` says why).
+      // A haul's trailer handed in only refuses (`promptFor` says why).
       if (haulLoadLock(this.world.state, t.trailerId) !== null) {
         this.sound = 'refused';
         return;
@@ -2833,6 +2856,8 @@ export class Interaction {
       // joints on one anchor and the solver would fight itself.
       if (!resolved.carId || !resolved.vehicle || resolved.vehicleDist > HITCH_CAR_RANGE) return;
       if (this.trailers.hitchedTo(resolved.carId) || haulLoadLock(this.world.state, resolved.carId) !== null) return;
+      // Hitching a waiting haul's trailer (or onto a waiting haul's car) takes it.
+      if (!this.takeHauls([t.trailerId, resolved.carId])) return;
       trailer.hitchTo(resolved.vehicle, resolved.carId);
       this.sound = 'mount';
       return;
@@ -2946,8 +2971,8 @@ export class Interaction {
   /**
    * What a locked car the player is looking at says, or null: the nearest car within
    * reach and in the aim (its body, or a kit car's render mesh), still priced on a lot
-   * (`lotPrice`: paid for at its key box), or a haul's load that is not his to take
-   * (contracts/world.ts `haulLoadLock`).
+   * (`lotPrice`: paid for at its key box), or a haul's load handed in (contracts/world.ts
+   * `haulLoadLock`).
    */
   private lockedCarAimed(resolved: Resolved): string | null {
     if (!resolved.carId || resolved.vehicleDist > VEHICLE_RANGE) return null;
@@ -2969,8 +2994,8 @@ export class Interaction {
   private tryEnter(resolved: Resolved): boolean {
     if (!resolved.vehicle || !resolved.carId) return false;
     // A car on a lot is not the player's until he takes its key from the key box beside
-    // it (world/keybox.ts), nor a haul's car before its card is taken or once it is handed
-    // in: F at the car itself only refuses.
+    // it (world/keybox.ts), nor a haul's car once it is handed in: F at the car itself
+    // only refuses.
     if (this.lockedCarAimed(resolved)) {
       this.sound = 'refused';
       return false;
@@ -3019,7 +3044,10 @@ export class Interaction {
       this.sound = 'refused';
       return false;
     }
-    this.world.apply({ t: 'enter_car', carId: resolved.carId, seat: resolved.kitSeat ?? 'driver' });
+    const seat = resolved.kitSeat ?? 'driver';
+    // Sitting at the wheel of a waiting haul's car takes it (contracts/hauls.ts).
+    if (seat === 'driver' && !this.takeHauls([resolved.carId])) return false;
+    this.world.apply({ t: 'enter_car', carId: resolved.carId, seat });
     this.player?.setEnabled(false);
     // Getting in is silent: the door was heard opening, and is heard shutting if he shuts it.
     return true;

@@ -2,11 +2,12 @@
  * A toy car to a friend (game-design2.md §7.3, §7.8): one specific car, which has to be
  * driven to the next post and parked in its bay.
  *
- * The car is a complete, serviceable car waiting in the SOURCE post's bay before its card
- * is taken (contracts/world.ts `spawnHaulLoad`), named after the offer seed. Taken, it is
- * an ordinary car — you drive it, refuel it, load its boot. It is handed in by reversing
- * it into the destination post's bay (contracts/haulbays.ts) and stepping out: the hand-in
- * refuses while the player sits in it.
+ * The car is a complete, serviceable car waiting in the SOURCE post's pick-up slot
+ * (contracts/hauls.ts, contracts/world.ts `spawnHaulLoad`), named after its contract.
+ * Sitting at its wheel takes it; from then on it is an ordinary car — you drive it,
+ * refuel it, load its boot. It is handed in by reversing it into the destination post's
+ * bay (contracts/haulbays.ts) and stepping out: the hand-in refuses while the player
+ * sits in it.
  *
  * Its state on arrival is not judged: delivered is delivered.
  *

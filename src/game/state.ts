@@ -294,12 +294,12 @@ export interface TrailerLoad {
 }
 
 /**
- * A haul taken at a post (game-design2.md §7.8, contracts/haulbays.ts): its card's
- * contract as TAKE left it, bound to the trailer or car it is about. No item stands for
- * it: the load is the contract.
+ * A haul taken (game-design2.md §7.8, contracts/hauls.ts): its contract as it was taken,
+ * bound to the trailer or car it is about. No item stands for it: the load is the
+ * contract.
  */
 export interface HaulState {
-  /** The card as taken: its thing, source, destination and urgent clock; the runtime ticks its progress. */
+  /** The contract as taken: its thing, source, destination and urgent clock; the runtime ticks its progress. */
   readonly contract: ContractCargoItem;
   /** The trailer (`contract-trailer:…`) or the car (`contract-car:…`) it is about. */
   readonly loadId: string;
@@ -320,8 +320,11 @@ export interface HaulState {
  *  - 6: no races. A contract carries no race legs and its progress no `started`; a
  *    contract an older save had out as a race loads as a plain one bound for the next
  *    post (save/save.ts `migrateItem`). `shellMint` counts fines' draws as well.
+ *  - 7: no haul cards. Each post's pick-up slot holds a haul by itself
+ *    (`haulRounds`); a load an older save had waiting for a card is dropped, and the
+ *    bulky card's haul offer is drawn again as a bulky thing.
  */
-export const SAVE_VERSION = 6;
+export const SAVE_VERSION = 7;
 
 export interface WorldState {
   readonly seed: number;
@@ -391,7 +394,7 @@ export interface WorldState {
    * the completed id (`courier_storage`).
    */
   deliveriesByKind: Partial<Record<ContractKind, number>>;
-  /** The hauls taken and not yet handed in or returned, by contract id (world/post.ts TAKE). */
+  /** The hauls taken and not yet handed in or returned, by contract id (contracts/hauls.ts `takeHaulLoads`). */
   hauls: Record<string, HaulState>;
   /**
    * The loads handed in or returned in a post's bay (contracts/haulbays.ts), by load id:
@@ -404,6 +407,11 @@ export interface WorldState {
    * post index; absent, round 0. It moves on when that round's contract closes.
    */
   shelterRounds: Record<string, number>;
+  /**
+   * The round of the haul each post's pick-up slot is at (contracts/hauls.ts), by post
+   * index; absent, round 0. It moves on when that round's haul is taken.
+   */
+  haulRounds: Record<string, number>;
   /**
    * Vending machine slots already sold, by machine id (world/vending.ts). A machine's
    * stock is a pure function of the seed and where it stands; this is what it has
@@ -461,14 +469,23 @@ export type WorldDelta =
       /** The completed contract's kind, counted into `deliveriesByKind`. */
       completedContractKind?: ContractKind;
     }
-  /** A haul card taken at a post (world/post.ts): the contract is active, bound to its load. */
-  | { t: 'haul_take'; haul: HaulState }
+  /**
+   * A haul's waiting load taken (contracts/hauls.ts `takeHaulLoads`): the contract is
+   * active, bound to its load, and post `postRound.index`'s pick-up slot moves past round
+   * `postRound.round`. A dev haul (app/devtools.ts) has no round.
+   */
+  | { t: 'haul_take'; haul: HaulState; postRound?: { index: number; round: number } }
   /**
    * A haul's load accepted in post `postIndex`'s bay (contracts/haulbays.ts): the contract
    * closes, counted into `deliveriesByKind` under `deliveredKind` when it was delivered
    * (null: returned to the sender), and the load stays there locked.
    */
   | { t: 'haul_close'; contractId: string; postIndex: number; deliveredKind: ContractKind | null }
+  /**
+   * A taken haul's load left behind (contracts/haulbays.ts): the contract closes
+   * undelivered. The load's `trailer_remove` or `car_remove` follows.
+   */
+  | { t: 'haul_abandon'; contractId: string }
   /**
    * A teddy in hand seated on a shelter's bench (contracts/shelters.ts): `delivered` at a
    * destination (its own id recorded among the completed, with no kind: the ledger counts
@@ -584,6 +601,7 @@ export function newWorldState(seed: number): WorldState {
     hauls: {},
     handedInLoads: {},
     shelterRounds: {},
+    haulRounds: {},
     trailers: {},
     looseParts: {},
     looseItems: {},
@@ -1040,10 +1058,16 @@ export class GameWorld {
           }
         }
         break;
-      case 'haul_take':
+      case 'haul_take': {
         if (s.completedContractIds.includes(delta.haul.contract.id)) break;
         s.hauls[delta.haul.contract.id] = delta.haul;
+        const at = delta.postRound;
+        if (at) {
+          const key = String(at.index);
+          if ((s.haulRounds[key] ?? 0) === at.round) s.haulRounds[key] = at.round + 1;
+        }
         break;
+      }
       case 'haul_close': {
         const haul = s.hauls[delta.contractId];
         if (!haul) break;
@@ -1055,6 +1079,11 @@ export class GameWorld {
         s.handedInLoads[haul.loadId] = delta.postIndex;
         break;
       }
+      case 'haul_abandon':
+        if (!s.hauls[delta.contractId]) break;
+        delete s.hauls[delta.contractId];
+        if (!s.completedContractIds.includes(delta.contractId)) s.completedContractIds.push(delta.contractId);
+        break;
       case 'teddy_seat': {
         if (s.completedContractIds.includes(delta.partyId)) break;
         const carried = s.player.carried.findIndex((item) => item.id === delta.teddyId);

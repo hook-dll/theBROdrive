@@ -18,6 +18,7 @@ import {
 import { carShellKind, carShells } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import { buildParkingRow, postParkingSlots, type ParkingSlot } from './haulbay';
+import { buildHaulSign } from './haulsign';
 import { setReflectorEmission } from './props/delineators';
 import { postStop } from './poststops';
 import { fitGround } from './footprint';
@@ -683,6 +684,11 @@ function buildPoi(
     if (layout.parking) {
       const slots = postParkingSlots(ctx.world.seed, ctx.road, stop.index);
       buildParkingRow(ctx, slots, group);
+      const pickup = slots[0]!;
+      const second = slots[1]!;
+      // The row's next slot along the pick-up slot's local X: the sign stands the other way.
+      const toNext = Math.sign((second.x - pickup.x) * Math.cos(pickup.yaw) - (second.z - pickup.z) * Math.sin(pickup.yaw));
+      buildHaulSign(ctx, stop, pickup, toNext, group, bodies, colliders, fixtures, registeredFixtures, disposers);
       if (layout.forSale) {
         const sale = slots[2]!;
         const middle = slots[1]!;

@@ -10,9 +10,11 @@
  *
  * The player earns a shell for every whole kilometre he rides in a car (`payDriving`)
  * and the route's kilometres for a delivery (`contractPay`). A job that closes WITHOUT
- * DELIVERY — its thing broken, handed back, its load returned, a teddy party short —
- * costs `FINE_SHELLS` (`fine`), once per job. Prices are small and flat down the whole
- * road: nothing scales with the distance from home.
+ * DELIVERY — its fragile thing broken, handed back or its load returned at another post,
+ * its load left behind, a teddy party short — costs `FINE_SHELLS` (`fine`), once per job.
+ * Handed back at the post it was taken at (the boy changed his mind), or an ordinary
+ * thing broken, it only pays nothing. Prices are small and flat down the whole road:
+ * nothing scales with the distance from home.
  * Everything here but the writers (`debit`, `credit`, `payDriving`, `fine`) is a pure
  * function of its arguments and the saved state, so a card and the action behind it can
  * never disagree about a price.

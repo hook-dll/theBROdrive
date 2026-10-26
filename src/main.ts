@@ -1634,9 +1634,9 @@ async function boot(): Promise<void> {
   const rideVelocity = { x: 0, y: 0, z: 0 };
 
   /**
-   * The haul bays at work (contracts/haulbays.ts): a haul's load stood in its source bay
-   * while its card waits, and accepted when it is reversed into another. "Out of view" is
-   * out of the camera's frustum as last rendered.
+   * The haul bays at work (contracts/haulbays.ts): a post's haul load stood in its pick-up
+   * slot until it is taken, accepted when it is reversed into another, judged when left
+   * behind. "Out of view" is out of the camera's frustum as last rendered.
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain };
   const haulFrustum = new THREE.Frustum();

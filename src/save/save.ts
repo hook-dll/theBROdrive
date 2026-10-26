@@ -28,6 +28,7 @@ import {
 import { isHaulThing, isThingId, thingDef } from '../items/things';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
+import { isHaulLoadId } from '../contracts/world';
 import type { ContractKind, ContractProgress } from '../contracts/types';
 import {
   AIR_FILTER_CELL,
@@ -189,9 +190,10 @@ export function installVehicleAutosave(
       // A car into or out of the toy box (world/toybox.ts).
       case 'car_box':
       case 'car_unbox':
-      // A haul card taken at a post, or its load handed in (contracts/haulbays.ts).
+      // A haul's load taken, handed in or left behind (contracts/hauls.ts, contracts/haulbays.ts).
       case 'haul_take':
       case 'haul_close':
+      case 'haul_abandon':
       // A teddy seated on a shelter's bench (contracts/shelters.ts).
       case 'teddy_seat':
         if (world.state.player.drivingCarId) return;
@@ -618,6 +620,11 @@ export function migrateState(raw: unknown): WorldState {
   }
 
   const completedContractIds = migrateStringArray(obj.completedContractIds);
+  const hauls = migrateHauls(obj.hauls, cars, trailers);
+  const handedInLoads = migrateHandedInLoads(obj.handedInLoads, cars, trailers);
+  // Before version 7 a haul's load waited in the pick-up slot for its card: the card is
+  // gone, so is the load; the slot stands its post's own haul there instead.
+  if (version < 7) dropCardLoads(cars, trailers, hauls, handedInLoads);
 
   return {
     seed,
@@ -641,9 +648,10 @@ export function migrateState(raw: unknown): WorldState {
     courierStorage,
     completedContractIds,
     deliveriesByKind: migrateDeliveriesByKind(obj.deliveriesByKind),
-    hauls: migrateHauls(obj.hauls, cars, trailers),
-    handedInLoads: migrateHandedInLoads(obj.handedInLoads, cars, trailers),
-    shelterRounds: migrateShelterRounds(obj.shelterRounds),
+    hauls,
+    handedInLoads,
+    shelterRounds: migrateRounds(obj.shelterRounds, 'shelterRounds'),
+    haulRounds: migrateRounds(obj.haulRounds, 'haulRounds'),
     trailers,
     looseParts,
     looseItems,
@@ -693,10 +701,29 @@ function migrateHandedInLoads(
   return out;
 }
 
-/** The teddy shelters' rounds, by post index: whole numbers from 0, anything else dropped. */
-function migrateShelterRounds(raw: unknown): Record<string, number> {
+/**
+ * The haul loads of a save from before version 7 that no taken haul is bound to and that
+ * were not handed in: they waited for a card no post shows any more. Taken out of `cars`
+ * and `trailers` in place.
+ */
+function dropCardLoads(
+  cars: Record<string, CarState>,
+  trailers: Record<string, TrailerState>,
+  hauls: Readonly<Record<string, HaulState>>,
+  handedInLoads: Readonly<Record<string, number>>,
+): void {
+  const bound = new Set(Object.values(hauls).map((haul) => haul.loadId));
+  for (const store of [cars, trailers]) {
+    for (const id of Object.keys(store)) {
+      if (isHaulLoadId(id) && !bound.has(id) && handedInLoads[id] === undefined) delete store[id];
+    }
+  }
+}
+
+/** A post's rounds (the teddy shelters', the pick-up slots'), by post index: whole numbers from 0, anything else dropped. */
+function migrateRounds(raw: unknown, field: string): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const [index, round] of Object.entries(recordField(raw, 'shelterRounds'))) {
+  for (const [index, round] of Object.entries(recordField(raw, field))) {
     if (/^\d+$/.test(index) && typeof round === 'number' && Number.isInteger(round) && round >= 0) out[index] = round;
   }
   return out;

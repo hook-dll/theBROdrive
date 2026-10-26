@@ -39,10 +39,11 @@ import { SERVICE_HALF, spotPose, type SettlementSpot } from './settlement';
  * source, or refused with where it rides on to. The party is paid ONCE, and only whole:
  * when its last teddy is seated at the destination bench and EVERY teddy of the party
  * was seated there (`partyPays`); one returned, left behind or forgotten, and it pays
- * nothing. A party that CLOSES so — short at the destination, or put back whole at its
- * source — closed undelivered and is FINED `FINE_SHELLS` (economy/economy.ts `fine`),
- * once, right after the seat that closed it is recorded (`teddy_seat`, which a reload
- * finds and never closes again). Delivered teddies sit right of the middle
+ * nothing. A party that CLOSES short at the destination closed undelivered and is FINED
+ * `FINE_SHELLS` (economy/economy.ts `fine`), once, right after the seat that closed it is
+ * recorded (`teddy_seat`, which a reload finds and never closes again). Put back at its
+ * source the boy only changed his mind: the party closes with no pay and no fine.
+ * Delivered teddies sit right of the middle
  * until the chunk is streamed out with the player long gone; they are not saved.
  *
  * Shared kit materials, merged; only the timetable has its own painted board.
@@ -378,7 +379,7 @@ class Shelter implements WorldFixture {
     if (held) {
       const seating = teddySeating(this.world.state, held, this.stop.index);
       if (seating.mode === 'refuse') return seating.why;
-      if (seating.mode === 'return') return seating.close ? `[F] put the teddy back — the job is off, ${formatFine(FINE_SHELLS)}` : '[F] put the teddy back — no pay';
+      if (seating.mode === 'return') return seating.close ? '[F] put the teddy back — the job is off, no fine' : '[F] put the teddy back — no pay';
       const late = isLate(held) ? ' · late' : '';
       const pays = this.partyPays(held, seating.close !== null)
         ? `the party pays ${formatPay(contractPay(this.world.seed, held))}`
@@ -444,15 +445,16 @@ class Shelter implements WorldFixture {
     });
     ctx.give(teddy.id);
     if (pay > 0) ctx.credit(pay);
-    // Closed short or put back whole: undelivered, fined once, after the closing seat.
-    const fined = seating.close && pay === 0 ? formatFine(fine(this.world, FINE_SHELLS)) : null;
+    // Closed short at the destination: undelivered, fined once, after the closing seat.
+    // Put back at the source, never fined.
+    const fined = delivered && seating.close && pay === 0 ? formatFine(fine(this.world, FINE_SHELLS)) : null;
     if (delivered) {
       const arrival = this.teddies[WAITING_PLACES + (this.arrivals % (PLACES - WAITING_PLACES))];
       this.arrivals++;
       if (arrival) arrival.visible = true;
       ctx.toast(pay > 0 ? `teddy seated — job done · ${formatPay(pay)}` : fined ? `teddy seated — not every teddy came, no pay · ${fined}` : 'teddy seated — the party pays when every teddy is here');
     } else {
-      ctx.toast(fined ? `teddy back on the bench — the job is off · ${fined}` : 'teddy back on the bench — no pay');
+      ctx.toast(seating.close ? 'teddy back on the bench — the job is off, no fine' : 'teddy back on the bench — no pay');
     }
     this.refresh();
     return delivered ? 'coin' : 'drop';

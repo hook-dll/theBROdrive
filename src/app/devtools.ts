@@ -678,10 +678,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * `thing(id, urgent?)`: a contract for catalogue thing `id` (items/things.ts, e.g.
    * 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound for
    * the next, dropped loose in front of him (the post machine itself gives into its grid).
-   * A haul is taken there and then: its load stood in that post's pick-up slot, the first
-   * of its parking row (whatever stands there already), and bound to it, as TAKE does
-   * (contracts/world.ts). `urgent` gives it the urgent clock. The teddies wait in a
-   * shelter: see `teddies`. Returns the contract id.
+   * A haul is stood in that post's pick-up slot, the first of its parking row (whatever
+   * stands there already), and taken there and then, as hitching, towing or sitting at
+   * its wheel would take the slot's own haul (contracts/hauls.ts), past the limits; the
+   * slot's own round is left as it is. `urgent` gives it the urgent clock. The teddies
+   * wait in a shelter: see `teddies`. Returns the contract id.
    */
   dev['thing'] = (id: string, urgent = false): string => {
     if (!isThingId(id)) throw new Error(`unknown thing "${id}": ${THINGS.map((def) => def.id).join(', ')}`);
@@ -693,7 +694,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     if (isHaul(offer)) {
       spawnHaulLoad({ world: ctx.world, road: ctx.road, terrain: ctx.terrain }, offer);
       ctx.world.apply({ t: 'haul_take', haul: { contract: offer, loadId: haulLoadId(offer) } });
-      ctx.hud.setToast(`took the ${offer.thing} haul at post ${source}: its load is in the bay`);
+      ctx.hud.setToast(`the ${offer.thing} haul at post ${source} is yours: its load is in slot 1`);
       return offer.id;
     }
     dropInFront([offer]);

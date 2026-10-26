@@ -4,6 +4,48 @@
 
 ### Added
 
+- HAULS WITHOUT CARDS (contracts phase 3; `contracts/hauls.ts` `haulRound`,
+  `waitingHaul`, `waitingHaulOfLoad`, `takeHaulLoads`; `contracts/offers.ts` `postHaul`,
+  `postHaulId`, `parsePostHaulId`; `contracts/world.ts` `haulLoadId`,
+  `haulLoadContractId`, `haulLoadLock`; `contracts/haulbays.ts`; `world/haulsign.ts`;
+  `world/poi.ts`; `player/interaction.ts`; `world/post.ts`; `items/things.ts`
+  `thingCard`; `game/state.ts` `WorldState.haulRounds`, deltas `haul_take` `postRound`,
+  `haul_abandon`, `SAVE_VERSION` 7; `save/save.ts`; `app/devtools.ts`). "If a trailer or
+  a car stands there, you can take it and drive it."
+  - No post card offers a haul any more: the bulky card draws only bulky things, and the
+    machine's haul TAKE, its limit note and haul notes are gone. Each post's pick-up slot
+    holds a haul by itself, round after round (`WorldState.haulRounds`): a trailer load,
+    a broken car to tow or a car to drive over, the kind stepping on one or two each
+    round (never the same twice running), the thing drawn in its kind, bound for the next
+    post, urgent at the cards' share. Its load stands in the slot when the slot is empty
+    and goes out of the world far behind, as before. A load is named after its contract
+    (`contract-trailer:haul:<post>:<round>`), so it tells which post and round it waits
+    for.
+  - TAKE IS PHYSICAL: hitching the waiting trailer, putting the waiting car on the tow
+    bar, or sitting at its wheel takes it there and then (`haul_take`), and the slot moves
+    on to its next round, whose load appears once the slot is empty again. At three jobs
+    or one haul out the action is refused with a toast ("one haul at a time — …") and the
+    load keeps waiting. Waiting loads are no longer locked: doors and boot open freely;
+    only a handed-in load stays locked. The hitch and tow-bar prompts add "the job to
+    <destination>"; the take toasts "the piano is yours — take it to <destination>".
+  - THE HAUL SIGN: a board on a post beside each pick-up slot, past its outer line by
+    the back, facing the pad (kit post and frame, painted board like the shelter's
+    timetable, solid post). While the load waits it shows a pictogram of the kind (a car
+    with a trailer, a car towing a car, a car with its key), an arrow, the DESTINATION
+    big, and the kilometres, the pay and an urgent clock small; blank otherwise.
+  - LEFT BEHIND: a taken load that nothing couples, that the player does not sit in and
+    that does not stand at its destination's hand-in slot is abandoned once the player
+    is 300 m from it in a straight line — live, or streamed out by its saved pose. The
+    contract closes undelivered (`haul_abandon`), the load goes out of the world and the
+    job is fined 3 shells ("left the piano behind — −3 shells"), in that order, so a
+    reload never fines twice or brings it back. Left standing in one of its own source
+    post's slots it closes with no fine.
+  - Saves before version 7: a load that waited for a card is dropped, the bulky card's
+    haul offer is drawn again as a bulky thing, and hauls already taken keep working
+    under their old load ids. `__bro.thing(<haul>)` stands the load in the nearest post's
+    pick-up slot and takes it at once, as a hitch would, leaving the slot's own round
+    alone.
+
 - FINES (economy phase 2; `economy/shells.ts` `takeShells`, `economy/economy.ts` `fine`,
   `FINE_SHELLS`, `formatFine`, `game/state.ts`, `contracts/runtime.ts`,
   `contracts/haulbays.ts`, `world/post.ts`, `world/shelter.ts`, `ui/hudjar.ts`,
@@ -20,7 +62,12 @@
   greyed and dimmed, turning over slowly — with the jar sagging on its foot and a falling
   three-note `fine` foley; the toast names the reason and "−3 shells". The post's return
   card, the shelter's prompts and toasts say the fine before it is taken. A late urgent
-  delivery is not fined (plain pay); abandoning a haul is not fined yet.
+  delivery is not fined (plain pay). Since contracts phase 3: only a FRAGILE thing's
+  break is fined (any other broken thing closes its job with no pay and no fine); a thing
+  handed back at the very post it was taken at, a haul's load returned to its own post's
+  hand-in slot or left in its source slots, and a teddy party put back at its own shelter
+  close with no pay and no fine — the boy only changed his mind; the cards, prompts and
+  toasts say so. A haul left behind is fined (see HAULS WITHOUT CARDS).
 
 - TRAFFIC COST BREAKDOWN (`core/trafficprofile.ts`, `RoadTraffic.profile`, dev only, off
   by default; `__bro.traffic.profile.enabled = true` in the console). Where a traffic step's
