@@ -126,6 +126,8 @@ import { setGroundFadeWindow } from './render/groundfade';
 import { nextPostIndex, postStop, postStopsBetween } from './world/poststops';
 import { laybyNear } from './world/layby';
 import { placeNameAt } from './world/placenames';
+import { postSlot } from './world/poislots';
+import { roadsideStop } from './world/settlement';
 import { loadSpine } from './world/spinecache';
 import { RoadMeshProvider } from './world/roadmesh';
 import { RoadDistance } from './world/roaddistance';
@@ -414,10 +416,14 @@ async function boot(): Promise<void> {
   const pads = gamepads();
   pads.setDeadzone(world.state.settings.controllerDeadzone);
   pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
-  // The navigator orb's road and posts, named, asked for as the car moves on.
+  // The navigator's road and posts, named, each with its lay-by's side (the map's +1 is
+  // right of the way up the road; `offsetPoint`'s +lateral is left), asked for as the car moves on.
   const hud = new Hud(uiRoot, {
     postsBetween: (fromS, toS) =>
-      postStopsBetween(world.seed, fromS, toS).map((stop) => ({ index: stop.index, s: stop.s, name: placeNameAt(world.seed, stop.s) })),
+      postStopsBetween(world.seed, fromS, toS).map((stop) => {
+        const layout = roadsideStop(world.seed, postSlot(stop.index))?.layout;
+        return { index: stop.index, s: stop.s, name: placeNameAt(world.seed, stop.s), side: layout ? (layout.side === 1 ? -1 : 1) : 0 };
+      }),
     roadPoint: (s, out) => {
       const sample = road.sampleAt(s);
       out.x = sample.x;
@@ -1813,7 +1819,6 @@ async function boot(): Promise<void> {
         mapView.kind = 'race';
         mapView.targetIndex = -1;
         mapView.targetS = raceProgress.finishS;
-        mapView.place = placeNameAt(world.seed, raceProgress.finishS);
         const span = raceProgress.finishS - raceProgress.startS;
         let rank = 1;
         for (let i = 0; i < raceProgress.rivals.length; i++) {
@@ -1829,7 +1834,6 @@ async function boot(): Promise<void> {
         mapView.kind = delivering ? 'delivery' : 'idle';
         mapView.targetIndex = target;
         mapView.targetS = postStop(world.seed, target).s;
-        mapView.place = placeNameAt(world.seed, mapView.targetS);
         mapView.rivalCount = 0;
         if (!delivering) mapView.urgentS = null;
       }

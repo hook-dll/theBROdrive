@@ -288,12 +288,13 @@ body.is-machine-focus .hud-crosshair {
 }
 
 /* ------------------------------------------------------------------ *
- *  THE PANEL (hud.ts) along the top edge, on foot and driving alike, *
- *  out of the way of every camera: faint glass in the corners — the  *
- *  navigator (hudmap.ts) left, the gyro and the pedal lever          *
- *  (hudgyro.ts) right — and between them the POD: the segment        *
- *  display. The glass is lit like a car stereo of about 2000, in     *
- *  one amber-orange, faults in red; the pod is a thing, not light.   *
+ *  THE PANEL (hud.ts) along the bottom edge, on foot and driving     *
+ *  alike (on a touch screen along the top: the thumbs' controls own  *
+ *  the bottom): faint glass in the corners — the navigator           *
+ *  (hudmap.ts) left, the gyro and the pedal lever (hudgyro.ts)       *
+ *  right — and between them the POD: the segment display. The glass  *
+ *  is lit like a car stereo of about 2000, in one amber-orange,      *
+ *  faults in red; the pod is a thing, not light.                     *
  * ------------------------------------------------------------------ */
 
 #ui {
@@ -316,7 +317,7 @@ body.is-machine-focus .hud-crosshair {
   --bezel: #1d1b17;
   --bezel-lo: #0f0e0c;
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
   right: 0;
   height: 0;
@@ -336,7 +337,7 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-navi {
   position: absolute;
-  top: calc(1.1em + env(safe-area-inset-top));
+  bottom: calc(1.1em + env(safe-area-inset-bottom));
   left: calc(1.1em + env(safe-area-inset-left));
   width: 26em;
   height: 16em;
@@ -355,12 +356,13 @@ body.is-machine-focus .hud-crosshair {
   border-radius: inherit;
 }
 
-/* The plate under the navigator: where the route goes and how far. */
+/* The plate over the navigator: a race's place in the field and the urgent clock aboard,
+   out only when there is one. */
 .hud-navi-plate {
   position: absolute;
-  top: 100%;
+  bottom: 100%;
   left: 0;
-  margin-top: 0.5em;
+  margin-bottom: 0.5em;
   padding: 0.25em 0.7em 0.3em;
   background: var(--hud-faint-glass);
   border: 1px solid var(--lcd-edge);
@@ -370,33 +372,20 @@ body.is-machine-focus .hud-crosshair {
   letter-spacing: 0.06em;
   line-height: 1.1;
   text-shadow: 0 0 0.25em rgba(0, 0, 0, 0.9);
-}
-
-.hud-navi-place {
-  font-size: 1.2em;
-  font-weight: 600;
-}
-
-.hud-navi-dist {
   font-size: 1.6em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--lcd-hot);
 }
 
-.hud-navi-dist.is-late,
-.hud-navi-dist.is-lost {
+.hud-navi-plate.is-late {
   color: var(--lcd-alarm);
-}
-
-.hud-navi.is-idle .hud-navi-plate {
-  opacity: 0.8;
 }
 
 /* THE GYRO: a steel ball in a glass bowl; the pedal lever scale beside it. */
 .hud-orb--gyro {
   position: absolute;
-  top: calc(1.1em + env(safe-area-inset-top));
+  bottom: calc(1.1em + env(safe-area-inset-bottom));
   right: calc(1.1em + env(safe-area-inset-right));
   width: 16em;
   height: 16em;
@@ -528,7 +517,7 @@ body.is-machine-focus .hud-crosshair {
   opacity: calc(var(--hud-faint) * 0.45);
 }
 
-/* THE POD between the corners: the display hung from the top edge. Its frame
+/* THE POD between the corners: the display stood on the bottom edge. Its frame
    says who drives: plain is the player's own hands, a coloured frame is a car driving
    itself — `sleeper` keeps its lane well inside the tyres, `frantic` races the whole
    road at their limit. Faint glass as the corners are; only the lit segments of the
@@ -536,17 +525,17 @@ body.is-machine-focus .hud-crosshair {
 .hud-pod {
   --hud-frame: color-mix(in srgb, var(--lcd-edge) 62%, transparent);
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 1.1em;
-  padding: calc(0.5em + env(safe-area-inset-top)) 1.1em 0.6em;
+  padding: 0.6em 1.1em calc(0.5em + env(safe-area-inset-bottom));
   background: color-mix(in srgb, var(--lcd-glass) 16%, transparent);
   border: 1px solid var(--hud-frame);
-  border-top: none;
-  border-radius: 0 0 1em 1em;
+  border-bottom: none;
+  border-radius: 1em 1em 0 0;
 }
 
 .hud-pod.is-autopilot-sleeper { --hud-frame: #fffdd0; }
@@ -554,7 +543,7 @@ body.is-machine-focus .hud-crosshair {
 .hud-pod.is-autopilot-frantic { --hud-frame: #d4174b; }
 
 .hud-pod[class*='is-autopilot-'] {
-  border-width: 0 2px 2px;
+  border-width: 2px 2px 0;
 }
 
 .hud-lcd {
@@ -629,16 +618,16 @@ body.is-machine-focus .hud-crosshair {
   opacity: 0.35;
 }
 
-/* THE MONEY JAR (hudjar.ts) in the bottom right corner, out only on foot on a lay-by:
-   it rises into view and sinks away. Sized in em by hudjar.ts. */
+/* THE MONEY JAR (hudjar.ts) in the top right corner, out only on foot on a lay-by: it
+   drops into view and rises away. Sized in em by hudjar.ts. */
 .hud-jar {
   position: absolute;
   right: calc(0.6 * var(--hud-u) + env(safe-area-inset-right));
-  bottom: calc(0.4 * var(--hud-u) + env(safe-area-inset-bottom));
+  top: calc(0.4 * var(--hud-u) + env(safe-area-inset-top));
   font-size: calc(1.3 * var(--hud-u));
   pointer-events: none;
   opacity: 0;
-  transform: translateY(30%);
+  transform: translateY(-30%);
   transition: opacity 0.35s ease, transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -656,8 +645,9 @@ body.is-machine-focus .hud-crosshair {
 }
 
 @media (pointer: coarse) {
-  /* Above the thumbs' controls. */
+  /* The panel's gyro holds the top right here: above the thumbs' controls instead. */
   .hud-jar {
+    top: auto;
     bottom: 46vh;
   }
 }
@@ -666,6 +656,37 @@ body.is-machine-focus .hud-crosshair {
   /* Phones draw the panel smaller: the screen is small and the thumbs are on it. */
   #ui {
     --hud-u: calc(7px * var(--hud-dash-scale, 1));
+  }
+
+  /* The thumbs' controls own the bottom: the panel hangs from the top edge instead. */
+  .hud-panel {
+    top: 0;
+    bottom: auto;
+  }
+
+  .hud-navi,
+  .hud-orb--gyro {
+    top: calc(1.1em + env(safe-area-inset-top));
+    bottom: auto;
+  }
+
+  .hud-navi-plate {
+    top: 100%;
+    bottom: auto;
+    margin: 0.5em 0 0;
+  }
+
+  .hud-pod {
+    top: 0;
+    bottom: auto;
+    padding: calc(0.5em + env(safe-area-inset-top)) 1.1em 0.6em;
+    border-top: none;
+    border-bottom: 1px solid var(--hud-frame);
+    border-radius: 0 0 1em 1em;
+  }
+
+  .hud-pod[class*='is-autopilot-'] {
+    border-width: 0 2px 2px;
   }
 }
 
@@ -687,7 +708,7 @@ body.is-machine-focus .hud-crosshair {
 .hud-inventory {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: calc(5 * var(--hud-u) + env(safe-area-inset-bottom) + 12px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -761,7 +782,7 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-toasts {
   position: absolute;
-  top: calc(6.6 * var(--hud-u) + env(safe-area-inset-top) + 12px);
+  top: calc(12px + env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -784,6 +805,18 @@ body.is-machine-focus .hud-crosshair {
 
 .hud-toast-leaving {
   opacity: 0;
+}
+
+/* A touch screen: the panel hangs from the top (above), so the toasts stand under its
+   pod and the carried slots go back down to the bottom edge. */
+@media (pointer: coarse) {
+  .hud-toasts {
+    top: calc(6.6 * var(--hud-u) + env(safe-area-inset-top) + 12px);
+  }
+
+  .hud-inventory {
+    bottom: 16px;
+  }
 }
 
 /* ------------------------------------------------------------------ *

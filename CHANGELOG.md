@@ -105,6 +105,20 @@
   the corridor solves are 6% of a decision, against 16% for the racing-line solve, about
   23% for the speed plan's road samples, 11% for the road-body shape query, 6% each for
   the driver's own projection and the nose scan.
+- THE DASHBOARD STANDS ON THE BOTTOM EDGE (`ui/hud.css`, `ui/hudmap.ts`, `main.ts`). The
+  owner asked for it (2026-10-26): the navigator (bottom left), the pod with the segment
+  display (bottom centre, its tab open upward) and the gyro with the pedal lever (bottom
+  right) now sit on the bottom edge; the toasts move to the top edge, the carried slots
+  over the pod, the money jar to the top right corner (dropping in from above). A touch
+  screen keeps the panel along the top, where it was: the thumbs' controls own the bottom
+  (the jar stays above them there). The plate under the navigator
+  with the place name and the distance to it is gone; a plate over the screen comes out
+  only in a race (`RACE 2/4`) or with an urgent clock aboard (red once late).
+  `MapView.place` is gone. The place names on the map no longer jump from one side of
+  their dot to the other as the map turns: each stands on the side of the road its
+  lay-by is on (`MapPost.side`, from the stop's `layout.side`), as the road runs up the
+  screen, flipping only when the view turns more than ~107° from the road's direction,
+  and is pushed in off the screen's edge rather than dropped.
 - THE CARD MACHINES ARE ARCADE CABINETS, AND GIVE AND TAKE THROUGH A GRID LIKE THE BOOT'S
   (`world/cardmachine.ts`, `world/post.ts`, `world/vending.ts`, `render/trunkview.ts`,
   `vehicle/trunk.ts`, `player/machinefocus.ts`, `game/state.ts`, `save/save.ts`,
