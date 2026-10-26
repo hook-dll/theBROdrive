@@ -1,7 +1,7 @@
 /**
  * The kit's materials: a whole car is ONE opaque material and its glass.
  *
- * A part is still built in slots (builder.ts `KitSlot`: paint, trim, chrome, tyre, rim,
+ * A part is still built in slots (builder.ts `KitSlot`: paint, trim, chrome, tyre, rim, alloy,
  * each lamp role, the lit faces, glass), one mesh per slot, but every slot but the glass
  * draws with the same material: what makes a slot what it is goes into its vertices
  * (`finishKitSurfaces`), so the loader can merge a car into one mesh per material
@@ -61,6 +61,8 @@ export const KIT_SLOT_FINISH: Readonly<Record<Exclude<KitSlot, 'glass'>, KitSlot
   chrome: finish(CAR_SURFACE_FINISH.chrome.color, CAR_SURFACE_FINISH.chrome.roughness, CAR_SURFACE_FINISH.chrome.metalness),
   tyre: finish(CAR_SURFACE_FINISH.rubber.color, CAR_SURFACE_FINISH.rubber.roughness, CAR_SURFACE_FINISH.rubber.metalness),
   rim: finish(CAR_SURFACE_FINISH.rim.color, CAR_SURFACE_FINISH.rim.roughness, CAR_SURFACE_FINISH.rim.metalness),
+  /** Cast aluminium: brighter and more metallic than a painted steel wheel, short of chrome. */
+  alloy: finish(0xb9bec3, 0.35, 0.55),
   lamp_head: finish(0xe8eef2, 0.15, 0.2, 1),
   lamp_tail: finish(0x8a1410, 0.25, 0, 2),
   lamp_brake: finish(0x8a1410, 0.25, 0, 3),

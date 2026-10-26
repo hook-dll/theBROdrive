@@ -19,6 +19,7 @@ export type KitSlot =
   | 'chrome'
   | 'tyre'
   | 'rim'
+  | 'alloy'
   | 'lamp_head'
   | 'lamp_tail'
   | 'lamp_brake'

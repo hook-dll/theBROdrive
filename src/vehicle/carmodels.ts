@@ -1873,6 +1873,25 @@ const SOVIET_WHEEL_SET_POOL = [
  */
 const DISTINCT_SOVIET_WHEEL_SETS = ['sv_gaz21', 'sv_gaz24', 'sv_vaz2101', 'sv_vaz2103', 'sv_vaz2106', 'sv_vaz2108'] as const;
 
+/**
+ * What the kit cars are shod from: the pack's six designs and the generated sets
+ * (carkit/rims.ts, `gw_*`, each drawn from photos of the real wheel), one draw per
+ * instance (render/carmodel.ts `selectedWheels`), each entry equally likely.
+ *
+ * Soviet cars: the pack's designs, the 2110's stamped wheel, the plastic covers every
+ * steel wheel of the 90s could wear, and the 2112's alloy.
+ */
+const KIT_SOVIET_WHEEL_SETS = [...DISTINCT_SOVIET_WHEEL_SETS, 'gw_vaz_steel16', 'gw_cover_vents', 'gw_cover_turbine', 'gw_alloy_split7'] as const;
+/**
+ * The Oka's hub is its own (3x98): its stamped wheel, half the draws, or that wheel
+ * under one of the covers.
+ */
+const KIT_OKA_WHEEL_SETS = ['gw_oka', 'gw_oka', 'gw_cover_vents', 'gw_cover_turbine'] as const;
+/** The foreign cars: plain steel, the covers and the period's alloys. */
+const KIT_FOREIGN_WHEEL_SETS = ['gw_vaz_steel16', 'gw_cover_vents', 'gw_cover_turbine', 'gw_alloy_8hole', 'gw_alloy_cross'] as const;
+/** The Niva family: the Niva's own wheel, or an off-roader's alloy. */
+const KIT_OFFROAD_WHEEL_SETS = [...OFFROAD_WHEEL_SET_POOL, 'gw_alloy_fan'] as const;
+
 function sovietWheelNodes(file: string): WheelNodeNames {
   const stem = file.slice(0, -4);
   const prefix = stem.startsWith('gz') ? `g${stem.slice(2)}` : stem.slice(2);
@@ -2745,9 +2764,15 @@ function kitEntry([id, source, kit, label, gear]: KitCarRow): Entry {
     clearGlass: true,
     paintStyle: 'solid-paint',
     wheelNodes: KIT_WHEEL_NODES,
-    // Shod from the Soviet pack's sets, each design equally likely, rescaled to the kit's
-    // own tyre; a Niva-family sibling keeps its own off-road pool.
-    wheelSetPool: base.wheelSetPool === OFFROAD_WHEEL_SET_POOL ? OFFROAD_WHEEL_SET_POOL : DISTINCT_SOVIET_WHEEL_SETS,
+    // Shod from its kind's pool, rescaled to the kit's own tyre: a Niva-family sibling
+    // off-road, the Oka on its own hub, a foreign car (no sibling) on the foreign pool.
+    wheelSetPool: base.wheelSetPool === OFFROAD_WHEEL_SET_POOL
+      ? KIT_OFFROAD_WHEEL_SETS
+      : id === 'kit_vaz1111'
+        ? KIT_OKA_WHEEL_SETS
+        : typeof source !== 'string'
+          ? KIT_FOREIGN_WHEEL_SETS
+          : KIT_SOVIET_WHEEL_SETS,
     lights: KIT_LIGHTS,
     scale: 1,
   };

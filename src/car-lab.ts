@@ -36,6 +36,7 @@ import {
   carSpawnYAboveGround,
   createCarModel,
   loadCarModel,
+  setWheelSetOverride,
   type CarModelInstance,
 } from './render/carmodel';
 import { FarCarField } from './render/farcars';
@@ -104,6 +105,8 @@ export interface CarLabApi {
   mid(modelId: string, on: boolean): void;
   /** Shows only this car (null: all of them), so a far view down the grid meets no other. */
   only(modelId: string | null): void;
+  /** Rebuilds every car on one wheel set from the pools (a pack id or a `gw_*` design), or on its own draw again with null. */
+  wheels(setId: string | null): void;
   /** A kit car's rig: set a channel, click a control by id, list the controls. */
   kit(modelId: string): {
     set(channel: string, value: number): void;
@@ -560,6 +563,10 @@ export async function bootCarLab(): Promise<void> {
     },
     only(modelId) {
       for (const car of cars) car.anchor.visible = modelId === null || car.def.id === modelId;
+    },
+    wheels(setId) {
+      setWheelSetOverride(setId);
+      for (const car of cars) buildCar(car);
     },
     kit(modelId) {
       const car = cars.find((candidate) => candidate.def.id === modelId);

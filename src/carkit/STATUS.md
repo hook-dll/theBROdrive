@@ -43,8 +43,9 @@ indicator and reversing lamps.
 drawn; the glass an opaque mirror from 45 m). Since 2026-10-15 every car's flat runs are
 merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewer than before.
 
-**Wheels**: the Soviet pack's wheel sets, each of the six designs equally likely, rescaled
-to the kit tyre. The kit's five generated wheel styles were removed at the owner's request.
+**Wheels**: the Soviet pack's six designs and eight generated sets (`rims.ts`, since
+2026-10-26), drawn per instance from the car's kind of pool, rescaled to the kit tyre. See
+"Wheels: designs and the roster" below.
 
 ## Roadmap (agreed order)
 
@@ -260,6 +261,31 @@ bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear
 
 Suggested start: one easy car to set up the foreign running-gear path (Nexia or Astra F),
 then the off-road family starting with the Pajero II (it needs every new piece once).
+
+## Wheels: designs and the roster
+
+Pools (carmodels.ts): Soviet cars `KIT_SOVIET_WHEEL_SETS` (the pack's six, `gw_vaz_steel16`,
+both covers, `gw_alloy_split7`); the Oka `KIT_OKA_WHEEL_SETS` (its own 3x98 wheel half the
+draws, else under a cover); foreign cars `KIT_FOREIGN_WHEEL_SETS` (steel, both covers, the
+8-hole, the cross-spoke); the Niva family `KIT_OFFROAD_WHEEL_SETS` (`sv_niva`, the fan).
+
+| Design | Real wheel (`RimDesign.ref` names the photo; local copies in `build/carshape/_refs/bp/img/wheels`) | Meant for |
+|---|---|---|
+| `gw_oka` | VAZ-1111 stamped, 14 holes, 3 nuts | Oka |
+| `gw_vaz_steel16` | VAZ-2110 stamped, 16 holes, 4 bolts | front-drive VAZes, any plain steel |
+| `gw_cover_vents` | Audi 80 B4 cover, ring of 24 slots | any steel wheel: VW, Audi, Ford, Renault, Škoda, SEAT, Fiat |
+| `gw_cover_turbine` | GM cover of the Astra F / Vectra A | Opel, Daewoo |
+| `gw_alloy_split7` | VAZ-2112 alloy, 7 split spokes | the tens, Samaras |
+| `gw_alloy_8hole` | Mercedes W124 8-hole | W124; flat aftermarket alloys on big saloons |
+| `gw_alloy_cross` | BBS cross-spoke (BMW Style 5) | BMW E34; sporty saloons |
+| `gw_alloy_fan` | Mitsubishi Pajero II fan | Pajero II; aftermarket on the Niva |
+
+Still wanted for the foreign list (each needs a photo first): Golf III / Passat B3 black
+steel (bare, no cover); a Japanese cover (Corolla E110, Carina E, Primera) with radial ribs;
+Audi 80 / Saab / Volvo period alloys; the off-roaders' own (Land Cruiser 80 and Patrol Y60
+6-stud steel and alloys, Discovery I "boost", Frontera, Vitara, RAV4, CR-V, Sportage, Grand
+Cherokee ZJ), and the off-roaders' larger, chunkier tyre. When a foreign car is added, its
+row may name its own pool instead of the foreign one (the W124 its 8-hole and covers).
 
 ## Check results (`npm run kit-check`, 2026-10-19)
 

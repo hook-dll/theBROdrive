@@ -47,6 +47,7 @@ import {
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { kitBodyMaterial } from '../carkit/materials';
+import { buildRimWheel, isGeneratedWheelSet, rimDesign } from '../carkit/rims';
 import { kitGlassOpacity } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
@@ -1689,7 +1690,8 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
   const defs = ids ? ids.map(carModel) : CAR_MODELS;
   const idsToLoad = new Set(defs.map((def) => def.id));
   for (const def of defs) {
-    for (const sourceId of def.wheelSetPool ?? []) idsToLoad.add(sourceId);
+    // A generated set (carkit/rims.ts) is built on first use, not loaded.
+    for (const sourceId of def.wheelSetPool ?? []) if (!isGeneratedWheelSet(sourceId)) idsToLoad.add(sourceId);
   }
   await Promise.all([...idsToLoad].map((id) => loadModel(carModel(id))));
 }
@@ -1760,8 +1762,58 @@ function template(id: string): Template {
 function selectedWheels(t: Template, appearanceKey: string): ReadonlyMap<string, THREE.Object3D> {
   const pool = t.def.wheelSetPool;
   if (!pool || pool.length === 0) return t.wheels;
+  const forced = wheelSetOverride === null ? undefined : poolWheelSet(wheelSetOverride);
+  if (forced) return forced;
   const sourceId = pool[appearanceHash('vaz-wheel-set', appearanceKey) % pool.length]!;
-  return (templates.get(sourceId) ?? t).wheels;
+  return poolWheelSet(sourceId) ?? t.wheels;
+}
+
+const generatedWheelSets = new Map<string, ReadonlyMap<string, THREE.Object3D>>();
+/** Every generated set built, to tell one from a pack set by identity. */
+const generatedSets = new WeakSet<ReadonlyMap<string, THREE.Object3D>>();
+
+/**
+ * A generated set (carkit/rims.ts) kept as a pack model's own wheels are (`takeOwnWheels`):
+ * one centred wrapper per wheel, the right side's turned to face out. Built once; every
+ * wrapper shares the one wheel's geometry.
+ */
+function generatedWheelSet(id: string): ReadonlyMap<string, THREE.Object3D> | undefined {
+  const cached = generatedWheelSets.get(id);
+  if (cached) return cached;
+  const design = rimDesign(id);
+  if (!design) return undefined;
+  const wheel = buildRimWheel(design);
+  const set = new Map<string, THREE.Object3D>();
+  for (const wheelId of WHEEL_IDS) {
+    const turn = new THREE.Group();
+    if (wheelId === 'wheel_fr' || wheelId === 'wheel_rr') turn.rotation.y = Math.PI;
+    turn.add(wheel.clone(true));
+    const wrapper = new THREE.Group();
+    wrapper.name = wheelId;
+    wrapper.add(turn);
+    prepareMaterials(wrapper, false, new Set());
+    set.set(wheelId, wrapper);
+  }
+  generatedWheelSets.set(id, set);
+  generatedSets.add(set);
+  return set;
+}
+
+/** A wheel pool entry's set: a generated design, or a loaded pack model's own wheels. */
+function poolWheelSet(id: string): ReadonlyMap<string, THREE.Object3D> | undefined {
+  return isGeneratedWheelSet(id) ? generatedWheelSet(id) : templates.get(id)?.wheels;
+}
+
+/**
+ * Dev: every pooled car built from now on wears this set (`null` hands back the pool's
+ * draw). `?wheels=<set id>` sets it from the start, so a look tool shoots the real game on it.
+ */
+let wheelSetOverride: string | null = import.meta.env.DEV && typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('wheels')
+  : null;
+
+export function setWheelSetOverride(id: string | null): void {
+  wheelSetOverride = id;
 }
 
 /**
@@ -1895,6 +1947,8 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
     // Culled as a sphere round the chassis centre the wheels stand within.
     const reach = Math.hypot(...t.measure.halfExtents) + Math.max(...t.measure.wheels.map((wheel) => wheel.radius));
     const drawn = attachKitWheels(kitWheelModel(t, set), wheels, reach);
+    // A generated set draws in the car's own kit material, the program its body has.
+    if (generatedSets.has(set)) drawn.mesh.material = clones.get(kitBodyMaterial())!;
     wheelDraw = drawn.mesh;
     skeletons.push(drawn.skeleton);
   }
@@ -2129,7 +2183,8 @@ function cloneStaticModel(t: Template, appearanceKey: string): StaticCarInstance
       if (!geometry) throw new Error(`Car model "${t.def.id}" has a wheel set with no meshes`);
       sets.set(set, (baked = { geometry, materials }));
     }
-    const wheels = new THREE.Mesh(baked.geometry, baked.materials.length === 1 ? baked.materials[0]! : baked.materials);
+    const own = generatedSets.has(set) ? clones.get(kitBodyMaterial()) : undefined;
+    const wheels = new THREE.Mesh(baked.geometry, own ?? (baked.materials.length === 1 ? baked.materials[0]! : baked.materials));
     wheels.name = 'wheels';
     wheels.castShadow = true;
     wheels.receiveShadow = true;
@@ -2204,7 +2259,7 @@ function buildFarGeometry(t: Template): THREE.BufferGeometry {
   // sets, and the plain disc was what gave the swap away. One set per model: a far car
   // is too small for its own set to be told from another.
   const poolSet = t.def.wheelSetPool?.[0];
-  const wheels = cloneWheels(t, (poolSet ? templates.get(poolSet) : undefined)?.wheels ?? t.wheels);
+  const wheels = cloneWheels(t, (poolSet ? poolWheelSet(poolSet) : undefined) ?? t.wheels);
   if (t.spare) {
     // `addSpareWheel`, in the chassis frame the mount is measured in.
     const mount = new THREE.Group();
@@ -2350,7 +2405,7 @@ function buildMidModel(t: Template): CarMidModel | null {
     }
     return geometry;
   };
-  const sets = (def.wheelSetPool ?? []).map((id) => (templates.get(id) ?? t).wheels);
+  const sets = (def.wheelSetPool ?? []).map((id) => poolWheelSet(id) ?? t.wheels);
   if (sets.length === 0) sets.push(t.wheels);
   const wheels = new Map<ReadonlyMap<string, THREE.Object3D>, MidCarWheel[]>();
   for (const set of sets) {
@@ -2397,12 +2452,13 @@ async function buildProgramAnchor(id: string): Promise<THREE.Group> {
     if (driving.mid) group.add(driving.mid.paint);
     if (driving.mid?.glass) group.add(driving.mid.glass);
     // Every set the wheel pool can give this body, not only the one its own key picks:
-    // as a static car wears it and, on a kit body, as a driven one does.
+    // as a static car wears it and, on a kit body, as a driven one does. A generated set
+    // draws in the body's own material, anchored with the body already.
     for (const sourceId of t.def.wheelSetPool ?? []) {
-      const source = templates.get(sourceId);
-      if (!source) continue;
-      for (const wheel of source.wheels.values()) group.add(wheel.clone(true));
-      if (t.kit) group.add(attachKitWheels(kitWheelModel(t, source.wheels), cloneWheels(t, source.wheels), 1).mesh);
+      const source = poolWheelSet(sourceId);
+      if (!source || generatedSets.has(source)) continue;
+      for (const wheel of source.values()) group.add(wheel.clone(true));
+      if (t.kit) group.add(attachKitWheels(kitWheelModel(t, source), cloneWheels(t, source), 1).mesh);
     }
     return group;
   });

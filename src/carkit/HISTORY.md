@@ -46,6 +46,24 @@ Format of an entry: **Problem** → **Cause** → **Fix** → *Code* (commit).
 - **The same wheel design kept recurring.** → `SOVIET_WHEEL_SET_POOL` has 12 entries but
   only 6 designs (repeats). → Kit cars draw from `DISTINCT_SOVIET_WHEEL_SETS` (each design
   once). *carmodels.ts* (0131dc7).
+- **Every new drive's Oka wore the same colour and the same wheels** (owner, 2026-10-26).
+  → Colour and wheel set hash from the car's id, and the start car's id was the constant
+  `'car:start'` (ochre, GAZ-21 wheels in every world). → The id carries the world seed
+  (`car:start:<seed>`); old saves keep theirs. *story/site.ts* (cb07657).
+- **Six wheel designs for the whole roster, foreign cars coming** (owner, 2026-10-26: new
+  geometry wanted). → The pack's sets were all there was; the earlier generated styles had
+  been removed as crude (14-sided lathes, the "daisy" petals painted on, no holes). →
+  Generated sets again, beside the pack's, built as the real wheel is: a face of revolution
+  with real windows cut through it (each band's sectors joined point for point to a
+  star-shaped outline, every ring on one angle list so nothing cracks), walled on the
+  alloys, a dark drum and barrel seen through them; each design from a photo of the real
+  wheel (`RimDesign.ref`), judged side by side with it in the game's light. Eight designs:
+  Oka and 2110 stamped steel, two 90s covers (ring of vents; the GM turbine), the 2112
+  alloy, the W124 8-hole, the BBS cross-spoke, the Pajero II fan. Pools per kind (Soviet,
+  Oka on its own 3x98 hub, foreign, off-road). They draw in the car's own kit material, so
+  no new program (`tools/look/programs.mjs`: 0 new on every tier); 900–1500 triangles a
+  wheel against the pack's 500. *rims.ts, materials.ts `alloy`, render/carmodel.ts
+  `poolWheelSet`, carmodels.ts `KIT_*_WHEEL_SETS`* (2026-10-26).
 - **A spare-wheel well hung under the classic saloons as a painted box.** → bay.ts built
   the well below the boot floor. → The spare lies flat in the boot's corner; the well box
   is gone. Silencers tucked up `SILENCER_TUCK` (25 mm) above the lowest point; the lowest
@@ -1105,7 +1123,9 @@ each measurements file's "Review 2".
   in the body and the door's shut line is one line from sill to rail. (On the 2105/2107 the
   rear door *does* carry its fixed pane; check photos per car.)
 - **Proportioning by eye** (first 2106): see Method.
-- **Generated wheel styles**: removed at the owner's request; use the pack's sets.
+- **Generated wheel styles as painted lathes** (the first five): removed at the owner's
+  request. Generated sets came back on 2026-10-26 at the owner's request as cut-window
+  rims drawn from photos (Generator); a design that only paints its holes on is still out.
 - **Following a drawing's bonnet roll-off literally on BODY_05**: read as a bent nose.
 - **Sampling a lamp lens every 20 mm along a flank** to keep it on a curving side: under a
   lean each cell bends its own way and the lens reads as a mosaic; bend only at the skin's

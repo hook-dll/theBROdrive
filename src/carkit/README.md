@@ -667,15 +667,31 @@ Since 2026-10-21 the clear glass is one draw, not a front and a back one: it is 
 a single pass (`forceSinglePass`, render/carmodel.ts `carClearGlassMaterial`), so three
 no longer flips its side and looks its program up again twice per pass.
 
-## Wheels: the Soviet pack's sets
+## Wheels: pack sets and generated sets
 
-A kit car is shod from `DISTINCT_SOVIET_WHEEL_SETS` (carmodels.ts: the pack's six wheel
-designs, `sv_gaz21`, `sv_gaz24`, `sv_vaz2101`, `sv_vaz2103`, `sv_vaz2106`, `sv_vaz2108`, once
-each), one set on all four wheels per instance, picked by its appearance key and rescaled
-by `cloneWheels` to the kit's own tyre. A sibling on the Niva pool
-(`OFFROAD_WHEEL_SET_POOL`) keeps it. The kit's own wheel (`buildWheel`) only sets where the
-wheels stand and how big they are. In the lab, `Экземпляр` (and `?variant=`) steps the
-appearance key: paint and wheels change together.
+A kit car is shod from its kind's pool (carmodels.ts `KIT_SOVIET_WHEEL_SETS`,
+`KIT_OKA_WHEEL_SETS`, `KIT_FOREIGN_WHEEL_SETS`, `KIT_OFFROAD_WHEEL_SETS`), one set on all
+four wheels per instance, picked by its appearance key and rescaled by `cloneWheels` to the
+kit's own tyre. An entry is a pack model's id (`sv_*`: its own wheels, loaded with it) or a
+generated design's (`gw_*`, `rims.ts`, built on first use: render/carmodel.ts
+`poolWheelSet`). A generated set draws in the car's own kit material (it carries the
+attributes that material reads), so it costs no program. The kit's own wheel
+(`buildWheel`, wheels.ts) only sets where the wheels stand and how big they are. In the lab,
+`Экземпляр` (and `?variant=`) steps the appearance key: paint and wheels change together.
+
+A generated design (`RimDesign`) is data: a flange and a face profile (radius over the
+rim's, x in metres at the nominal 0.29 m tyre), bands of the face cut into sectors with a
+window each (an outline in the sector's frame, star-shaped about its middle; walled by
+`depth` on an alloy), lug nuts and a cap. To add one:
+
+1. Photos of the real wheel first (Commons, with the licence), noted in `ref`.
+2. The design in `RIM_DESIGNS`; its id into the pools it belongs in.
+3. Lab: `__carLab.wheels('gw_…')` puts it on every car (null hands back the draws); the
+   game: `?wheels=gw_…` (dev) shoes every pooled car on it. Judge it side by side with the
+   photo, near and as mid traffic (`__carLab.mid`), both sides.
+4. Triangles (`buildRimWheel` + count): the pack's wheels are 500; the generated ones
+   900–1500, the window walls being most of an alloy's.
+5. `node tools/look/programs.mjs`: no new program.
 
 ## Lab
 
@@ -690,6 +706,7 @@ appearance key: paint and wheels change together.
     `fov` in degrees narrows the lens without moving the eye, so the LOD distance is real;
   - `mid(id, on)` — draw the car as mid traffic does (its mid paint, glass and the shared
     parts), posed far; `only(id | null)` — show one car alone;
+  - `wheels(setId | null)` — rebuild every car on one wheel set (a `sv_*` or `gw_*` id);
   - `kit(id).set(channel, v)`, `.activate(controlId)` (`'door_fl'`, `'door_rl'`, `'bonnet'`,
     `'boot'`, `'tailgate'`, `'flap'`, `'window_fl'`, …), `.controls()`;
   - `set({ dirt, scratches, timeHours, variant })`;
