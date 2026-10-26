@@ -9,6 +9,7 @@ import {
   type CameraStyle,
 } from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
+import { bobAmplitude, stepLength } from '../player/gait';
 
 export type CameraMode = 'foot' | 'cabin' | 'chase';
 
@@ -35,6 +36,8 @@ export interface CameraTarget {
   cabinOffset: readonly [number, number, number];
   /** On foot, how far a crouch has lowered the eye below `EYE_HEIGHT`, metres (`Player.interpolatedEyeDrop`); 0 in a car. */
   eyeDrop: number;
+  /** On foot and grounded, horizontal ground speed, m/s (`Player.groundSpeed`): the head bob's gait. 0 in a car or in the air. */
+  footSpeed: number;
   /**
    * Velocity in the float frame, X and Z, m/s. Zero on foot.
    *
@@ -157,8 +160,8 @@ const FOV_OMEGA = 6;
 /** Ten-power binoculars: the view is the resting FOV divided by this. */
 const BINOCULAR_POWER = 10;
 const FOV_EPSILON = 0.01;
-const BOB_AMP = 0.035;
-const BOB_FREQ = 9;
+/** How fast the head bob's height follows a change of gait (1/s), so stopping settles the eye instead of snapping it. */
+const BOB_SETTLE = 10;
 /**
  * THE SURGE: the chase arm stretches while the car gains speed and shortens while it
  * sheds it, then settles back once the speed holds.
@@ -371,7 +374,9 @@ export class CameraRig {
   private baseHalfTan = Math.tan((DEFAULT_FIELD_OF_VIEW * Math.PI) / 360);
   private fov = DEFAULT_FIELD_OF_VIEW;
 
-  private bobTime = 0;
+  /** Head bob: phase, radians (one 2π cycle per step, player/gait.ts), and the eased height over the middle, metres. */
+  private bobPhase = 0;
+  private bobAmp = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
   private recentering = false;
   /** World-space heading captured when an external-camera re-centre begins. */
@@ -799,9 +804,12 @@ export class CameraRig {
     // representations from disagreeing on the next frame.
     if (inputMode === 'cabin') this.cabinYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
 
-    // Wobble phases. Bob only advances while moving, so it freezes at rest.
-    const moveMag = Math.min(1, Math.hypot(input.moveX, input.moveZ));
-    if (moveMag > 1e-3) this.bobTime += d;
+    // Head bob: the phase moves with ground covered, one cycle a step, so it freezes at
+    // rest; its height eases toward the gait's, so a stop settles the eye.
+    const footSpeed = onFoot ? target.footSpeed : 0;
+    if (footSpeed > 0.05) this.bobPhase = (this.bobPhase + (2 * Math.PI * footSpeed * d) / stepLength(footSpeed)) % (2 * Math.PI);
+    const bobGoal = footSpeed > 0.05 ? bobAmplitude(footSpeed) : 0;
+    this.bobAmp += (bobGoal - this.bobAmp) * Math.min(1, d * BOB_SETTLE);
 
     // The surge measures the speed's own rate of change; see SURGE_STRETCH_PER_MPS2.
     // Speed is |forward|, so reversing harder surges the same way driving off does.
@@ -828,7 +836,7 @@ export class CameraRig {
 
     switch (mode) {
       case 'foot':
-        this.desiredFoot(target, moveMag);
+        this.desiredFoot(target);
         break;
       case 'cabin':
         this.desiredCabin(target);
@@ -877,8 +885,8 @@ export class CameraRig {
 
   /* ---- desired pose per mode; each writes _vA = eye, _vB = look-at ---- */
 
-  private desiredFoot(target: CameraTarget, moveMag: number): void {
-    const bob = Math.sin(this.bobTime * BOB_FREQ) * BOB_AMP * moveMag;
+  private desiredFoot(target: CameraTarget): void {
+    const bob = Math.sin(this.bobPhase) * this.bobAmp;
     _vA.set(target.x, target.y + EYE_HEIGHT - target.eyeDrop + bob, target.z);
     this.lookVector(_vD);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);

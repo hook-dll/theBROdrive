@@ -15,11 +15,12 @@
  */
 
 import { SurfaceType } from '../core/surfaces';
+import { stepLength } from '../player/gait';
 import { AudioMixer, ramp } from './mixer';
 import { playOnce, type SampleName } from './samples';
 
-/** Metres of ground covered per footstep. A stride, not a tick. */
-const STRIDE_METRES = 1.5;
+// Metres per footstep come from the boy's gait (player/gait.ts `stepLength`), shared with
+// the camera's head bob so the steps heard and the steps felt keep one cadence.
 /** Speed (m/s) below which the player is standing still and no steps are emitted. */
 const STEP_MIN_MPS = 0.4;
 
@@ -146,14 +147,14 @@ export class Foley {
 
     if (!grounded || speedMps < STEP_MIN_MPS) {
       // Reset just short of a step so the first stride after standing still lands
-      // promptly instead of instantly.
-      this.strideAccum = Math.min(this.strideAccum, STRIDE_METRES * 0.7);
+      // promptly instead of instantly. The accumulator counts steps, not metres.
+      this.strideAccum = Math.min(this.strideAccum, 0.7);
       return;
     }
 
-    this.strideAccum += speedMps * dt;
-    if (this.strideAccum >= STRIDE_METRES) {
-      this.strideAccum -= STRIDE_METRES;
+    this.strideAccum += (speedMps * dt) / stepLength(speedMps);
+    if (this.strideAccum >= 1) {
+      this.strideAccum -= 1;
       this.step(speedMps, surface);
     }
   }

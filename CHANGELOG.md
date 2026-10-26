@@ -17,6 +17,15 @@
 
 ### Changed
 
+- A BOY'S EYE AND GAIT ON FOOT (`render/cameras.ts`, `player/player.ts`, `player/gait.ts`,
+  `audio/foley.ts`, `main.ts`). The standing eye is at 1.10 m (was 1.62), a full crouch
+  brings it to 0.65 m; the cabin view is unchanged. The head bob runs one cycle per step
+  of ground covered instead of on a clock, with a boy's short steps (`stepLength`: 0.6 m
+  crouching, 1 m at the walk, 1.55 m at the sprint — 2.5, 3.5 and 4 steps a second) and
+  a speed-dependent height (`bobAmplitude`: 1 cm, 2 cm, 4.5 cm), eased in and out so a
+  stop settles the eye. The footstep sounds keep the same steps (were one per 1.5 m).
+  Walk and sprint speeds unchanged.
+
 - CARD MACHINES ARE WORKED BY WALKING UP TO THEM, ONE BIG CELL, NO FLICKER
   (`world/cardmachine.ts`, `world/post.ts`, `world/vending.ts`, `world/fixturefield.ts`,
   `player/interaction.ts`, `player/machinefocus.ts`, `render/trunkview.ts`, `main.ts`).
