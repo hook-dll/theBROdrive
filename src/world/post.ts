@@ -25,12 +25,13 @@ import {
 import { hasTag, thingBootFootprint, thingCard, type PostCard, type ThingDef } from '../items/things';
 import { carModel, hasCarModel, type CarModelDef } from '../vehicle/carmodels';
 import { bootHolds } from '../vehicle/trunk';
-import { buildCardMachine, CardMachine, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
+import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, thingName, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import { placeNameAt } from './placenames';
 import { postId, postStop, type PostStop } from './poststops';
 import { postParkingSlot } from './haulbay';
+import { box, mergeKitStatics } from './poi/kit';
 
 /**
  * THE POST MACHINE (game-design2.md §7): where contracts are taken and handed in, by
@@ -45,9 +46,9 @@ import { postParkingSlot } from './haulbay';
  * or a race's note, the lay-by car's sticker bonus, and says when the thing will not fit
  * that car. The wheel turns through them for as long as the player likes; TAKE gives the
  * one showing, always, fitting or not: the car can be changed. Its thing appears in the
- * machine's GRID, taking its boot footprint's cells, and he takes it from there into
- * his hands or pack as from a boot; with no room for it there, TAKE refuses and says
- * so. A HAUL gives nothing (§7.8): its load already waits in the first slot of
+ * machine's GRID, its one cell, and he takes it from there into his hands or pack as
+ * from a boot; with something lying there already, TAKE refuses and says so. A HAUL
+ * gives nothing (§7.8): its load already waits in the first slot of
  * the post's parking row (world/haulbay.ts, contracts/haulbays.ts), and TAKE binds the
  * contract to it (`haul_take`), which lifts its lock; with no load in the slot (the slot
  * is taken) TAKE refuses. The card it was on falls away and the slot's next offer is
@@ -60,13 +61,13 @@ import { postParkingSlot } from './haulbay';
  * cards print. A delivery is paid by the same car's stickers, read when the grid takes
  * it; with no car on the lay-by, by the car he last drove, wherever it stands.
  *
- * The GRID takes things in too, as a boot does: a thing bound here, put into a free cell
- * (its footprint round it), lies there a moment while the machine draws it in, and the
- * pay goes into the player's money (§7.7: no envelope, stickers are only bought). A thing
- * this post will not sign for goes in as a RETURN TO SENDER: no pay, the job closed.
- * Worked with a thing in hand, the window shows the HAND-IN card first: what to put in
- * the grid, what it pays, that it is a return, or why it will not take it. A haul is
- * handed in by its load, in the second slot (contracts/haulbays.ts), never at the grid.
+ * The GRID takes things in too: a thing bound here, put into the empty cell, lies there a
+ * moment while the machine draws it in, and the pay goes into the player's money (§7.7:
+ * no envelope, stickers are only bought). A thing this post will not sign for goes in as
+ * a RETURN TO SENDER: no pay, the job closed. Standing at it with a thing in hand, the
+ * window shows the HAND-IN card first, and follows what he holds: what to put in the
+ * grid, what it pays, that it is a return, or why it will not take it. A haul is handed
+ * in by its load, in the second slot (contracts/haulbays.ts), never at the grid.
  *
  * TAKE refuses while the player already has `ACTIVE_CONTRACT_LIMIT` jobs out, and a haul
  * while he has `ACTIVE_HAUL_LIMIT` hauls out (`activeContracts`); the cards say so.
@@ -225,9 +226,10 @@ export function deliveryStickers(state: WorldState, laybyCar: string | null): nu
 
 /**
  * Builds stop `stop`'s machine at ABSOLUTE (`x`, `z`) on the lay-by, its front turned by
- * `yaw` (front local -Z: the settlement spot's convention). In the physics band it is
- * solid and registers its fixture (id pushed to `registered`, for the chunk to forget);
- * beyond it, it is only seen. `disposers` gets the card materials.
+ * `yaw` (front local -Z: the settlement spot's convention), a tied parcel in its
+ * showcase. In the physics band it is solid and registers its fixture (id pushed to
+ * `registered`, for the chunk to forget); beyond it, it is only seen. `disposers` gets
+ * the card materials.
  */
 export function buildPost(
   ctx: ChunkContext,
@@ -243,6 +245,14 @@ export function buildPost(
   disposers: Array<() => void>,
 ): void {
   const parts = buildCardMachine(ctx, stop.s, x, z, yaw, POST_LOOK, group, bodies, colliders, disposers);
+  // The parcel: brown paper, twine round it both ways and a pale label on its front,
+  // each standing 5-6 mm proud of what it lies on.
+  const at: [number, number, number] = [NICHE_X, NICHE_FLOOR_Y + 0.06, NICHE_Z];
+  box(parts.root, [0.17, 0.12, 0.1], at, 0x9c7650);
+  box(parts.root, [0.012, 0.13, 0.11], at, 0xd8c9a0);
+  box(parts.root, [0.18, 0.13, 0.012], at, 0xd8c9a0);
+  box(parts.root, [0.06, 0.04, 0.012], [NICHE_X + 0.045, at[1] - 0.01, NICHE_Z - 0.05], 0xece4cf);
+  mergeKitStatics(parts.root);
   const slot = postParkingSlot(ctx.world.seed, ctx.road, stop.index, 'handIn');
   const machine = new PostMachine(ctx.world, stop, slot.x, slot.z, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
@@ -255,7 +265,8 @@ interface Posting {
 }
 
 class PostMachine extends CardMachine {
-  protected readonly title = 'POST';
+  /** The id of the thing in hand the hand-in card was last made for (null: none); undefined while not engaged. */
+  private handInFor: string | null | undefined = undefined;
   /** The offer standing in each slot (the four, then `SPECIAL_SLOT`). */
   private readonly offers: ContractCargoItem[];
   /** What an old save left in a courier's boot and the grid has had no room for yet, in order. */
@@ -449,11 +460,9 @@ class PostMachine extends CardMachine {
       this.cardsChanged();
       this.refreshLimit();
       ctx.toast(haulTakenText(contractThing(offer)));
-      // Let go of, so he sees the slot.
-      ctx.stepBack();
       return 'mount';
     }
-    if (this.roomFor(offer) < 0) {
+    if (!this.cellFree()) {
       ctx.toast(`no room in the grid for the ${contractThing(offer).name} — take out what lies there first`);
       return this.refuse();
     }
@@ -467,17 +476,23 @@ class PostMachine extends CardMachine {
     return 'mount';
   }
 
-  override setFocused(focused: boolean, ctx: FixtureContext): void {
-    super.setFocused(focused, ctx);
-    // Let go of, the window goes back to the offers.
-    if (!focused) this.showHandIn(null);
+  protected override onEngaged(ctx: FixtureContext, first: boolean): void {
+    if (first) {
+      // The car on the lay-by now, from its live body: the cards repaint when it changed.
+      this.refreshLayby(ctx);
+      this.refreshLimit();
+    }
+    // The hand-in card follows what is in hand while he stands there.
+    const held = ctx.held?.id ?? null;
+    if (held === this.handInFor) return;
+    this.handInFor = held;
+    this.showHandIn(this.handInCard(ctx));
   }
 
-  protected override onFocused(ctx: FixtureContext): void {
-    // The car on the lay-by now, from its live body: the cards repaint when it changed.
-    this.refreshLayby(ctx);
-    this.showHandIn(this.handInCard(ctx));
-    this.refreshLimit();
+  protected override onDisengaged(): void {
+    // Walked away, the window goes back to the offers.
+    this.handInFor = undefined;
+    this.showHandIn(null);
   }
 
   /** The hand-in card for the thing in hand, or null when he holds none. */
@@ -539,12 +554,19 @@ class PostMachine extends CardMachine {
     return { item: held, mode: deliver ? 'deliver' : 'return' };
   }
 
+  protected override putPrompt(ctx: FixtureContext, held: Item): string | null {
+    if (isPassenger(held)) return null;
+    const posting = this.posting(ctx);
+    if (!posting) return null;
+    return `[F] ${posting.mode === 'deliver' ? 'hand in' : 'return'} ${thingName(posting.item)}`;
+  }
+
   /**
-   * The thing in hand put to a free cell: it goes in where its footprint fits round the
-   * cell, as into a boot, lies there while the machine draws it in (`swallow`), and is
-   * delivered or returned. Anything that is not the post's cargo stays in the hand.
+   * The thing in hand put to the empty cell: it lies there while the machine draws it in
+   * (`swallow`), and is delivered or returned. Anything that is not the post's cargo stays
+   * in the hand.
    */
-  protected override putIn(ctx: FixtureContext, held: Item, cell: number): FoleyEvent | null {
+  protected override putIn(ctx: FixtureContext, held: Item): FoleyEvent | null {
     if (isPassenger(held)) {
       ctx.toast('teddies get off at a shelter — seat it on the bench');
       return 'refused';
@@ -556,12 +578,10 @@ class PostMachine extends CardMachine {
       return 'refused';
     }
     const item = posting.item;
-    const anchor = this.putAnchor(ctx, item, cell);
-    if (anchor < 0) return 'refused';
-    if (posting.mode === 'return') return this.takeBack(ctx, item, anchor);
+    if (posting.mode === 'return') return this.takeBack(ctx, item);
     const stickers = this.deliveryStickers(ctx);
     const pay = contractPay(this.world.seed, item, stickers) + ctx.racePay(item.id);
-    this.swallow(item, anchor);
+    this.swallow(item);
     // The completed id and the ledger first, then the pay, so a crash between cannot pay twice.
     this.save({ consumedItemId: item.id, completedContractId: item.id, completedContractKind: contractKindOf(item) });
     ctx.give(item.id);
@@ -572,14 +592,14 @@ class PostMachine extends CardMachine {
   }
 
   /**
-   * RETURN TO SENDER: the grid takes `item` back at `anchor` with no pay, and its
-   * contract is closed — recorded in `completedContractIds` without a kind, so the ledger
-   * does not count it and it no longer counts against the limit.
+   * RETURN TO SENDER: the grid takes `item` back with no pay, and its contract is closed —
+   * recorded in `completedContractIds` without a kind, so the ledger does not count it
+   * and it no longer counts against the limit.
    */
-  private takeBack(ctx: FixtureContext, item: ContractCargoItem, anchor: number): FoleyEvent {
+  private takeBack(ctx: FixtureContext, item: ContractCargoItem): FoleyEvent {
     const contractId = contractIdOf(item);
     const open = !this.world.state.completedContractIds.includes(contractId);
-    this.swallow(item, anchor);
+    this.swallow(item);
     this.save(open ? { consumedItemId: item.id, completedContractId: contractId } : { consumedItemId: item.id });
     ctx.give(item.id);
     this.showHandIn(this.handInCard(ctx));

@@ -3,7 +3,6 @@ import type { FoleyEvent } from '../audio/foley';
 import type { InputFrame, InputReader } from '../core/input';
 import type { CameraRig } from '../render/cameras';
 import type { FixtureContext, FixtureField, FixtureFocus, WorldFixture } from '../world/fixturefield';
-import type { FixedGridView } from '../vehicle/trunk';
 import type { WorldOrigin } from '../world/origin';
 
 /** Seconds the camera takes to step up to a machine, and back. */
@@ -12,18 +11,20 @@ const BLEND_S = 0.45;
 const WHEEL_NOTCH = 1;
 
 /**
- * WORKING A MACHINE UP CLOSE (world/cardmachine.ts): F on a fixture with a `focus` hands
- * it here. The camera eases from the player's eyes to the machine's own framing, the
- * pointer lock is let go so the cursor is the hand, and the player stands still:
+ * WORKING A MACHINE UP CLOSE (world/keybox.ts, world/toybox.ts): F on a fixture with a
+ * `focus` hands it here. The camera eases from the player's eyes to the machine's own
+ * framing, the pointer lock is let go so the cursor is the hand, and the player stands
+ * still:
  *  - the cursor's ray is the eye ray the interaction picks with (`ray`), so what is under
  *    the cursor is what the prompt names and a click works it, as F would;
- *  - a press on a part that takes the hand (`WorldFixture.grab`, the wheel) drags it
+ *  - a press on a part that takes the hand (`WorldFixture.grab`, a handwheel) drags it
  *    instead, until the button is let go; the mouse wheel turns it a detent at a time;
  *  - Escape, the right button or a step away (a movement key) let go of it, and the
  *    camera eases back to the eyes; so does the machine itself when what it did is out
- *    in the world (`FixtureContext.stepBack`: a haul's load in its slot);
- *  - the machine's cell grid (`WorldFixture.grid`, its opening) is drawn while it is
- *    worked, as a boot's grid is while the boot is open (`grid`, main.ts).
+ *    in the world (`FixtureContext.stepBack`: a car boxed, a key in the drawer).
+ *
+ * The card machines are not framed: they are worked by walking up to them
+ * (`WorldFixture.reach`, player/interaction.ts).
  *
  * A money machine debits or pays the player's money only while it is framed (`onFramed`
  * tells player/interaction.ts which fixture is being worked).
@@ -235,11 +236,6 @@ export class MachineFocus {
   /** This tick's pick direction: the cursor's ray while working, else null (the eye's own). */
   ray(): THREE.Vector3 | null {
     return this.working ? this.rayDir : null;
-  }
-
-  /** The framed machine's cell grid while it is worked, else null. */
-  grid(): FixedGridView | null {
-    return this.working ? this.fixture?.grid?.() ?? null : null;
   }
 
   /** After the interaction tick: the cursor the part under it asks for. */

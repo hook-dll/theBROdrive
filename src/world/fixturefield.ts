@@ -27,8 +27,8 @@ export interface FixtureContext {
   /** The item in the hands, or null. */
   readonly held: Item | null;
   /**
-   * Takes `rubles` from the player's money while a machine is being worked; false, and
-   * nothing taken, when none is or the money is short.
+   * Takes `rubles` from the player's money while a machine is being worked (framed or
+   * engaged); false, and nothing taken, when none is or the money is short.
    */
   debit(rubles: number): boolean;
   /** Pays `rubles` into the player's money (economy/economy.ts `credit`). */
@@ -36,9 +36,9 @@ export interface FixtureContext {
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;
   /**
-   * Lets go of the machine being worked (player/machinefocus.ts): the camera steps back
-   * so the player sees what the machine did out in the world (a key in a drawer, a haul's
-   * load in its slot).
+   * Lets go of the machine framed up close (player/machinefocus.ts): the camera steps
+   * back so the player sees what the machine did out in the world (a key in a drawer, a
+   * car boxed).
    */
   stepBack(): void;
   /**
@@ -95,14 +95,24 @@ export interface WorldFixture {
   /** Per-frame animation (a lever swinging back, a door easing); omitted when static. */
   update?(dt: number): void;
   /**
-   * A machine worked UP CLOSE (world/cardmachine.ts): F on it frames it in the camera
-   * and frees the cursor (player/machinefocus.ts), and from then on the cursor's ray is
-   * the eye ray `aim` is handed, a click is F, and a drag works `grab`/`drag`. Omitted
-   * for a fixture F works from where the player stands.
+   * A machine worked UP CLOSE (world/keybox.ts, world/toybox.ts): F on it frames it in the
+   * camera and frees the cursor (player/machinefocus.ts), and from then on the cursor's
+   * ray is the eye ray `aim` is handed, a click is F, and a drag works `grab`/`drag`.
+   * Omitted for a fixture F works from where the player stands.
    */
   focus?(): FixtureFocus;
-  /** The machine is framed (true) or let go of (false); its prompts say "click", not F. */
+  /** The machine is framed (true) or let go of (false). */
   setFocused?(focused: boolean, ctx: FixtureContext): void;
+  /**
+   * A machine worked by WALKING UP to it (world/cardmachine.ts): metres from the player's
+   * feet at ABSOLUTE (`x`, `z`) to where it is worked, or Infinity out of its reach. The
+   * nearest in reach is engaged (`engage`, player/interaction.ts) while he stands on foot.
+   */
+  reach?(x: number, z: number): number;
+  /** Every fixed tick the fixture is the engaged one; `first` on the tick it became so. */
+  engage?(ctx: FixtureContext, first: boolean): void;
+  /** It is engaged no more: the player walked off, sat in a car, or another is nearer. */
+  disengage?(): void;
   /**
    * Mouse down while framed, with the cursor ray (as `aim`'s). True when a part takes
    * the hand (a card machine's wheel): the drag then goes to `drag`, and the click is not a press.
@@ -114,12 +124,15 @@ export interface WorldFixture {
   drag?(turn: number): FoleyEvent | null;
   /** The mouse let go of the held part; the sound it made, or null. */
   release?(): FoleyEvent | null;
-  /** Mouse-wheel notches while framed (positive: the next card); the sound, or null. */
+  /**
+   * Mouse-wheel notches while framed, or while engaged and aimed at (positive: the next
+   * card); the sound, or null.
+   */
   scroll?(notches: number): FoleyEvent | null;
   /** The cursor to show over the part the last `aim` hit while framed, or null for the arrow. */
   cursor?(): 'grab' | 'grabbing' | 'pointer' | null;
   /**
-   * The machine's cell grid while it is framed, for the renderer to draw as a boot's
+   * The machine's cell grid while it is engaged, for the renderer to draw as a boot's
    * (world/cardmachine.ts, render/trunkview.ts `updateFixed`); omitted for a fixture
    * with none. Read every frame: the object may be reused in place.
    */

@@ -8,21 +8,21 @@ import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { STICKERS } from '../items/stickercatalog';
 import type { PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
-import { buildCardMachine, CardMachine, MACHINE_D, PANEL_X, PANEL_Y, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
+import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import type { Poi } from './poi';
-import { box, C, mergeKitStatics } from './poi/kit';
+import { box, C } from './poi/kit';
 
 /**
  * The SHOP machines: where the small things a driver needs are bought.
  *
  * A card machine (world/cardmachine.ts), the post's twin: the wheel turns through a card
- * for each thing still in it, the showcase under the window holds the one the card
+ * for each thing still in it, the showcase beside the window holds the one the card
  * names, and BUY takes its price from the player's money and lays the thing in the
  * machine's grid, where he takes it as from a boot. Short, the button springs back with
- * a rattle, nothing is given, and the card says the money is short; with no room left in
- * the grid (eight things bought and not taken), it refuses before taking any money.
+ * a rattle, nothing is given, and the card says the money is short; with the grid's one
+ * cell taken (a thing bought and not taken), it refuses before taking any money.
  * What lies in the grid is saved (`WorldState.machineGrids`), so a thing paid for and
  * left there waits for him.
  *
@@ -51,7 +51,7 @@ type Ware = 'spray' | 'shades' | 'air_filter' | 'turbine' | 'can5' | 'can10' | '
 const SHADE_TINTS: readonly ShadeTint[] = ['green', 'yellow', 'red'];
 const CAN_WARES: readonly Ware[] = ['can5', 'can5', 'can10', 'can10', 'can20'];
 
-/** How each ware looks in the window: a coloured block of its size, metres [w, h, d]. */
+/** How each ware looks in the showcase: a coloured block of its size, metres [w, h, d]. */
 const PRODUCT_LOOK: Readonly<Record<Ware, { readonly colour: number; readonly size: readonly [number, number, number] }>> = {
   spray: { colour: 0xffffff, size: [0.05, 0.15, 0.05] },
   shades: { colour: 0x28251f, size: [0.13, 0.045, 0.03] },
@@ -167,11 +167,6 @@ const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: s
   sticker: { band: '#b0702a', kind: 'STICKER', line: 'sealed — a sticker you see once it is open' },
 };
 
-/** The showcase beside the button: a lit niche with a shelf, local metres. */
-const CASE_W = 0.28;
-const CASE_H = 0.24;
-const CASE_FRONT = -MACHINE_D / 2;
-
 /**
  * Builds a machine standing at absolute (`x`, `z`) on the sand, its front turned by `yaw`.
  * In the physics band it is solid and registers its fixture (id pushed to `registered`,
@@ -194,13 +189,9 @@ export function buildShop(
   const id = shopId(poi.index);
   const { items, wares } = vendingStock(ctx.world, poi);
 
-  // The showcase: a frame, a pale back, a shelf, and every ware still in the machine
-  // standing on it, only the one on the card shown.
+  // The showcase: every ware still in the machine standing on its floor, only the one
+  // on the card shown.
   const root = parts.root;
-  box(root, [CASE_W + 0.04, CASE_H + 0.04, 0.05], [PANEL_X, PANEL_Y, CASE_FRONT - 0.02], C.darkMetal);
-  box(root, [CASE_W, CASE_H, 0.01], [PANEL_X, PANEL_Y, CASE_FRONT - 0.046], 0xbcb8aa);
-  const shelfY = PANEL_Y - CASE_H / 2 + 0.03;
-  box(root, [CASE_W, 0.012, 0.06], [PANEL_X, shelfY, CASE_FRONT - 0.08], C.metal);
   const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(SHOP_SLOTS).fill(null);
   const sold = ctx.world.state.vendingSold[id] ?? [];
   for (let slot = 0; slot < SHOP_SLOTS; slot++) {
@@ -209,14 +200,12 @@ export function buildShop(
     if (!ware || !item || sold.includes(slot)) continue;
     const look = PRODUCT_LOOK[ware];
     const colour = item.type === 'spray_can' ? item.paint : item.type === 'sun_shades' ? SHADE_LOOK[item.tint] : look.colour;
-    const product = box(root, look.size, [PANEL_X, shelfY + 0.006 + look.size[1] / 2, CASE_FRONT - 0.08], colour);
+    const product = box(root, look.size, [NICHE_X, NICHE_FLOOR_Y + look.size[1] / 2, NICHE_Z], colour);
     product.visible = false;
     // Shown one at a time, on its card: never merged.
     product.userData.kitKeep = true;
     products[slot] = product;
   }
-  // The showcase joins the cabinet's merged boxes.
-  mergeKitStatics(root);
 
   const machine = new ShopMachine(ctx.world, id, poi.s / 1000, items, wares, products, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
@@ -228,7 +217,6 @@ function shopId(poiIndex: number): string {
 }
 
 class ShopMachine extends CardMachine {
-  protected readonly title = 'SHOP';
   /** The slots still for sale, in window order: the cards. */
   private readonly available: number[];
   /** The slot whose BUY the money was too short for, painted on its card until it turns. */
@@ -313,8 +301,8 @@ class ShopMachine extends CardMachine {
   protected pressButton(ctx: FixtureContext, index: number): FoleyEvent {
     const at = this.itemAt(index);
     if (!at) return this.refuse();
-    if (this.roomFor(at.item) < 0) {
-      ctx.toast('the grid is full — take out what you bought first');
+    if (!this.cellFree()) {
+      ctx.toast('take out what lies in the grid first');
       return this.refuse();
     }
     const price = itemPrice(at.item, this.km);

@@ -47,6 +47,7 @@ import {
   type StorageSide,
   type TrunkGrid,
   type TrunkGridRayHit,
+  type FixedGridView,
   type TrunkViewState,
 } from '../vehicle/trunk';
 import {
@@ -67,7 +68,7 @@ import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
 import { KIT_BENCH_NODE } from '../carkit/interior';
 import { credit, debit, formatMoney } from '../economy/economy';
-import type { FixtureContext, FixtureField } from '../world/fixturefield';
+import type { FixtureContext, FixtureField, WorldFixture } from '../world/fixturefield';
 import { PUMP_RATE, type PumpNozzle } from '../world/pumps';
 
 /** How far the eye ray reaches for picking. */
@@ -721,6 +722,10 @@ export class Interaction {
   private readonly towEyeD = { x: 0, y: 0, z: 0 };
   /** The machine framed up close (player/machinefocus.ts), or null. */
   private focusedFixture: string | null = null;
+  /** The machine worked by walking up to it (`WorldFixture.reach`), or null. */
+  private engagedFixture: string | null = null;
+  /** Mouse-wheel travel at the engaged machine not yet turned into whole notches. */
+  private scrollNotches = 0;
   /** What a world fixture may do to the player (world/fixturefield.ts); one object, read live. */
   private readonly fixtureContext: FixtureContext = (() => {
     const self = this;
@@ -728,7 +733,7 @@ export class Interaction {
       get world() { return self.world; },
       get inventory() { return self.inventory; },
       get held() { return self.inventory.held; },
-      debit: (rubles: number) => self.focusedFixture !== null && debit(self.world, rubles),
+      debit: (rubles: number) => (self.focusedFixture !== null || self.engagedFixture !== null) && debit(self.world, rubles),
       credit: (rubles: number) => credit(self.world, rubles),
       give: (itemId: string) => self.inventory.remove(itemId),
       stepBack: () => self.hooks.stepBack(),
@@ -820,6 +825,38 @@ export class Interaction {
     return this.fixtureContext;
   }
 
+  /** The engaged machine's cell grid (`WorldFixture.grid`) for the renderer, or null. */
+  engagedGrid(): FixedGridView | null {
+    return this.engagedFixture ? this.worldFixtures.get(this.engagedFixture)?.grid?.() ?? null : null;
+  }
+
+  /**
+   * Engages the machine worked by walking up to it (`WorldFixture.reach`) nearest the
+   * feet at ABSOLUTE (`x`, `z`), every tick; null (in a car) engages none. The one it
+   * replaces is let go of.
+   */
+  private engageNearest(x: number | null, z: number): void {
+    let best: WorldFixture | null = null;
+    let bestM = Infinity;
+    if (x !== null) {
+      for (const fixture of this.worldFixtures.values()) {
+        const m = fixture.reach?.(x, z) ?? Infinity;
+        if (m < bestM) {
+          bestM = m;
+          best = fixture;
+        }
+      }
+    }
+    const was = this.engagedFixture !== null ? this.worldFixtures.get(this.engagedFixture) : null;
+    if (was && was !== best) was.disengage?.();
+    this.engagedFixture = best?.id ?? null;
+    if (!best) {
+      this.scrollNotches = 0;
+      return;
+    }
+    best.engage?.(this.fixtureContext, best !== was);
+  }
+
   /**
    * The hazard button or the radio knob worked from the seat since the last call, once:
    * main.ts cycles the hazards with the autopilot and steps the car's radio.
@@ -878,6 +915,8 @@ export class Interaction {
     }
 
     if (this.world.state.player.drivingCarId) {
+      // A machine is worked on foot.
+      this.engageNearest(null, 0);
       // Nobody drives off with the nozzle in hand.
       this.hangUpNozzle();
       // Sitting down closes whatever was open: the grid belongs to a player standing
@@ -920,6 +959,7 @@ export class Interaction {
     }
 
     const resolved = this.resolve(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
+    this.engageNearest(eyeX + this.origin.x, eyeZ + this.origin.z);
     this.followLids(resolved, eyeX, eyeY, eyeZ);
     if (this.nozzle) this.followNozzle(eyeX, eyeY, eyeZ, dirX, dirY, dirZ);
     // The bar action is settled before the prompt is built from it. A storage cell,
@@ -935,6 +975,19 @@ export class Interaction {
       this.towActionValue = null;
     }
     const envelope = this.inventory.held?.type === 'sticker_envelope' ? this.inventory.held : null;
+    // The mouse wheel turns the dial of the machine the player stands at and looks at
+    // (a sticker in hand keeps the wheel for itself).
+    const target = resolved.target;
+    if (envelope === null && target.kind === 'world-fixture' && target.id === this.engagedFixture) {
+      this.scrollNotches += input.zoomDelta;
+      const notches = Math.trunc(this.scrollNotches);
+      if (notches !== 0) {
+        this.scrollNotches -= notches;
+        this.sound = this.worldFixtures.get(target.id)?.scroll?.(notches) ?? this.sound;
+      }
+    } else {
+      this.scrollNotches = 0;
+    }
     if (envelope) {
       const trying = this.updateStickerMode(
         envelope,

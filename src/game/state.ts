@@ -393,9 +393,10 @@ export interface WorldState {
   vendingSold: Record<string, number[]>;
   /**
    * What lies in a card machine's grid (world/cardmachine.ts), by the machine's fixture
-   * id (`post:<index>`, `vend:<poi>`), by anchor cell: what it gave and the player has
-   * not taken yet. A thing lying there is out of the post's stock, its contract active
-   * (contracts/registry.ts `activeContracts`). Absent: an empty grid.
+   * id (`post:<index>`, `vend:<poi>`), in order: what lies in its one cell, then what an
+   * older save's eight-cell grid left waiting to drop into it — what it gave and the
+   * player has not taken yet. A thing lying there is out of the post's stock, its
+   * contract active (contracts/registry.ts `activeContracts`). Absent: an empty grid.
    */
   machineGrids: Record<string, (Item | null)[]>;
 }

@@ -46,7 +46,10 @@ import { weatherBeginS } from '../world/weather';
  * what a courier-era boot of eight cells left that the post's grid has had no room for.
  */
 const POST_STOCK_CELL_COUNT = 12;
-/** A card machine's grid (world/cardmachine.ts `MACHINE_GRID`, 4 x 2). */
+/**
+ * Most things a card machine's grid record holds (world/cardmachine.ts): its one cell and
+ * what waits for it, never more than the eight cells the grid once had.
+ */
 const MACHINE_GRID_CELL_COUNT = 8;
 
 /**
@@ -589,8 +592,8 @@ export function migrateState(raw: unknown): WorldState {
     courierStorage[id] = migrateStorage(value, POST_STOCK_CELL_COUNT, `post "${id}" stock`);
   }
 
-  // What lies in a card machine's grid; the machine drops what does not fit its anchor
-  // (world/cardmachine.ts), as a boot does (`normalizeBoot`).
+  // What lies in a card machine's grid, in order; the machine puts the first in its cell
+  // and keeps the rest waiting for it (world/cardmachine.ts).
   const machineGrids: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(recordField(obj.machineGrids, 'machineGrids'))) {
     const cells = migrateStorage(value, MACHINE_GRID_CELL_COUNT, `machine "${id}" grid`);

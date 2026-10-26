@@ -17,6 +17,32 @@
 
 ### Changed
 
+- CARD MACHINES ARE WORKED BY WALKING UP TO THEM, ONE BIG CELL, NO FLICKER
+  (`world/cardmachine.ts`, `world/post.ts`, `world/vending.ts`, `world/fixturefield.ts`,
+  `player/interaction.ts`, `player/machinefocus.ts`, `render/trunkview.ts`, `main.ts`).
+  The camera no longer dollies in: within 1.4 m of the deck's lip the machine is engaged
+  (`WorldFixture.reach` / `engage` / `disengage`, the nearest one), its grid is drawn, and
+  F works the part under the crosshair — the dial (one card on), the button, the grid; the
+  mouse wheel aimed at the machine turns the dial both ways. The prompt names only what F
+  does there. The post's hand-in card follows what is in hand while the player stands at
+  it. The key box and the toy box keep the framed close-up. The GRID is one 0.76 × 0.40 m
+  cell instead of 4 × 2: one thing of any size lies there, and the button refuses while it
+  does; what an older save left in the eight cells waits inside and drops into the cell one
+  by one (the save record is the cell, then the queue). Re-laid out: the card window and a
+  lit showcase niche in one row (the shop's ware, the post's tied parcel), a sloped deck
+  across the whole front with the dial under the cards and the button under the showcase,
+  bevelled back under so the opening below is seen past it. Z-fighting: the old pod's
+  block and deck shared both side faces exactly (185 cm² each side), the window's dark back
+  lay 2 mm behind the bezel, the knurls and the dial's red bar 2.5-3 mm off the knob and
+  the button's plate 3 mm off the pod; the deck is now one extruded profile, every laid-on
+  plate stands ≥ 5 mm proud, the flap hangs 8 mm in front of the window and the window's
+  top half shows only while the flap falls. A throwaway coplanar scan of the built cabinet
+  (same-facing faces of different colour within 4.5 mm) found 15 clusters before and none
+  after, flap up and down. Checked in game (seed `flick`, post 0): shop BUY 45 → 33,
+  second BUY refused, F takes the can, wheel ±1 card, F on the dial +1; the post's TAKE,
+  take, and a return through the empty cell; stepping 2.8 m off disengages and hides the
+  grid.
+
 - PROP STRIKES READ ONLY NEARBY CELLS (`world/debris.ts`). `DebrisField` keeps its standing
   breakable props in 50 m world-XZ cells (`STRIKE_CELL_METRES`), kept in step on register,
   forget and break, and `strike` reads only the cells the chassis' swept box can reach (its

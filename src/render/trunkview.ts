@@ -258,19 +258,20 @@ export class TrunkView {
       if (!item) continue;
       if (!layout.cellBox(cell, this.cellPosition, this.cellSize)) continue;
       // A thing of several boot cells is drawn once, across all of them: its anchor cell
-      // (the top-left) joined with the far corner of its footprint.
+      // (the top-left) joined with the far corner of its footprint. A grid without that
+      // corner (a card machine's one cell) draws it in its one cell.
       const footprint = grid ? bootFootprint(item) : null;
-      const spans = grid !== null && footprint !== null && (footprint.columns > 1 || footprint.rows > 1);
+      const far = grid !== null && footprint !== null && (footprint.columns > 1 || footprint.rows > 1)
+        ? cell + (footprint.rows - 1) * grid.columns + footprint.columns - 1
+        : -1;
+      const spans = far >= 0 && layout.cellBox(far, this.farPosition, this.farSize);
       if (spans) {
-        const far = cell + (footprint.rows - 1) * grid.columns + footprint.columns - 1;
-        if (layout.cellBox(far, this.farPosition, this.farSize)) {
-          const minX = Math.min(this.cellPosition.x - this.cellSize.x / 2, this.farPosition.x - this.farSize.x / 2);
-          const maxX = Math.max(this.cellPosition.x + this.cellSize.x / 2, this.farPosition.x + this.farSize.x / 2);
-          const minY = Math.min(this.cellPosition.y - this.cellSize.y / 2, this.farPosition.y - this.farSize.y / 2);
-          const maxY = Math.max(this.cellPosition.y + this.cellSize.y / 2, this.farPosition.y + this.farSize.y / 2);
-          this.cellPosition.set((minX + maxX) / 2, (minY + maxY) / 2, this.cellPosition.z);
-          this.cellSize.set(maxX - minX, maxY - minY, this.cellSize.z);
-        }
+        const minX = Math.min(this.cellPosition.x - this.cellSize.x / 2, this.farPosition.x - this.farSize.x / 2);
+        const maxX = Math.max(this.cellPosition.x + this.cellSize.x / 2, this.farPosition.x + this.farSize.x / 2);
+        const minY = Math.min(this.cellPosition.y - this.cellSize.y / 2, this.farPosition.y - this.farSize.y / 2);
+        const maxY = Math.max(this.cellPosition.y + this.cellSize.y / 2, this.farPosition.y + this.farSize.y / 2);
+        this.cellPosition.set((minX + maxX) / 2, (minY + maxY) / 2, this.cellPosition.z);
+        this.cellSize.set(maxX - minX, maxY - minY, this.cellSize.z);
       }
       const mesh = createItemMesh(item);
       if (item.type === 'part') setPartCondition(mesh, item.part);

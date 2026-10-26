@@ -489,8 +489,8 @@ async function boot(): Promise<void> {
     },
   );
   const trunkView = new TrunkView(renderer.scene);
-  // The framed card machine's opening (world/cardmachine.ts), drawn as a boot's grid;
-  // its own instance, so an open boot on the lay-by stays drawn beside it.
+  // The opening of the card machine the player stands at (world/cardmachine.ts), drawn
+  // as a boot's grid; its own instance, so an open boot on the lay-by stays drawn beside it.
   const machineGridView = new TrunkView(renderer.scene, 'machine-grid');
   /** The car currently showing a sticker being tried on, so it can be cleared. */
   let stickerPreviewCarId: string | null = null;
@@ -1301,7 +1301,7 @@ async function boot(): Promise<void> {
     {
       toast: (text) => hud.setToast(text),
       focus: (fixtureId) => machineFocus.enter(fixtureId),
-      // A machine whose work is out in the world (a haul's load) lets go, so the player sees it.
+      // A machine whose work is out in the world (a car boxed) lets go, so the player sees it.
       stepBack: () => machineFocus.leave(true),
     },
   );
@@ -3014,7 +3014,7 @@ async function boot(): Promise<void> {
       renderer.camera.position,
     );
     machineGridView.updateFixed(
-      machineFocus.grid(),
+      interaction.engagedGrid(),
       origin.x,
       origin.z,
       s.timeOfDay,
