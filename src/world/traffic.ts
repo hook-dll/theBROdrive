@@ -116,10 +116,33 @@ const DENSE_SPAWN_ROAD_GAP_M = 32;
  * own headway would ask for at its own target speed, so the pair is already in trim
  * and does not visibly adjust — while solo spawns are untouched and still obey the
  * ordinary floor. The chance compounds per extra car (`P(pair) = 32%`,
- * `P(triplet+) = 10%`, `P(quad+) = 3%`), which matches groups being common,
+ * `P(triplet+) = 10%`, `P(quad) = 3%`), which matches groups being common,
  * three-plus rare, and never runaway.
+ *
+ * The size of a group is drawn when its first car is (`drawPlatoonMates`), so the site
+ * search can leave the group its room inside the spawn band.
  */
 const PLATOON_CHANCE = 0.32;
+/**
+ * ONCOMING TRAFFIC COMES IN CONVOYS (owner, 2026-10-27: a road like Highway Traffic
+ * Racer's). The chance each extra car joins an oncoming group, against `PLATOON_CHANCE`
+ * for the player's own side. The oncoming count is held by `SAME_DIRECTION_SHARE`; the
+ * groups only rearrange it, so the same few cars come by bunched and leave long empty
+ * stretches between them, which is the road a pass needs. At 75% three oncoming
+ * spawns in four bring a mate, and most oncoming cars come by in a group of two to four.
+ * A frantic driver still drives alone (`drawPlatoonMates`).
+ */
+const ONCOMING_PLATOON_CHANCE = 0.75;
+/**
+ * THE STREAM IS MOSTLY THE PLAYER'S OWN SIDE (owner, 2026-10-27). The share of the
+ * target count that drives his way. Half and half by COUNT was nowhere near half and
+ * half by what he meets: an oncoming car goes by at the sum of the two speeds and a
+ * car on his side at their difference, so at 110 km/h against 80 km/h traffic he met
+ * the oncoming half four times as often as he passed the other half (traffic bench,
+ * 2026-10-27: 15 met a minute, 3.5 overtaken). A road to weave through wants
+ * the cars on his side and the oncoming lane mostly open.
+ */
+export const SAME_DIRECTION_SHARE = 0.75;
 /**
  * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
  * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
@@ -186,8 +209,13 @@ export const PER_CAR_DRIVER_MIX: readonly [number, number, number] = (() => {
  * still be the one in a hurry. Those are the only two body classes in the pool.
  */
 const FRANTIC_ENGINE_ID = 'engine_bmw_m30';
-/** Longest chain one roll may build, so a bad streak of rolls cannot eat a whole queue. */
-const PLATOON_MAX_CHAIN = 4;
+/**
+ * Most cars one leader brings in behind it, so a bad streak of rolls cannot eat a whole
+ * queue: a group is four cars at most. The longest such group, three cautious sleepers
+ * at 70 km/h and three seconds, is 175 m of road, inside the narrowest band a group is
+ * placed in (the 220 m of `TRAFFIC_REAR_SPAWN_MIN_M`-`TRAFFIC_REAR_SPAWN_MAX_M`).
+ */
+const PLATOON_MAX_MATES = 3;
 /** Floor under the headway-derived follow gap: body clearance, not a target distance. */
 const PLATOON_MIN_GAP_M = 15;
 /** Never materialize an opposing car inside a pass that was clear when committed. */
@@ -759,6 +787,14 @@ function rearSpawnBand(style: TrafficDriverStyle): readonly [number, number] {
     : [TRAFFIC_REAR_SPAWN_MIN_M, TRAFFIC_REAR_SPAWN_MAX_M];
 }
 
+/**
+ * Road a platoon mate is put behind its leader at (see `PLATOON_CHANCE`). One formula
+ * for the placing and for the room the site search keeps (`findSpawnS`), which must agree.
+ */
+function platoonGap(speedCap: number, headwayS: number): number {
+  return Math.max(PLATOON_MIN_GAP_M, speedCap * headwayS);
+}
+
 interface PendingSpawn {
   readonly generation: number;
   readonly direction: TrafficDirection;
@@ -775,8 +811,13 @@ interface PendingSpawn {
   readonly pace: number;
   readonly lane: number;
   readonly rear: boolean;
-  /** Remaining chain budget for a platoon mate spawned off this one; see `queuePlatoonMate`. */
-  readonly platoonChain?: number;
+  /** Platoon mates still to come in behind this car; see `drawPlatoonMates`. */
+  readonly platoonMates: number;
+  /**
+   * Live cars this spawn may bring the stream up to: the target for a leader, the
+   * machine's cap for a platoon mate (see `queuePlatoonMate`).
+   */
+  readonly ceiling: number;
   /** Put down already parked on this lay-by's first place; see `parkedSpawnSite`. */
   readonly layby?: Layby;
 }
@@ -2712,7 +2753,9 @@ export class RoadTraffic {
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
     // A stop coming into the band on this stream's side may have a car standing at it.
     const parked = driver.style === 'frantic' ? null : this.parkedSpawnSite(direction);
-    const spawn = parked ?? this.findSpawnS(direction, fromBehind, driver.style);
+    const mates = parked ? 0 : this.drawPlatoonMates(direction, driver.style);
+    const convoyM = mates * platoonGap(driver.speedCap, driver.headwayS);
+    const spawn = parked ?? this.findSpawnS(direction, fromBehind, driver.style, convoyM);
     if (spawn === null) return;
     const request: PendingSpawn = {
       generation: this.generation,
@@ -2728,7 +2771,8 @@ export class RoadTraffic {
       pace: driver.pace,
       lane: spawn.lane,
       rear: spawn.s < this.playerS,
-      platoonChain: parked ? 0 : PLATOON_MAX_CHAIN,
+      platoonMates: mates,
+      ceiling: this.desiredCount,
       layby: parked?.layby,
     };
     this.pending = request;
@@ -2765,7 +2809,7 @@ export class RoadTraffic {
       : offset >= TRAFFIC_UNSEEN_M - SPAWN_ARRIVAL_SLACK_M && offset <= TRAFFIC_SPAWN_MAX_M;
     if (
       this.desiredCount === 0 ||
-      this.carList.length >= this.desiredCount ||
+      this.carList.length >= request.ceiling ||
       request.generation !== this.generation ||
       this.pending !== request ||
       !arrivalOk
@@ -2773,7 +2817,10 @@ export class RoadTraffic {
       return;
     }
     const record = this.placeCar(request);
-    if (record) this.queuePlatoonMate(record, request.platoonChain ?? PLATOON_MAX_CHAIN);
+    if (record === null) return;
+    // This spawn is done: a mate is the next one in flight, not one more behind it.
+    this.pending = null;
+    this.queuePlatoonMate(record, request.platoonMates);
   }
 
   /**
@@ -2938,26 +2985,52 @@ export class RoadTraffic {
   }
 
   /**
-   * Occasionally drags a second car in right behind one that just finished spawning,
+   * How many cars a fresh spawn brings in behind it: each one more with this side's
+   * chance (`PLATOON_CHANCE`, or `oncomingPlatoons` for the oncoming side), up to
+   * `PLATOON_MAX_MATES`, and no bigger as a group than its side's whole share of the
+   * target (`nextDirection`). It may run over what is left of that share: a side is
+   * opened only while it is under its share, so a group that arrives whole and then
+   * waits for its side to drain is what leaves the long gaps between groups. Nobody
+   * rides in convoy behind a frantic driver: it is gone in a minute.
+   */
+  private drawPlatoonMates(direction: TrafficDirection, style: TrafficDriverStyle): number {
+    if (style === 'frantic') return 0;
+    const share = direction === 1 ? this.sameShare : 1 - this.sameShare;
+    const room = Math.min(PLATOON_MAX_MATES, Math.ceil(this.desiredCount * share) - 1);
+    const chance = direction === 1 ? PLATOON_CHANCE : this.oncomingPlatoons;
+    let mates = 0;
+    while (mates < room && this.random() < chance) mates++;
+    return mates;
+  }
+
+  /**
+   * Brings the next of a spawn's platoon mates (`drawPlatoonMates`) in right behind it,
    * at the distance its own headway would ask for at its own target speed — see
    * `PLATOON_CHANCE` for why. Goes through the same async model-load path as an
    * ordinary spawn, so a slow-loading model degrades exactly like any other spawn
-   * (silently dropped, never blocking) rather than needing its own error handling.
+   * (silently dropped, never blocking, and the rest of the group with it) rather than
+   * needing its own error handling.
+   *
+   * The stream tops up one car at a time, so it is nearly always at its target when a
+   * leader lands. A mate takes the slot of a car out of sight behind the player
+   * (`pickRecycleIndex`) when there is one, and otherwise runs the stream over its
+   * target, never over the machine's cap: a group arrives whole, and the next cars to
+   * fall behind drain the surplus (`trimTo`) before anything else spawns.
    */
-  private queuePlatoonMate(leader: TrafficCar, chainRemaining: number): void {
-    if (chainRemaining <= 0) return;
-    // Nobody rides in convoy behind a frantic driver: it is gone in a minute.
-    if (leader.style === 'frantic') return;
+  private queuePlatoonMate(leader: TrafficCar, mates: number): void {
+    if (mates <= 0) return;
     if (this.pending !== null) return;
-    if (this.carList.length >= this.desiredCount) return;
-    if (this.random() >= PLATOON_CHANCE) return;
-    const followGap = Math.max(PLATOON_MIN_GAP_M, leader.speedCap * leader.headwayS);
-    const s = leader.forwardS - leader.direction * followGap;
+    const s = leader.forwardS - leader.direction * platoonGap(leader.speedCap, leader.headwayS);
     if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) return;
     const lane = leader.lane;
     if (!this.spawnSiteClear(s, leader.direction, lane, TRAFFIC_HALF_WIDTH_M, NEIGHBOUR_HALF_LENGTH_M, leader.id)) {
       return;
     }
+    if (this.carList.length >= this.desiredCount) {
+      const stale = this.pickRecycleIndex();
+      if (stale >= 0) this.removeAt(stale);
+    }
+    if (this.carList.length >= this.trafficCap) return;
     // Reuses the leader's own model rather than drawing a fresh random one: the
     // leader's model just finished loading (it is instantiated and on screen), so
     // this spawn is guaranteed warm. A platoon mate fires the moment its leader
@@ -2980,7 +3053,8 @@ export class RoadTraffic {
       pace: leader.pace,
       lane,
       rear: s < this.playerS,
-      platoonChain: chainRemaining - 1,
+      platoonMates: mates - 1,
+      ceiling: this.trafficCap,
     };
     this.pending = request;
     void this.prepareModel(request.modelId)
@@ -3024,35 +3098,50 @@ export class RoadTraffic {
     return this.physics.world.getCollider(hit.colliderHandle)?.parent()?.isFixed() ?? false;
   }
 
+  /**
+   * Which way the next spawn drives: toward `sameShare` of the target on the player's
+   * side and the rest oncoming (`SAME_DIRECTION_SHARE`), null while both are full. A
+   * side with nothing on it is opened first, so a thin stream still has both.
+   */
   private nextDirection(): TrafficDirection | null {
-    let same = 0;
-    let oncoming = 0;
-    for (const car of this.carList) {
-      if (car.direction === 1) same++;
-      else oncoming++;
-    }
-    const maxPerDirection = this.desiredCount / 2;
-    if (same >= maxPerDirection && oncoming >= maxPerDirection) return null;
-    if (same === 0 || oncoming >= maxPerDirection) return 1;
-    if (oncoming === 0 || same >= maxPerDirection) return -1;
-    return this.random() < 0.5 ? 1 : -1;
+    const same = this.liveInDirection(1);
+    const oncoming = this.carList.length - same;
+    const sameQuota = this.desiredCount * this.sameShare;
+    const sameFull = same >= sameQuota;
+    const oncomingFull = oncoming >= this.desiredCount - sameQuota;
+    if (sameFull && oncomingFull) return null;
+    if (oncomingFull || (same === 0 && !sameFull)) return 1;
+    if (sameFull || oncoming === 0) return -1;
+    return this.random() < this.sameShare ? 1 : -1;
+  }
+
+  private liveInDirection(direction: TrafficDirection): number {
+    let count = 0;
+    for (const car of this.carList) if (car.direction === direction) count++;
+    return count;
   }
 
   /**
    * `fromBehind` searches the rear band first. It is a preference, not a mode: a
    * rear site that is blocked must not cost the whole spawn, so the later attempts
-   * fall back to the road ahead.
+   * fall back to the road ahead. `convoyM` is the road the spawn's platoon mates will
+   * need behind it (`drawPlatoonMates`), kept inside the band: off its near edge for a
+   * car ahead of the player going his way, off its far edge for the rest.
    */
   private findSpawnS(
     direction: TrafficDirection,
     fromBehind: boolean,
     style: TrafficDriverStyle,
+    convoyM: number,
   ): { s: number; lane: number } | null {
     const [rearMin, rearMax] = rearSpawnBand(style);
+    const rearFar = rearMax - convoyM;
+    const aheadNear = TRAFFIC_UNSEEN_M + (direction === 1 ? convoyM : 0);
+    const aheadFar = TRAFFIC_SPAWN_MAX_M - (direction === 1 ? 0 : convoyM);
     for (let attempt = 0; attempt < 12; attempt++) {
       const behind = fromBehind && attempt < 6;
       const distance = behind
-        ? -(rearMin + this.random() * (rearMax - rearMin))
+        ? -(rearMin + this.random() * (rearFar - rearMin))
         // Skewed toward TRAFFIC_SPAWN_MAX_M: `sqrt(u)` for `u` uniform on [0,1] has CDF `x^2`,
         // so it under-samples near 0 and over-samples near 1. A flat draw put half its
         // mass inside the first 130 m of this 260 m band, so the median spawn sat
@@ -3060,7 +3149,7 @@ export class RoadTraffic {
         // something resolving out of the fog. TRAFFIC_SPAWN_MAX_M is exactly TRAFFIC_REACH_M,
         // the edge of the road's guaranteed collision support, past which
         // `hasSpawnGround` has nothing to raycast against.
-        : TRAFFIC_UNSEEN_M + Math.sqrt(this.random()) * (TRAFFIC_SPAWN_MAX_M - TRAFFIC_UNSEEN_M);
+        : aheadNear + Math.sqrt(this.random()) * (aheadFar - aheadNear);
       const s = this.playerS + distance;
       if (s < END_MARGIN_M || s > this.road.length - END_MARGIN_M) continue;
       const lane = this.pickSpawnLane(s, style);
@@ -3345,6 +3434,35 @@ export class RoadTraffic {
     this.mixOverride = total > 0
       ? [clean[0]! / total, clean[1]! / total, clean[2]! / total]
       : PER_CAR_DRIVER_MIX;
+  }
+
+  private sameShareOverride: number | null = null;
+
+  /**
+   * The share of the target driving the player's way: `SAME_DIRECTION_SHARE`, or the
+   * dev menu's override (`__bro.traffic.sameShare = 0.9`; `null` hands it back). Cars
+   * already on the road keep their direction; the stream turns over as it recycles.
+   */
+  get sameShare(): number {
+    return this.sameShareOverride ?? SAME_DIRECTION_SHARE;
+  }
+
+  set sameShare(value: number | null) {
+    this.sameShareOverride = value === null ? null : Math.min(1, Math.max(0, value));
+  }
+
+  private oncomingPlatoonsOverride: number | null = null;
+
+  /**
+   * The chance each extra car joins an oncoming group: `ONCOMING_PLATOON_CHANCE`, or the
+   * dev menu's override (`__bro.traffic.oncomingPlatoons = 0.5`; `null` hands it back).
+   */
+  get oncomingPlatoons(): number {
+    return this.oncomingPlatoonsOverride ?? ONCOMING_PLATOON_CHANCE;
+  }
+
+  set oncomingPlatoons(value: number | null) {
+    this.oncomingPlatoonsOverride = value === null ? null : Math.min(1, Math.max(0, value));
   }
 
   /** The fewest cars a density draw can ask for against the present cap. */

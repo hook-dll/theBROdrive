@@ -401,6 +401,28 @@
   built with, the imports stay at the scrapyards; engine and radiator sold dry), 1–2 spray
   cans, 1–3 empty cans of 5/10/20 L, and the small goods, gum and sun shades; each kind by
   its own roll (`GAR1` domain), 12 slots, gum then cans given up when it overflows. Its
+- TRAFFIC MOSTLY GOES YOUR WAY, AND THE ONCOMING SIDE COMES IN GROUPS (`world/traffic.ts`
+  `SAME_DIRECTION_SHARE`, `ONCOMING_PLATOON_CHANCE`, `nextDirection`, `drawPlatoonMates`,
+  `queuePlatoonMate`, `findSpawnS`; `main.ts`, `ui/menu.ts`). The owner wants a road like
+  Highway Traffic Racer's: cars on his side to weave past and an oncoming lane open for
+  the pass. The stream was held half and half by count, and an oncoming car passes at
+  the sum of the two speeds: at 110 km/h he met 14 oncoming cars a minute and overtook
+  two. Now 75 % of the target drives his way, and an oncoming spawn brings each extra
+  car with a 75 % chance (up to four in a group, never a frantic driver's), so the same
+  few come by bunched. The group's size is drawn with its leader, whose site keeps the
+  group's road inside the spawn band; a mate takes the slot of a car recycled out of
+  sight behind the player, or runs the stream over its target up to the cap until the
+  next cars fall behind. Platoons had never spawned at all: the mate was refused because
+  its own leader's spawn was still the pending one; the leader's side keeps its 32 %.
+  Dev menu sliders «Your way» (75 %) and «Oncoming groups» (75 %), and
+  `__bro.traffic.sameShare` / `.oncomingPlatoons` (`null` hands either back). Measured
+  headless at 110 km/h, cap 20, three random seeds (1298704429, 527486576, 1135279471),
+  five minutes each, before → after: oncoming met 14.0 → 7.1 a minute, time with the
+  oncoming lane clear for 250 m 36 → 53 %, median oncoming gap 147 → 430 m, cars of his
+  side overtaken 1.8 → 4.0 a minute, of his side ahead of him 3.8 → 5.3. In
+  `tools/traffic-bench.ts` one seed of four (1309652872) now reads 4.8 of 12.7 live cars
+  ahead against a 40 % floor: cars he overtakes stay live until 500 m behind him.
+
   cabinet is a workshop's tool wall, not the arcade cabinet (`CardMachineLook.cabinet`
   `'garage'`, `dressGarageShell`): dark steel cheeks with rivets up their front edges, a
   pegboard with a spanner and a hammer on each flank, a hazard band and a round spanner

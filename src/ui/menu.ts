@@ -820,6 +820,12 @@ export interface PauseHooks {
     /** Live cars by driver, in the same order as `driverMix`. */
     readonly liveMix: readonly [number, number, number];
     setDriverMix(value: readonly [number, number, number] | null): void;
+    /** Share of the target that drives the player's way (world/traffic.ts `sameShare`). */
+    readonly sameShare: number;
+    setSameShare(value: number | null): void;
+    /** Chance each extra car joins an oncoming group (world/traffic.ts `oncomingPlatoons`). */
+    readonly oncomingPlatoons: number;
+    setOncomingPlatoons(value: number | null): void;
   };
   /**
    * Record a fully fuelled car into the world.
@@ -2887,8 +2893,9 @@ export class MainMenu {
           });
           devTools.push(row);
         }
-        // Two sliders and a readout across the grid: the ceiling in cars and the share
-        // of it the density draw may fall to. The readout is the stream's own answer.
+        // Sliders and a readout across the grid: the ceiling in cars, the share of it the
+        // density draw may fall to, the share driving the player's way and how bunched the
+        // oncoming side comes. The readout is the stream's own answer.
         if (import.meta.env.DEV && hooks.traffic) {
           const traffic = hooks.traffic;
           const box = el('div', 'menu-dev-traffic');
@@ -2979,6 +2986,22 @@ export class MainMenu {
               () => Math.round(traffic.floor * 100),
               (v) => `${v}%`,
               (v) => traffic.setFloor(v / 100),
+            ).row,
+            knob(
+              'Your way',
+              0,
+              100,
+              () => Math.round(traffic.sameShare * 100),
+              (v) => `${v}%`,
+              (v) => traffic.setSameShare(v / 100),
+            ).row,
+            knob(
+              'Oncoming groups',
+              0,
+              100,
+              () => Math.round(traffic.oncomingPlatoons * 100),
+              (v) => `${v}%`,
+              (v) => traffic.setOncomingPlatoons(v / 100),
             ).row,
             readout,
             ...mixKnobs.map((k) => k.row),

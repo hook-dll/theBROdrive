@@ -3304,6 +3304,18 @@ async function boot(): Promise<void> {
           setDriverMix: (value: readonly [number, number, number] | null) => {
             traffic.driverMix = value;
           },
+          get sameShare() {
+            return traffic.sameShare;
+          },
+          setSameShare: (value: number | null) => {
+            traffic.sameShare = value;
+          },
+          get oncomingPlatoons() {
+            return traffic.oncomingPlatoons;
+          },
+          setOncomingPlatoons: (value: number | null) => {
+            traffic.oncomingPlatoons = value;
+          },
         }
       : undefined,
     ink: import.meta.env.DEV
