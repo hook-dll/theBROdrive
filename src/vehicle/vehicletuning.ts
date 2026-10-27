@@ -274,13 +274,15 @@ export const AXLE_ROLL_LIMIT_RAD = 0.15;
 export const DRIVELINE_SHAFT_RATE_NM_PER_RAD = 8000;
 /**
  * The shaft's damping as a share of critical FOR THE SHUFFLE MODE in the gear the car is
- * in, so every gear rings the same way. 0.4 lets a tip-in surge by a fifth of the pull
- * and settle inside a cycle (tools/chassis-stability.ts): felt, not thrown — this is a
- * kids' game, and a real shuffle at 0.1-0.2 is what car makers spend years tuning out.
- * The tyres damp the mode further. The same damper ties a wheel that loses its load to the
- * crank within milliseconds, which is what keeps a bump from flicking it into a spin.
+ * in, so every gear rings the same way. A real driveline shuffles at 0.1-0.2 of critical
+ * (engine mounts, clutch damper springs and the tyres' own slip are what damp it); 0.15
+ * is the middle of that band, so a tip-in surges and rings a cycle or two before it
+ * settles. (At 0.4 the surge measured 17-27% and settled inside a cycle; 0.15 is not
+ * re-measured, the owner judges it by feel.) The tyres
+ * damp the mode further. The same damper ties a wheel that loses its load to the crank
+ * within milliseconds, which is what keeps a bump from flicking it into a spin.
  */
-export const DRIVELINE_SHAFT_DAMPING_RATIO = 0.4;
+export const DRIVELINE_SHAFT_DAMPING_RATIO = 0.15;
 
 // ---------------------------------------------------------------------------
 // Lateral grip budget.
@@ -293,22 +295,12 @@ export const DRIVELINE_SHAFT_DAMPING_RATIO = 0.4;
 // ---------------------------------------------------------------------------
 
 /**
- * Fraction of the surface's frictionSlip that acts as the lateral grip budget.
- *
- * Bias-ply, not radials. 0.4 gave a ~1 g peak, which is a modern tyre on a good
- * road; a period cross-ply on a 1970s road surface is 0.7-0.8 g, and it gives up
- * progressively rather than at a cliff edge.
+ * Fraction of the surface's coefficient that sizes the PARKED HOLD's grip cone
+ * (`TyreContacts.holdBrake`). It reaches nothing else: cornering, drive and braking
+ * forces all come from the tyre model, against `wheelGrip` and the load. The name and
+ * the figure are what is left of the ray-cast vehicle's lateral budget.
  */
 export const LATERAL_GRIP_FRACTION = 0.33;
-/** Chassis mass (kg) at which the grip budget is unscaled. */
-export const GRIP_REFERENCE_MASS = 1100;
-/**
- * The budget scales with (reference/mass)^GRIP_MASS_EXPONENT: a laden truck or
- * bus gets a smaller budget per kilogram, so it corners worse than a hatchback
- * even though its tyres carry more load — road tyres are sized to the chassis,
- * not scaled with it.
- */
-export const GRIP_MASS_EXPONENT = 0.3;
 /*
  * There was a SIDE_FRICTION_GAIN here: 0.7, the gain on Rapier's lateral constraint,
  * documented as "a period car's vagueness — a 40-60 km/h corner runs 4-6 degrees of

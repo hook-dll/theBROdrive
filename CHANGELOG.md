@@ -4,6 +4,15 @@
 
 ### Changed
 
+- Physics crutches out (`vehicle/vehicletuning.ts`, `vehicle/vehicle.ts`). The driveline
+  shaft's damping is 0.15 of the shuffle mode (was 0.4), the middle of a real
+  driveline's 0.1-0.2: tip-in and lift-off now surge and ring for a cycle or two. The
+  mass-scaled grip (`GRIP_MASS_EXPONENT` 0.3 against `GRIP_REFERENCE_MASS` 1100 kg) is
+  removed: grip is the tyre's `wheelGrip` and the load only, so cars over 1100 kg grip a
+  few per cent more (the autopilot's grip estimates and `tools/climb-limit.ts` follow
+  it). `LATERAL_GRIP_FRACTION` was confirmed to size only the parked hold; its stale
+  "lateral grip budget" comment is corrected. Not benched; judged in game.
+
 - The driver sits 10 cm closer to the wheel in every kit car (owner: «сантиметров на 10
   ближе к рулю»; `DRIVER_EYE_FORWARD`, carkit/interior.ts); the Nivas 5 cm
   (`Layout.eyeForward`), where 10 cm put the left door mirror behind the vent wing's frame

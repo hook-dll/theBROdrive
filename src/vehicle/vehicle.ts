@@ -146,8 +146,6 @@ import {
   FOOT_BRAKE_REAR_BIAS,
   FUEL_EMIT_INTERVAL,
   GRAVITY,
-  GRIP_MASS_EXPONENT,
-  GRIP_REFERENCE_MASS,
   HANDLING_PROFILES,
   tyreCurve,
   brushPeakTan,
@@ -1942,7 +1940,7 @@ export class Vehicle implements Rebasable {
       SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
-      this.tyreCarGrip(this.statsValue.mass) *
+      this.statsValue.wheelGrip *
       this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip *
       axleMu *
@@ -2001,7 +1999,7 @@ export class Vehicle implements Rebasable {
       longitudinalPeakShare(SURFACES[surfaceType].slide, weather.wet) *
       SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
-      this.tyreCarGrip(this.statsValue.mass) *
+      this.statsValue.wheelGrip *
       this.worstTyreTemperatureGrip();
     const knee =
       this.rearValveKerbKnee === Infinity ? Infinity : this.rearValveKerbKnee * this.parkedRearSpringRatio;
@@ -2017,16 +2015,6 @@ export class Vehicle implements Rebasable {
         this.rearLinkTan,
       ) * GRAVITY
     );
-  }
-
-  /**
-   * What this car's tyres bring to every contact patch before the ground and the
-   * temperature do, in every direction alike: the catalogue `wheelGrip`, scaled
-   * down for mass because road tyres are sized to the chassis rather than with it, so a
-   * laden truck grips worse per kilogram than a hatchback.
-   */
-  private tyreCarGrip(mass: number): number {
-    return this.statsValue.wheelGrip * Math.pow(GRIP_REFERENCE_MASS / mass, GRIP_MASS_EXPONENT);
   }
 
   /**
@@ -3327,9 +3315,10 @@ export class Vehicle implements Rebasable {
     const brakeDenom =
       this.frontWheelCount * brakeFrontShare + this.rearWheelCount * brakeRearShare;
 
-    // The tyre's own coefficient, shared by drive, braking and cornering: see
-    // `tyreCarGrip`, and the note on `SurfaceProps.mu` for why there is one.
-    const tyreCarGrip = this.tyreCarGrip(mass);
+    // The tyre's own coefficient, shared by drive, braking and cornering: the catalogue
+    // `wheelGrip`, the same at any mass (the load does the rest, through μ(Fz)). See the
+    // note on `SurfaceProps.mu` for why there is one.
+    const tyreCarGrip = this.statsValue.wheelGrip;
 
     // THE PEDAL ASKS THE BRAKES, AND ONLY THE BRAKES. A floored pedal is
     // `brakeDecelG` of the car's own drums and discs, split on the fixed bias up to the
@@ -3447,8 +3436,7 @@ export class Vehicle implements Rebasable {
     // now, which is the point — referencing a front tyre against a quarter of the
     // car's weight told a front-drive hatchback that its nose tyres were permanently
     // overloaded and its rears permanently light, and the load-sensitivity term then
-    // handed the grip to the wrong end. A heavier car still gets no free advantage
-    // from sitting harder on its tyres; that is what GRIP_MASS_EXPONENT is for.
+    // handed the grip to the wrong end.
 
     // The air the tyres are cooling against, sampled once for the whole car.
     const ambientC = ambientAirC(this.world.state.timeOfDay, DAY_LENGTH);
@@ -5793,7 +5781,7 @@ export class Vehicle implements Rebasable {
     const staticCapacityPerN =
       SURFACES[SurfaceType.Asphalt].mu *
       this.handling.tyreLateralScale *
-      this.tyreCarGrip(this.statsValue.mass);
+      this.statsValue.wheelGrip;
     let moment = 0;
     let referenceMoment = 0;
     let travel = 0;

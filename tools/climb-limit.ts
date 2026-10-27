@@ -52,7 +52,6 @@ import fits from '../src/vehicle/model-fits.json';
 import { installAssetShim } from './assetshim';
 import { runInclineLaunchCheck } from './handling-bench';
 import { engineTorqueNm } from '../src/vehicle/drivetrain';
-import { GRIP_MASS_EXPONENT, GRIP_REFERENCE_MASS } from '../src/vehicle/vehicletuning';
 
 /** Wheel radius used when a body has no measured fit, metres. */
 const FALLBACK_WHEEL_RADIUS = 0.35;
@@ -129,15 +128,8 @@ function ceilingFor(def: CarModelDef): Ceiling {
   const front = frontWeightFraction(def);
   const drivenShare =
     def.rearDriveBias >= 0.99 ? 1 - front : def.rearDriveBias <= 0.01 ? front : 1;
-  // The tyre model's own coefficient: surface, tyre, and the mass scaling road tyres
-  // get for being sized to the chassis (`Vehicle.tyreCarGrip`).
-  const gripForce =
-    ROAD.mu *
-    def.wheelGrip *
-    Math.pow(GRIP_REFERENCE_MASS / def.mass, GRIP_MASS_EXPONENT) *
-    drivenShare *
-    def.mass *
-    GRAVITY;
+  // The tyre model's own coefficient: surface and tyre (`wheelGrip`).
+  const gripForce = ROAD.mu * def.wheelGrip * drivenShare * def.mass * GRAVITY;
 
   return {
     def,
