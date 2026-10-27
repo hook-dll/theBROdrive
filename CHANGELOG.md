@@ -1157,6 +1157,18 @@
 
 ### Fixed
 
+- THE TRAFFIC BENCH'S GROUND REACHES THE VERGE (`tools/traffic-bench.ts`
+  `RIBBON_HALF_WIDTH`). Its road collider ended 5.9 m from the crown, and a frantic
+  driver's bypass round a queue runs 4-6 m out, on what is solid verge in the game: a
+  car on that line drove off the bench's ground, stopped dead and was hit by the car
+  behind, a collision only the bench had (seed 299800035 after the 75 % direction split;
+  1 impact before the fix, 0 after, and 0 on 331611328, 4253641864, 2119155336,
+  1309652872 and 3707599939). The ground now runs to two lanes and 4 m, as
+  `tools/traffic-road.ts` lays it. The comment on "most of the live stream stays where
+  the player can see it" now notes that the share ahead went from 0.60 to 0.51 (lowest
+  0.41, twelve random seeds) with three quarters of the stream on his side; the 0.4
+  floor stays.
+
 - FAR SURFACES NO LONGER FIGHT FOR DEPTH: REVERSED-Z (`core/renderer.ts`
   `reversedDepthBuffer`, `render/depthconvention.ts`). Reported from play (owner's recording,
   2026-10-27): the outlines of distant mesas shimmered. The 24-bit depth buffer stepped by

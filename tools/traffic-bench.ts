@@ -52,7 +52,15 @@ const ROAD_TO = 7_000;
 /** Cruising pace for the streamed phase: the speed the distribution is judged at. */
 const PLAYER_MPS = 25;
 const ROAD_STEP = 2;
-const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH + 3;
+/**
+ * Ground either side of the crown, metres: the verge as well as the asphalt, as
+ * tools/traffic-road.ts lays it. A frantic driver's bypass round a queue runs its line
+ * 4-6 m out on the verge, which in the game is solid ground to the road's whole
+ * physics reach (`VERGE_SOLID_REACH_M`). The bench's ground ended at 5.9 m, and a car
+ * on such a line drove off the edge of it and counted as a collision (seed 299800035,
+ * 2026-10-27).
+ */
+const RIBBON_HALF_WIDTH = ROAD_HALF_WIDTH * 2 + 4;
 /** Road paved either side of the lay-by scenario's stop: past the stream's whole reach. */
 const LAYBY_ROAD_REACH_M = 900;
 /** How long the lay-by scenario watches: a stop is a quarter of the cars passing, one at a time. */
@@ -416,6 +424,13 @@ check(
 // is the road's now, and a narrow stretch legitimately holds a quarter of what a widened
 // one does, so a fixed nine would be asserting the width of the road rather than where
 // the stream sits on it.
+//
+// Since three quarters of the stream drives the player's way (`SAME_DIRECTION_SHARE`,
+// 2026-10-27), less of it is ahead by design: an oncoming car is past him and gone in
+// seconds, a car of his side that he overtakes stays live until it is 500 m behind him
+// (`TRAFFIC_UNSEEN_M`, which no recycling may undercut). Measured at 90 km/h over five
+// minutes on twelve random seeds, the share ahead went from 0.60 to 0.51 on the mean,
+// lowest 0.41. The floor stays at 0.4: under it the rear is eating the quota again.
 check(
   'most of the live stream stays where the player can see it',
   meanAhead >= 3 && meanAhead >= meanLive * 0.4,
