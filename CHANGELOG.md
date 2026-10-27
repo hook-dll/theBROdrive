@@ -159,15 +159,12 @@
   - CARCASS UNDER LOAD: relaxation length `σ0 · (Fz/Fz0)^(0.7 − e)` per wheel per step
     (`relaxationLoadScale`; e = 0.2 radial, 0.1 cross-ply), lateral and longitudinal. No
     inflation pressure is added: nothing in the catalogue carries one.
-  - COMPLIANCE STEER (`COMPLIANCE_STEER_*`, dev toggle "Compliance steer", default on): the
-    bushes give toe under last step's side force (front 0.15°/kN, rear 0.05°/kN, both
-    understeer) and front brake force (0.06°/kN toe-out). The understeer gradient goes from
-    1.58 to 2.20°/g on the 2101, 1.33 to 1.94 on the 2108 and 2.00 to 2.87 on the GAZ-24.
-    Skidpad g is unchanged.
-  - STEERING FREE PLAY (`HandlingTuning.steerLash`, dev toggle "Steering free play", default
-    on): 1° at the wheels on classic, 1.2° utility, 0.5° road, 0.3° sport, closing at the
-    knuckle stops. It applies only to the car the player steers himself: under the autopilot
-    the GAZ-21 wove at 1.7 crossings/km and 0.082 m RMS, against 0.3 and 0.038 without it.
+  - STEERING FREE PLAY AND COMPLIANCE STEER REMOVED after the owner drove them: they took
+    the feel further from what he wants. Gone with them: `STEERING_DEV`,
+    `STEER_LASH_CLASSIC_RAD`, `HandlingTuning.steerLash`, `wheelRackRad`,
+    `updateComplianceSteer`, `COMPLIANCE_*`, the two dev-menu switches and `__bro.steering`.
+    The road wheels follow the rack (`steerAngle`) with no play and no bush toe, as before
+    this pass.
   - TYRE SOUND FROM THE TYRE: one recorded squeal per axle, at the axle, driven by that
     axle's worst tyre's combined slip over its brush peak (onset 0.85, full 1.5) and gated
     by the patch's sliding speed. Level and pitch rise with slip and load. On loose ground
@@ -298,6 +295,13 @@
   (`world/haulbay.ts` `postParkingSlot`).
 
 ### Changed
+
+- ON FOOT: A GROWN-UP AGAIN, AT 62° (`render/cameras.ts` `FOOT_FIELD_OF_VIEW`,
+  `player/player.ts`; reverts of 9ee9a670 and 029e338c). The boy's 1.10 m eye and short
+  quick gait are gone: the eye stands at 1.62 m again (crouch to 0.95 m), the head bob and
+  footsteps are the adult's fixed stride. The on-foot view has its own fixed 62° field of
+  view; the FOV setting (85 by default) is the driving views' only, and the view switches
+  between the two on getting in and out.
 
 - THE SHOP BECOMES THE GARAGE MACHINE, AND NOT EVERY SETTLEMENT HAS ONE (shells phase 5;
   `world/vending.ts`, `world/cardmachine.ts`, `world/settlement.ts`, `world/poi.ts`,

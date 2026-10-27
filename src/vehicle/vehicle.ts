@@ -194,12 +194,6 @@ import {
   ROLL_CAMBER_LIMIT_RAD,
   rollCamberShare,
   relaxationLoadScale,
-  COMPLIANCE_BRAKE_TOE_RAD_PER_N,
-  COMPLIANCE_STEER_FRONT_RAD_PER_N,
-  COMPLIANCE_STEER_MAX_RAD,
-  COMPLIANCE_STEER_REAR_RAD_PER_N,
-  COMPLIANCE_STEER_TAU_S,
-  STEERING_DEV,
   SCRATCH_IMPACT_THRESHOLD_MPS,
   SCRATCH_PER_IMPACT_CAP,
   SCRATCH_PER_SEVERITY_MPS,
@@ -539,12 +533,6 @@ interface WheelVisual {
    */
   relaxationM: number;
   longitudinalRelaxationM: number;
-  /**
-   * COMPLIANCE STEER, radians in the steer sign (`toeRad`): the toe the bushes and the
-   * steering's own elasticity give under last step's side and longitudinal force,
-   * low-passed over the rubber's own time (`COMPLIANCE_STEER_TAU_S`).
-   */
-  complianceSteerRad: number;
   mesh: THREE.Object3D;
   /**
    * How far into THE DIG this wheel is, 0..1 — see the block comment on `DIG_FIRM_MU`.
@@ -1214,15 +1202,8 @@ export class Vehicle implements Rebasable {
 
   // Steering state: the rack's angle, where the driver's hands have put it (rate limited
   // to the rack speed), or anywhere the tyres' aligning moment swings it when no hand is
-  // on the wheel. It is also the rim's.
+  // on the wheel. The road wheels hang off it with no play, so it is also the rim's.
   private steerAngle = 0;
-  /**
-   * The rack's angle as the ROAD WHEELS have it: `steerAngle` through the steering's free
-   * play (`HandlingTuning.steerLash`). Inside the play the wheels follow their own
-   * aligning moment; at its edge the rack drags them. Equal to `steerAngle` with the
-   * lash switched off (`STEERING_DEV.lash`).
-   */
-  private wheelRackRad = 0;
   /**
    * The load the tyres' load sensitivity and peak angle are referenced at, N: the car's
    * mean corner load (weight over the wheel count). One tyre all round, so the nose of
@@ -2080,7 +2061,6 @@ export class Vehicle implements Rebasable {
     this.wheels = [];
     this.beamAxles = [];
     this.steerAngle = 0;
-    this.wheelRackRad = 0;
     this.keysRimRad = 0;
     this.keysPressS = 0;
     this.keysPressKey = 0;
@@ -2321,7 +2301,6 @@ export class Vehicle implements Rebasable {
         tyreLoadMeanN: 0,
         relaxationM: this.tyre.relaxationM,
         longitudinalRelaxationM: this.tyre.longitudinalRelaxationM,
-        complianceSteerRad: 0,
         mesh,
         digWeight: 0,
         longitudinalCapacityN: 0,
@@ -2518,11 +2497,7 @@ export class Vehicle implements Rebasable {
     this.parkingHoldRequested = false;
     this.impactVelocityPrimed = false;
     this.steerAngle = 0;
-    this.wheelRackRad = 0;
-    for (const w of this.wheels) {
-      w.tyre.steerRad = 0;
-      w.complianceSteerRad = 0;
-    }
+    for (const w of this.wheels) w.tyre.steerRad = 0;
   }
 
   /** True between `enterRails` and `leaveRails`. */
@@ -2627,7 +2602,6 @@ export class Vehicle implements Rebasable {
     const lock = this.model.steerLock;
     const rack = speedMps > 1 ? clamp(Math.atan((this.wheelbaseM * yawRate) / speedMps), -lock, lock) : 0;
     this.steerAngle = rack;
-    this.wheelRackRad = rack;
     for (const w of this.wheels) w.tyre.steerRad = this.wheelSteerAngle(w);
     this.rollWheelsAt(speedMps);
   }
@@ -3150,7 +3124,6 @@ export class Vehicle implements Rebasable {
     this.updateBumpSteer(dt, speedKmh);
     this.updateAxleRoll();
     this.updateSteering(dt, input, fwd);
-    this.updateComplianceSteer(dt);
 
     // The drive at the hubs as the driveline's last substep left it (it is stepped with
     // the wheels, in `updateWheelDynamics`), with this step's pedal override applied as
@@ -5730,78 +5703,29 @@ export class Vehicle implements Rebasable {
       }
     }
 
-    // Where the road wheels would roll free, in the WHEELS' rack angle: the travel angle
-    // above is in the rack's, measured with the wheels where the lash left them.
-    const wheelsFree = centre + this.wheelRackRad - this.steerAngle;
-    const swingLimit =
-      referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
     if (handsOff) {
       // No hand on the wheel: the tyres swing toward the travel angle on their own
       // moment, never past it, over the column's damping (`STEER_FREE_TAU_S`).
       const gap = centre - this.steerAngle;
+      const swingLimit =
+        referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
       this.steerAngle = clamp(this.steerAngle + clamp(gap, -swingLimit, swingLimit), -lock, lock);
-    } else {
-      const maxDelta = this.handling.steerRackSpeed * dt;
-      this.steerAngle = clamp(this.steerAngle + clamp(target - this.steerAngle, -maxDelta, maxDelta), -lock, lock);
+      return;
     }
-
-    // THE FREE PLAY (`STEER_LASH_CLASSIC_RAD`). Inside it the road wheels are as free as
-    // a rack with no hand on it, and swing on the same moment toward where they would
-    // roll; at either edge of it the rack drags them. The lock is set by the stops on
-    // the knuckles, not by the box, so the play closes up as the rack reaches it: at
-    // full lock the wheels are at full lock, and the turning circle is the factory's.
-    //
-    // THE PLAYER'S HANDS ONLY (`playerDriven`): the autopilot and the traffic steer
-    // through a linear controller, and a dead band inside its loop is a limit cycle.
-    // Measured (tools/autopilot-bench.ts), the classic profile's 1° made the GAZ-21
-    // sleeper cross its line 1.7 times a km with 0.082 m RMS off it, against 0.3 and
-    // 0.038 without; the driver's own correction is what the play is there to ask for.
-    const halfLash = STEERING_DEV.lash && this.playerDriven
-      ? Math.min(0.5 * this.handling.steerLash, Math.max(0, lock - Math.abs(this.steerAngle)))
-      : 0;
-    const swung = this.wheelRackRad + clamp(wheelsFree - this.wheelRackRad, -swingLimit, swingLimit);
-    this.wheelRackRad = clamp(swung, this.steerAngle - halfLash, this.steerAngle + halfLash);
+    const maxDelta = this.handling.steerRackSpeed * dt;
+    this.steerAngle = clamp(this.steerAngle + clamp(target - this.steerAngle, -maxDelta, maxDelta), -lock, lock);
   }
 
   /**
-   * COMPLIANCE STEER (`COMPLIANCE_STEER_FRONT_RAD_PER_N`): each wheel's toe as the bushes
-   * give under last step's tyre forces — the side force steering each axle toward
-   * understeer, a front wheel's brake force toeing it out — lagged over the rubber's own
-   * time. Zero, at once, with `STEERING_DEV.compliance` off.
-   */
-  private updateComplianceSteer(dt: number): void {
-    const on = STEERING_DEV.compliance;
-    const blend = 1 - Math.exp(-dt / COMPLIANCE_STEER_TAU_S);
-    for (const w of this.wheels) {
-      if (!on) {
-        w.complianceSteerRad = 0;
-        continue;
-      }
-      // A positive steer heads the wheel toward +X, the side force's own sign: the front
-      // turns away from the force it is making, the rear into it.
-      let target = w.isFront
-        ? -COMPLIANCE_STEER_FRONT_RAD_PER_N * w.sideForceBodyXN
-        : COMPLIANCE_STEER_REAR_RAD_PER_N * w.sideForceBodyXN;
-      // Toe-out is the static toe-in's opposite sign (`toeRad`).
-      if (w.isFront && w.beamPartner === null && w.brakeForceN > 0) {
-        target += w.sideSign * COMPLIANCE_BRAKE_TOE_RAD_PER_N * Math.abs(w.longitudinalForceN);
-      }
-      target = clamp(target, -COMPLIANCE_STEER_MAX_RAD, COMPLIANCE_STEER_MAX_RAD);
-      w.complianceSteerRad += (target - w.complianceSteerRad) * blend;
-    }
-  }
-
-  /**
-   * The steering angle a wheel actually presents to the road: the rack's angle as the
-   * wheels have it through the free play (`wheelRackRad`), shared out by the Ackermann
-   * geometry, the worn front end's bump disturbance, the static toe, the roll steer and
-   * the bushes' compliance steer. The rear wheels get the last three. `steerAngle`
-   * stays the rack's — the bicycle-model angle of the axle's centreline, which is what
-   * `steerLock`, the HUD and the autopilot's inverse are written in.
+   * The steering angle a wheel actually presents to the road: the rack's angle shared
+   * out by the Ackermann geometry, the worn front end's bump disturbance, the static toe
+   * and the roll steer. The rear wheels get the last two. `steerAngle` stays the rack's
+   * — the bicycle-model angle of the axle's centreline, which is what `steerLock`, the
+   * HUD and the autopilot's inverse are written in.
    */
   private wheelSteerAngle(w: WheelVisual): number {
     const roll = w.isFront ? this.frontRollRad : this.rearRollRad;
-    const geometry = w.toeRad + w.rollSteer * roll + w.complianceSteerRad;
+    const geometry = w.toeRad + w.rollSteer * roll;
     if (!w.isFront) return geometry;
     return this.ackermannAngle(w) + w.sideSign * this.bumpSteerAngle + geometry;
   }
@@ -5813,11 +5737,10 @@ export class Vehicle implements Rebasable {
    * The trapezoid delivers `ackermann` of that difference and the rest is parallel. The
    * two straddle δ, so the car's centreline turns on the same circle as before and the
    * factory turning circles `steerLock` was cut to stand; what goes is the inner tyre
-   * dragged sideways at full lock and the outer one under-steered beside it. δ is the
-   * rack as the wheels have it (`wheelRackRad`).
+   * dragged sideways at full lock and the outer one under-steered beside it.
    */
   private ackermannAngle(w: WheelVisual): number {
-    const delta = this.wheelRackRad;
+    const delta = this.steerAngle;
     if (this.ackermann === 0 || delta === 0) return delta;
     const L = this.wheelbaseM;
     const tanDelta = Math.tan(Math.abs(delta));

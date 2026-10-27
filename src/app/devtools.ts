@@ -48,7 +48,6 @@ import {
   type TrailerField,
 } from '../vehicle/trailer';
 import type { Vehicle } from '../vehicle/vehicle';
-import { STEERING_DEV } from '../vehicle/vehicletuning';
 import type { Hud } from '../ui/hud';
 import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
@@ -674,13 +673,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     traffic: ctx.traffic,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
-    // Live tuning, read every frame or step: `tyreVoice.onsetPeak = 0.7` starts the squeal
-    // sooner (audio/vehicleaudio.ts `TYRE_VOICE`), `headMotion.leanPerMps2 = 0` stills the
-    // head's lean (render/cameras.ts `HEAD_MOTION`), `steering.lash = false` takes the
-    // free play out (vehicle/vehicletuning.ts `STEERING_DEV`, also in the dev menu).
+    // Live tuning, read every frame: `tyreVoice.onsetPeak = 0.7` starts the squeal sooner
+    // (audio/vehicleaudio.ts `TYRE_VOICE`), `headMotion.leanPerMps2 = 0` stills the head's
+    // lean (render/cameras.ts `HEAD_MOTION`).
     tyreVoice: TYRE_VOICE,
     headMotion: HEAD_MOTION,
-    steering: STEERING_DEV,
     // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands
     // the sky back to the schedule.
     weather: { force: forceWeather, now: weather },

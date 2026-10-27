@@ -795,11 +795,6 @@ export interface PauseHooks {
   /** POI scenery receiving shadows (world/poi.ts `setPoiReceiveShadows`): off, it only casts them. Dev only. */
   poiShadows?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
-   * The steering's free play and the bushes' compliance steer (vehicle/vehicletuning.ts
-   * `STEERING_DEV`), switched for every car at once, for an A/B by feel. Dev only.
-   */
-  steeringFeel?: { lash: boolean; compliance: boolean };
-  /**
    * The trial designs of the toy box's stand (world/devlook.ts): `cycle` saves the drive,
    * writes the next one and reloads. Dev only.
    */
@@ -2856,24 +2851,6 @@ export class MainMenu {
             shadows.setEnabled(!shadows.enabled);
             const btn = devTools[index];
             if (btn) btn.textContent = label();
-          });
-        }
-        // Same shape, one switch each: read by every car on its next step.
-        if (import.meta.env.DEV && hooks.steeringFeel) {
-          const feel = hooks.steeringFeel;
-          const lashLabel = (): string => `Steering free play: ${feel.lash ? 'on' : 'off'}`;
-          const lashIndex = devTools.length;
-          devButton(lashLabel(), () => {
-            feel.lash = !feel.lash;
-            const btn = devTools[lashIndex];
-            if (btn) btn.textContent = lashLabel();
-          });
-          const complianceLabel = (): string => `Compliance steer: ${feel.compliance ? 'on' : 'off'}`;
-          const complianceIndex = devTools.length;
-          devButton(complianceLabel(), () => {
-            feel.compliance = !feel.compliance;
-            const btn = devTools[complianceIndex];
-            if (btn) btn.textContent = complianceLabel();
           });
         }
         // A reload: the stops are built as their chunks stream in.
