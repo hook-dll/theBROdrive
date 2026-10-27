@@ -2064,11 +2064,27 @@ export class RoadTraffic {
         car.forwardS = projection.s;
         car.roadLateral = projection.lateral;
       }
+      const velocity = car.vehicle.chassis.linvel();
+      // A BODY THE SOLVER HAS LOST. A non-finite position or velocity reaches every
+      // driver near it through the traffic field and its own autopilot's road queries
+      // (`Road.sampleAt(NaN)` throws), so it is reported with what it was doing and
+      // taken off the road before anything reads it.
+      if (
+        !Number.isFinite(car.forwardS + car.roadLateral) ||
+        !Number.isFinite(velocity.x + velocity.y + velocity.z)
+      ) {
+        console.error(
+          `traffic: ${car.id} (${car.modelId}, ${car.style}) left the solver: s ${car.forwardS}, ` +
+            `velocity ${velocity.x}/${velocity.y}/${velocity.z}, ${car.autopilot.activity}/` +
+            `${car.autopilot.manoeuvre}, settling ${car.settleFor.toFixed(2)} s`,
+        );
+        this.removeAt(i);
+        continue;
+      }
       // Along the road, not along the body: a car halfway through a manoeuvre still
       // closes on what is in front of it at its road speed, and that is the number a
       // driver behind it has to reason about.
       const heading = this.road.headingAt(car.forwardS);
-      const velocity = car.vehicle.chassis.linvel();
       const half = car.halfExtents;
       const travelMargin = Math.hypot(velocity.x, velocity.z) * dt + this.playerStepTravel;
       if (Math.abs(car.forwardS - playerS) + car.bodyRadius + travelMargin + PHYSICS_EDGE_SLACK_M >= TRAFFIC_REACH_M) {

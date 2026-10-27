@@ -1226,6 +1226,15 @@
 
 ### Fixed
 
+- A TRAFFIC CAR THE SOLVER LOSES IS REPORTED AND TAKEN OFF THE ROAD (`world/traffic.ts`).
+  Once, on the traffic bench (seed 2119155336, 2026-10-27, while vehicle work was in
+  flight in the tree), a driven car's speed went NaN and its autopilot asked
+  `Road.sampleAt(NaN)`, which throws, and the run died. Each step now checks every car's
+  road position and body velocity before anything reads them; a non-finite one is logged
+  (`traffic: <id> (<model>, <style>) left the solver: …`, with its activity) and the car
+  removed. Not reproduced since: 0 in 10 traffic-bench runs (2119155336 three times, six
+  random seeds) at b60a1547.
+
 - The Mercedes W124's back light is a plain trapezoid from behind (owner: «заднее стекло
   по всем фото выглядит довольно ровной трапецией»): its top no longer follows the roof's
   crown down to chamfered corners but runs straight at the outer corners' height, the
