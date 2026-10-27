@@ -801,3 +801,10 @@ Each is cosmetic; leave them until the owner asks.
 - The two-tone paint (white roof and greenhouse) of many 2206s is not modelled: one paint
   slot.
 - Only one fuel flap (the right). The car has one each side.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **uaz469**: front 0.46 / 0.46 / 0.56: 0.5 / open / open → 0.46 / 0.442 / 0.566; rear 0.44 / 0.56 / 0.55: 0.5 / open / open → 0.442 / 0.56 / 0.54. `arch` 1.35 → 1.44, `frontArchRise` 1.243, `archShift` [0.03, 0] (the front's end kept behind the face and its head lamps: 0.563 on the hub moved the face's columns under them, kit-zfight), `rearArch` 1.51, `rearArchRise` 1.19 (wide low down, ending at the sill); refs front ahead 0.5 → 0.46 (the inner line's lower end).
+- **uaz2206**: front 0.38 / 0.37 / 0.365: 0.364 / open / open → 0.382 / 0.362 / 0.372; rear 0.29 / 0.39 / 0.38: 0.278 / open / open → 0.292 / 0.364 / 0.364. `arch` 1.0 → 1.016, `frontArchRise` 1.044, `rearArchRise` 0.76 → 0.8, `archSquare` 4; refs rear from photo P1 [0.29, 0.39, 0.38] (the drawing's 0.32 schematic).

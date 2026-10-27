@@ -451,3 +451,97 @@ w124` after every other car's exhaust was re-recorded (all 26 identical). Silhou
 advice: side IoU 0.705, s 3.59–4.30 low (the drawing's lid rise and its second line from
 the roof); front 0.966. Lab captures: `build/kitcheck/w124/lab-side.png`,
 `lab-front-wheel.png` (his angle), `lab-rear34.png`, `lab-rear-side.png`.
+
+## 10. The owner's third review (2026-10-27)
+
+His words: «посмотри, какой чудесный сайт ... здесь есть фото и размеры. я не верю в твоё
+объяснение про передний свес ... передний свес на самом деле короткий, а у нас нет. ...
+сравни, как сделаны ручки дверей. посмотри, какие из фар ребристые. посмотри на линии
+остекления заднего окна. посмотри на формы кормы и передка. нужны исправления.» His links
+were a 190 (W201); he then said he mixed the cars up and the W124 references stand. Later,
+on lab screenshots: «у w124 сейчас ручка передней двери посреди двери», «решетка у
+мерседеса не должна выступать за капот», «линия остекления заднего стекла явно не должна
+быть такой ... вокруг стекла металл зажевало, переход в крышу с щелями».
+
+**Sources added** (`build/carshape/_refs/photos/carsized/`, carsized.com
+`/en/cars/mercedes-benz-e-1984-sedan/`, a late saloon, black): [C S] `w124_side.png`
+(1503 × 712): the rims' bright discs give the hubs (240.5, 596) and (1174.5, 594.5), 933 px
+apart → 333 px/m on the 2800 wheelbase; ground y 704; tips x 2 / 1500. [C F]
+`w124_front.png` (622 × 780) and [C R] `w124_rear.png` (596 × 780): across from the body's
+width at the bumper (x 3–620 for 1.74: 354.6 px/m front; x 2–594: 340 px/m rear), the
+centre x 311.5 / 298, ground y 754 / 747. Method: the built car traced orthographically
+(tools/kitlib.ts `trace`) on the side photo by both hubs, and from the front and rear at
+the photos' scales, the silhouettes compared row by row (`/tmp/w124/side.ts`, `ends.ts`,
+throwaway).
+
+**Overhangs.** On its hubs the photo's tips stand 0.708 ahead of the front hub and 0.993
+behind the rear: 4.50 overall against the factory 4.74, both overhangs 13 % short and in
+the factory's ratio (0.708 / 0.993 = 0.71; 815 / 1125 = 0.72). A perspective trace of our
+car from 3–16 m (its hubs registered the same way) shortens the ends by at most 5 cm, so
+the rest is the image itself (its wheels or its scale), not a shorter car: the overhangs
+stay 0.815 / 1.125 [A, D]. What did differ is the nose over the bumper, measured from the
+bumper's front (the same at either scale):
+
+| Height | Photo [C S] | Before | Built |
+|---|---|---|---|
+| 0.40–0.46 (bumper band) | 0 | 0 | 0 |
+| 0.61 | 0.10 | 0.02 | 0.096 |
+| 0.70 | 0.14 | 0.04 | 0.129 |
+| 0.79 (the lip) | 0.19 | 0.12 | 0.21 |
+| 0.85 | 0.25 | 0.27 | 0.33 |
+| 0.31 (apron) | 0.075 | 0.03 | 0.03 |
+
+The drawing [D] has the face upright 0.06 behind the bumper to 0.57 and the lip at 0.093:
+its nose is the long one. Built: the face station at s 0.12 (was 0.06), `frontLean` 0.35 m
+per m (was 0.20) from 0.56, `full` 0.26, `bonnetFront` 0.12, the station behind at s 0.25
+deck 0.87 (at 0.882 the bonnet dented at s 0.5, kit-surface). The ref `bonnet` is now the
+photo's lip, [0.19, 1.341] (built 0.202). The aprons under the bumpers' black band draw
+back to their foot (moulded `foot`, new: front from 0.35 back 0.08, rear from 0.335 back
+0.04; [C S]: the front 0.07 back at 0.35, 0.10 at 0.30; the rear 0.09 at 0.35).
+
+**Door handles.** [C S] (and [S], [F34]): long chrome pull bars, the front s 2.29–2.51 and
+the rear 3.23–3.46 (the doors' rear edges 2.53 and 3.555), 0.81–0.83 high; under each, the
+pull lever's bright lip (front 2.33–2.45, rear 3.28–3.38) 4.7 cm lower over a black recess.
+Ours: 13 cm bars at s 2.12 (the front door's middle) and 3.35. Built: `handles` front 2.40,
+rear 3.345, y 0.82, half 0.112, and `grip` (new: `{ half, drop }`): a bar 1.6 cm tall, a
+black recess 3 mm proud of the skin under it, the lever's lip at `drop` 0.046, half 0.055.
+
+**Fluted lamps.** [C F, F34, F]: the head lamps' and indicators' glass is smooth; [C R,
+R34]: the tail lamps are fluted, about 3 cm apart, the top band (smoked: reversing inside,
+indicator outside from ±0.69) 44 % of the lamp's height and the red band 56 %. The head
+lamps' `ribs: 3` (review 1) removed; the tail lamps 0.665–0.768 red (3 ribs) and
+0.774–0.855 smoked (2 ribs), was 0.665–0.794 / 0.80–0.855 with 5 and 2.
+
+**Back light and C pillar.** [C S]: the quarter glass's rear edge 3.19 at 1.24, 3.34 at
+1.11, 3.45 at 0.99 (photo heights ×1.034: its roof reads 1.384); the bar before it chrome,
+upright at 3.105–3.14. [D]: 3.246 / 3.365 / 3.527. Built: the quarter's rear column 3.50
+(was 3.53; kit-drawing `sideGlassBelt` 3.48 against the accepted 3.508), the bar at
+3.105–3.14 in chrome (column `finish: 'chrome'`, new; was a black bar 3.11–3.15). [C R]:
+the glass ±0.50 at its top under the roof's ±0.53, ±0.65 at its foot, its top corners
+rounded. A first pass curved the glass's top back in plan (a `rearTop` field) so the side
+showed glass behind the C pillar: the owner's screenshot showed its corners jutting and the
+roof chewed round it, with slits; removed (HISTORY.md, failed approaches). Built: the roof
+ends square over the glass at 3.56 as before, its corners cut in one chamfer
+(`cornerDrop` 0.035 on the last column), the seal round the glass thinner (`rearHeader`
+0.045 → 0.025, `rearBottom` 0.025 → 0.02).
+
+**Front.** [C F]: the chrome shell x 182–443 (±0.365 with its frame), y 488–597, under the
+bonnet's lip which runs over its top; the lamps y 513–580. Ours was ±0.33. Built: grille
+`x` 0.34 (frame ±0.365), its slot from 3.5 cm over the bumper's top to 3.5 cm under the
+lip (the frame 1 cm under it), `standOut` 0 (its front 2.4 cm out of the raked face, the
+bar 4.6). A tall top bar standing over the lip (photo: the shell's broad top) was tried
+and removed on the owner's word.
+
+**Tail.** [C R]: the lamps' inner edges lean from ±0.472 at their foot to ±0.582 at their
+top, the lid's foot ±0.456 at 0.655; ours cut the lid upright at ±0.42 with the lamps' inner
+edge leaning only in the lamp. Built: `notch` 0.572 with `notchWall` 0.112 (new, on the
+tail station: the deck's wall that width, so the lid's cut runs from ±0.572 at the
+corners' top to ±0.46 at its foot), the lamps 8–11 mm outside it (brake from ±0.474–0.531,
+reversing ±0.535–0.58).
+
+### Checks (`npm run kit-check -- w124`, 2026-10-27, after the third review)
+
+zfight pass (no slit), proportions pass, reality pass, mirrors L100 R100, dents 0,
+triangles 12 194, drawing 20/20, dash 9/9; frozen: re-recorded (`--write w124`) after the
+arches' shelf change; every other car `identical`. No lab captures (the owner looks in the
+car lab himself).

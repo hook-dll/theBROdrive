@@ -198,3 +198,8 @@ The fog lamps and the intake were flat face items on a bumper whose face turns b
 ±0.45 (corner 0.2). They now lie on the bumper's own face (`inlays`, swept along its path
 like the band), from 0.085 over the foot, where the section's face is upright.
 
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **astraf**: front 0.31 / 0.34 / 0.32: 0.36 / 0.348 / 0.36 → 0.31 / 0.34 / 0.316; rear 0.31 / 0.35 / 0.36: 0.318 / 0.342 / 0.346 → 0.318 / 0.342 / 0.346. `arch` 1.25 → 1.146, `frontArchRise` 1.076, `archShift` [-0.01, 0] (the dark well's top 0.31; the lip's lines to 0.371 outside it).

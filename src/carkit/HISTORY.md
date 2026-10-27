@@ -1200,6 +1200,74 @@ each measurements file's "Review 2".
   and the W124 at 0.19 pass too. *bay.ts `exhaust`, `pipeUnder`, `canUnder`, `tube`
   `ridge`; exterior.ts `bumperFoot`; spec.ts, uaz.ts*.
 
+## Arches to the drawings (2026-10-27)
+
+- **«насчёт арок - исправляем все машины подряд»** (and, on the way: «нужно именно форму
+  выпила под колёсную арку в кузове менять, а не подкладывать палочки и дощечки») → Only
+  14 of 50 arches stood within 0.03 of their drawings (STATUS.md "Arches against the
+  drawings"). → Every arch was set as one circle, `arch` (and at most `rearArch` /
+  `rearArchRise`) times the tyre radius, read off one point (the lip's or the liner's top)
+  and never checked against the drawn opening's width, its height and where it sits on
+  the hub. → Each car's cut in the skin set to its drawing with the existing fields: half
+  ellipses (`frontArchRise`, `rearArchRise`), widths (`arch`, `rearArch`), arches off the
+  hub (`archShift`: the Volgas' sweeping back, the eights', tens' and Opels' forward, the
+  Oka's, 2141's and Niva's back), the 2206's flat-topped steep-sided arches (`archSquare`
+  4); per-car wheels where a family's drawings differ (2112, 2115). The opening is the
+  cut itself: no plate, liner or strip stands in it to fake a shape. Found on the way:
+  where an arch is a half ellipse higher than its circle (the Niva's front, the W124's,
+  the eights') the inner wings' and boot's shelves stood at the circle's top and showed
+  as a painted chord across the top of the opening (the owner's 2121 screenshot) → they
+  now clear the skin's opening (`BodyFrame.archTop`). Refs re-read: the Oka's on its
+  drawn hub crosshair (the registration's stood 0.06 high), the 2110's rear from photo s1
+  (the drawing's flat top is stylised), the 2206's rear from photo P1, the UAZ-469's front
+  on the inner line's lower end; the 2101 and 2131 got arch refs (the 2101's drawing; the
+  2121's arches). kit-drawing reads the reach at the edge's lower end where the skin
+  stops over the hub. *specs.ts, estates.ts, samaras.ts, tens.ts, nivas.ts, oka.ts,
+  volgas.ts, azlk.ts, uaz.ts, opel.ts `wheels`; body.ts `archTop`; bay.ts shelves;
+  tools/kit-drawing.ts; refs*.
+
+## Mercedes W124, the owner's third review (2026-10-27)
+
+His words, with carsized.com's W124 photos (and a 190 he later said he mixed up): «я не
+верю в твоё объяснение про передний свес ... передний свес на самом деле короткий, а у нас
+нет. ... сравни, как сделаны ручки дверей. посмотри, какие из фар ребристые. посмотри на
+линии остекления заднего окна. посмотри на формы кормы и передка»; then «у w124 сейчас
+ручка передней двери посреди двери», «решетка у мерседеса не должна выступать за капот»,
+«линия остекления заднего стекла явно не должна быть такой ... вокруг стекла металл
+зажевало, переход в крышу с щелями». Measured by tracing the built car orthographically
+onto `w124_side.png` registered on its hubs (measurements-w124.md §10).
+
+- **The nose read long.** → The bumper and the overhangs are the factory's, but the face
+  above the bumper stood 6 cm behind its front, near upright (the drawing's line), where
+  the photo's nose rakes back from 0.09 behind the bumper's front at 0.60 to 0.18 at the
+  lip: from the side the lamps and the bonnet's front reached 7–10 cm too far forward. →
+  The face's foot at 0.12, `frontLean` 0.35, `bonnetFront` 0.12: now 0.096 / 0.129 / 0.21
+  behind the bumper's front at 0.61 / 0.70 / 0.79 (photo 0.10 / 0.14 / 0.19). The whole
+  photo reads 4.50 m long on its hubs, both overhangs 12 % short in the same ratio as the
+  factory 815 / 1125: the image's wheels or its scale, not the car; the overhangs stay.
+  *mercedes.ts stations, `frontLean`; refs `bonnet` from the photo*.
+- **Door handles.** → A short 13 cm bar at s 2.12 (the door's middle) and 3.35. On the car:
+  a 22 cm chrome bar at each door's rear edge under the belt, the pull lever's bright lip
+  under it over a black recess. → `handles.grip` (new): bar, recess and lip; front 2.40,
+  rear 3.345. *spec.ts, exterior.ts `buildDoorHardware`*.
+- **Fluted lamps.** → The head lamps are smooth glass; only the tail lamps are fluted.
+  The head lamp's `ribs` removed; the tail lamps' bands re-split to the photo (44 / 56 %).
+- **Back light.** → A first try curved the back light's top in plan to show glass behind
+  the C pillar from the side: it jutted at the corners and chewed the roof's end (his
+  screenshot); removed. The roof ends square over the glass again, its corners cut in one
+  chamfer (`cornerDrop` 0.035) for the photo's rounded corners, the frame round the glass
+  thinner (`rearHeader` 0.025, `rearBottom` 0.02); the quarter glass's rear edge 3.50 (the
+  photo's 3.45, the drawing's 3.53) and the bar before it bright (column `finish:
+  'chrome'`, new). *body.ts; mercedes.ts columns*.
+- **Front and tail.** → The grille shell 0.68 wide (photo ±0.365 with its frame), its top
+  1 cm under the bonnet's lip (a top bar standing over the lip was tried and removed:
+  «не должна выступать за капот»); the bumpers' aprons drawn back under their black band
+  (moulded `foot`, new); the boot lid's sides on the tail follow the lamps' leaning inner
+  edges, ±0.572 at their top to ±0.46 at the foot (`notchWall`, new), the lamps inside
+  them. *spec.ts, body.ts `notchWall`, exterior.ts `buildBumpers`; mercedes.ts*.
+
+Every other car `identical` (kit-fingerprint); w124 re-recorded, 12 363 → 12 194 triangles.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
@@ -1227,6 +1295,13 @@ each measurements file's "Review 2".
   own columns and rows.
 - **A flank bumper's corner chamfer starting `r · 0.4` back along the flank**: the body's
   corner, 1 cm behind the end face, pokes through it; start it level with the end face.
+- **The back light's top curved back in plan** (the W124, to show glass behind the C
+  pillar from the side, as `screenTop` does at the front): its top corners jutted and
+  the roof's end was chewed round the glass with slits at the join. Chamfer the corners
+  instead (`cornerDrop`).
+- **A grille frame's top bar standing over the bonnet's lip** (the W124's shell, to match
+  the photo's tall chrome top): a box with a sloped lid on the nose. The shell stays under
+  the lip.
 
 ## Template for new entries
 

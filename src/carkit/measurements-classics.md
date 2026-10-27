@@ -467,3 +467,13 @@ There is no frontal photo with a known scale, so sizes are ratios measured on th
 - **Interior sizes:** I found no dashboard photo with a scale reference, so the dashboard sizes are ratios plus [E] absolutes.
 - **Missing photos:** I found no 2105/2107 steering wheel photo, and no right-hand orthographic side view for the fuel flap.
 - **No measurement taken for:** headlamp depth and protrusion beyond the side silhouette, bumper depth in plan view, and the plan-view radii of the corners.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vaz2101**: front 0.34 / 0.325 / 0.355: — → 0.35 / 0.326 / 0.326; rear 0.24 / 0.33 / 0.33: — → 0.268 / 0.316 / 0.36. BODY_124: `frontArchRise` 1.215, `rearArch` 1.18, `rearArchRise` 0.93, `archShift` [0, 0.02] (refs new, its own drawing).
+- **vaz2103**: front 0.34 / 0.31 / 0.33: 0.326 / 0.326 / 0.326 → 0.35 / 0.326 / 0.326; rear 0.26 / 0.31 / 0.33: 0.326 / 0.326 / 0.326 → 0.268 / 0.316 / 0.36. BODY_124 (as the 2101).
+- **vaz2105**: front 0.345 / 0.3 / 0.355: 0.332 / open / 0.332 → 0.332 / 0.33 / 0.332; rear 0.285 / 0.36 / 0.37: 0.332 / 0.332 / 0.332 → 0.286 / 0.364 / 0.362. BODY_05: `rearArch` 1.265, `rearArchRise` 0.99.
+- **vaz2106**: front 0.36 / 0.32 / 0.35: 0.326 / 0.326 / 0.326 → 0.35 / 0.326 / 0.326; rear 0.29 / 0.32 / 0.385: 0.326 / 0.326 / 0.326 → 0.268 / 0.316 / 0.36. BODY_124 (as the 2101).
+- **vaz2107**: front 0.345 / 0.3 / 0.355: 0.332 / open / 0.332 → 0.332 / 0.33 / 0.332; rear 0.285 / 0.36 / 0.37: 0.332 / 0.332 / 0.332 → 0.286 / 0.364 / 0.362. BODY_05 (as the 2105).

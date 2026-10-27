@@ -41,6 +41,8 @@
       "v": 1.046,
       "src": "D dimension 1046 (vaz_2101.jpg; BODY_124 comment)"
     },
+    "archFront": { "v": [0.34, 0.325, 0.355], "src": "D side (vaz_2101.jpg, 4.703 mm/px, no overlay registration; read on the drawn front hub (647, 278) px): the well band's outer edge 0.339 over the hub (y 206); its edge 0.03 over the hub's height 0.325 ahead (x 578; at the hub's height it runs into the bumper) and 0.357 behind (x 723)" },
+    "archRear": { "v": [0.24, 0.33, 0.33], "src": "D side (vaz_2101.jpg, read on the drawn rear hub (1162, 278) px): the arch's thick line 0.235-0.249 over the hub (y 228; the thin line at 0.296 is the lip's outer edge); its edge at the hub's height x 1092 ahead and x 1232 behind (the well's band ends 0.33 each side). A stock 2101 side photo (Commons 'Lada 1200L in Kerava, Finland (side view).jpg') shows it about 0.33 high on a car standing tail-high; the drawing kept, as the 2102/2103/2106 drawings draw it low too" },
     "screenFoot": {
       "v": [
         1.16,

@@ -186,7 +186,11 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
     // skin, its lip, a bumper or cladding over it), and the opening otherwise (the tyre, the
     // well's wall, nothing). [top, ahead, behind]: the opening's top over the hub (the
     // highest within 0.1 of it along the car), and its reach ahead of and behind the hub
-    // 5 mm over the hub's height.
+    // 5 mm over the hub's height; where the skin there stops above that height (a classic's
+    // wing ahead of the front wheel, the UAZes' arches ending at the sill), at the edge's
+    // lower end: the lowest height, up to 0.3 over the hub, whose line meets the body
+    // within 0.65 (no arch reaches further; a bumper further out is not its edge). The refs
+    // read the drawn edge there too.
     const body = (ss: number, y: number): boolean => {
       const hit = grid.nearest([3, y, car.z(ss)], [-1, 0, 0], 6, fitting);
       return hit !== null && info(hit.tri).zone !== 'wheel' && 3 - hit.t > car.frame.sideX(ss, y) - 0.03;
@@ -200,9 +204,12 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
         top = Math.max(top, y - hy);
       }
       const reach = (dir: 1 | -1): number => {
-        let d = 0.1;
-        while (d < 0.8 && !body(hs + dir * d, hy + 0.005)) d += 0.002;
-        return d;
+        for (let dy = 0.005; dy <= 0.3 + 1e-9; dy += 0.005) {
+          let d = 0.1;
+          while (d < 0.65 && !body(hs + dir * d, hy + dy)) d += 0.002;
+          if (d < 0.65) return d;
+        }
+        return 0.8;
       };
       out[key] = [r3(top), r3(reach(-1)), r3(reach(1))];
     }

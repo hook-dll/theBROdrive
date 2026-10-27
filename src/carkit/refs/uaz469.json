@@ -12,7 +12,7 @@
     "height": { "v": 2.015, "src": "F ru.wikipedia canvas top (hard top 2020)" },
     "wheelbase": { "v": 2.38, "src": "F manual; D 2380* dimension" },
     "overhangFront": { "v": 0.68, "src": "D 680* dimension; side hub x 192, measurements-uaz.md §1.2" },
-    "archFront": { "v": [0.46, 0.5, 0.56], "src": "D side (uaz2.jpg, read on the drawn front hub (972, 451) px): the opening's top y 346, its edge at the hub's height x 857 ahead and x 1100 behind" },
+    "archFront": { "v": [0.46, 0.46, 0.56], "src": "D side (uaz2.jpg, read on the drawn front hub (972, 451) px): the opening's top y 346 (the innermost of the wing's three lines); the trapezoid's sides end over the hub's height: ahead its inner line's lower end x 867, 0.27 over the hub (the outer lines run on to x 857), on the bumper's end; behind x 1100, 0.08 over the hub" },
     "archRear": { "v": [0.44, 0.56, 0.55], "src": "D side (uaz2.jpg, read on the drawn rear hub (1518, 451) px): the opening's top y 350, its edge at the hub's height x 1390 ahead and x 1644 behind; the drawn hubs stand 0.065 over the registration's 0.30; top: the wing's innermost line; the trapezoid arches end over the hub height, so ahead/behind are the edge's reach at its lower ends (front 0.28 / 0.08 over the hub, rear 0.04 / 0.28)" },
     "screenFoot": { "v": [1.28, 1.27], "src": "D side (330, 184), measurements-uaz.md §1.2" },
     "beltY": { "v": 1.2, "src": "D side doors' top y 200, measurements-uaz.md §1.2" },

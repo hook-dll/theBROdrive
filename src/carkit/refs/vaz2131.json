@@ -15,6 +15,8 @@
     "wheelbase": { "v": 2.7, "src": "F vaz.ru" },
     "overhangFront": { "v": 0.688, "src": "D the 2121's front hub (car grew by its wheelbase only), measurements-niva.md §1, §5" },
     "overhangRear": { "v": 0.845, "src": "D the 2121's rear overhang (2.888 → 3.733), measurements-niva.md §1, §5" },
+    "archFront": { "v": [0.455, 0.37, 0.385], "src": "D the 2121's (niva.jpg, refs/vaz2121.json archFront): the 2131 keeps the 2121's front wing and arch (kolesa.ru: the same front end and doors)" },
+    "archRear": { "v": [0.39, 0.4, 0.385], "src": "D the 2121's (niva.jpg, refs/vaz2121.json archRear) round the 2131's own rear hub; P1 ('2017 Lada 4X4 Urban 213100 brown side.jpg', plastic flares on that trim) reads its top about 0.40 over the hub, taller than wide as the 2121's" },
     "screenFoot": { "v": [1.152, 1.01], "src": "D the 2121's A pillar at the belt, measurements-niva.md §1, §5" },
     "screenTop": { "v": [1.583, 1.496], "src": "D the 2121's A pillar at the rail, measurements-niva.md §1, §5" },
     "backLightTop": { "v": [3.826, 1.434], "src": "D the 2121's (3.326, 1.434) + 0.5, measurements-niva.md §5 (tail the 2121's + 0.5)" },

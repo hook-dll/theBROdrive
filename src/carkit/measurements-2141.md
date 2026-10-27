@@ -167,3 +167,9 @@ Read off "Салон Москвич-2141.jpg" (1920 × 1079, from the driver's d
 | Hazard | x 1298, y 471, right of the heater | [−0.11, −0.19] |
 | Stack, radio | the stack down to the tunnel; the radio y 624–710 | `stack` half 0.1, `radio` dy −0.30, ashtray −0.37 [E] |
 | Glovebox | lid x 1365–1647, y 306–422, its top at the fascia's | x −0.31, dy −0.11, half 0.13 × 0.045 |
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **azlk2141**: front 0.355 / 0.34 / 0.38: 0.404 / 0.404 / 0.396 → 0.356 / 0.336 / 0.38; rear 0.34 / 0.34 / 0.35: 0.372 / 0.372 / 0.382 → 0.346 / 0.34 / 0.35. `arch` 1.3 → 1.161, `frontArchRise` 1.145, `rearArch` 1.2 → 1.113, `archShift` [0.02, 0.005]; front bumper `wrapTo` 0.5 → the drawn 0.535.

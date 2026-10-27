@@ -75,10 +75,15 @@ export const SHELL_COLOURS = {
   dark: 0x18191a,
   rubber: 0x0e0e0f,
   wheelWell: 0x141515,
+  /** A bright greenhouse strip (`CabinColumn.finish: 'chrome'`), exterior.ts's chrome trim. */
+  chrome: 0xb8bec3,
 } as const;
 
-/** `canvas`: a soft top's (`CabinSpec.softTop`), unpainted trim in its colour. */
-type Mat = 'paint' | 'glass' | 'dark' | 'canvas';
+/**
+ * `canvas`: a soft top's (`CabinSpec.softTop`), unpainted trim in its colour; `chrome`: a
+ * bright greenhouse strip (`CabinColumn.finish`).
+ */
+type Mat = 'paint' | 'glass' | 'dark' | 'canvas' | 'chrome';
 
 interface Face {
   v: number[];
@@ -140,7 +145,7 @@ export class BodyFrame {
 
   station(s: number): TubStation {
     const st = this.spec.stations;
-    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'corner'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'notchWall' | 'corner'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
     return {
       s,
       sill: pick('sill'),
@@ -205,7 +210,8 @@ export class BodyFrame {
     if (n <= 0) return level;
     // Level out to the wall, up it to the corners' top, level again out to the edge.
     const notch = this.lidX(s);
-    const u = Math.min(1, Math.max(0, (Math.abs(x) - (notch - NOTCH_WALL)) / NOTCH_WALL));
+    const wall = this.notchWall(s);
+    const u = Math.min(1, Math.max(0, (Math.abs(x) - (notch - wall)) / wall));
     return lerp(level, lerp(sec.st.deck, edge[1], u), n);
   }
 
@@ -227,7 +233,7 @@ export class BodyFrame {
     if (!this.notched) return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
     // On a notched station the half row moves out to the wall's foot.
     const lid = this.lidX(s);
-    return [0, lerp(0.5, (lid - NOTCH_WALL) / edge, this.notchWeight(s)), lid / edge, 1];
+    return [0, lerp(0.5, (lid - this.notchWall(s)) / edge, this.notchWeight(s)), lid / edge, 1];
   }
 
   /**
@@ -345,10 +351,27 @@ export class BodyFrame {
     return table(this.spec.stations.map((st) => [st.s, st.notch === undefined ? 0 : 1] as const), s);
   }
 
+  /** Width of the wall a notched deck rises in at s (`TubStation.notchWall`), linear between stations. */
+  private notchWall(s: number): number {
+    return table(this.spec.stations.map((st) => [st.s, st.notchWall ?? NOTCH_WALL] as const), s);
+  }
+
   /** Arch radius over the tyre radius at an axle: the rear's `rearArch` if set, else `arch`. */
   archFactor(axle: number): number {
     const w = this.spec.wheels;
     return axle === w.rear ? (w.rearArch ?? w.arch) : w.arch;
+  }
+
+  /**
+   * The arch's skin opening's top over the hub at an axle: the circle's radius, or a half
+   * ellipse's rise where `frontArchRise` / `rearArchRise` sets one higher. Whatever stands
+   * over the arch inside (the inner wings' and boot's shelves) clears this, or it shows as
+   * a painted chord across the opening.
+   */
+  archTop(axle: number): number {
+    const w = this.spec.wheels;
+    const rise = axle === w.rear ? w.rearArchRise : w.frontArchRise;
+    return Math.max(w.radius * this.archFactor(axle), rise === undefined ? 0 : w.radius * rise);
   }
 
   /**
@@ -1103,8 +1126,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // Owner and glass of the band pair; `band` 0..3 is b-k, k-q, q-t, t-u.
       let upper = 'body';
       let glass: string | null = null;
-      // The strip's paint above the belt as black trim (`CabinColumn.finish`).
-      let black = false;
+      // The strip's paint above the belt as black or bright trim (`CabinColumn.finish`).
+      let finish: CabinColumn['finish'];
       if (a.kind === 'front' && b.kind === 'front') {
         glass = 'body';
       } else if (a.kind === 'rear' || b.kind === 'rear') {
@@ -1122,7 +1145,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
         if (kind === 'fixed') glass = upper === 'body' ? 'body' : upper.replace('door', 'quarter');
         else if (kind === 'drop') glass = upper === 'body' ? 'body' : upper.replace('door', 'window');
         else if (kind === 'vent') glass = upper === 'body' ? 'body' : upper.replace('door', 'vent');
-        black = column.finish === 'black';
+        finish = column.finish;
       }
       const bands: [Vec3, Vec3, Vec3, Vec3, number][] = [
         [a.b, b.b, b.k, a.k, 0],
@@ -1149,7 +1172,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // `from` (the windscreen's frame and the pillars ahead of it stay painted).
       const soft = cabin.softTop;
       const top: Mat = soft ? 'canvas' : 'paint';
-      const strip: Mat = black ? 'dark' : soft && (upper === 'body' || upper.startsWith('tailgate')) && frame.zNose - (a.b[2] + b.b[2]) / 2 > soft.from ? 'canvas' : 'paint';
+      const strip: Mat = finish === 'black' ? 'dark' : finish === 'chrome' ? 'chrome' : soft && (upper === 'body' || upper.startsWith('tailgate')) && frame.zNose - (a.b[2] + b.b[2]) / 2 > soft.from ? 'canvas' : 'paint';
       // The back light as a framed pane each side (`rearPanes`): the strip below the
       // tailgate's top is cut along the pane's outline (a rounded rectangle, convex), glass
       // inside it, the tailgate's paint round it; above the top, the body's. Every piece is
@@ -1307,6 +1330,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     const b = builderOf(f.owner);
     if (f.mat === 'dark') b.color(SHELL_COLOURS.wheelWell).poly('trim', pts);
     else if (f.mat === 'canvas') b.color(frame.spec.cabin.softTop!.colour).poly('trim', pts);
+    else if (f.mat === 'chrome') b.color(SHELL_COLOURS.chrome).poly('chrome', pts);
     else b.poly(glassFace ? 'glass' : 'paint', pts);
   }
 

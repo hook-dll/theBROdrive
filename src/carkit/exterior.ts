@@ -831,7 +831,11 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       const top: [number, number][] = bumper.flush
         ? [[1, y1 - 0.06], [0.5, y1 - 0.015], [0, y1]]
         : [[1, y1 - 0.05], [0.9, y1 - 0.005], [0.55, y1], [0, y1]];
-      const section: [number, number][] = [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top];
+      // A drawn-back apron (`foot`): upright to `foot.y`, then straight back to the bottom.
+      const foot = bumper.foot;
+      const section: [number, number][] = foot
+        ? [[0, y0], [Math.max(0.1, 1 - foot.back / depth), y0], [1, foot.y], ...top]
+        : [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top];
       const moulded = new PartBuilder().color(shell.color);
       // No back: it lies against the end face and the flanks.
       sweep(moulded, shell.slot, path, section, [section.length - 1]);
@@ -1270,7 +1274,21 @@ function buildDoorHardware(ctx: KitContext): void {
     const y = at ? at.y : beltY - (chrome ? 0.07 : 0.09);
     const x = side * (frame.sideX(handleS, y) + 0.006);
     const half = at?.half ?? (chrome ? 0.075 : 0.07);
-    b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, half] : [0.012, 0.018, half], 0.006);
+    const grip = at?.grip;
+    if (grip) {
+      // A thin bar over a black recess, the pull lever's bright lip at the recess's foot;
+      // the recess and the lip stand a few mm off the skin at their own height, rooted in it.
+      b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], [0.008, 0.008, half], 0.004);
+      const black = finishSlot('black');
+      const recessY = y - 0.004 - (grip.drop - 0.008) / 2;
+      const rx = side * (frame.sideX(handleS, recessY) + 0.001);
+      b.color(black.color).box(black.slot, [rx, recessY, frame.z(handleS)], [0.003, (grip.drop - 0.008) / 2, grip.half]);
+      const lipY = y - grip.drop + 0.004;
+      const lx = side * (frame.sideX(handleS, lipY) + 0.003);
+      b.color(finish.color).box(finish.slot, [lx, lipY, frame.z(handleS)], [0.005, 0.004, grip.half + 0.004]);
+    } else {
+      b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, half] : [0.012, 0.018, half], 0.006);
+    }
     addBuilt(door.node, b, door.pivot, `${owner}_handle`);
     if (!front || (side < 0 && spec.look.mirrors === 'left')) continue;
     // Mirror: a stalk from the door's front top corner and a head on it, turned so the

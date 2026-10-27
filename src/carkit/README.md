@@ -307,6 +307,7 @@ author.
 | `wSill`, `wCrease`, `wBelt` | Half widths at those three heights. |
 | `flat?` | `1`: the deck lies level out to the pillar row and rises straight to the edge (an estate's tailgate sill). Default `0`: parabolic crown. |
 | `notch?` | Half width of a lid that comes down between two lamp corners: the deck lies level at `deck` out to `notch − NOTCH_WALL`, rises in a 25 mm wall to the corners' top and stays level to the side; the lid is cut along this line (`BodyFrame.lidX`). |
+| `notchWall?` | With `notch`: the wall's width instead of 25 mm, so the lid's side edge on the tail face leans from the notch at the corners' top in to its foot (the W124's 0.112, along its trapezoid lamps). |
 
 **`CabinSpec`** — the greenhouse.
 
@@ -493,6 +494,8 @@ new material or program: the paint's vertex colour is white, so every other car 
   face, to the face, a larger one turns in two), `wrapTo?` (`s` its sides follow the
   flanks back to, lying on them with its foot in line with the sill, a path point at each
   station between; the tens' and the 2115's bumpers run to their wheel arches),
+  `foot?` (`{ y, back }`: the face upright down to `y`, then straight back by `back` to its
+  bottom edge, the W124's aprons under their black band),
   `flush?` (its top grows out of the body's surface in its top 60 mm instead of a flat
   shelf: the tens' and the 2115's bumpers, integrated in the body's lines), `inlays?`
   (`{ x: [inner, outer], y: [bottom, top], finish }[]`: pieces laid on the bumper's own
@@ -816,7 +819,8 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `round`), `bonnet` (and its `nose`, with front `lid` items), `cornerLamps`,
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
-  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`.
+  `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`,
+  `notchWall`, moulded `foot`, `handles.grip`, column `finish: 'chrome'`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 

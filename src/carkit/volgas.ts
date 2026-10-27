@@ -140,11 +140,16 @@ export const BODY_GAZ24: KitBody = {
     width: 0.187,
     frontHalfTrack: 0.735,
     rearHalfTrack: 0.71,
-    // The front arch clear of the tyre [D: top 81 px over the hub, 0.413]; the rear one as
-    // wide as the tyre and covering its top [D: 66 px, 0.337].
-    arch: 1.17,
-    rearArch: 1.0,
-    rearArchRise: 0.95,
+    // The arches sweep back behind the wheels [D side, refs archFront / archRear]: the front
+    // 0.38 high, 0.37 ahead of the hub (the drawn 0.35 held clear of the 0.354 tyre) and
+    // 0.47 behind it; the rear covers the tyre's top, 0.33 high, 0.39 ahead and 0.45 behind.
+    // Half ellipses 0.42 wide centred 0.05 / 0.03 behind the hubs (they stood a circle of
+    // 0.414 and one 0.354 wide and 0.337 high, on the hubs).
+    arch: 1.186,
+    frontArchRise: 1.073,
+    rearArch: 1.186,
+    rearArchRise: 0.932,
+    archShift: [0.05, 0.03],
   },
   // [D: 0.275 (front) – 0.316 (rear)]; 0.31 keeps the doors' skin off the chrome sill
   // strip (at 0.29 the new door columns left a 4.7 mm far-range z-fight on the right side).
@@ -332,11 +337,15 @@ export const BODY_GAZ31029: KitBody = {
     width: 0.205,
     frontHalfTrack: 0.7475,
     rearHalfTrack: 0.7125,
-    // [D: the front arch's top 0.393 over the hub; the rear one covers the tyre's top, 0.30
-    // over the hub]
-    arch: 1.22,
-    rearArch: 1.08,
-    rearArchRise: 0.93,
+    // [D side, refs archFront / archRear: the front 0.39 high, 0.38 ahead of the hub and
+    // 0.43 behind it; the rear covers the tyre's top, 0.28 high, 0.41 ahead and 0.43
+    // behind]: half ellipses 0.405 and 0.42 wide centred 0.025 / 0.01 behind the hubs (they
+    // stood a circle of 0.392 and one 0.347 wide and 0.30 high).
+    arch: 1.262,
+    frontArchRise: 1.215,
+    rearArch: 1.308,
+    rearArchRise: 0.872,
+    archShift: [0.025, 0.01],
   },
   bonnetFront: 0.075,
   // The lid comes down the tail face between the wings.

@@ -122,6 +122,14 @@ const BODY_124: KitBody = {
     frontHalfTrack: 0.6825,
     rearHalfTrack: 0.6605,
     arch: 1.13,
+    // The arches to the 2101, 2103 and 2106 drawings (refs archFront / archRear, the same
+    // shell): the front 0.35 high over 0.326 wide; the rear covers the tyre's top (0.268,
+    // the drawings 0.24 / 0.26 / 0.29) and runs further behind the hub than ahead
+    // (0.32 / 0.36).
+    frontArchRise: 1.215,
+    rearArch: 1.18,
+    rearArchRise: 0.93,
+    archShift: [0, 0.02],
   },
   doorBottom: 0.29,
   bonnetFront: 0.17,
@@ -223,6 +231,10 @@ const BODY_05: KitBody = {
     frontHalfTrack: 0.6825,
     rearHalfTrack: 0.6605,
     arch: 1.15,
+    // The rear arch to the 2107 drawing (refs archRear): ±0.36-0.37 at the hub's height,
+    // its top 0.285 over the hub, low over the tyre.
+    rearArch: 1.265,
+    rearArchRise: 0.99,
   },
   doorBottom: 0.365,
   bonnetFront: 0.06,

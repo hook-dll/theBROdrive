@@ -138,9 +138,18 @@ export const BODY_UAZ469: KitBody = {
     width: 0.215, // [F]
     frontHalfTrack: 0.7225, // 1445 [F manual; D front]
     rearHalfTrack: 0.7225,
-    // Square-cut arches round the tyre: top 0.50 over the hub front and rear [D side y 270
-    // / 280]. One circle: 1.35 R.
-    arch: 1.35,
+    // Square-cut arches round the tyre, wider low down [D side, refs archFront / archRear,
+    // the opening's inner line]: the front 0.46 over the hub, reaching 0.46 ahead where it
+    // ends at the sill (the bumper's end) and 0.56 behind; the rear 0.44 over the hub,
+    // 0.55-0.56 either side at their lower ends. Half ellipses 0.533 and 0.56 wide, the
+    // front centred 0.03 behind its hub so its front end stays behind the face and the
+    // head lamps (0.563 on the hub reached to s 0.117 and moved the face's columns under
+    // them). They stood one circle of 0.50, 1.35 R, the outer lip's line.
+    arch: 1.44,
+    frontArchRise: 1.243,
+    rearArch: 1.51,
+    rearArchRise: 1.19,
+    archShift: [0.03, 0],
     // The body stands high over the hubs: the arches end at the sill [D side; P], none of
     // the wing or the well's wall hangs to the hub's height ahead of the tyre (owner,
     // 2026-10-19: "a skirt under the bumper").
@@ -371,11 +380,15 @@ export const BODY_UAZ2206: KitBody = {
     width: 0.215, // 215/90-15C
     frontHalfTrack: 0.7225, // 1445 [D]
     rearHalfTrack: 0.7225,
-    // Tight arches: the front's top 0.714 [P] (here the circle's 0.728); the rear's flat
-    // top 0.639 [P], below the tyre's top: 0.76 of the radius over the hub.
-    arch: 1.0,
+    // Square-cut arches, flat-topped with steep sides (`archSquare`) [D side; P1]: the
+    // front 0.37 wide and 0.38 high round the tyre [D, refs archFront]; the rear 0.364
+    // wide with its flat top 0.29 over the hub, under the tyre's top [P1, refs archRear].
+    // They stood a circle of 0.364 and a half ellipse 0.276 high.
+    arch: 1.016,
+    frontArchRise: 1.044,
     rearArch: 1.0,
-    rearArchRise: 0.76,
+    rearArchRise: 0.8,
+    archSquare: 4,
     // The arches end at the sill (0.42-0.60 over the 0.364 hub): no skirt of wing or well
     // ahead of the front tyre [D side; owner, 2026-10-19].
     archToSill: true,

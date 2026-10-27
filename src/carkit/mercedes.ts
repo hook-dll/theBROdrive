@@ -36,15 +36,19 @@ export const BODY_W124: KitBody = {
   length: 4.74, // [F MB archive 4740; the drawing's 4755]
   platform: 'classic', // rear drive, the engine lengthwise (MB archive)
   stations: [
-    // The face [D side x 31–40: upright to 0.57, the lip at 0.78; D2 front: the lamps
-    // 0.555–0.75 out to ±0.77, the body ±0.80 at their height]; the plan's corners rounded
-    // (r ≈ 0.2 [D plan]) by the next station's width.
-    { s: 0.06, sill: 0.3, crease: 0.56, belt: 0.765, deck: 0.785, wSill: 0.79, wCrease: 0.8, wBelt: 0.785 },
+    // The face: its foot 0.12 behind the bumper's front, raking back over the lamps to the
+    // lip, the grille 4.6 cm ahead of it [P carsized side, registered on the hubs: the nose's
+    // outline 0.09 behind the bumper's front at 0.60, 0.14 at 0.70, 0.18 at 0.80; D side x
+    // 31–40 has the face upright to 0.57 0.06 behind, the lip at 0.78; D2 front: the lamps
+    // 0.555–0.75 out to ±0.77, the body ±0.80 at their height]. The owner, 2026-10-27: the
+    // nose over the bumper read long. The plan's corners rounded by the next station's width.
+    { s: 0.12, sill: 0.3, crease: 0.56, belt: 0.765, deck: 0.785, wSill: 0.79, wCrease: 0.8, wBelt: 0.785 },
     // The bonnet's line [D side: 0.846 at s 0.15, 0.876 at 0.33, 0.899 at 0.5, 0.916 at
     // 0.615, 0.928 at 0.76, 0.951 at 0.96, 0.975 at 1.14, 0.986 at the cowl]; the wing's top
     // just under it; the flank ±0.87 [F 1740], ±0.835 just under the belt [D2 front: the
-    // outline at 0.85–0.87].
-    { s: 0.22, sill: 0.29, crease: 0.565, belt: 0.83, deck: 0.855, wSill: 0.84, wCrease: 0.86, wBelt: 0.825 },
+    // outline at 0.85–0.87]. The lean (`frontLean`) takes this station's deck back to s
+    // 0.36, just under the drawn line (0.876 at 0.33: at 0.882 the bonnet dented at s 0.5).
+    { s: 0.25, sill: 0.29, crease: 0.565, belt: 0.83, deck: 0.87, wSill: 0.84, wCrease: 0.86, wBelt: 0.825 },
     { s: 0.5, sill: 0.28, crease: 0.58, belt: 0.875, deck: 0.9, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     { s: 0.96, sill: 0.19, crease: 0.59, belt: 0.915, deck: 0.951, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     // The cowl [D side (255, 161)].
@@ -68,19 +72,21 @@ export const BODY_W124: KitBody = {
     { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.015, wSill: 0.805, wCrease: 0.82, wBelt: 0.782 },
     // The tail face [D side x 828–835: upright from the deck's edge 0.99 at s 4.70]: the
     // lid's rear panel above the lamps (0.858 [D side y 183]) across, and down between them
-    // to their foot (0.655 [P R: the lid's foot just under the lamps']), cut at ±0.42 (the
-    // lamps' inner edges ±0.43 at their foot [D2 rear]).
-    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.86, deck: 0.655, notch: 0.42, wSill: 0.79, wCrease: 0.8, wBelt: 0.775 },
+    // to their foot (0.655 [P R: the lid's foot just under the lamps']), its sides along the
+    // lamps' leaning inner edges [P carsized rear, 340 px/m across: the lamps ±0.472 at their
+    // foot to ±0.582 at their top, the lid's foot ±0.456]: cut at ±0.572 at the top, in by
+    // 0.112 to ±0.46 at the foot (`notchWall`).
+    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.86, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.79, wCrease: 0.8, wBelt: 0.775 },
   ],
   // The side glass's foot ±0.765 over the skin's ±0.835 [D2 front: the glass ±0.735 at 1.05,
   // ±0.61 at the rail].
   shoulder: { inset: 0.07, rise: 0.02 },
-  // The face rakes back above the bumper, the lamps and grille with it [D side: the face x 31
-  // at 0.57, the lip x 40 at 0.78: 0.05 back over 0.21].
-  frontLean: { base: 0.56, lean: 0.2, blend: 0.3, full: 0.24 },
+  // The face rakes back above the bumper, the lamps and grille with it [P carsized side: 0.09
+  // back over the 0.2 from 0.60 to 0.80; D side: 0.05 over 0.21].
+  frontLean: { base: 0.56, lean: 0.35, blend: 0.3, full: 0.26 },
   cabin: {
     // Door frames, B and C pillars body colour, the glass in thin black seals [P F34, R34,
-    // INT]; the bar before the rear door's quarter glass dark.
+    // INT]; the bar before the rear door's quarter glass bright.
     columns: [
       // The screen's side from the cowl (1.341, 0.986) to the rail at 1.893 [D side (255, 158)
       // → (350, 95)].
@@ -97,12 +103,15 @@ export const BODY_W124: KitBody = {
       { s: 2.53, top: 2.56, upper: 'body', lower: 'door2' },
       { s: 2.58, top: 2.6, upper: 'door2' },
       { s: 2.615, top: 2.62, upper: 'door2', glass: 'drop' },
-      // The bar between the drop glass and the fixed quarter [D side x 560–573: 3.12–3.19].
-      { s: 3.11, top: 3.12, upper: 'door2', finish: 'black' },
-      { s: 3.15, top: 3.17, upper: 'door2', glass: 'fixed' },
-      // The quarter's rear edge slanting down to the belt [D side: 3.246 at 1.226, 3.365 at
-      // 1.109, 3.527 at 0.99], the door's frame behind it.
-      { s: 3.53, top: 3.19, upper: 'door2' },
+      // The bright bar between the drop glass and the fixed quarter, upright [P carsized side:
+      // chrome 3.105–3.14 from the belt to the rail; D side x 560–573: 3.12–3.19].
+      { s: 3.105, top: 3.105, upper: 'door2', finish: 'chrome' },
+      { s: 3.14, top: 3.14, upper: 'door2', glass: 'fixed' },
+      // The quarter's rear edge slanting down to the belt, the door's frame behind it [P
+      // carsized side: the glass's rear edge 3.19 at 1.24, 3.34 at 1.11, 3.45 at 0.99 (heights
+      // ×1.034, the photo's roof 1.384); D side: 3.246 at 1.226, 3.365 at 1.109, 3.527 at 0.99]:
+      // between the two, 3 cm ahead of the drawing at the belt.
+      { s: 3.5, top: 3.17, upper: 'door2' },
       // The rear door's rear edge [D side x 636 from the belt down to 0.85, then forward round
       // the rear arch's front to the sill], kept 2 cm ahead of the arch (3.228). Bent at the
       // fuel flap's two rows (0.92, 0.80) instead of rounded, and sharp at its foot: within
@@ -110,8 +119,10 @@ export const BODY_W124: KitBody = {
       // 4-segment round cost 356 triangles, the foot's 3 cm one 112).
       { s: 3.555, top: 3.21, upper: 'body', foot: { y: 0.92, s: 3.21, knee: [3.535, 0.8] } },
       // The C pillar, body colour, to the back light's foot; the roof runs back over the back
-      // light's top to 3.56 at 1.354 [D side x 635], where it ends in a small lip.
-      { s: 3.96, top: 3.56 },
+      // light's top to 3.56 at 1.354 [D side x 635]. The glass's top corners rounded [P
+      // carsized rear, R34: r ≈ 0.08 at the roof's corners]: the corner cut in one convex
+      // chamfer (`cornerDrop`) (owner, 2026-10-27: «линии остекления заднего окна»).
+      { s: 3.96, top: 3.56, cornerDrop: 0.035 },
     ],
     // The side glass's top level along both doors [D side y 100: 1.343] under its 2 cm rubber.
     rail: 1.36,
@@ -136,8 +147,10 @@ export const BODY_W124: KitBody = {
     // glass without the real one's lifting arm (`buildWipers`) [E].
     wiperBlade: 0.5,
     wipers: 1,
-    rearBottom: 0.025, // [E]
-    rearHeader: 0.045, // [E]
+    // The back light in a thin seal, the C pillars beside it 3–5 cm from behind [P carsized
+    // rear: the glass ±0.50 at its top under the roof's ±0.53, ±0.65 at its foot].
+    rearBottom: 0.02,
+    rearHeader: 0.025,
     pillar: 0.07, // [E]
   },
   wheels: {
@@ -164,7 +177,7 @@ export const BODY_W124: KitBody = {
     archSegments: 8,
   },
   doorBottom: 0.21, // [D side y 292–295: 0.204–0.222]
-  bonnetFront: 0.06,
+  bonnetFront: 0.12,
   // The bonnet covers the whole top, its side shut lines along the wings' top, cut round the
   // grille shell [P F34, F34r].
   bonnet: { inset: 0.01 },
@@ -198,8 +211,12 @@ export const LOOK_W124: KitLook = {
   mirrorS: 1.66,
   mirrorReach: 0.04,
   mirrorHeightOffset: -0.02,
-  // [D side: front x 380–400 at y 190, rear x 580–620 at y 186–190]
-  handles: { front: 2.12, rear: 3.35, y: 0.82, half: 0.065 },
+  // Long chrome pull bars at each door's rear edge under the belt, the pull lever's bright
+  // lip under them over a black recess [P carsized side, on the hubs: the front bar s
+  // 2.29–2.51, its lever 2.33–2.45, 4.7 cm under the bar; the rear bar 3.23–3.46, its lever
+  // 3.28–3.38; the bars 0.78–0.80 high (0.81–0.83 with the photo's heights ×1.034); F34,
+  // side.jpg]. The owner, 2026-10-27: the front one stood in the door's middle (s 2.12).
+  handles: { front: 2.4, rear: 3.345, y: 0.82, half: 0.112, grip: { half: 0.055, drop: 0.046 } },
   waist: null,
   // Axle to axle (the arches cut it): the front wing behind its arch, both doors [P].
   cladding: { top: 0.47, finish: 'tone', span: [0.815, 3.615], edge: { finish: 'chrome', height: 0.01 } },
@@ -207,11 +224,10 @@ export const LOOK_W124: KitLook = {
   cornerLamps: [
     // Head lamp and indicator, one flat glass 0.57–0.76 [D side y 200–233; D2 front
     // 0.555–0.75 from ±0.36 out to ±0.77]: the amber indicator its outer quarter from ±0.68,
-    // wrapping round the corner onto the wing [P F34, F34r; D side: the unit to x 82]. Fluted
-    // glass [P F: fine flutes on the head lamp and the indicator] as dark lines (owner,
-    // 2026-10-27: "тёмные полосы в качестве ребристости это ок").
+    // wrapping round the corner onto the wing [P F34, F34r; D side: the unit to x 82].
+    // Smooth glass [P carsized front, F34]: only the tail lamps are fluted (owner,
+    // 2026-10-27: «посмотри, какие из фар ребристые»).
     {
-      ribs: 3,
       points: [
         { x: 0.37, y: [0.57, 0.755], role: 'head' },
         { x: 0.68, y: [0.57, 0.755], role: 'blinker' },
@@ -220,48 +236,55 @@ export const LOOK_W124: KitLook = {
       ],
     },
     // Tail lamps 0.665–0.855 [D side y 183–216; D2 rear 0.64–0.83], their inner edges leaning
-    // (±0.43 at the foot, ±0.60 at the top [D2 rear]), wrapping round onto the wings to s
-    // 4.52 [D side x 800]. Top band the reversing lamp inside and the amber indicator
-    // outside, the red tail and brake lamp below [P R, R34], all ribbed [P R34].
+    // along the lid's cut, 8–11 mm clear of it [P carsized rear: ±0.472 at the foot to ±0.582
+    // at the top], wrapping round onto the wings to s 4.52 [D side x 800]. Top band the
+    // reversing lamp inside and the amber indicator outside from ±0.69, the red tail and
+    // brake lamp below split at ±0.62 [P R, R34, carsized rear: the bands 44 % / 56 % of the
+    // lamp's height]; fluted at about 3 cm [P carsized rear, R34].
     {
       end: 'rear',
       ribs: 2,
       points: [
-        { x: [0.545, 0.595], y: [0.8, 0.855], role: 'reverse' },
-        { x: 0.645, y: [0.8, 0.855], role: 'blinker' },
-        { y: [0.8, 0.855], role: 'blinker' },
-        { s: 4.53, y: [0.805, 0.85] },
+        { x: [0.535, 0.58], y: [0.774, 0.855], role: 'reverse' },
+        { x: 0.69, y: [0.774, 0.855], role: 'blinker' },
+        { y: [0.774, 0.855], role: 'blinker' },
+        { s: 4.53, y: [0.779, 0.85] },
       ],
     },
     {
       end: 'rear',
-      ribs: 5,
+      ribs: 3,
       points: [
-        { x: [0.435, 0.54], y: [0.665, 0.794], role: 'brake' },
-        { x: 0.62, y: [0.665, 0.794], role: 'tail' },
-        { y: [0.665, 0.794], role: 'tail' },
-        { s: 4.52, y: [0.67, 0.794] },
+        { x: [0.474, 0.531], y: [0.665, 0.768], role: 'brake' },
+        { x: 0.62, y: [0.665, 0.768], role: 'tail' },
+        { y: [0.665, 0.768], role: 'tail' },
+        { s: 4.52, y: [0.67, 0.768] },
       ],
     },
   ],
   front: {
     // Tone of body colour 0.222–0.537 [D side x 21: the bar's face 0.40–0.537, the apron to
     // 0.222], a black band 0.35–0.47 with the chrome line over it [P F34 bumper: the line
-    // 21 % down the bumper, the band's foot 62 %]; its sides back along the wings to the
-    // front arch [D side x 105], the corners rounded [D plan r ≈ 0.2].
-    bumper: { kind: 'moulded', drop: 0.113, height: 0.315, finish: 'tone', moulding: { y: 0.41, height: 0.12, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.2, wrapTo: 0.47 },
+    // 21 % down the bumper, the band's foot 62 %]; under the band the apron drawn back 8 cm
+    // to its foot [P carsized side: 0.03 back at 0.40, 0.07 at 0.35, 0.10 at 0.30; D side x
+    // 27–35 under the bar]; its sides back along the wings to the front arch [D side x 105],
+    // the corners rounded [D plan r ≈ 0.2].
+    bumper: { kind: 'moulded', drop: 0.113, height: 0.315, finish: 'tone', moulding: { y: 0.41, height: 0.12, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.2, wrapTo: 0.47, foot: { y: 0.35, back: 0.08 } },
     items: [
-      // The chrome shell standing out of the face between the lamps, 0.52–0.79 at ±0.33 with
-      // its frame [D2 front], horizontal chrome slats on a dark back [P F34, F34r].
+      // The chrome shell between the lamps, ±0.365 with its frame, from the bumper's top to
+      // just under the bonnet's lip, which runs over it [P carsized front, 354.6 px/m across:
+      // the shell x 182–443; F34; the owner, 2026-10-27: «решетка не должна выступать за
+      // капот»], horizontal chrome slats on a dark back [P F34, F34r].
       {
         kind: 'grille',
-        x: { centre: 0.305 },
-        // Its frame's top 1 cm under the bonnet's lip and its foot 2 cm over the bumper's top
-        // (at 3 and 5 mm they fought from afar).
-        y: { from: ['bumperTop', 0.045], to: ['deck', -0.035] },
-        // Its back's front 3.4 cm out of the face, the slats' 4.6 [D side: the shell x 31–38
+        x: { centre: 0.34 },
+        // The slot from 3.5 cm over the bumper's top to 3.5 cm under the lip, so the frame's
+        // top stays 1 cm under it and its foot 1 cm over the bumper's top (at 3 and 5 mm they
+        // fought from afar).
+        y: { from: ['bumperTop', 0.035], to: ['deck', -0.035] },
+        // Its back's front 2.4 cm out of the face, the slats' 3.6 [D side: the shell x 31–38
         // ahead of the lamps' face at the bumper].
-        standOut: 0.01,
+        standOut: 0,
         frame: { finish: 'chrome', margin: 0.025 },
         back: true,
         // The slats 12 mm proud of the back's front (so + 0.024; at the 2107's 2 mm, and at
@@ -269,15 +292,16 @@ export const LOOK_W124: KitLook = {
         bars: { dir: 'horizontal', count: 7, finish: 'chrome', margin: 0.015, width: 0.008, depth: 0.014, proud: 0.036 },
       },
       // And its one vertical chrome bar down the middle [P F34], its front 1 cm ahead of the
-      // slats' (standOut 0.01 + 0.036).
-      { kind: 'panel', x: { centre: 0.008 }, y: { from: ['bumperTop', 0.06], to: ['deck', -0.05] }, finish: 'chrome', proud: 0.056 },
+      // slats' (0.036).
+      { kind: 'panel', x: { centre: 0.008 }, y: { from: ['bumperTop', 0.05], to: ['deck', -0.035] }, finish: 'chrome', proud: 0.046 },
     ],
   },
   rear: {
     // Tone of body colour 0.25–0.584 [D side x 790–843], the black band 0.335–0.47 under the
     // chrome line [P R: the line a quarter down the bumper, the band below to its foot];
-    // forward along the wings to the rear arch [D side x 715].
-    bumper: { kind: 'moulded', drop: 0.135, height: 0.334, finish: 'tone', moulding: { y: 0.4025, height: 0.135, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.15, wrapTo: 4.02 },
+    // under the band drawn back to the tail face [P carsized side: 0.05 back at 0.40, 0.09
+    // at 0.35]; forward along the wings to the rear arch [D side x 715].
+    bumper: { kind: 'moulded', drop: 0.135, height: 0.334, finish: 'tone', moulding: { y: 0.4025, height: 0.135, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.15, wrapTo: 4.02, foot: { y: 0.335, back: 0.04 } },
     items: [],
   },
 };

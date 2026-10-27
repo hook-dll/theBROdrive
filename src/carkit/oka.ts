@@ -130,8 +130,12 @@ export const BODY_1111: KitBody = {
     width: 0.135, // [F]
     frontHalfTrack: 0.605, // 1210 [F drivernotes.net; D front dimension 1210]
     rearHalfTrack: 0.6, // 1200 [F drivernotes.net]
-    // Front: liner top 0.604, lip 0.67 over the ground: opening radius 0.364 [D side] → 1.45.
-    arch: 1.45,
+    // Front: liner top 0.604 over the ground, 0.36 over the hub, its edge at the hub's height
+    // 0.295 ahead and 0.32 behind [D side, refs archFront]: a half ellipse 0.3075 wide and
+    // 0.36 high, 12.5 mm behind the hub (it stood a circle of 0.364, 1.45).
+    arch: 1.23,
+    frontArchRise: 1.44,
+    archShift: [0.0125, 0],
     // Rear: tight over the tyre, its top 0.53–0.55 [D side; P]: 0.293 → 1.17.
     rearArch: 1.17,
   },

@@ -61,11 +61,11 @@ export const BODY_2108: KitBody = {
     // The face; the front wing's corner behind it, leaning in at the top to the lamps' ends.
     { s: 0.11, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.775, wCrease: 0.785, wBelt: 0.69 },
     WING_FRONT,
-    // On the arch's facet columns s = 0.785 − 0.35968 cos(i · 15°), i = 0 and 7, so they
+    // On the arch's facet columns s = 0.77 − 0.34282 cos(i · 15°), i = 0 and 7, so they
     // add no tub column.
-    { ...onRun(WING_FRONT, WING_MID, 0.42532), crease: 0.705, wCrease: 0.77 },
+    { ...onRun(WING_FRONT, WING_MID, 0.42718), crease: 0.705, wCrease: 0.77 },
     WING_MID,
-    { ...onRun(WING_MID, COWL, 0.878092), crease: 0.705, wCrease: 0.801 },
+    { ...onRun(WING_MID, COWL, 0.858728), crease: 0.705, wCrease: 0.801 },
     COWL,
     { s: 2.55, sill: 0.264, crease: 0.64, belt: 0.911, deck: 0.93, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
     { s: 3.6, sill: 0.28, crease: 0.64, belt: 0.92, deck: 0.94, wSill: 0.795, wCrease: 0.82, wBelt: 0.805 },
@@ -111,7 +111,14 @@ export const BODY_2108: KitBody = {
     width: 0.165,
     frontHalfTrack: 0.7,
     rearHalfTrack: 0.685,
-    arch: 1.28,
+    // The arches to the 2108, 2109 and 21099 drawings (refs archFront / archRear): the
+    // front 0.343 wide and 0.35 high, 0.015 ahead of the hub (0.35 ahead, 0.32-0.34
+    // behind, as drawn); the rear 0.345 wide, 0.32 high (it stood a circle 0.36 high).
+    arch: 1.22,
+    frontArchRise: 1.25,
+    rearArch: 1.228,
+    rearArchRise: 1.14,
+    archShift: [-0.015, 0.005],
   },
   doorBottom: 0.302,
   bonnetFront: 0.11,
@@ -314,6 +321,9 @@ export const LOOK_21099: KitLook = { ...LOOK_2108, label: 'VAZ-21099', rear: REA
 export const BODY_2115: KitBody = {
   ...BODY_21099,
   length: 4.285,
+  // The rear arch on its hub, as the purple 2115 photo shows it (refs archRear [P19]: 0.34
+  // ahead, 0.32 behind); the drawings' 2109 put it 5 mm back.
+  wheels: { ...BODY_21099.wheels, archShift: [-0.015, 0] },
   stations: [
     { s: 0.0, sill: 0.36, crease: 0.6, belt: 0.775, deck: 0.79, wSill: 0.77, wCrease: 0.78, wBelt: 0.77 },
     { s: 0.17, sill: 0.33, crease: 0.6, belt: 0.8, deck: 0.815, wSill: 0.785, wCrease: 0.8, wBelt: 0.785 },

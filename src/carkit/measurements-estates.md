@@ -476,3 +476,10 @@ These are measured facts. Each one bends the literals above; nothing in the code
   - the lamps' wrap depth onto the sides (2102 ≈ 50 mm [D]; 2104 visible in `p04_rq`, not measured);
   - the tailgate hinge line;
   - the rear wiper's size.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vaz2102**: front 0.34 / 0.3 / 0.34: 0.326 / 0.326 / 0.326 → 0.326 / 0.326 / 0.326; rear 0.25 / 0.32 / 0.31: 0.326 / 0.326 / 0.326 → 0.256 / 0.326 / 0.326. BODY_2102: `rearArchRise` 0.885.
+- **vaz2104**: front 0.335 / 0.33 / 0.35: 0.332 / open / 0.332 → 0.332 / 0.33 / 0.332; rear 0.28 / 0.36 / 0.36: 0.332 / 0.332 / 0.332 → 0.28 / 0.36 / 0.358. BODY_2104: `rearArch` 1.25, `rearArchRise` 0.97.

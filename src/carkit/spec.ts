@@ -49,6 +49,12 @@ export interface TubStation {
    */
   readonly notch?: number;
   /**
+   * With `notch`: the width of the wall the deck rises in, so the lid's side edge on the
+   * tail face runs from the notch at the corners' top in by this much to its foot (the
+   * W124's lid between its trapezoid lamps). Absent: 25 mm (`NOTCH_WALL`).
+   */
+  readonly notchWall?: number;
+  /**
    * An intended break in the side's plan at this station (a corner drawn on the real car:
    * where a nose's rounding meets a straight flank, say), with its source in a comment.
    * Changes no geometry: tools/kit-surface.ts does not flag the turn here as a dent.
@@ -117,9 +123,10 @@ export interface CabinColumn {
   /**
    * `'black'`: the strip above the belt is black trim instead of paint, up to the rail:
    * the frame round its glass, a blacked-out pillar, the mirror's sail (the Espero's).
+   * `'chrome'`: the same strip bright (the W124's divider before its rear quarter glass).
    * The rail's chamfer onto the roof stays painted. Absent: painted.
    */
-  readonly finish?: 'black';
+  readonly finish?: 'black' | 'chrome';
 }
 
 export interface CabinSpec {
@@ -392,8 +399,17 @@ export interface KitLook {
    * Where the outside door handles stand, when measured: the centre s of the front doors'
    * and of the rear (side) doors' handle, their height and half length along the car.
    * Absent: 0.13 ahead of each door's rear edge, under the belt.
+   * `grip`: the handle is a thin bar (1.6 cm tall) over a black recess with the pull
+   * lever's bright lip at its foot, `half` its half length and `drop` the lip's foot under
+   * the bar's centre (the W124's). Absent: the bar alone, as before.
    */
-  readonly handles?: { readonly front: number; readonly rear: number; readonly y: number; readonly half: number };
+  readonly handles?: {
+    readonly front: number;
+    readonly rear: number;
+    readonly y: number;
+    readonly half: number;
+    readonly grip?: { readonly half: number; readonly drop: number };
+  };
   /**
    * Outside fittings on a split tailgate's leaves (`tailgateHinge: 'split'`): hinge straps
    * across each leaf's outer shut line, in body colour, from ±x0 out to ±x1, one per [y0,
@@ -580,6 +596,12 @@ export type BumperLook =
        * the wheel arch). Absent: a short wrap standing off the corner.
        */
       readonly wrapTo?: number;
+      /**
+       * Its face upright down to height `y`, then straight back by `back` m to its bottom
+       * edge (the W124's apron under its band), at most to the end face. Absent: the
+       * face drawn in only at its foot's bevel.
+       */
+      readonly foot?: { readonly y: number; readonly back: number };
       /**
        * The bumper continues the body: its top runs out of the end face and the flanks
        * with no ledge, rounding out to its face below (the 2110's and 2112's). Absent: a

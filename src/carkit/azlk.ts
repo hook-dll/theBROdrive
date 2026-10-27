@@ -144,11 +144,16 @@ export const BODY_2141: KitBody = {
     width: 0.165, // [F]
     frontHalfTrack: 0.72, // 1440 [F wiki.zr.ru, ru.wikipedia]
     rearHalfTrack: 0.71, // 1420 [F]
-    // Front: the lip's top 0.724, the liner's 0.668 over the ground [D side]: 0.40 round the
-    // hub between the two → 1.3.
-    arch: 1.3,
-    // Rear: the lip's top 0.674 [D side]: 0.372 → 1.2.
-    rearArch: 1.2,
+    // Front: the liner's top 0.665 over the ground, 0.355 over the hub, its edge at the
+    // hub's height 0.34 ahead and 0.38 behind [D side, refs archFront; the lip's top 0.724
+    // outside it]: a half ellipse 0.36 wide, 0.02 behind the hub (it stood a circle of 0.403,
+    // 1.3).
+    arch: 1.161,
+    frontArchRise: 1.145,
+    // Rear: 0.34 over the hub, 0.34 ahead and 0.35 behind [D side, refs archRear]: a circle
+    // of 0.345 (it stood 0.372, 1.2, the lip's top).
+    rearArch: 1.113,
+    archShift: [0.02, 0.005],
   },
   // [D side 0.324 at the doors' foot; P "Moskwitsch 2141 (side)" 0.30]; 0.33, over the hub,
   // so the rear door's foot meets its arch cut-out above the arch's front point.
@@ -219,8 +224,8 @@ export const LOOK_2141: KitLook = {
     // Black plastic 0.20–0.565 [D side: top 0.563, its lip to 0.194; front 0.577–0.18], its
     // top under the lamps' foot (0.584): the band hangs `drop` under the face's sill bevel
     // (sill 0.25 + 0.035), 0.285 − 0.085. Its sides back along the wings to the front arch
-    // [D side x 115, s 0.535; the arch's front 0.513 at the hub's height].
-    bumper: { kind: 'moulded', drop: 0.085, height: 0.365, wrapTo: 0.5 },
+    // [D side x 115, s 0.535; the arch's front 0.57 at the hub's height].
+    bumper: { kind: 'moulded', drop: 0.085, height: 0.365, wrapTo: 0.535 },
     items: [
       // Black horizontal slats between the lamps, ±0.343, from the bumper's top to under the
       // lip (0.749) [D front; P].
@@ -236,7 +241,7 @@ export const LOOK_2141: KitLook = {
   rear: {
     // Black plastic 0.28–0.545 [D side 0.277–0.558, rear 0.277–0.549], its top under the
     // lamps' foot (0.556): 0.355 (sill 0.32 + 0.035) − 0.075. Its sides forward along the
-    // wings to the rear arch [D side x 690, s 3.82; the arch's back 3.862].
+    // wings to the rear arch [D side x 690, s 3.82; the arch's back 3.84].
     bumper: { kind: 'moulded', drop: 0.075, height: 0.265, wrapTo: 3.87 },
     items: [],
   },

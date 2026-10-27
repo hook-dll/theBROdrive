@@ -189,3 +189,8 @@ The narrow rear door was the 1989 preview read with the quarter glass as body (t
 2.95 taken as the door's end). On the drawing and the GLS photos the door's frame runs
 round the quarter glass to the C pillar.
 
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vectraa**: front 0.36 / 0.37 / 0.33: 0.378 / 0.378 / 0.376 → 0.36 / 0.37 / 0.326; rear 0.35 / 0.37 / 0.34: 0.326 / 0.356 / 0.36 → 0.326 / 0.356 / 0.36. `arch` 1.28 → 1.186, `frontArchRise` 1.22, `archShift` [-0.02, 0].

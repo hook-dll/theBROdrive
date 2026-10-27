@@ -247,3 +247,12 @@ Owner (2026-10-16): the front wing in front of and above the front arch is over-
 | 21099 | 22.4° → **7.5°** | 6.94 → **1.81** m | 25.3 → **15.2** m° |
 
 Proof against the tree before the change (`/tmp/cf/base.json`, triangles in the car frame at 1e-5 m, sorted, hashed): every other car identical in hash, count and bounds (the 2115 included: its stations take only the cowl and door from `SALOON_FRONT`), apart from the GAZ-24, GAZ-31029 and 2111, which a concurrent greenhouse change was moving. On the three, bounds unchanged; triangles 2108 / 2109 10 229 / 11 394 → 10 301 / 11 466, 21099 11 757 → 11 879; the triangles that differ lie in s 0.17–1.232, y 0.264–0.90, |x| 0.48–0.825, in three meshes only on each: the body's paint (the wing), its trim (the front arch's liner, whose edge follows the skin) and the engine bay's paint (its inner wings loft through the two new stations, within 1.7 mm of their old surface). `tools/kit-zfight.ts vaz2108 vaz2109 vaz21099`: PASS, 0 visible and 0 slits. Close-ups before and after over the drawings: `build/k/compare2/samara_<car>_wing_{before,after}_{side,side_lines,side_overlay,top_overlay,top_lines,q34,front}.png`.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vaz2108**: front 0.335 / 0.35 / 0.32: 0.36 / 0.36 / 0.358 → 0.352 / 0.358 / 0.326; rear 0.32 / 0.34 / 0.33: 0.36 / 0.36 / 0.36 → 0.32 / 0.34 / 0.35. BODY_2108: `arch` 1.28 → 1.22, `frontArchRise` 1.25, `rearArch` 1.228, `rearArchRise` 1.14, `archShift` [-0.015, 0.005]; the wing stations moved onto the new arch columns (0.42718, 0.858728).
+- **vaz2109**: front 0.345 / 0.35 / 0.34: 0.36 / 0.36 / 0.358 → 0.352 / 0.358 / 0.326; rear 0.32 / 0.32 / 0.38: 0.36 / 0.36 / 0.36 → 0.32 / 0.34 / 0.35. BODY_2108 (as the 2108).
+- **vaz21099**: front 0.375 / 0.365 / 0.33: 0.36 / 0.36 / 0.358 → 0.352 / 0.358 / 0.326; rear 0.33 / 0.345 / 0.33: 0.36 / 0.36 / 0.36 → 0.32 / 0.34 / 0.35. BODY_2108 (as the 2108).
+- **vaz2115**: front 0.33 / 0.36 / 0.31: 0.36 / 0.36 / 0.36 → 0.352 / 0.358 / 0.328; rear 0.3 / 0.34 / 0.32: 0.36 / 0.36 / 0.36 → 0.322 / 0.346 / 0.346. BODY_2108, its own `archShift` [-0.015, 0] (the rear on its hub, P19).

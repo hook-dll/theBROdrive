@@ -155,11 +155,15 @@ export const BODY_2110: KitBody = {
     width: 0.175,
     frontHalfTrack: 0.7,
     rearHalfTrack: 0.685,
-    // The front arch stands clear of the tyre; the rear one is as wide as the tyre and
-    // covers its top [P s1: top 0.81 R over the hub, 1.0 R wide at the hub's height].
-    arch: 1.2,
-    rearArch: 1.0,
-    rearArchRise: 0.81,
+    // The front arch 0.34 wide and 0.355 high, 0.015 ahead of the hub [D10, D11, D12:
+    // 0.345-0.35 ahead, 0.31-0.33 behind]; the rear covers the tyre's top, 0.305 wide and
+    // 0.274 high [P s1: 0.93 R over the hub, 1.03-1.08 R at the hub's height; D11 0.265;
+    // the D10's flat top at 0.185 is stylised] (refs archFront / archRear).
+    arch: 1.18,
+    frontArchRise: 1.235,
+    rearArch: 1.06,
+    rearArchRise: 0.95,
+    archShift: [-0.015, 0],
   },
   doorBottom: 0.3,
   bonnetFront: 0.04,
@@ -313,6 +317,8 @@ export const LOOK_2110: KitLook = {
 export const BODY_2112: KitBody = {
   ...BODY_2110,
   length: 4.17,
+  // The hatchback's rear arch reaches 2 cm further forward [D12: 0.35 ahead, 0.31 behind].
+  wheels: { ...BODY_2110.wheels, rearArch: 1.1, archShift: [-0.015, -0.02] },
   stations: [
     ...BODY_2110.stations.slice(0, 9),
     // The D pillar's foot: the side's top under the tailgate's edge.

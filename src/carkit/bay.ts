@@ -496,7 +496,7 @@ function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
 function buildEngineBay(frame: BodyFrame, b: PartBuilder, room: BayRoom, classic: boolean): BayLayout {
   const w = frame.spec.wheels;
   const { inner, support, cowl } = room;
-  const shelf = w.radius * (1 + frame.archFactor(w.front)) + WELL_GAP;
+  const shelf = w.radius + frame.archTop(w.front) + WELL_GAP;
 
   // ---- inner wings with the chassis rails along their feet, firewall, scuttle ----
   if (room.wings) {
@@ -753,7 +753,7 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   // the backs of the lamps rooted 7 mm in it stand clear of this wall (exterior.ts `FACE_ROOT`).
   const s1 = Math.min(spec.bootEnd! + 0.008, spec.stations[spec.stations.length - 1]!.s - 0.015);
   const inner = frame.wellX(w.rear) - WELL_GAP;
-  const shelf = w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP;
+  const shelf = w.radius + frame.archTop(w.rear) + WELL_GAP;
   // Flat floor at the highest point of the shell's floor under it.
   let floor = 0;
   for (const s of stationsBetween(frame, s0, s1)) floor = Math.max(floor, floorY(frame, s) + 0.015);
@@ -818,7 +818,7 @@ function buildHatchBoot(frame: BodyFrame, b: PartBuilder): void {
   const inner = frame.wellX(w.rear) - WELL_GAP;
   // Under the tailgate's sill, but never under the floor pan: an estate's sill is low.
   const floor = Math.max(frame.deckY(frame.rearBase, 0) - HATCH_SILL_DROP, frame.station(frame.rearBase).sill + LOAD_FLOOR_RISE);
-  const shelf = Math.max(w.radius * (1 + frame.archFactor(w.rear)) + WELL_GAP, floor + 0.05);
+  const shelf = Math.max(w.radius + frame.archTop(w.rear) + WELL_GAP, floor + 0.05);
   b.color(COLOURS.bootTrim);
   b.quad('trim', at(frame, -inner, floor, s0), at(frame, inner, floor, s0), at(frame, inner, floor, s1), at(frame, -inner, floor, s1));
   // An estate's (a `flat` tail under a knee) D pillar comes down behind the knee to the

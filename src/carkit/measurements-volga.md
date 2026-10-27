@@ -268,3 +268,10 @@ Lab captures in `/tmp/kit-review/volga-dash/` (not committed): `gaz*-seat.png` (
 - GAZ-24: the panel's lamps' functions, the knobs' functions, the ammeter (drawn on the voltmeter's channel); the clock is round (square on the car); the kit's standard radio and hazard button stand in for the period ones; the "Волга" script on the horn bar is not drawn. The early car's aluminium band is drawn (the II series has a wood-look band, the photo kept for reference).
 - GAZ-31029: only one interior photo; the combined gauge's scales other than fuel, the passenger's end of the dash, the ashtray and the warning lamps' places are estimates. The pad wheel is the kit's pad on three spokes, not the moulded one-piece centre.
 - Both Volgas' seats are still the classic's; seatX moved them 3 cm outboard with the column.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **gaz24**: front 0.38 / 0.35 / 0.47: 0.416 / 0.414 / 0.408 → 0.38 / 0.37 / 0.47; rear 0.33 / 0.39 / 0.45: 0.338 / 0.348 / 0.35 → 0.33 / 0.39 / 0.45. `arch` 1.17 → 1.186, `frontArchRise` 1.073, `rearArch` 1.0 → 1.186, `rearArchRise` 0.95 → 0.932, `archShift` [0.05, 0.03] (front ahead held 0.37, clear of the 0.354 tyre).
+- **gaz31029**: front 0.39 / 0.38 / 0.43: 0.392 / 0.392 / 0.392 → 0.39 / 0.376 / 0.426; rear 0.28 / 0.41 / 0.43: 0.3 / 0.342 / 0.346 → 0.28 / 0.404 / 0.43. `arch` 1.22 → 1.262, `frontArchRise` 1.215, `rearArch` 1.08 → 1.308, `rearArchRise` 0.93 → 0.872, `archShift` [0.025, 0.01]; the rear bench's base 3 cm inside the wells (`CABIN_GAZ31029.bench.clear` 0.03: the longer rear covers now stand beside it, kit-zfight).

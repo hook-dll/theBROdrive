@@ -136,3 +136,9 @@ Rail ±0.493 at the side glass's top corners [D front] → `railHalf` **0.49**: 
 - **Rear arch**: drawn flattened under the flank line; one circle of 0.29 (`rearArch` 1.17), no `rearArchRise`.
 - **Tracks**: 1210 / 1200 [F web, D] against 1214 / 1204 in the `cf_vaz1111` row.
 - Not modelled: number plates and their recesses in both bumpers, the sail's black finish (painted here), the roof's rear lip, the badge.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vaz1111**: front 0.36 / 0.295 / 0.32: 0.364 / 0.362 / 0.36 → 0.36 / 0.294 / 0.32; rear 0.29 / 0.28 / 0.27: 0.294 / 0.292 / 0.292 → 0.294 / 0.292 / 0.292. `arch` 1.45 → 1.23, `frontArchRise` 1.44, `archShift` [0.0125, 0]; refs re-read on the drawn hub crosshair (1103, 529).

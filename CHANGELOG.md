@@ -4,6 +4,21 @@
 
 ### Added
 
+- ARCHES TO THE DRAWINGS, every car (owner, 2026-10-27: the arches' shape makes a car
+  recognisable). Each refs file carries the drawn `archFront` / `archRear` [top over hub,
+  reach ahead, reach behind], `kit-drawing` judges them; all 54 within 0.03 m. The cut in
+  the skin itself changed (`rearArchRise`, `frontArchRise`, `archShift`, `archSquare`):
+  rears lowered over the tyre on the classics, Samaras, tens and Oka, the Nivas' taller
+  than wide, the Volgas' swept back, the 2206's flat-topped, the Opels' fronts lower and
+  ahead; the inner shelves clear the opening's real top (`BodyFrame.archTop`). Nexia and
+  Espero unchanged.
+- W124, owner's review 3 (carsized.com photos): the nose rakes back over the bumper as on
+  the car; door handles at each door's rear edge, a 22 cm chrome bar over a black recess
+  (`handles.grip`); head lamps smooth, only the tail lamps fluted; the grille shell under
+  the bonnet's lip, wider; the back light's corners chamfered with a thin frame and the
+  roof square over it (no slits); a chrome bar before the quarter glass (column `finish`
+  `'chrome'`); bumper aprons drawn back to their foot (`foot`); the lid's sides leaning
+  with the lamps (`notchWall`). 12 194 triangles.
 - THE EXHAUST UNDER THE FLOOR, every car (owner, 2026-10-27: "flatter, neater, less
   hanging out underneath"; `src/carkit/bay.ts` `exhaust`). A Ø36 pipe 10 mm under the
   shell's floor wherever it is, a flat oval resonator (0.11 × 0.06) and silencer (0.30 ×

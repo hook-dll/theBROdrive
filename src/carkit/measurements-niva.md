@@ -216,3 +216,10 @@ Cluster scale: the speedometer's bezel is the 2106's (0.106 m) = 265 px on the Z
 The big dials' height over the belt is the classic's [E]. Seats from the drawing: centres ±0.39 → `seatX` 0.38; the front seat drawn at its rails' front (0.47 m hip to pedal), so `hip` 0.85 [E]; the rear bench's back at 1.52 behind the cowl → `bench` offset 0.67, its base 2 cm off the wheel-house covers it stands between (`clear` 0.04). Gear lever at 0.48 behind the cowl, the transfer box's two levers at 0.66 (diff lock left and longer, range right and shorter) [E positions, P which is which].
 
 Not modelled: the glovebox opens upwards on the car (the kit's falls open); two round vents on the dash top; a diff-lock lamp channel (the amber lens shows `tell_fuel`); front backrests folding forward on the 3-door; the instruments' deep wells; the transfer levers are static.
+
+## Arches to the drawings (2026-10-27)
+
+Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
+
+- **vaz2121**: front 0.455 / 0.37 / 0.385: 0.446 / open / 0.446 → 0.456 / 0.37 / 0.386; rear 0.39 / 0.4 / 0.385: 0.446 / 0.446 / open → 0.39 / 0.386 / 0.388. `arch` 1.35 → 1.145, `frontArchRise` 1.38, `rearArch` 1.18, `archShift` [0.008, 0]: the arches taller than wide (§ "not expressible" above now expressed).
+- **vaz2131**: front 0.455 / 0.37 / 0.385: — → 0.456 / 0.37 / 0.386; rear 0.39 / 0.4 / 0.385: — → 0.39 / 0.386 / 0.388. BODY_2121 (as the 2121); refs new, the 2121's.

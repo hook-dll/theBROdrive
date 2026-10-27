@@ -77,7 +77,8 @@ export const BODY_2102: KitBody = {
     rearKnee: { s: 3.947, y: 0.91 },
     pillar: 0.07, // BODY_124
   },
-  wheels: { front: 0.648, rear: 3.072, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.13 }, // BODY_124; tracks 1365/1321 [D]
+  // The rear arch to the 2102 drawing (refs archRear): low over the tyre, its top 0.255.
+  wheels: { front: 0.648, rear: 3.072, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.13, rearArchRise: 0.885 }, // BODY_124; tracks 1365/1321 [D]
   doorBottom: 0.29, // BODY_124
   bonnetFront: 0.17, // BODY_124
   // no bootEnd: the rear ring is a tailgate hinged at the roof
@@ -183,7 +184,8 @@ export const BODY_2104: KitBody = {
     rearKnee: { s: 3.858, y: 0.91 },
     pillar: 0.07, // BODY_05
   },
-  wheels: { front: 0.635, rear: 3.048, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.15 }, // BODY_05
+  // The rear arch to the 2104 drawing (refs archRear): ±0.36 at the hub's height, its top 0.28.
+  wheels: { front: 0.635, rear: 3.048, radius: 0.288, width: 0.165, frontHalfTrack: 0.6825, rearHalfTrack: 0.6605, arch: 1.15, rearArch: 1.25, rearArchRise: 0.97 }, // BODY_05
   doorBottom: 0.365, // BODY_05
   bonnetFront: 0.06, // BODY_05 (2105 face)
   bonnet: { inset: 0.07, rear: 0.9 }, // BODY_05: the drawn rear edge, the scuttle behind it

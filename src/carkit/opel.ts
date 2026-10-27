@@ -141,8 +141,12 @@ export const BODY_ASTRA_F: KitBody = {
     width: 0.175, // [F]
     frontHalfTrack: 0.715, // 1430 [F auto-data]
     rearHalfTrack: 0.7145, // 1429 [F]
-    // Front: the liner's top 0.659, 0.371 over the hub; ±0.34 at the hub's height [D side].
-    arch: 1.25,
+    // Front: the dark well's top 0.31 over the hub (the lip's lines over it, to 0.371), its
+    // edge at the hub's height 0.34 ahead and 0.32 behind [D side, refs archFront]: a half
+    // ellipse 0.33 wide and 0.31 high, 0.01 ahead of the hub (it stood a circle of 0.36).
+    arch: 1.146,
+    frontArchRise: 1.076,
+    archShift: [-0.01, 0],
     // Rear: ±0.34 at the hub's height, its top 0.606, 0.318 over the hub [D side].
     rearArch: 1.2,
     rearArchRise: 1.1,
@@ -403,8 +407,12 @@ export const BODY_VECTRA_A: KitBody = {
     width: 0.195, // [F]
     frontHalfTrack: 0.7185, // 1437 [F auto-data]
     rearHalfTrack: 0.716, // 1432 [F]
-    // Front: the liner's top 0.674, 0.379 over the hub [D side x 220].
-    arch: 1.28,
+    // Front: the liner's top 0.36 over the hub, its edge at the hub's height 0.37 ahead and
+    // 0.33 behind [D side, refs archFront]: a half ellipse 0.35 wide, 0.02 ahead of the hub
+    // (it stood a circle of 0.378).
+    arch: 1.186,
+    frontArchRise: 1.22,
+    archShift: [-0.02, 0],
     // Rear: its top 0.656, 0.361 over the hub [D side x 670].
     rearArch: 1.22,
     rearArchRise: 1.1,

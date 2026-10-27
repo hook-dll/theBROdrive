@@ -35,7 +35,7 @@
     "mirror": { "v": [1.66, 0.98], "src": "D side: the head x 300-320 (s 1.60-1.72), y 172-188 (0.93-1.03)" },
     "roofHalfWidth": { "v": 0.61, "src": "D2 front: the outline x 546-668 at the rail's height (1.33-1.37) about the centre x 607" },
     "beltHalfWidth": { "v": 0.835, "src": "D2 front: the body's outline x 523 / 691 at 0.85-0.87 about the centre x 607" },
-    "bonnet": { "v": [0.093, 1.341], "src": "D side: the bonnet's lip over the grille (40, 196) to the cowl (255, 161)" },
+    "bonnet": { "v": [0.19, 1.341], "src": "P carsized w124_side.png, registered on the hubs (333 px/m): the nose's outline at the lip's height (0.79) 0.18 behind the bumper's front (owner 2026-10-27: the nose over the bumper reads short on the photo); D side: the lip over the grille (40, 196), s 0.093, a raked face the photos do not show; the cowl (255, 161)" },
     "bootLid": { "v": [3.96, 4.68], "src": "D side: the back light's foot x 706 to the tail face x 830" }
   },
   "dash": {

@@ -1489,6 +1489,9 @@ export const CABIN_GAZ31029: CabinLayoutOverride = {
   // first taken for the lights [E]; the ashtray low on the console [E].
   lights: { right: 0.117, dy: -0.111, kind: 'knob' },
   ashtray: [0, -0.33],
+  // The rear covers reach forward beside the bench's base since the arches were set to the
+  // drawing (0.42 wide): the base 3 cm inside the wells, not 2 mm off the covers' walls.
+  bench: { ...LAYOUTS.classic.bench, clear: 0.03 },
   // 0.193 to the grip's centre, an 18 mm grip; the pad reaches the rim at nine o'clock,
   // a little under the level, and at six [P]; the right spoke by symmetry [E].
   wheel: { ...LAYOUTS.classic.wheel, dy: 0, radius: 0.193, rim: 0.0095, spokes: [-10, 190, 270], hub: 'pad' },

@@ -41,8 +41,8 @@
       "v": 0.469,
       "src": "DO side: rear hub 2.731 to the tip 3.200 (measurements-oka.md §1)"
     },
-    "archFront": { "v": [0.32, 0.29, 0.31], "src": "DO side (vaz_1111_oka.jpg, read on the drawn front hub (1106, 507) px): the opening's top y 388, its edge at the hub's height x 998 ahead and x 1221 behind" },
-    "archRear": { "v": [0.22, 0.32, 0.29], "src": "DO side (vaz_1111_oka.jpg, read on the drawn rear hub (1918, 507) px): the opening's top y 425, its edge at the hub's height x 1799 ahead and x 2025 behind" },
+    "archFront": { "v": [0.36, 0.295, 0.32], "src": "DO side (vaz_1111_oka.jpg, read on the drawn front hub's crosshair (1103, 529) px, 0.24 over the ground line; the registration's hub y 507 stood 0.06 too high): the black opening's top y 396 (the liner, measurements-oka.md; the lip's lines over it at y 388 and 368), its edge at the hub's height x 994 ahead (the wing's front lower edge) and x 1222 behind" },
+    "archRear": { "v": [0.29, 0.28, 0.27], "src": "DO side (vaz_1111_oka.jpg, read on the drawn rear hub's crosshair (1914, 530) px): the opening's top y 423, flattened under the flank line (y 418); its edge at the hub's height x 1810 ahead (the arch's inner line) and x 2014 behind (the bumper's end)" },
     "screenFoot": {
       "v": [
         0.891,

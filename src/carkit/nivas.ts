@@ -123,9 +123,14 @@ export const BODY_2121: KitBody = {
     width: 0.175, // [F]
     frontHalfTrack: 0.715, // 1430 [F]; drawn 1431
     rearHalfTrack: 0.7, // 1400 [F]; drawn 1389
-    // The real arches are taller than wide: opening ±0.40 at the hub, top 0.46 over it,
-    // flared lip to ±0.42 / 0.485 [D side]. One circle: 0.445 (1.35 R).
-    arch: 1.35,
+    // The real arches are taller than wide (refs archFront / archRear, the black well
+    // band's outer edge [D side]): the front ±0.37-0.385 at the hub, top 0.455 over it,
+    // 8 mm behind the hub; the rear a circle of 0.39. The flared lip outside them
+    // (±0.42 / 0.485) is not modelled. They stood one circle of 0.445 (1.35 R).
+    arch: 1.145,
+    frontArchRise: 1.38,
+    rearArch: 1.18,
+    archShift: [0.008, 0],
   },
   doorBottom: 0.428, // [D side y 404]
   bonnetFront: 0.15,
