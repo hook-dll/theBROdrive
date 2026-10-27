@@ -61,8 +61,8 @@ export interface CameraTarget {
 
 /** Mouse pitch clamp, radians. Keeps the view from flipping over the poles. */
 const PITCH_LIMIT = 1.45;
-/** Standing eye height above the player position, metres: a boy's, about 1.10 m (2026-10-26). */
-const EYE_HEIGHT = 1.1;
+/** Standing eye height above the player position, metres. */
+const EYE_HEIGHT = 1.62;
 /** How far ahead of the eye the spring's look-at point sits. */
 const LOOK_AHEAD = 12;
 /**
