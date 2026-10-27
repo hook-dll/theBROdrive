@@ -1233,6 +1233,20 @@
 
 ### Fixed
 
+- TRAFFIC NO LONGER SAWS AT THE WHEEL ON A STRAIGHT (`vehicle/autopilot.ts` `dampYaw`,
+  `YAW_RATE_DAMPING`; `world/traffic.ts`). Reported from play: cars on a straight jerked
+  the wheel left and right without end. The drivers decide 12 times a second
+  (`TRAFFIC_CONTROL_HZ`), and the steering's yaw-rate feedback, at its highway gain of 3,
+  was closed through that 12 Hz sample-and-hold: a limit cycle at the decision rate.
+  Measured cruising on straights at 90 km/h: the command reversed 10-12 times a second,
+  0.4-1.5° of rack and 1.6-4.6°/s of yaw RMS (at 60 Hz decisions: 0.02-0.03° and 0.2°/s).
+  Lowering the gain stopped it but is the gain that keeps fast cars out of the S-bend
+  weave. The yaw-rate term alone is now redone every physics step from the last
+  decision and the body's yaw rate now; route, speed and lane decisions stay at 12 Hz.
+  After, on the same seeds (1364921546, 3610724226, 3292638362): 0.03-0.24° of rack and
+  0.2-1.6°/s of yaw, nothing left at the decision rate. Traffic step cost unchanged
+  (0.412 ms/step, traffic bench seed 3404541405); collisions and passes as before.
+
 - A TRAFFIC CAR THE SOLVER LOSES IS REPORTED AND TAKEN OFF THE ROAD (`world/traffic.ts`).
   Once, on the traffic bench (seed 2119155336, 2026-10-27, while vehicle work was in
   flight in the tree), a driven car's speed went NaN and its autopilot asked

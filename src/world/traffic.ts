@@ -2248,6 +2248,9 @@ export class RoadTraffic {
             trafficProfile.driveCalls++;
             trafficProfile.driveMs += performance.now() - driveFrom;
           }
+        } else {
+          // The yaw-rate term runs at the physics rate; see YAW_RATE_DAMPING (autopilot.ts).
+          car.autopilot.dampYaw(car.vehicle, car.input);
         }
         const vehicleFrom = profiling ? performance.now() : 0;
         car.vehicle.fixedUpdate(dt, car.input);

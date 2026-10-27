@@ -706,6 +706,15 @@ const MIN_PLANNED_BRAKE_MPS2 = 0.75;
  * at 3 did: 0% off the road on all twelve runs, and 10-40 km/h more pace, because the
  * car is no longer spending its tyres on its own oscillation. Below the ramp the old
  * figure holds, so a hairpin and a recovery turn exactly as they did.
+ *
+ * AND IT IS A LOOP THAT MUST RUN AT THE PHYSICS RATE. The traffic decides 12 times a
+ * second (world/traffic.ts `TRAFFIC_CONTROL_HZ`), and a yaw-rate feedback at the
+ * highway gain closed through a 12 Hz sample-and-hold is a limit cycle at the decision
+ * rate: the owner saw traffic on a straight saw at the wheel (2026-10-28). Measured on
+ * the stream at 90 km/h, cruising on straights: the steering reversed 10-12 times a
+ * second, 0.5-1.5° of rack RMS and 2-4.6°/s of yaw, against 0.02-0.03° and 0.2°/s with
+ * the drivers at 60 Hz. So the term is redone every physics step (`dampYaw`) from the
+ * last decision's path and the body's yaw rate now; everything else stays at 12 Hz.
  */
 const YAW_RATE_DAMPING = 0.8;
 const YAW_RATE_DAMPING_FAST = 3;
@@ -2024,6 +2033,16 @@ export class Autopilot {
   private asphaltHalfWidth = 0;
   /** Steering curvature trim, rad/m; see `ModeConfig.curvatureTrim`. */
   private curvatureTrim = 0;
+  /**
+   * The last decision's steering, held for `dampYaw`: the path curvature, the curvature
+   * asked of the wheels before the yaw term, that term's gain, the wheelbase, and the
+   * command it produced (NaN until the lane controller has steered).
+   */
+  private heldPathCurvature = 0;
+  private heldSteerCurvature = 0;
+  private heldYawDamping = 0;
+  private heldWheelbase = 1;
+  private heldSteer = Number.NaN;
   /** The pedal as it was last left, so it can only be fed back in; see RACER_FEED_PER_S. */
   private racerThrottle = 0;
   /** This step's manoeuvre and the named rules binding speed and pedal; see manoeuvre.ts. */
@@ -2800,6 +2819,23 @@ export class Autopilot {
 
   get mode(): AutopilotMode { return this.modeValue; }
   setMode(mode: AutopilotMode): void { this.modeValue = mode; }
+  /**
+   * Redoes the yaw-rate term of the last decision's steering against the body's yaw
+   * rate now, between decisions; see YAW_RATE_DAMPING. Only while the command in `out`
+   * is still the lane controller's own: a pull-out, a reverse or a recovery wrote its
+   * own and is left alone. Called every physics step by a driver that decides less
+   * often (world/traffic.ts); no allocation.
+   */
+  dampYaw(vehicle: Vehicle, out: InputFrame): void {
+    if (out.steer !== this.heldSteer || out.reverse) return;
+    const velocity = vehicle.chassis.linvel();
+    const speed = Math.hypot(velocity.x, velocity.z);
+    const actualYawCurvature = vehicle.chassis.angvel().y / Math.max(speed, 3);
+    const curvature =
+      this.heldSteerCurvature + this.heldYawDamping * (this.heldPathCurvature - actualYawCurvature);
+    out.steer = vehicle.steeringInputForWheelAngle(Math.atan(this.heldWheelbase * curvature));
+    this.heldSteer = out.steer;
+  }
   /**
    * Ceiling below the mode's own cruise, m/s, or Infinity for none.
    *
@@ -5265,8 +5301,14 @@ export class Autopilot {
       pathCurvature * config.steeringGain +
       yawDamping * (pathCurvature - actualYawCurvature) +
       this.curvatureTrim;
-    const wheelAngle = Math.atan(wheelbaseOf(vehicle) * controlledCurvature);
-    out.steer = vehicle.steeringInputForWheelAngle(wheelAngle);
+    const wheelbase = wheelbaseOf(vehicle);
+    out.steer = vehicle.steeringInputForWheelAngle(Math.atan(wheelbase * controlledCurvature));
+    // What `dampYaw` needs to redo the yaw term between decisions; see YAW_RATE_DAMPING.
+    this.heldPathCurvature = pathCurvature;
+    this.heldSteerCurvature = pathCurvature * config.steeringGain + this.curvatureTrim;
+    this.heldYawDamping = yawDamping;
+    this.heldWheelbase = wheelbase;
+    this.heldSteer = out.steer;
 
     // Build a local speed profile rather than applying one worst bend to the whole
     // horizon. Every sample contributes its surface, decay, grade and curvature;
