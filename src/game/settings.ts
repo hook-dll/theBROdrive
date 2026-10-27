@@ -613,14 +613,6 @@ export interface Settings {
    */
   bouncyCars: boolean;
   /**
-   * JELLY BODY: every car drawn near — the one driven and the traffic beside it — flexes
-   * like a cartoon: the body leans and squats behind the chassis with a springy
-   * overshoot, rocks as the suspension articulates, and shivers after a knock or a
-   * landing (render/jellybody.ts). Drawn only, like `bouncyCars`: the chassis, its
-   * collider and the suspension never see it. On by default; off costs nothing.
-   */
-  jellyBody: boolean;
-  /**
    * Driver aids on the player's own car, all off by default: these cars had none, and
    * the drive is meant to be driven (vehicle/vehicletuning.ts, DRIVER AIDS).
    * `abs` eases the brake while a wheel locks; `tractionControl` eases the throttle
@@ -742,7 +734,6 @@ export const DEFAULT_SETTINGS: Settings = {
   cameraShake: true,
   // Off by default; a joke should be opted into, not discovered mid-drive.
   bouncyCars: false,
-  jellyBody: true,
   abs: false,
   tractionControl: false,
   dashboardSize: 1,
@@ -1014,8 +1005,6 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // Missing means an older save: on, like every new drive.
     cameraShake: obj.cameraShake !== false,
     bouncyCars: obj.bouncyCars === true,
-    // Missing means an older save: on, like every new drive.
-    jellyBody: obj.jellyBody !== false,
     abs: obj.abs === true,
     tractionControl: obj.tractionControl === true,
     // Snapped to the slider's step, clamped to its range; missing means the default. A

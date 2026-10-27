@@ -1728,29 +1728,6 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // Drawn only and nearly free (render/jellybody.ts): independent of the rung.
-      segmented('Jelly body', [
-        {
-          label: 'Off',
-          icon: 'gfx1',
-          hint: 'Car bodies stay rigid on their springs.',
-          active: () => !settings.jellyBody,
-          pick: () => {
-            settings.jellyBody = false;
-            apply();
-          },
-        },
-        {
-          label: 'On',
-          icon: 'bounce',
-          hint: 'Car bodies flex like jelly: they lean and squat behind the chassis, rock over bumps and shiver after a knock or a landing. Purely visual: handling and collisions are untouched.',
-          active: () => settings.jellyBody,
-          pick: () => {
-            settings.jellyBody = true;
-            apply();
-          },
-        },
-      ]),
       // Ground cover and plants. Not on Very Low, whose own light build is fixed. Off
       // until the player picks otherwise; no preset changes it (`Settings.groundCover`).
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Grass', [
@@ -2640,7 +2617,6 @@ export class MainMenu {
         mouseDriving: base.mouseDriving,
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
-        jellyBody: base.jellyBody,
         abs: base.abs,
         tractionControl: base.tractionControl,
         dashboardSize: base.dashboardSize,
@@ -2677,7 +2653,6 @@ export class MainMenu {
           mouseDriving: settings.mouseDriving,
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,
-          jellyBody: settings.jellyBody,
           abs: settings.abs,
           tractionControl: settings.tractionControl,
           dashboardSize: settings.dashboardSize,
