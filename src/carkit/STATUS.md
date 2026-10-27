@@ -63,6 +63,9 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    review); the **Opel Astra F** (five-door 1.6i, facelift) drafted 2026-10-18 (awaiting
    the owner's review); the **Opel Vectra A** (saloon 2.0i, facelift) drafted 2026-10-18
    (awaiting the owner's review).
+   Next: the **Mercedes W124** (230 E saloon, 1989–92 facelift): sources gathered and the
+   feature inventory written 2026-10-27 (`measurements-w124.md` §4, the first car through
+   the inventory step), awaiting the owner's review before any geometry.
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).
