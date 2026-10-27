@@ -161,6 +161,13 @@ const FOV_BRAKE_MAX = 2;
 const FOV_OMEGA = 6;
 /** Ten-power binoculars: the view is the resting FOV divided by this. */
 const BINOCULAR_POWER = 10;
+/**
+ * The on-foot view's field of view, degrees: a person's natural framing, fixed. The FOV
+ * setting (`setFieldOfView`) is the driving views' — a car wants its wide 85 for speed
+ * and the mirrors; walking about at that width bent the posts, machines and the jar
+ * corners, and up close to a machine everything looked far away.
+ */
+const FOOT_FIELD_OF_VIEW = 62;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
@@ -1340,7 +1347,8 @@ export class CameraRig {
     const cue = !widen ? 0
       : s >= 0 ? Math.min(s * FOV_ACCEL_DEG_PER_MPS2, FOV_ACCEL_MAX)
       : Math.max(s * FOV_BRAKE_DEG_PER_MPS2, -FOV_BRAKE_MAX);
-    const targetFov = this.binoculars ? this.baseFov / BINOCULAR_POWER : this.baseFov + cue;
+    const resting = this.onFoot ? FOOT_FIELD_OF_VIEW : this.baseFov;
+    const targetFov = this.binoculars ? resting / BINOCULAR_POWER : resting + cue;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
     this.updateProjection();
   }
@@ -1383,7 +1391,7 @@ export class CameraRig {
     }
     this.eye.set(target.x, target.y + EYE_HEIGHT - target.eyeDrop, target.z);
     this.lookAt.copy(this.eye).addScaledVector(_vC, LOOK_AHEAD);
-    this.fov = this.baseFov;
+    this.fov = FOOT_FIELD_OF_VIEW;
     this.surge = 0;
     this.surgeSpeedMps = 0;
     // Stepping out ends the drive the dynamic terms were measuring; entering a car
