@@ -1286,6 +1286,21 @@
   land. Those four functions now reach three pre-swapped, so the reset is `ALWAYS` in
   both conventions; worked through every pass for a cloud, a house, ground, a star and
   open sky in both conventions with three's own matrices and remap table.
+- CLOUDS HIDE THE STARS, THE PLANETS AND THE MOON (`render/clouds.ts` "WHAT IT HIDES",
+  `CLOUD_OCCLUSION_GAIN`; `render/sky.ts` `moonPatch`, `uMoonLayer`). Owner: they showed
+  through. The stars and planets were drawn before the clouds and the Moon inside the
+  dome, so a cloud covered them only by its own alpha, which is its night fade: half
+  faded at dusk it let half of a star through, and a full Moon burned through a storm's
+  clouds at night. Now the dome draws the sky without the Moon, every cloud surface
+  takes the scene target's alpha down by four times its fade (all of it from a quarter
+  visible up), and the stars, the planets and the Moon come after the clouds' depth
+  reset, each weighted by the alpha left; as a cloud fades out of the night it lets them
+  back with it, so a cloud already gone leaves no starless hole. The Moon is a small fan
+  of the dome round its disc drawn with the dome's own program, adding exactly the
+  radiance the Moon added to the dome, so a clear sky is the same to the bit; its blend
+  is set after three's material state, which keeps its program key the dome's. No new
+  program in either depth convention: blending is not in the key, and the Moon's layer
+  is a uniform.
 - THE VISTA HOLDS STILL UNDER A MOVING CAMERA, AND A MESA'S FOOT CANNOT OPEN
   (`render/vista.ts` `DISC_STEP`, `MESA_CURTAIN_DEPTH`). The second half of the far mesas'
   shimmer: the polar disc slid with the camera and re-blended every vertex for its exact

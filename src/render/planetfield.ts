@@ -84,14 +84,19 @@ export class PlanetField {
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       uniforms: { uExposure: { value: 0 } },
-      // Opaque pass, before the clouds, like the stars (render/starcatalog.ts).
+      // Opaque pass, after the clouds and weighted by the alpha they leave, like the stars
+      // (render/starcatalog.ts).
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.DstAlphaFactor,
+      blendDst: THREE.OneFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
       toneMapped: false,
     });
     this.points = new THREE.Points(geometry, this.material);
     this.points.frustumCulled = false;
-    this.points.renderOrder = -7;
+    this.points.renderOrder = -4.6;
   }
 
   update(frame: CelestialFrame, exposure: number): void {

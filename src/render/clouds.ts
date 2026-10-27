@@ -48,16 +48,24 @@ import { SCENE_EXPOSURE } from './displaytransform';
  * (`AIR_SCALE_HEIGHT_M`), so no cloud reads clearer than a mesa in front of it.
  *
  * WHERE IT IS IN THE FRAME. Drawn in the opaque pass straight after the dome (with its sun
- * disc and glow), the stars and the planets (`renderOrder` -6), and OPAQUE: a cloud hides
- * the sun and the stars behind it. Only the night fade is alpha (`uCloudAmount`, the
- * bodies' own: haze and dust veil them through the aerial perspective instead), and while
- * it runs a depth prepass (-6.5) keeps the fading cloud one surface deep. The clouds are kilometres beyond
+ * disc and glow) (`renderOrder` -6), and OPAQUE: a cloud hides the sun behind it. Only the
+ * night fade is alpha (`uCloudAmount`, the bodies' own: haze and dust veil them through
+ * the aerial perspective instead), and while it runs a depth prepass (-6.5) keeps the
+ * fading cloud one surface deep. The clouds are kilometres beyond
  * the far plane, so their depth is their own (`DEPTH_NEAR_M`..`DEPTH_FAR_M`, written as a
  * projection row so clipping stays linear), which sorts the facets of a cloud and the
  * clouds among themselves; a depth-only triangle (`depthReset`, -5) then puts the far
  * plane back everywhere, so the land draws over the clouds as over the dome, and the
  * finishing pass still reads cloud pixels as sky. Every cloud is behind all land: a cloud
  * base is a kilometre over the eye and nothing on the ground is.
+ *
+ * WHAT IT HIDES. The stars (-4.8), the planets (-4.6) and the Moon (render/sky.ts
+ * `moonPatch`, -4.4) are drawn AFTER the clouds and the reset, weighted by the scene
+ * target's alpha, which the dome sets to 1 and each cloud surface takes down by its
+ * occlusion, `CLOUD_OCCLUSION_GAIN` times its fade: a cloud hides them outright while it
+ * is a quarter visible or more, and as it fades out of the night it lets them back in
+ * with it, so a cloud already gone leaves no starless hole. Drawn before the clouds and
+ * covered by their alpha, they showed through every fading cloud and a storm's at night.
  *
  * THE SHADOWS. Each frame the clouds whose shadow can fall near the eye are drawn once
  * more, flattened along the sun's ray onto a `MAP_SIZE` square map `MAP_WIDTH_M` across
@@ -82,6 +90,13 @@ const LIST_CAPACITY = 16384;
 const RING_DESKTOP_M = 26_000;
 const RING_LOW_M = 16_000;
 const RING_FADE_SHARE = 0.8;
+/**
+ * A cloud's hold on the stars, the planets and the Moon behind it, over its own fade
+ * (`uCloudAmount`): it hides them outright from a quarter visible up. At 1 (plain alpha)
+ * they showed through a half-faded dusk cloud at half brightness and a full Moon burned
+ * through a night storm deck.
+ */
+const CLOUD_OCCLUSION_GAIN = 4;
 /** The clouds' own depth range, metres from the eye. */
 const DEPTH_NEAR_M = 50;
 const DEPTH_FAR_M = 120_000;
@@ -646,13 +661,16 @@ export class CloudLayer {
         airSun: { value: airSun },
         airDusk: { value: airDusk },
       },
-      // Over the dome, the sun, the stars by alpha (the night fade); kept in the opaque pass
-      // so it draws before the land.
+      // Over the dome and the sun by alpha (the night fade); kept in the opaque pass so it
+      // draws before the land. The target's ALPHA carries what the cloud hides of the sky
+      // behind it: the dome writes 1 and every cloud surface takes it down by its
+      // occlusion (`blendAlpha`, set in `update` from `CLOUD_OCCLUSION_GAIN`); the stars,
+      // the planets and the Moon, drawn after the clouds, are weighted by what is left.
       blending: THREE.CustomBlending,
       blendSrc: THREE.SrcAlphaFactor,
       blendDst: THREE.OneMinusSrcAlphaFactor,
       blendSrcAlpha: THREE.ZeroFactor,
-      blendDstAlpha: THREE.OneFactor,
+      blendDstAlpha: THREE.OneMinusConstantAlphaFactor,
     });
     this.skyMeshes = [this.smallSky, this.bigSky].map((list) => {
       const mesh = new THREE.Mesh(list.geometry, this.material);
@@ -760,6 +778,7 @@ export class CloudLayer {
     this.root.visible = sky.uCloudAmount.value > 0.003;
     const fading = sky.uCloudAmount.value < 0.999;
     for (const mesh of this.prepassMeshes) mesh.visible = fading;
+    this.material.blendAlpha = Math.min(1, CLOUD_OCCLUSION_GAIN * sky.uCloudAmount.value);
     const strength = cloudShadowLive.strength.value;
     this.shadowPass = strength > 0;
     if (!this.root.visible && !this.shadowPass) return;

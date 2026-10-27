@@ -191,17 +191,22 @@ export class StarField {
         uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
         uMoonAngularRadius: { value: 0.0045 },
       },
-      // Additive, but in the OPAQUE pass (three blends any non-normal blending there): it
-      // draws right after the dome and before the clouds (render/clouds.ts), which then
-      // cover the stars behind them. As a transparent draw it came after the clouds and
-      // shone through them.
+      // Added in the OPAQUE pass, AFTER the clouds and their depth reset (render/clouds.ts
+      // "WHAT IT HIDES") and before the land: each star weighted by the scene target's
+      // alpha, which a cloud in front has taken down, and the alpha left as it is for the
+      // planets and the Moon after. Drawn before the clouds and covered by their alpha
+      // instead, the stars showed through every fading cloud.
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.DstAlphaFactor,
+      blendDst: THREE.OneFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
       toneMapped: false,
     });
     this.points = new THREE.Points(geometry, this.material);
     this.points.frustumCulled = false;
-    this.points.renderOrder = -8;
+    this.points.renderOrder = -4.8;
     this.points.matrixAutoUpdate = false;
     this.setQuality(quality);
   }

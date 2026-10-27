@@ -114,6 +114,16 @@ const SHADOW_DIR_STEP_COS = Math.cos(SHADOW_DIR_STEP);
 /** Deliberate presentation scale: physical lunar disc is too small in play. */
 const MOON_VISUAL_SCALE = 3;
 /**
+ * The moon patch (`Sky.moonPatch`): its rim's angular radius against the visible disc's,
+ * plus a margin in radians for the disc's one-pixel antialiased edge at any zoom
+ * (a pixel is about 0.001 rad at 85 degrees and 1440 lines, far less through the
+ * binoculars), and the rim's vertex count. The fan's flat edge reaches in to
+ * cos(pi / 16) = 0.98 of the rim.
+ */
+const MOON_PATCH_SCALE = 1.4;
+const MOON_PATCH_MARGIN_RAD = 0.003;
+const MOON_PATCH_RIM = 16;
+/**
  * Radiance of sunlit lunar regolith, day and night, in the same authored units as the
  * palette below.
  *
@@ -522,6 +532,14 @@ uniform float uSunGlowIntensity;
 uniform float uSunAureole;
 uniform float uMoonAmount;
 /**
+ * Which part of the sky this draw writes, a uniform so all three share the dome's one
+ * program: 0 the sky with the Moon (the environment probe), 1 the sky without it (the
+ * dome, drawn before the clouds), 2 only what the Moon adds, in scene radiance (the
+ * moon patch, drawn after the clouds and weighted by what they leave; render/clouds.ts
+ * "WHAT IT HIDES").
+ */
+uniform float uMoonLayer;
+/**
  * How strongly the sky away from the sun is pulled down, 0..1. Peaks when the sun
  * is near the horizon and is zero at midday and through the night.
  */
@@ -558,8 +576,9 @@ varying vec3 vDir;
 
 /**
  * CLOUDS. The fair-weather cumulus are not the dome's: they are low-poly meshes
- * (render/clouds.ts), drawn over the dome and the stars, so a cloud hides the stars behind
- * it. What the dome keeps is the STORM DECK: when a storm builds, a grey convective
+ * (render/clouds.ts), drawn over the dome, and the stars, the planets and the Moon after
+ * them only where they leave the sky, so a cloud hides what is behind it. What the dome
+ * keeps is the STORM DECK: when a storm builds, a grey convective
  * overcast closes over the sky, a flat layer STORM_BASE_M up that follows the clouds'
  * own drift (uCloudPan) and is periodic on their period, so a rebase moves nothing.
  * The environment probe shares this shader, so a stormy sky lights the car a little
@@ -808,7 +827,9 @@ void main() {
   // an additive disc inherits the sky's blue pedestal and a neutral albedo can
   // only ever land somewhere on the blue side of white.
   vec3 lunarAlbedo = texture2D(uMoonTexture, moonMapUv).rgb * vec3(1.10, 1.0, 0.84);
-  col += lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
+  vec3 moonLight = lunarAlbedo * (sunlit + earthshine) * uMoonRadiance * mdisc * uMoonAmount;
+  // What later terms scale the sky by, so the Moon's share comes out as if added here.
+  float moonKeep = 1.0;
 
 
   // --- Rainbow --------------------------------------------------------------
@@ -834,7 +855,9 @@ void main() {
     float alexander = smoothstep(0.745, 0.77, anti) * (1.0 - smoothstep(0.85, 0.875, anti));
     float foot = smoothstep(0.0, 0.08, dir.y);
     col += (bow * 0.13 + inner * 0.03) * uRainbow * foot;
-    col *= 1.0 - alexander * 0.06 * uRainbow * foot;
+    float alexanderKeep = 1.0 - alexander * 0.06 * uRainbow * foot;
+    col *= alexanderKeep;
+    moonKeep *= alexanderKeep;
   }
 
   // --- Lightning ------------------------------------------------------------
@@ -859,7 +882,12 @@ void main() {
   // The palette, sun and Moon are authored as the colour the screen shows (see
   // MOON_RADIANCE_DAY), so the dome writes the radiance the display transform maps to
   // that colour (render/displaytransform.ts); the sun disc's excess keeps rolling off.
-  gl_FragColor = vec4(sceneFromScreen(col), 1.0);
+  // The Moon's share is the difference in radiance, so the dome without it plus the
+  // patch's share is the sky with it, to the bit of the old single draw.
+  vec3 withMoon = sceneFromScreen(col + moonLight * moonKeep);
+  if (uMoonLayer > 1.5) gl_FragColor = vec4(withMoon - sceneFromScreen(col), 1.0);
+  else if (uMoonLayer > 0.5) gl_FragColor = vec4(sceneFromScreen(col), 1.0);
+  else gl_FragColor = vec4(withMoon, 1.0);
 }
 `;
 
@@ -872,6 +900,58 @@ void main() {
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
+}
+
+const NO_BLEND_COLOR = new THREE.Color(0, 0, 0);
+
+/**
+ * `WebGLState.setBlending` as three r185 runs it: the blend colour and alpha come before
+ * the premultiplied flag, which @types/three 0.185 leaves out.
+ */
+type SetBlending = (
+  blending: THREE.Blending,
+  equation: THREE.BlendingEquation,
+  src: THREE.BlendingSrcFactor,
+  dst: THREE.BlendingDstFactor,
+  equationAlpha: THREE.BlendingEquation,
+  srcAlpha: THREE.BlendingSrcFactor,
+  dstAlpha: THREE.BlendingDstFactor,
+  color: THREE.Color,
+  alpha: number,
+  premultipliedAlpha: boolean,
+) => void;
+
+/**
+ * Draws `material` (the moon patch) added to the target weighted by its alpha, which the
+ * clouds have taken down where they hide the sky (render/clouds.ts "WHAT IT HIDES").
+ *
+ * The material itself stays a plain opaque one, so its program key is the dome's
+ * (three keys an OPAQUE flag on normal blending without transparency) and the patch
+ * links nothing of its own; three would draw it unblended, so its blend is set here,
+ * right after three has set the material's state, through three's own `setBlending`, so
+ * three's record of the blend state stays true for the next draw.
+ */
+function gateMoonPatchBlend(renderer: THREE.WebGLRenderer, material: THREE.Material): void {
+  const state = renderer.state;
+  // See `SetBlending`: the typings name the r185 function with an older parameter list.
+  const setBlending = state.setBlending as unknown as SetBlending;
+  const setMaterial = state.setMaterial.bind(state);
+  state.setMaterial = (drawn, frontFaceCW, hardwareClippingPlanes) => {
+    setMaterial(drawn, frontFaceCW, hardwareClippingPlanes);
+    if (drawn !== material) return;
+    setBlending(
+      THREE.CustomBlending,
+      THREE.AddEquation,
+      THREE.DstAlphaFactor,
+      THREE.OneFactor,
+      THREE.AddEquation,
+      THREE.ZeroFactor,
+      THREE.OneFactor,
+      NO_BLEND_COLOR,
+      0,
+      false,
+    );
+  };
 }
 
 
@@ -887,6 +967,14 @@ export class Sky {
   private readonly root = new THREE.Group();
 
   private readonly dome: THREE.Mesh;
+  /**
+   * The Moon's own draw: a small fan of the dome round its disc, drawn with the dome's
+   * program (`uMoonLayer` 2) after the clouds and weighted by the alpha they leave
+   * (render/clouds.ts "WHAT IT HIDES"), so a cloud in front hides it. The dome itself
+   * draws the sky without it.
+   */
+  private readonly moonPatch: THREE.Mesh;
+  private readonly moonPatchPositions: THREE.BufferAttribute;
   private readonly starField: StarField;
 
   private readonly planetField = new PlanetField();
@@ -1099,6 +1187,8 @@ export class Sky {
         uBoltAz: this.uBoltAz,
         uBoltTop: this.uBoltTop,
         uBoltSeed: this.uBoltSeed,
+        // The sky without the Moon: the moon patch adds it after the clouds.
+        uMoonLayer: { value: 1 },
       },
       side: THREE.BackSide,
       // The sky is the backdrop: draw first, never write depth, never test it,
@@ -1113,11 +1203,11 @@ export class Sky {
 
     // --- Environment probe dome: same geometry and uniform objects as the
     // visible dome, so the one bake (see bakeEnvironment) sees exactly the sky the
-    // dome draws, in the same radiance.
+    // dome draws, in the same radiance, the Moon in it (`uMoonLayer` 0).
     this.envMaterial = new THREE.ShaderMaterial({
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,
-      uniforms: domeMaterial.uniforms,
+      uniforms: { ...domeMaterial.uniforms, uMoonLayer: { value: 0 } },
       side: THREE.BackSide,
       depthWrite: false,
       depthTest: false,
@@ -1125,6 +1215,40 @@ export class Sky {
     const envDome = new THREE.Mesh(domeGeometry, this.envMaterial);
     envDome.frustumCulled = false;
     this.envScene.add(envDome);
+
+    // --- The Moon, after the clouds (`moonPatch`). The dome's program: same shaders,
+    // side, attributes (positions, a normal and a uv like the sphere's) and blending
+    // as the material declares it, and only the moon's share (`uMoonLayer` 2), added
+    // where the clouds leave the target's alpha (`gateMoonPatchBlend`).
+    const rim = MOON_PATCH_RIM;
+    const patchGeometry = new THREE.BufferGeometry();
+    this.moonPatchPositions = new THREE.BufferAttribute(new Float32Array((rim + 1) * 3), 3);
+    this.moonPatchPositions.setUsage(THREE.DynamicDrawUsage);
+    patchGeometry.setAttribute('position', this.moonPatchPositions);
+    patchGeometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array((rim + 1) * 3), 3));
+    patchGeometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((rim + 1) * 2), 2));
+    // Vertex 0 the centre, 1..rim the rim counter-clockwise as seen looking out at the
+    // Moon (`placeMoonPatch`); each triangle wound clockwise on screen, which is what a
+    // BackSide material draws, as the inside of the dome's sphere is.
+    const fan: number[] = [];
+    for (let k = 0; k < rim; k++) fan.push(0, 1 + ((k + 1) % rim), 1 + k);
+    patchGeometry.setIndex(fan);
+    this.moonPatch = new THREE.Mesh(
+      patchGeometry,
+      new THREE.ShaderMaterial({
+        vertexShader: SKY_VERTEX,
+        fragmentShader: SKY_FRAGMENT,
+        uniforms: { ...domeMaterial.uniforms, uMoonLayer: { value: 2 } },
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    gateMoonPatchBlend(webgl, this.moonPatch.material as THREE.ShaderMaterial);
+    this.moonPatch.renderOrder = -4.4;
+    this.moonPatch.frustumCulled = false;
+    this.moonPatch.visible = false;
+    this.root.add(this.moonPatch);
 
     // --- Real Tycho-2 star field ---
     this.starField = starField;
@@ -1173,6 +1297,52 @@ export class Sky {
     scene.add(this.hemiLight);
 
     scene.add(this.root);
+  }
+
+  /**
+   * Lays the moon patch round the Moon's direction `m` (world, unit) at the dome's
+   * radius: object space is the camera-centred dome's, which the patch shares. The rim
+   * runs counter-clockwise as seen looking out along `m`: with `r` across it and
+   * `u = r x m`, `r x u = -m`, the screen's right and up for an eye looking along `m`.
+   * Hidden while the Moon adds nothing.
+   */
+  private placeMoonPatch(m: THREE.Vector3, discRadius: number): void {
+    this.moonPatch.visible = this.uMoonAmount.value > 0;
+    if (!this.moonPatch.visible) return;
+    // r: horizontal and across the Moon, unless the Moon is near the zenith.
+    let rx = m.z;
+    let ry = 0;
+    let rz = -m.x;
+    if (Math.abs(m.y) > 0.9) {
+      rx = 0;
+      ry = -m.z;
+      rz = m.y;
+    }
+    const rLength = Math.hypot(rx, ry, rz);
+    rx /= rLength;
+    ry /= rLength;
+    rz /= rLength;
+    const ux = ry * m.z - rz * m.y;
+    const uy = rz * m.x - rx * m.z;
+    const uz = rx * m.y - ry * m.x;
+    const rim = MOON_PATCH_RIM;
+    const angle = (discRadius * MOON_PATCH_SCALE + MOON_PATCH_MARGIN_RAD) / Math.cos(Math.PI / rim);
+    const along = Math.cos(angle) * DOME_RADIUS;
+    const across = Math.sin(angle) * DOME_RADIUS;
+    const p = this.moonPatchPositions.array as Float32Array;
+    p[0] = m.x * DOME_RADIUS;
+    p[1] = m.y * DOME_RADIUS;
+    p[2] = m.z * DOME_RADIUS;
+    for (let k = 0; k < rim; k++) {
+      const phi = (k / rim) * Math.PI * 2;
+      const c = Math.cos(phi) * across;
+      const s = Math.sin(phi) * across;
+      const o = (k + 1) * 3;
+      p[o] = m.x * along + rx * c + ux * s;
+      p[o + 1] = m.y * along + ry * c + uy * s;
+      p[o + 2] = m.z * along + rz * c + uz * s;
+    }
+    this.moonPatchPositions.needsUpdate = true;
   }
 
   /** Prevents the launch cover from leaving while the lunar texture is still decoding. */
@@ -1411,6 +1581,7 @@ export class Sky {
     const overcast = Math.max(weather.cloud, weather.dust, weather.haze * 0.75);
     const starVisibility = smoothstep(0.12, -0.12, this.sunElevation) * (1 - 0.97 * overcast);
     this.uMoonAmount.value *= 1 - 0.92 * overcast;
+    this.placeMoonPatch(celestial.moon.direction, visibleMoonRadius);
     this.starField.update(
       celestial.equatorialToWorld,
       celestialExposure / 18_000,
@@ -1790,6 +1961,8 @@ export class Sky {
 
     this.dome.geometry.dispose();
     (this.dome.material as THREE.ShaderMaterial).dispose();
+    this.moonPatch.geometry.dispose();
+    (this.moonPatch.material as THREE.ShaderMaterial).dispose();
     this.moonTexture.dispose();
 
     this.starField.dispose();
