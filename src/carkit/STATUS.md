@@ -262,6 +262,32 @@ bumpers, corner lamps, `rearKnee` hatches, `rearLean` estates, spare on the rear
 Suggested start: one easy car to set up the foreign running-gear path (Nexia or Astra F),
 then the off-road family starting with the Pajero II (it needs every new piece once).
 
+## The toy box: the owner's second list (2026-10-27)
+
+Not the street of the 1990s (the list above stays the world's traffic) but a boy's box of
+toy cars: unexpected, rarely seen in other games, fun to drive, built before 2000. Every
+one accepted, none struck out.
+
+- The owner's: Peugeot 406 Coupé, Ferrari Mondial, Caterham 7, Mazda MX-5 (NA), Citroën
+  Xantia, Volvo 850 (T-5R estate).
+- Europe: Alfa Romeo 75, Fiat Coupé (1993), Matra Murena, Volvo 480, Lancia Thema 8.32,
+  Maserati Biturbo, Ferrari 308 GT4, Porsche 914, Peugeot 306 GTi-6, Citroën AX GT,
+  Renault Sport Spider, Lotus Elan M100, Reliant Robin.
+- Eastern bloc: Tatra 613, Škoda 130 RS, LuAZ-969M, ZAZ-965.
+- Japan: Daihatsu Charade GTti, Honda City Turbo II, Subaru SVX, Mazda MX-3, Isuzu VehiCROSS.
+- Desert: Matra Rancho, VW Golf Country, Suzuki X-90, GMC Syclone, AMC Pacer.
+
+First choice (owner and assistant, 2026-10-27): the owner's six, then Alfa 75, Fiat Coupé,
+Matra Murena, Tatra 613, LuAZ-969M, Reliant Robin, Daihatsu Charade GTti, Golf Country,
+Lancia Thema 8.32.
+
+What the physics cannot yet say about them: the engine sits ahead of the front axle in
+`Vehicle.applyChassisMass` (longitudinal behind it when the rear is driven, transverse
+ahead of it otherwise), so a mid or rear engine (Mondial, 308 GT4, Murena, 914, Tatra
+613, Škoda 130 RS, ZAZ-965) gets its axle split right but its yaw inertia wrong; and a car
+has exactly four wheels (`render/carmodel.ts` `WHEEL_IDS`), so the Reliant Robin cannot
+be built. Open cars (Caterham, Spider, MX-5) need an open cabin from the generator.
+
 ## Wheels: designs and the roster
 
 Pools (carmodels.ts): Soviet cars `KIT_SOVIET_WHEEL_SETS` (the pack's six, `gw_vaz_steel16`,
