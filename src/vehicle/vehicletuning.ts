@@ -1587,8 +1587,20 @@ export const BEAM_AXLE_GYRATION_SQ = 0.6;
  * spring usable over a big hit.
  *
  * The stop engages over the last BUMP_STOP_FRACTION of the available bump travel and
- * its force rises with the square of how far into it the wheel is, reaching
+ * its force rises with the CUBE of how far into it the wheel is, reaching
  * BUMP_STOP_PEAK times the corner load the car was DESIGNED at when fully crushed.
+ *
+ * A cube, not a square. A jounce bumper is a cellular polyurethane or rubber cone: it
+ * meets the axle at its soft tip and stiffens steeply only as the cone runs out of
+ * material to fold (the knee-shaped force-deflection curves the bumper makers print,
+ * BASF Cellasto and the like). The square this replaced already pushed with 0.375 of
+ * the design load a quarter of the way in, so a corner that merely brushed the stop
+ * over a crest or a hard dip met a firm knock. The cube makes 0.125 of the load there
+ * and 1.0 halfway in, against 1.5 [E: the shape of a cellular bumper's curve, not a
+ * fitted one]. The peak
+ * went from 6 to 8 so the rubber still stores what it did over the same length
+ * (`peak · L / (n + 1)`: 6/3 = 8/4), and a big hit still reaches the rigid clamp no
+ * more often than before.
  *
  * The design load, not the load it is carrying: the stop is a piece of rubber bolted
  * to the car, and scaling its crush force with the payload made a loaded car's stop
@@ -1597,26 +1609,73 @@ export const BEAM_AXLE_GYRATION_SQ = 0.6;
  * gently in proportion to its own weight, which is what the real thing does.
  */
 export const BUMP_STOP_FRACTION = 0.4;
-export const BUMP_STOP_PEAK = 6;
+export const BUMP_STOP_PEAK = 8;
 /**
- * The damper's LOW-SPEED circuit. A real telescopic damper is not one linear
- * coefficient: below a knee of piston speed the oil only gets through the bleed
- * orifice, which damps DAMPER_BLEED_GAIN times harder than the valve stack that opens
- * above it. That is how a car can ride a sharp bump softly (high piston speed, valves
- * open) and still have its body motions — roll, pitch, the slow float after a crest,
- * all of them low piston speed — come to rest in about one swing.
+ * THE REBOUND STOP: how far a corner can droop below the stance it was designed at,
+ * as a share of its bump travel, and the length over which the stop takes the spring's
+ * remaining preload off the tyre.
  *
- * The preset damping ratios are the valve stack's, the figure a damper is specified
- * by. The wheel contact applies that linear part; `resolveTravel` adds the bleed's extra
- * `(gain − 1) · c · clamp(v, ±knee)` at each contact patch, and the tyre carries it.
+ * A linear spring hangs on until its free length, which for these soft cars is the
+ * whole sag: 188 mm of droop on a Zhiguli's nose, 275 on a GAZ-21's, so a body rising
+ * off a crest or the inside of a corner kept a wheel pressing the road far past where
+ * the real strut tops out. Real droop is shorter than that and somewhat LONGER than
+ * the bump travel: about 100 mm into jounce and 120-135 mm into rebound for a large
+ * sedan with a good ride, droop enough that all four wheels stay on the road at 1 g
+ * (G. Locock, Eng-Tips "Automobile rear wheel travel", a chassis engineer's rule of
+ * thumb). So droop is `REBOUND_TRAVEL_SHARE` of the preset's bump travel, capped at the
+ * spring's own sag: 108 mm on a Zhiguli, 168 on a Niva, and no change at all for the
+ * stiff cars whose sag is already shorter (the rally Lada's 81-103 mm).
  *
- * It is the only roll damping in the model (see the body-roll block below): with the
- * linear part alone the roll mode sat at 0.26-0.34 of critical, because the bars add
- * roll stiffness and nothing that damps it, and every car swung a third of its lean
- * back past upright when a couple was let go (tools/roll-balance.ts, roll release).
+ * At the top the spring still carries `k · (sag − droop)`. The rebound stop inside the
+ * strut (a rubber ring or a hydraulic top-out) takes that preload off the wheel over
+ * its last `TOP_OUT_M` [E: a rebound buffer's working length, a couple of cm], rising
+ * with the square of how far in, so the tyre's load runs smoothly to nothing at the
+ * limit; past it the wheel hangs from the body and leaves the road.
  */
-export const DAMPER_BLEED_GAIN = 2;
-export const DAMPER_BLEED_KNEE_MPS = 0.1;
+export const REBOUND_TRAVEL_SHARE = 1.2;
+export const TOP_OUT_M = 0.02;
+/**
+ * The damper's force curve: DIGRESSIVE, and stronger in rebound than in bump at low
+ * speed. Below a knee of piston speed the compression stroke runs at the preset's
+ * damping ratio and the rebound stroke at `DAMPER_REBOUND_LOW_SPEED_GAIN` times its
+ * own; above the knee both go on rising at only `DAMPER_HIGH_SPEED_SLOPE` of the
+ * preset's slope.
+ *
+ * That is the shape of a passenger car's telescopic damper. Its low and mid speeds
+ * (0-51 and 51-203 mm/s in Kasprzak's breakdown, "Understanding your Dampers", the
+ * FSAE damper chapter) are the bleed and the disc stack's preload, and they control
+ * the body: heave, pitch and roll all live there. Above, the stack opens and the
+ * curve flattens, so a sharp bump — a seam, a pothole's edge, the wheel ringing on
+ * its tyre — is passed to the body with less force than a linear damper would hand it.
+ * The knee sits at 0.1 m/s, the geometric middle of that 51-203 mm/s band [E]. Above
+ * it 0.6 of the slope [E]: Kasprzak's rule of thumb asks 0.5-0.7 of critical for the
+ * sprung mass and 0.3-0.5 for the unsprung, about that ratio.
+ *
+ * WHY REBOUND ALONE IS DOUBLED. The real damper is lopsided. The VAZ-2101's front
+ * damper is catalogued at 0.31 m/s of piston speed with 235 N in compression and
+ * 1154 N in rebound (AvtoVAZ 21010-2905402-06, ТУ 37.370.019-2001; SAAZ's 2101-2905402
+ * 1342 N), about 5:1, where Kasprzak gives 3:1 as the textbook passenger car. Brought
+ * to the wheel through a motion ratio of 0.55-0.65 [E: damper on the lower arm inside
+ * the spring], that rebound is about the Zhiguli preset's (ζ 0.38) at the matching
+ * wheel speed, and that compression is a third of the preset's (ζ 0.24). The stroke a
+ * bump drives is compression, and the one that brings the body back down is rebound,
+ * so this is where body control sits on a real car: firm rebound, soft bump.
+ *
+ * It replaced a low-speed bleed that DOUBLED both strokes below 0.1 m/s, added so the
+ * roll mode would settle in about one swing (it measured ζ 0.26-0.34 without:
+ * tools/roll-balance.ts, roll release). That put the body at 0.5 of critical in
+ * COMPRESSION for every motion under 0.1 m/s, twice what the catalogue damper makes
+ * there — the stiff, dead ride over small inputs. Roll is damped by the sum of the two
+ * strokes (one side extends as the other closes), so keeping the doubled rebound keeps
+ * most of that roll damping while every bump meets the softer compression stroke.
+ *
+ * The preset ratios (`SuspensionTuning.compressionRatio`/`reboundRatio`) are the low
+ * speed figures before the rebound gain. The curve is the contact's
+ * (`TyreContact.damperKneeMps`) and the hub's (`stepWheelHop`), one shape for both.
+ */
+export const DAMPER_KNEE_MPS = 0.1;
+export const DAMPER_HIGH_SPEED_SLOPE = 0.6;
+export const DAMPER_REBOUND_LOW_SPEED_GAIN = 2;
 /**
  * How far above a settled wheel's centre its suspension mount is placed, metres.
  *
@@ -1860,7 +1919,7 @@ export function stockRadiatorWater(variantId: string): number {
  * pitch is the springs' and dampers' business. Only roll is the stability case: a car
  * crawling at full lock or parked on one kerb rocks on four light tyres and nothing else
  * bleeds that motion, so it is kept, about the roll axis alone and at the same rate.
- * 0.1/s is a 10 s time constant; the suspension's own roll damping (a 0.45-0.67 damping
+ * 0.1/s is a 10 s time constant; the suspension's own roll damping (a 0.22-0.49 damping
  * ratio, tools/roll-balance.ts) dwarfs it whenever the wheels are working.
  */
 export const CHASSIS_ROLL_DAMPING_PER_S = 0.1;

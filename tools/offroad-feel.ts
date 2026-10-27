@@ -46,7 +46,7 @@
  *
  * DIAG=1 adds, per run: the share of 1 g jolts with a wheel at the suspension's travel clamp,
  * with the chassis box on the ground and with a bump stop engaged, and the body force
- * on those steps split by source (spring, damper, bump stop, tyre hop, bleed, rest);
+ * on those steps split by source (spring, damper, bump stop, tyre hop, rebound stop, rest);
  * what each wheel stood on (surface / road chunk or tile); where on the box the body
  * touched; and every launch (all four wheels off) and tip (roll over TIP_DEG_S)
  * attributed to what happened in the CAUSE_STEPS before it. TRACE=1 prints the car
@@ -67,8 +67,13 @@ import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { SURFACES, SurfaceType } from '../src/core/surfaces';
 import { GameWorld, newWorldState } from '../src/game/state';
 import { preloadCarModels } from '../src/render/carmodel';
-import { SUSPENSION_FORCE_HEADROOM } from '../src/vehicle/vehicletuning';
-import type { TyreContact } from '../src/vehicle/tyrecontact';
+import {
+  DAMPER_HIGH_SPEED_SLOPE,
+  DAMPER_KNEE_MPS,
+  DAMPER_REBOUND_LOW_SPEED_GAIN,
+  SUSPENSION_FORCE_HEADROOM,
+} from '../src/vehicle/vehicletuning';
+import { digressiveRate, type TyreContact } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { type ChunkContext } from '../src/world/chunks';
 import { DESERT_TILE_SIZE, DesertTileStreamer } from '../src/world/deserttiles';
@@ -133,7 +138,7 @@ interface WheelInternals {
   contactNormal: { y: number };
   /** World contact point (relative to the origin), as the tyre contact last reported it. */
   contactPoint: { y: number };
-  bleedN: number;
+  topOutN: number;
   hopZ: number;
   hopV: number;
   springRateNPerM: number;
@@ -157,7 +162,7 @@ interface Anatomy {
   spring: number;
   bumpStop: number;
   hop: number;
-  bleed: number;
+  topOut: number;
   residual: number;
 }
 
@@ -315,7 +320,7 @@ function newStats(label: string): Stats {
     surfaceChatter: 0,
     wheelContactSteps: 0,
     wheelClampSteps: 0,
-    anatomy: { steps: 0, clamped: 0, body: 0, bump: 0, rapier: 0, spring: 0, bumpStop: 0, hop: 0, bleed: 0, residual: 0 },
+    anatomy: { steps: 0, clamped: 0, body: 0, bump: 0, rapier: 0, spring: 0, bumpStop: 0, hop: 0, topOut: 0, residual: 0 },
     standing: {},
     bodyWhere: {},
     events: {},
@@ -523,7 +528,7 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
     let springN = 0;
     let bumpN = 0;
     let hopN = 0;
-    let bleedN = 0;
+    let topOutN = 0;
     const ride = vehicle.wheelRide;
     for (let i = 0; i < ride.length; i++) {
       const r = ride[i]!;
@@ -545,7 +550,7 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
         track.groundRate = rate;
         const suspension = wheel.tyre.forceN;
         // What the body is actually handed through this tyre: the spring's force and the stop.
-        const raw = suspension + r.bumpStopN;
+        const raw = suspension + r.bumpStopN + wheel.topOutN;
         if (r.staticLoadN > 0) load = Math.max(load, raw / r.staticLoadN);
         stats.wheelContactSteps++;
         if (wheel.compressionM >= wheel.maxTravelM - 1e-3) {
@@ -559,8 +564,14 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
         // The spring term is k·(rest − length); the rest of the force is the damper.
         springN += Math.min(applied, wheel.springRateNPerM * wheel.compressionM) * up;
         bumpN += r.bumpStopN;
-        bleedN += wheel.bleedN;
-        const cSusp = wheel.hopV > 0 ? wheel.compressionRateNsPerM : wheel.relaxationRateNsPerM;
+        topOutN += wheel.topOutN;
+        const cSusp = digressiveRate(
+          wheel.hopV > 0 ? wheel.compressionRateNsPerM : wheel.relaxationRateNsPerM,
+          Math.abs(wheel.hopV),
+          DAMPER_KNEE_MPS,
+          DAMPER_HIGH_SPEED_SLOPE,
+          wheel.hopV > 0 ? 1 : DAMPER_REBOUND_LOW_SPEED_GAIN,
+        );
         hopN += Math.max(-r.loadN, wheel.springRateNPerM * wheel.hopZ + cSusp * wheel.hopV);
       }
       const ground = contact ? wheel.tyre.ground : null;
@@ -645,8 +656,8 @@ function drive(g: Ground, car: Car, startS: number, stats: Stats, o: DriveOption
       a.spring += springN / weight;
       a.bumpStop += bumpN / weight;
       a.hop += hopN / weight;
-      a.bleed += bleedN / weight;
-      a.residual += az + 1 - (rapierN + bumpN + hopN + bleedN) / weight;
+      a.topOut += topOutN / weight;
+      a.residual += az + 1 - (rapierN + bumpN + hopN + topOutN) / weight;
     }
   }
 }
@@ -704,7 +715,7 @@ function anatomyRow(st: Stats): string {
     `  ${''.padEnd(22)} clamp ${((st.wheelClampSteps / Math.max(1, st.wheelContactSteps)) * 100).toFixed(1)}% of wheel-steps;` +
     ` ${a.steps} jolts >=${SPIKE_G} g: clamped ${share(a.clamped)} body ${share(a.body)} bumpstop ${share(a.bump)};` +
     ` mean g: spring ${(a.spring / k).toFixed(2)} damper ${((a.rapier - a.spring) / k).toFixed(2)} stop ${(a.bumpStop / k).toFixed(2)}` +
-    ` hop ${(a.hop / k).toFixed(2)} bleed ${(a.bleed / k).toFixed(2)} rest ${(a.residual / k).toFixed(2)}\n` +
+    ` hop ${(a.hop / k).toFixed(2)} topout ${(a.topOut / k).toFixed(2)} rest ${(a.residual / k).toFixed(2)}\n` +
     `  ${''.padEnd(22)} on: ${standing}\n` +
     `  ${''.padEnd(22)} body at: ${JSON.stringify(st.bodyWhere)}  launches/tips: ${JSON.stringify(st.events)}`
   );

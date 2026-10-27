@@ -407,6 +407,25 @@
 
 ### Changed
 
+- THE DAMPERS SOFT IN BUMP, FIRM IN REBOUND, AND DIGRESSIVE (`digressiveRate` in
+  `vehicle/tyrecontact.ts`; `DAMPER_KNEE_MPS` 0.1, `DAMPER_HIGH_SPEED_SLOPE` 0.6,
+  `DAMPER_REBOUND_LOW_SPEED_GAIN` 2 in vehicletuning.ts; the contact and the hubs share
+  the curve). The low-speed bleed that doubled BOTH strokes under 0.1 m/s is gone: it
+  put the body at 0.5 of critical in compression for every small input. Compression is
+  now the preset's ratio to the knee, rebound twice its ratio, both rising at 0.6 of the
+  slope above it; the VAZ-2101's catalogue damper (235 N bump, 1154-1342 N rebound at
+  0.31 m/s) is the source. THE BUMP STOP is cubic with a peak of 8× the design load (was
+  quadratic, 6×): the same energy over the same rubber, a third of the force at its
+  first quarter. A REBOUND STOP: droop is 1.2× the bump travel, capped at the sag
+  (`REBOUND_TRAVEL_SHARE`, `TOP_OUT_M`, `TyreContact.droopLengthM`); the stop takes the
+  spring's preload off the tyre over its last 20 mm and the wheel hangs past it (a
+  Zhiguli nose: 108 mm instead of 188). Ride bench, mean of three seeds, peak body
+  vertical acceleration on a 0.4 m bump: VAZ-2101 2 cm 30 km/h 3.7 → 2.3 m/s², 3 cm
+  60 km/h 7.3 → 5.1, 4 cm dip 60 km/h 4.4 → 3.2; 2110 2 cm 100 km/h 8.3 → 4.9. Cruise
+  RMS on the textured road rose (2101 at 60 km/h 0.21 → 0.36 m/s²): the body moves on
+  the road again. Roll release damping ratio 0.46 → 0.26 (2101), 0.68 → 0.49 (2110),
+  0.41 → 0.22 (IZh van); step-steer roll overshoot 21 → 47%, 19 → 37%, 28 → 57%.
+  reality.ts: all 24 within tolerance.
 - TRAFFIC ON YOUR SIDE KEEPS BELOW YOUR PACE OUT OF SIGHT (`world/traffic.ts`
   `PLAYER_PACE_SHARE`, `PLAYER_PACE_SPREAD`, `PLAYER_PACE_FLOOR_MPS`, `playerPaceCap`;
   `main.ts`, `ui/menu.ts`). A car going the player's way, ahead of him and out of his

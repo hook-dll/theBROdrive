@@ -117,8 +117,9 @@ import {
   CHASSIS_ROLL_DAMPING_PER_S,
   COM_DROP_FRACTION,
   CONTACT_PATCH_M,
-  DAMPER_BLEED_GAIN,
-  DAMPER_BLEED_KNEE_MPS,
+  DAMPER_HIGH_SPEED_SLOPE,
+  DAMPER_KNEE_MPS,
+  DAMPER_REBOUND_LOW_SPEED_GAIN,
   DEFORMATION_DRAG_FULL_MPS,
   DEFORMATION_DRAG_START_MPS,
   DESTROYED_ENGINE_SPEED_CAP_MPS,
@@ -191,6 +192,7 @@ import {
   pitchLinkTan,
   aligningMomentPeak,
   REAR_AXLE_SIDE_GRIP,
+  REBOUND_TRAVEL_SHARE,
   ROLL_CAMBER_LIMIT_RAD,
   rollCamberShare,
   relaxationLoadScale,
@@ -208,6 +210,7 @@ import {
   STEER_ASSIST_SLIP_MARGIN,
   STEER_FREE_TAU_S,
   SUSPENSION_FORCE_HEADROOM,
+  TOP_OUT_M,
   TRANSFORM_EMIT_INTERVAL,
   TWO_PI,
   TYRE_COOLING_AIRFLOW_GAIN,
@@ -245,7 +248,7 @@ import {
   TCS_SLIP,
 } from './vehicletuning';
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
-import { TyreContacts, type TyreContact } from './tyrecontact';
+import { TyreContacts, digressiveRate, type TyreContact } from './tyrecontact';
 import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
 
 const KIT_MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
@@ -385,6 +388,13 @@ interface WheelVisual {
    */
   bumpStopPeakN: number;
   /**
+   * The compression at which this corner's rebound stop has taken all of the spring's
+   * preload off the tyre, metres (`REBOUND_TRAVEL_SHARE`): the strut is at full
+   * droop. Zero where the spring reaches its free length first and there is no stop
+   * to meet.
+   */
+  topOutCompressionM: number;
+  /**
    * The static compression the load asks of the spring, metres: what this corner would
    * settle at if the travel were long enough to allow it. Where it actually settles is
    * `compressionM`, which is short of this whenever the bump stop is carrying part of
@@ -418,10 +428,11 @@ interface WheelVisual {
   /** Progressive bump-stop force applied this step, newtons. */
   bumpStopN: number;
   /**
-   * The damper's low-speed bleed force this step (N), positive pushing the body up:
-   * what the damper makes beyond the contact's linear part (see `DAMPER_BLEED_GAIN`).
+   * The rebound stop's force this step (N), zero or negative, pulling the body down at
+   * the patch: the spring's preload the stop takes off the tyre as the strut tops out
+   * (`TOP_OUT_M`).
    */
-  bleedN: number;
+  topOutN: number;
   /**
    * Anti-roll bar force on this corner (N), positive pushing the body up — the outer
    * wheel's share of the roll the bar resists. Applied to the body at the contact patch,
@@ -589,7 +600,7 @@ interface WheelVisual {
   carcassSlip: number;
   /**
    * Normal load (N) the tyre carries this step: the spring and damper, bump stop,
-   * damper bleed and anti-roll bar of this step's travel, and the links' share of last
+   * rebound stop and anti-roll bar of this step's travel, and the links' share of last
    * step's side force (`linkN`).
    */
   loadN: number;
@@ -2307,6 +2318,9 @@ export class Vehicle implements Rebasable {
       // bump stop below catches the last of it progressively.
       const maxTravel = sag + suspension.bumpTravel;
       const restLength = sag + MOUNT_ABOVE_WHEEL_CENTRE;
+      // Full droop, below the kerb stance (see REBOUND_TRAVEL_SHARE): the spring's sag
+      // where that is the shorter, and then there is no rebound stop to meet.
+      const topOutCompression = Math.max(0, sag - REBOUND_TRAVEL_SHARE * suspension.bumpTravel);
 
       // The mount is placed so a settled wheel centre lands exactly one radius above
       // the chosen contact plane, per axle. Two axles with different sag therefore sit
@@ -2335,6 +2349,10 @@ export class Vehicle implements Rebasable {
       tyre.relaxationRateNsPerM = relaxationRateNsPerM;
       tyre.maxTravelM = maxTravel;
       tyre.maxForceN = SUSPENSION_FORCE_HEADROOM * staticLoadN;
+      tyre.damperKneeMps = DAMPER_KNEE_MPS;
+      tyre.damperHighSpeedSlope = DAMPER_HIGH_SPEED_SLOPE;
+      tyre.damperReboundLowSpeedGain = DAMPER_REBOUND_LOW_SPEED_GAIN;
+      tyre.droopLengthM = restLength - topOutCompression;
 
       const mesh = this.wheelMeshes.get(wheel.id);
       if (!mesh) throw new Error(`Car model "${this.model.id}" is missing wheel ${wheel.id}`);
@@ -2372,6 +2390,7 @@ export class Vehicle implements Rebasable {
         designSagM: sag,
         bumpTravelM: suspension.bumpTravel,
         bumpStopPeakN: BUMP_STOP_PEAK * designLoadN,
+        topOutCompressionM: topOutCompression,
         sagM: sag,
         staticLoadN,
         springRateNPerM,
@@ -2381,7 +2400,7 @@ export class Vehicle implements Rebasable {
         tyreTempC: ambientAirC(this.world.state.timeOfDay, DAY_LENGTH),
         tyreGrip: 1,
         bumpStopN: 0,
-        bleedN: 0,
+        topOutN: 0,
         barN: 0,
         barFraction: wheel.isFront ? bars.front : bars.rear,
         rollCentreLocalY: contactY + (wheel.isFront ? rollCentre.front : rollCentre.rear),
@@ -4669,8 +4688,8 @@ export class Vehicle implements Rebasable {
       w.lateralSpeed = latSpeed;
 
       // THE LOAD, of this step. The spring is not the only thing between body and road.
-      // The bump stop, the damper's low-speed bleed and the anti-roll bar push the body
-      // up at this contact patch as well, so the tyre carries their force too: a bar
+      // The bump stop, the rebound stop and the anti-roll bar push (or pull) the body at
+      // this contact patch as well, so the tyre carries their force too: a bar
       // that resisted the roll without loading its outer tyre would take load transfer
       // AWAY from its own axle — the balance lever backwards, measured as 44% front on
       // a Zhiguli with a front bar twice the rear's (tools/roll-balance.ts). All are read
@@ -4681,7 +4700,7 @@ export class Vehicle implements Rebasable {
       // so an edge or a seam reaches it as the rise a wheel rolling over it makes, not
       // as a step.
       w.loadN = inContact
-        ? Math.max(0, w.tyre.forceN + w.bumpStopN + w.bleedN + w.barN + w.linkN + w.pitchLinkN)
+        ? Math.max(0, w.tyre.forceN + w.bumpStopN + w.topOutN + w.barN + w.linkN + w.pitchLinkN)
         : 0;
 
       // THE CARCASS UNDER LOAD (`relaxationLoadScale`): the lengths the patch builds its
@@ -5011,14 +5030,11 @@ export class Vehicle implements Rebasable {
         this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
       }
 
-      // The bump stop and the damper's bleed, sized off this step's travel in
-      // `resolveTravel`, pushed in at the contact patch.
-      if (w.bumpStopN !== 0) {
-        rotateVector(this.microUp, this.rotationScratch, 0, w.bumpStopN * dt, 0);
-        this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
-      }
-      if (w.bleedN !== 0) {
-        rotateVector(this.microUp, this.rotationScratch, 0, w.bleedN * dt, 0);
+      // The bump and rebound stops, sized off this step's travel in `resolveTravel`,
+      // pushed in at the contact patch.
+      const stopsN = w.bumpStopN + w.topOutN;
+      if (stopsN !== 0) {
+        rotateVector(this.microUp, this.rotationScratch, 0, stopsN * dt, 0);
         this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
       }
 
@@ -6201,7 +6217,13 @@ export class Vehicle implements Rebasable {
       }
       const mUnsprung = unsprungMass(w.radius);
       const kSusp = w.springRateNPerM;
-      const cSusp = w.hopV > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
+      const cSusp = digressiveRate(
+        w.hopV > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM,
+        Math.abs(w.hopV),
+        DAMPER_KNEE_MPS,
+        DAMPER_HIGH_SPEED_SLOPE,
+        w.hopV > 0 ? 1 : DAMPER_REBOUND_LOW_SPEED_GAIN,
+      );
       const cTyre = 2 * TYRE_DAMPING_RATIO * Math.sqrt(w.tyreRateN * mUnsprung);
       const ground = w.profileHeight - w.profileRate * dt * (1 - t);
       const touching = this.tyreTouches(w, ground, cTyre);
@@ -6296,8 +6318,20 @@ export class Vehicle implements Rebasable {
       const spring = 0.5 * (a.springRateNPerM + b.springRateNPerM);
       const springSelf = 0.5 * spring * (1 + spacingSq);
       const springCross = 0.5 * spring * (1 - spacingSq);
-      const damperA = a.hopV > 0 ? a.compressionRateNsPerM : a.relaxationRateNsPerM;
-      const damperB = b.hopV > 0 ? b.compressionRateNsPerM : b.relaxationRateNsPerM;
+      const damperA = digressiveRate(
+        a.hopV > 0 ? a.compressionRateNsPerM : a.relaxationRateNsPerM,
+        Math.abs(a.hopV),
+        DAMPER_KNEE_MPS,
+        DAMPER_HIGH_SPEED_SLOPE,
+        a.hopV > 0 ? 1 : DAMPER_REBOUND_LOW_SPEED_GAIN,
+      );
+      const damperB = digressiveRate(
+        b.hopV > 0 ? b.compressionRateNsPerM : b.relaxationRateNsPerM,
+        Math.abs(b.hopV),
+        DAMPER_KNEE_MPS,
+        DAMPER_HIGH_SPEED_SLOPE,
+        b.hopV > 0 ? 1 : DAMPER_REBOUND_LOW_SPEED_GAIN,
+      );
       const tyreDampA = 2 * TYRE_DAMPING_RATIO * Math.sqrt(a.tyreRateN * massA);
       const tyreDampB = 2 * TYRE_DAMPING_RATIO * Math.sqrt(b.tyreRateN * massB);
       const groundA = a.profileHeight - a.profileRate * dt * (1 - t);
@@ -6360,7 +6394,7 @@ export class Vehicle implements Rebasable {
 
   /**
    * This step's travel and the forces besides the spring's that hang off it: the bump
-   * stop, the damper's bleed and the anti-roll bars. Run straight after the contacts,
+   * stop, the rebound stop and the anti-roll bars. Run straight after the contacts,
    * so the load each tyre is handed (`loadN`) is all of THIS step's; their impulses go
    * in with the tyres' (`updateWheelDynamics`, `applyAntiRollBars`).
    */
@@ -6399,7 +6433,7 @@ export class Vehicle implements Rebasable {
       w.bumpStopN = 0;
       if (inContact && w.compressionM > stopBegins) {
         const into = Math.min(1, (w.compressionM - stopBegins) / (w.maxTravelM - stopBegins));
-        w.bumpStopN = w.bumpStopPeakN * into * into;
+        w.bumpStopN = w.bumpStopPeakN * into * into * into;
         // The clunk the audio hears: the corner still closing once the rubber is a
         // third crushed, which a parked or cornering car settled on its stop never is.
         if (into > 1 / 3 && previousCompressionM > 0 && dt > 0) {
@@ -6408,18 +6442,15 @@ export class Vehicle implements Rebasable {
         }
       }
 
-      // THE DAMPER'S BLEED (see DAMPER_BLEED_GAIN): below the knee the damper is
-      // `gain` times its valve-stack rate, and the contact has already applied the
-      // valve stack's. Read off the same compression the bump stop uses, so it is this
-      // step's piston speed.
-      w.bleedN = 0;
-      if (inContact && dt > 0) {
-        const pistonMps = (w.compressionM - previousCompressionM) / dt;
-        const rate = pistonMps > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
-        w.bleedN =
-          (DAMPER_BLEED_GAIN - 1) *
-          rate *
-          clamp(pistonMps, -DAMPER_BLEED_KNEE_MPS, DAMPER_BLEED_KNEE_MPS);
+      // THE REBOUND STOP (see REBOUND_TRAVEL_SHARE): over its last `TOP_OUT_M` of droop
+      // the strut's own stop takes the spring's remaining preload off the tyre, so the
+      // load runs out at full droop instead of a spring's free length further down.
+      // Never more than the contact is pushing with: what it cannot take, the wheel
+      // leaving the road does (`droopLengthM`).
+      w.topOutN = 0;
+      if (inContact && w.topOutCompressionM > 0) {
+        const into = clamp((w.topOutCompressionM + TOP_OUT_M - w.compressionM) / TOP_OUT_M, 0, 1);
+        w.topOutN = Math.max(-w.tyre.forceN, -w.springRateNPerM * w.topOutCompressionM * into * into);
       }
       w.barN = 0;
     }

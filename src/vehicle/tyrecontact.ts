@@ -130,6 +130,23 @@ const TREAD_AGREE_M = 1e-4;
 const TREAD_REFRESH_TICKS = 8;
 
 /**
+ * A digressive damper's rate at strut speed `speedAbs` (≥ 0), as the coefficient that
+ * gives its force when multiplied by that speed: `lowSpeedGain · rate` up to `kneeMps`,
+ * and above it the force goes on rising at `highSpeedSlope · rate`. The one curve the
+ * contact and the car's hubs both damp on (`DAMPER_KNEE_MPS` in vehicletuning.ts).
+ */
+export function digressiveRate(
+  rate: number,
+  speedAbs: number,
+  kneeMps: number,
+  highSpeedSlope: number,
+  lowSpeedGain: number,
+): number {
+  if (speedAbs <= kneeMps) return rate * lowSpeedGain;
+  return (rate * (lowSpeedGain * kneeMps + highSpeedSlope * (speedAbs - kneeMps))) / speedAbs;
+}
+
+/**
  * One wheel's contact and suspension. The configuration fields are the caller's to
  * keep current; the result fields are rewritten by every `TyreContacts.update`.
  */
@@ -144,6 +161,19 @@ export interface TyreContact {
   springRateNPerM: number;
   compressionRateNsPerM: number;
   relaxationRateNsPerM: number;
+  /**
+   * The damper's knee, m/s of strut speed, the share of its rate it keeps above it, and
+   * the factor on its REBOUND rate below it (`digressiveRate`). Infinity, 1 and 1 — a
+   * linear damper — until the owner sets them.
+   */
+  damperKneeMps: number;
+  damperHighSpeedSlope: number;
+  damperReboundLowSpeedGain: number;
+  /**
+   * The longest the strut gets before the wheel hangs from the body (its rebound
+   * stop), metres below the mount. Free length until the owner sets it.
+   */
+  droopLengthM: number;
   /** Cap on the spring force put through the body, N. */
   maxForceN: number;
   /** Road-wheel angle about the body's up axis, radians, positive toward +X. */
@@ -159,7 +189,7 @@ export interface TyreContact {
   readonly normal: Vec3;
   /** What it stands on, or null in the air. */
   ground: RAPIER.Collider | null;
-  /** Mount to hub along the axis, metres. Rest length in the air. */
+  /** Mount to hub along the axis, metres. The droop length (`droopLengthM`) in the air. */
   lengthM: number;
   /** Spring and damper force this step, N, after the cap. Zero in the air. */
   forceN: number;
@@ -250,6 +280,10 @@ export class TyreContacts {
       compressionRateNsPerM: 0,
       relaxationRateNsPerM: 0,
       maxForceN: 0,
+      damperKneeMps: Infinity,
+      damperHighSpeedSlope: 1,
+      damperReboundLowSpeedGain: 1,
+      droopLengthM: restLengthM,
       steerRad: 0,
       // Rapier's default, which a wheel nobody has driven kept.
       frictionSlip: 10.5,
@@ -297,7 +331,14 @@ export class TyreContacts {
         continue;
       }
       // Spring and damper along the strut, carried to the ground along its normal.
-      const damping = c.speedMps < 0 ? c.compressionRateNsPerM : c.relaxationRateNsPerM;
+      const closing = c.speedMps < 0;
+      const damping = digressiveRate(
+        closing ? c.compressionRateNsPerM : c.relaxationRateNsPerM,
+        Math.abs(c.speedMps),
+        c.damperKneeMps,
+        c.damperHighSpeedSlope,
+        closing ? 1 : c.damperReboundLowSpeedGain,
+      );
       const force = Math.max(
         0,
         (c.springRateNPerM * (c.restLengthM - c.lengthM) - damping * c.speedMps) * c.inv,
@@ -563,7 +604,7 @@ export class TyreContacts {
       hubFace &&
       c.treadAgreed &&
       c.inContact &&
-      length <= c.restLengthM &&
+      length <= c.droopLengthM &&
       (this.step + c.refreshPhase) % TREAD_REFRESH_TICKS !== 0 &&
       hubHandle === c.hubHandle &&
       hub.x * lastNormal.x + hub.y * lastNormal.y + hub.z * lastNormal.z >= GATE_NORMAL_COS &&
@@ -587,7 +628,7 @@ export class TyreContacts {
         hubFace && length >= hubLength - TREAD_AGREE_M && n.x * hub.x + n.y * hub.y + n.z * hub.z >= GATE_NORMAL_COS;
     }
 
-    if (!(length <= c.restLengthM)) {
+    if (!(length <= c.droopLengthM)) {
       this.inTheAir(c, mx, my, mz);
       return;
     }
@@ -746,10 +787,10 @@ export class TyreContacts {
 
   private inTheAir(c: ContactState, mx: number, my: number, mz: number): void {
     const d = this.axis;
-    const reach = c.restLengthM + c.radiusM;
+    const reach = c.droopLengthM + c.radiusM;
     c.inContact = false;
     c.ground = null;
-    c.lengthM = c.restLengthM;
+    c.lengthM = c.droopLengthM;
     c.speedMps = 0;
     c.inv = 1;
     c.point.x = mx + d.x * reach;
