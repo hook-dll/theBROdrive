@@ -1476,7 +1476,6 @@ async function boot(): Promise<void> {
     wheelContact: 0,
     cabinOffset: [0, 0, 0],
     eyeDrop: 0,
-    footSpeed: 0,
     velocityX: 0,
     velocityZ: 0,
     velocityY: 0,
@@ -2557,7 +2556,6 @@ async function boot(): Promise<void> {
       const drivenModel = s.cars[drivingId!]?.modelId;
       if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel, s.player.seat);
       target.eyeDrop = 0;
-      target.footSpeed = 0;
       // The dynamic camera's raw material: where the car is really going, not where it
       // points. Body-frame speed and slip come from the same solver step.
       const velocity = driving.chassis.linvel();
@@ -2574,7 +2572,6 @@ async function boot(): Promise<void> {
       target.y = p.y - Player.FEET_OFFSET;
       target.z = p.z;
       target.eyeDrop = player.interpolatedEyeDrop(alpha);
-      target.footSpeed = player.grounded ? player.groundSpeed : 0;
       target.qx = 0;
       target.qy = 0;
       target.qz = 0;
