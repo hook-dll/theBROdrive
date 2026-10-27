@@ -1851,7 +1851,6 @@ export class Vehicle implements Rebasable {
       SURFACES[surfaceType].mu *
       weatherGrip(surfaceType) *
       this.handling.tyreLateralScale *
-      this.model.lateralGripScale *
       this.tyreCarGrip(this.statsValue.mass) *
       this.worstTyreTemperatureGrip() *
       this.handling.rearAxleSideGrip *
@@ -3257,8 +3256,7 @@ export class Vehicle implements Rebasable {
     // tyre's own coefficient and the handling profile's cornering scale. The SURFACE's
     // own coefficient is applied per wheel below, because with four wheels on as many
     // surfaces it is no longer one number.
-    // `lateralGripScale` is the car's own skidpad calibration where one was measured.
-    const lateralCarFactor = this.handling.tyreLateralScale * this.model.lateralGripScale * tyreCarGrip;
+    const lateralCarFactor = this.handling.tyreLateralScale * tyreCarGrip;
     // The load μ(Fz) is measured against THIS WHEEL parked: `w.staticLoadN`, from the
     // weight distribution and the axle geometry (see AxleGeometry). It is per-wheel
     // now, which is the point — referencing a front tyre against a quarter of the
@@ -5586,7 +5584,6 @@ export class Vehicle implements Rebasable {
     const staticCapacityPerN =
       SURFACES[SurfaceType.Asphalt].mu *
       this.handling.tyreLateralScale *
-      this.model.lateralGripScale *
       this.tyreCarGrip(this.statsValue.mass);
     let moment = 0;
     let referenceMoment = 0;
@@ -6562,29 +6559,52 @@ export class Vehicle implements Rebasable {
 
     // Unsprung, at each wheel centre: a disc of the wheel's radius about its axle.
     let halfTrack = 0;
-    let crankY = 0;
+    let frontCentreY = 0;
+    let rearCentreY = 0;
     let frontWheels = 0;
+    let rearWheels = 0;
     for (const w of this.measure.wheels) {
       const m = unsprungMass(w.radius);
       const r2 = w.radius * w.radius;
       add(m, w.pos[0], w.pos[1], w.pos[2], 0.5 * m * r2, 0.25 * m * r2, 0.25 * m * r2);
       halfTrack += Math.abs(w.pos[0]) / this.measure.wheels.length;
       if (w.isFront) {
-        crankY += w.pos[1];
+        frontCentreY += w.pos[1];
         frontWheels++;
+      } else {
+        rearCentreY += w.pos[1];
+        rearWheels++;
       }
     }
-    // The crank runs at the front wheel centres' height.
-    crankY /= frontWheels;
 
     // The powertrain. A car that drives its rear axle has a propshaft, so a longitudinal
     // engine set back behind the front axle, the gearbox bolted on behind it, and on
     // four-wheel drive the transfer box behind that; a front-drive car has a transverse
-    // engine just ahead of the front axle and its transaxle on the axle line.
+    // engine just ahead of the front axle and its transaxle on the axle line. A mid or
+    // rear engine (`CarModelDef.rearEngine`) stands where the car's figure puts it, its
+    // crank at the rear wheel centres' height and its transaxle's differential on the
+    // rear axle: across the car the gearbox is on the axle line, along it the gearbox is
+    // on the axle's other side from the engine.
     const engineMass = variant(this.model.engineId).mass;
     const gearboxMass = variant(this.model.gearboxId).mass;
-    const engineY = crankY + ENGINE_ABOVE_CRANK_M;
-    if (this.model.rearDriveBias > 0) {
+    const rearEngine = this.model.rearEngine;
+    if (rearEngine) {
+      const crankY = rearCentreY / rearWheels;
+      const forward = Math.sign(axles.frontZ - axles.rearZ) || 1;
+      const engineZ = axles.rearZ + forward * rearEngine.aheadOfRearAxleM;
+      const engineY = crankY + ENGINE_ABOVE_CRANK_M;
+      if (rearEngine.transverse) {
+        addBox(engineMass, engineY, engineZ, ENGINE_LENGTH_M, ENGINE_HEIGHT_M, ENGINE_WIDTH_M);
+        addBox(gearboxMass, crankY, axles.rearZ, GEARBOX_LENGTH_M, GEARBOX_SECTION_M, GEARBOX_SECTION_M);
+      } else {
+        addBox(engineMass, engineY, engineZ, ENGINE_WIDTH_M, ENGINE_HEIGHT_M, ENGINE_LENGTH_M);
+        const gearboxZ = axles.rearZ - Math.sign(rearEngine.aheadOfRearAxleM) * forward * 0.5 * GEARBOX_LENGTH_M;
+        addBox(gearboxMass, crankY, gearboxZ, GEARBOX_SECTION_M, GEARBOX_SECTION_M, GEARBOX_LENGTH_M);
+      }
+    } else if (this.model.rearDriveBias > 0) {
+      // The crank runs at the front wheel centres' height.
+      const crankY = frontCentreY / frontWheels;
+      const engineY = crankY + ENGINE_ABOVE_CRANK_M;
       const engineZ = axles.frontZ - LONGITUDINAL_ENGINE_BEHIND_FRONT_AXLE_M;
       const gearboxLength = GEARBOX_LENGTH_M + (this.model.rearDriveBias < 1 ? TRANSFER_BOX_LENGTH_M : 0);
       addBox(engineMass, engineY, engineZ, ENGINE_WIDTH_M, ENGINE_HEIGHT_M, ENGINE_LENGTH_M);
@@ -6597,6 +6617,8 @@ export class Vehicle implements Rebasable {
         gearboxLength,
       );
     } else {
+      const crankY = frontCentreY / frontWheels;
+      const engineY = crankY + ENGINE_ABOVE_CRANK_M;
       const engineZ = axles.frontZ + TRANSVERSE_ENGINE_AHEAD_OF_FRONT_AXLE_M;
       addBox(engineMass, engineY, engineZ, ENGINE_LENGTH_M, ENGINE_HEIGHT_M, ENGINE_WIDTH_M);
       addBox(gearboxMass, crankY, axles.frontZ, GEARBOX_LENGTH_M, GEARBOX_SECTION_M, GEARBOX_SECTION_M);

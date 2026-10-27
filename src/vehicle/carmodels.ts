@@ -806,7 +806,7 @@ export interface LimitedSlip {
  * relaxation are derived from it (`tyreCurve` in vehicletuning.ts): a tall soft sidewall
  * builds force slowly and peaks late; a low radial is quick and peaks early. On loose
  * ground (the placeholder) it also sets how gently the tyre lets go by angle. Every
- * road car runs `KAMA_217`; the off-road cars (Niva, UAZ) and the rally 2105 keep their own.
+ * road car runs `ROAD_TYRE`; the off-road cars (Niva, UAZ) and the rally 2105 keep their own.
  */
 export interface TyreSpec {
   readonly construction: 'crossply' | 'radial';
@@ -815,56 +815,32 @@ export interface TyreSpec {
 }
 
 /**
- * THE ROAD TYRE: one typical KAMA of the 2000s on every road car, the owner's choice
- * (2026-10-17) over a ladder of period Soviet tyres the game has no test data for.
+ * THE ROAD TYRE: one good period tyre on every road car, the owner's choice (2026-10-27:
+ * "one good tyre for all", so no car's character is worn away on a mediocre one). It
+ * replaced the budget KAMA-217 (2026-10-17 to 2026-10-27, `wheelGrip` 0.53).
  *
- * KAMA-217, Nizhnekamskshina, 175/70 R13 82H (also 175/65 R14 82H), now discontinued.
- * PUBLISHED (td-kama.com/en/tyre_catalog/car/kama-217/175-70r13/): radial, tubeless,
- * combined carcass and breaker, road tread, 210 km/h, outer diameter 576 ± 6 mm,
- * section width at most 177 mm, static radius 261 ± 3 mm, 475 kg at 2.5 kgf/cm², 5J rim,
- * EU label wet grip E, rolling resistance F, 72 dB. The seller recommends the 175/70 R13
- * for VAZ models "from the 4th to the 11th" (mosautoshina.ru/catalog/tyre/kama/217/).
- *
- * KAMA publishes no dry-grip, cornering-stiffness or relaxation figure, so these are
- * DERIVED:
- *  - the side-force curve: `tyreCurve`'s radial rule at the 70 aspect (peak 5.8°, on
- *    loose ground plateau 0.81 by 23.9°, 0.31 m relaxation). One curve for every road car; each
- *    car keeps its own factory wheel radius and width (`FACTORY_GEOMETRY`), so this is
- *    the KAMA carcass at the car's own size, not a 175/70 R13 on a Volga hub.
- *  - `KAMA_217_GRIP`, below.
- * Its label class F is 10.6-12.0 N/kN on the test drum (EC 1222/2009), consistent with
- * the asphalt's road figure of 0.013 (`SURFACES`), which is left as it was.
+ * MICHELIN MXV, the European reference road radial of the late eighties: the one tyre
+ * model the period press measured on the most cars of our size, and the most alike on
+ * all of them. Car and Driver, 300 ft (91.4 m) skidpad and 70-0 mph:
+ *   VW Scirocco 16V, 1080 kg, front drive, MXV 185/60 HR14 (08/1986): 0.79 g, 196 ft
+ *   Acura Integra LS, 1087 kg, front drive, MXV (1986): 0.78 g, 194 ft
+ *   Acura Integra GS, 1218 kg, front drive, MXV: 0.78 g, 204 ft
+ *   BMW 325e, 1256 kg, rear drive, MXV 195/60 HR14 (06/1985): 0.78 g, 203 ft
+ * The side-force curve: `tyreCurve`'s radial rule at the 60 aspect of those sizes. Each
+ * car keeps its own factory wheel radius and width (`FACTORY_GEOMETRY`).
  */
-export const KAMA_217: TyreSpec = { construction: 'radial', aspect: 0.7 };
+export const ROAD_TYRE: TyreSpec = { construction: 'radial', aspect: 0.6 };
 /**
- * KAMA-217's `wheelGrip`, DERIVED: 0.53 is a peak of 0.90 on the reference asphalt
- * (mu 1.7), about 0.80 once locked on dry asphalt (`PAVED_SLIDE`, the peak 1.13 times the
- * locked figure). Wet grip class E (1.10-1.24
- * of the EU reference tyre, EC 1222/2009) puts it at the cheap end of its decade. The
- * figure is set on the two VAZs measured on budget 13-inch radials, and on the bench
- * (tools/physics-suite.ts, +150 kg, 2026-10-17) it held both: the Samara at 0.73 g on the 40 m
- * skidpad against Car and Driver's 0.71 g (06/1989, Samara 1500 on Goodyear Arriva M+S
- * P175/70R13) and 52.3 m from 100 against that test's 55.5 m rescaled; the 21102 at
- * 53.6 m against Za Rulem's 55.0 m on its standard 13-inch wheels (11/2004, no ABS).
- * docs/physics-references.md, kit_vaz2108 and kit_vaz2110.
+ * The MXV's `wheelGrip`, DERIVED by the step from the budget tyre it replaced: 0.62 is
+ * 1.17 times the KAMA's 0.53, a peak of about 1.05 on the reference asphalt. The KAMA's
+ * bench Samara cornered at 0.69 g against Car and Driver's 0.71 g on budget Goodyear
+ * Arriva M+S (06/1989); the MXV cars above at 0.78-0.79 g: × 1.17 for the Samara's own
+ * chassis. Their stops, 194-204 ft from 70 mph (47-49 m from 100 km/h), against the
+ * Samara test's 55.5 m from 100 rescaled: × 1.15-1.18. One coefficient serves both.
+ * The budget-to-good step agrees with the one car measured on both: the Honda Civic VX,
+ * 0.76 g on Dunlop SP23 and 0.82 g on Goodyear Eagle GA (Car and Driver 07/1993).
  */
-export const KAMA_217_GRIP = 0.53;
-/**
- * PER-CAR SKIDPAD CALIBRATION (`CarModelDef.lateralGripScale`), only where a measured
- * steady-state lateral figure exists (docs/physics-references.md). There is one: Car and
- * Driver 06/1989, 0.71 g on a 300 ft (91.4 m) circle, Samara 1500 3-door on Goodyear
- * Arriva M+S P175/70R13 — the 2108 itself, and the 2109 and 21099 as its same-chassis
- * siblings. `KAMA_217_GRIP` was set on that test when the bench gave the Samara 0.73 g;
- * later chassis changes left it at 0.69 (tools/physics-suite.ts skidpad, 40 m, +150 kg),
- * so these put the three back on the measurement without moving the tyre's braking. The
- * scale is a share of the side-force capacity, and the car's limit moves by a little less
- * than it, through load transfer.
- */
-const MEASURED_SKIDPAD_SCALE: Readonly<Record<string, number>> = {
-  kit_vaz2108: 1.05,
-  kit_vaz2109: 1.05,
-  kit_vaz21099: 1.05,
-};
+export const ROAD_TYRE_GRIP = 0.62;
 
 /** Mechanical era shared by cars with the same steering and tyre construction. */
 export type HandlingProfile = 'classic' | 'road' | 'sport' | 'utility';
@@ -967,6 +943,16 @@ const AERO_OPEL_ASTRA_F: AeroSpec = { frontalArea: 1.98, liftFront: 0.08, liftRe
  * area, 1.706 m × (1.40 − 0.15) m × 0.92.
  */
 const AERO_OPEL_VECTRA_A: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/**
+ * Caterham Seven: open, cycle wings, the wheels in the air. Its drag area is set on the
+ * bench to the 180 km/h (0.89): automobile-catalog's estimated Cd 0.65 on [E] 1.37 m².
+ * No lift figure: [E] the Zhiguli's shape figures, the open cockpit lifting the rear more.
+ */
+const AERO_CATERHAM_7: AeroSpec = { frontalArea: 1.37, liftFront: 0.13, liftRear: 0.26, sideSlope: 1.4, yawSlope: 0.47 };
+/** Matra Murena: a mid-engined wedge, Cd 0.328; the Samara hatches' shape on [E] 1.70 m². */
+const AERO_MATRA_MURENA: AeroSpec = { frontalArea: 1.7, liftFront: 0.08, liftRear: 0.26, sideSlope: 1.25, yawSlope: 0.5 };
+/** Tatra 613: a long notchback; the Volga 24's shape figures on [E] 2.05 m². */
+const AERO_TATRA_613: AeroSpec = { frontalArea: 2.05, liftFront: 0.14, liftRear: 0.2, sideSlope: 1.5, yawSlope: 0.45 };
 
 
 
@@ -1067,13 +1053,6 @@ export interface CarModelDef {
   /** Tyre grip multiplier on the surface's friction, in every direction alike. */
   readonly wheelGrip: number;
   /**
-   * Per-car calibration of the CORNERING coefficient against a measured skidpad, on top
-   * of `wheelGrip` and the handling profile's `tyreLateralScale`; 1 where no measurement
-   * exists (`MEASURED_SKIDPAD_SCALE`). Lateral only: braking and drive keep `wheelGrip`,
-   * which the measured stops are held to.
-   */
-  readonly lateralGripScale: number;
-  /**
    * What the car's own brakes deliver at a FLOORED pedal (a panic stamp) on a surface
    * that does not limit them, in g: the drums, discs and servo, not the tyres. Every
    * car here could lock its wheels on dry asphalt, so every figure is above its tyres'
@@ -1116,6 +1095,13 @@ export interface CarModelDef {
   /** Static share of kerb weight carried by the front axle, when layout needs an override. */
   readonly frontWeightShare?: number;
   /**
+   * Where a mid or rear engine sits: its centre's distance AHEAD of the rear axle line,
+   * metres (negative behind it), and whether it lies across the car. Absent: a front
+   * engine, placed by the drive layout. Only the masses use it (`Vehicle.applyChassisMass`):
+   * the axle split stays `frontWeightShare`, but the yaw inertia is the layout's own.
+   */
+  readonly rearEngine?: { readonly aheadOfRearAxleM: number; readonly transverse: boolean };
+  /**
    * Anti-roll bars, each as a fraction of its own axle's wheel rate (0 = no bar), when
    * the car's are not its suspension preset's (`SuspensionTuning.frontBar`/`rearBar`).
    * The split is the handling balance: the axle with more roll stiffness takes more of
@@ -1156,7 +1142,6 @@ export interface CarModelDef {
 type Entry = Omit<
   CarModelDef,
   | 'file'
-  | 'lateralGripScale'
   | 'fit'
   | 'factory'
   | 'scale'
@@ -1296,6 +1281,18 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // (115 Hp)"; the-blueprints.com drawing's 4430 / 2600 / 1700 / 1400).
   // src/carkit/measurements-vectra.md.
   kit_vectraa:    { length: 4.432, width: 1.706, height: 1.4, clearance: 0.15, wheelbase: 2.6, frontTrack: 1.437, rearTrack: 1.432, wheelRadius: 0.295, tyreWidth: 0.195 },
+  // The prototypes (`PROTOTYPE_MODELS`): the factory figures; the borrowed body is stretched
+  // to them. Caterham Super Seven 1.6 K-series (1996-2000): 3380 × 1575 × 1115 (hood up),
+  // 2225 wheelbase, 1270/1336 tracks, 185/60 HR14 (Caterham's year-2000 range sheet), the
+  // clearance [E] 100 (the Superlight's 80 on the same sheet), the nose [E] 0.48.
+  kit_caterham7:  { length: 3.380, width: 1.575, height: 1.115, clearance: 0.100, wheelbase: 2.225, frontTrack: 1.270, rearTrack: 1.336, wheelRadius: 0.289, tyreWidth: 0.185, frontOverhang: 0.48 },
+  // Matra Murena 2.2 (1981-83): 4070 × 1752 × 1220, 2435 wheelbase, 1410/1506 tracks (carfolio
+  // prints 1530 rear), 158 clearance (motorsdb, ultimatespecs), 185/60 R14 front and 195/60
+  // rear, kept as the front's radius with the rear's width; the nose [E] 0.80.
+  kit_murena:     { length: 4.070, width: 1.752, height: 1.220, clearance: 0.158, wheelbase: 2.435, frontTrack: 1.410, rearTrack: 1.506, wheelRadius: 0.289, tyreWidth: 0.195, frontOverhang: 0.80 },
+  // Tatra 613 first series (1975-80): 5025 × 1800 × 1505, 2980 wheelbase, 1520 tracks, 160
+  // clearance, 215/70 HR14 (the factory description, t613.wz.cz/popis.html); the nose [E] 0.95.
+  kit_tatra613:   { length: 5.025, width: 1.800, height: 1.505, clearance: 0.160, wheelbase: 2.980, frontTrack: 1.520, rearTrack: 1.520, wheelRadius: 0.328, tyreWidth: 0.215, frontOverhang: 0.95 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1334,7 +1331,7 @@ function factoryGeometry(id: string): FactoryGeometry {
  * driveline table (parts/registry.ts). Masses are catalogue kerb masses, weight
  * distribution is the factory axle split, steering lock is derived from the published
  * turning circle at each body's own measured wheelbase, and every road car runs the one
- * road tyre, `KAMA_217` (see the note above the table).
+ * road tyre, `ROAD_TYRE` (see the note above the table).
  *
  * `dragArea` is calibrated, in this order and never before the others: real mass,
  * ratios and driveline efficiency, then the engine's factory curve, then Cd·A as the
@@ -1377,7 +1374,7 @@ interface SovietSpec {
  *
  * `wheelGrip` multiplies the surface's one coefficient for drive, braking and
  * cornering alike, so it is the tyre. Every road car below runs the same one,
- * `KAMA_217` at `KAMA_217_GRIP`: the cars differ in mass, weight transfer, springs and
+ * `ROAD_TYRE` at `ROAD_TYRE_GRIP`: the cars differ in mass, weight transfer, springs and
  * axles, not in rubber. It replaced a ladder of period Soviet tyres (cross-ply Volgas
  * at 0.52-0.60, Fiat-era Zhiguli radials at 0.55-0.58, Samaras at 0.65 with the `road`
  * profile's 1.08 cornering scale on top), each calibrated to a period lateral figure
@@ -1497,11 +1494,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010305,
     mass: 1460,
     // Factory 6.70-15 cross-ply; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_zmz_21',
     gearboxId: 'gearbox_gaz_3',
     tankLitres: 60,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     steerLock: 0.511,
     rearDriveBias: 1,
@@ -1526,11 +1523,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.009556,
     mass: 1420,
     // Factory 7.35-14 cross-ply; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_zmz_24',
     gearboxId: 'gearbox_gaz_4',
     tankLitres: 55,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.63,
     rearDriveBias: 1,
@@ -1552,11 +1549,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010585,
     mass: 955,
     // Factory 155 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.521,
@@ -1578,11 +1575,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010632,
     mass: 1010,
     // Factory 165 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1200',
     gearboxId: 'gearbox_lada_4_2102',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_UNASSISTED_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.523,
@@ -1603,11 +1600,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010632,
     mass: 1030,
     // Factory 165/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_4_tall',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.522,
@@ -1629,11 +1626,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010585,
     mass: 1020,
     // Factory 165/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.522,
@@ -1654,11 +1651,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010632,
     mass: 995,
     // Factory 165/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1300',
     gearboxId: 'gearbox_lada_4_2105',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.522,
@@ -1712,11 +1709,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010585,
     mass: 1035,
     // Factory 165/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1600',
     gearboxId: 'gearbox_lada_4_1600',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.522,
@@ -1737,11 +1734,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010632,
     mass: 1030,
     // Factory 165/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_lada_1500',
     gearboxId: 'gearbox_lada_5',
     tankLitres: 39,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_ZHIGULI,
     steerLock: 0.522,
@@ -1765,11 +1762,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010123,
     mass: 900,
     // Factory 165/70 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.584,
@@ -1790,11 +1787,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010123,
     mass: 915,
     // Factory 165/70 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.584,
@@ -1817,11 +1814,11 @@ const SOVIET_SPECS: readonly SovietSpec[] = [
     scale: 0.010082,
     mass: 970,
     // Factory 165/70 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_SAMARA,
     steerLock: 0.583,
@@ -2068,11 +2065,11 @@ const SAAS_SPECS: readonly Entry[] = [
     scale: 0.86595,
     mass: 1055,
     // Factory 165/80 R14; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_i4_1600',
     gearboxId: 'gearbox_manual5',
     tankLitres: 55,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     rearBrakeValve: VALVE_AZLK_2141,
     suspension: SUSP_SAMARA,
@@ -2096,11 +2093,11 @@ const SAAS_SPECS: readonly Entry[] = [
     scale: 1,
     mass: 915,
     // Factory 165/70 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_samara_1300',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     steerLock: 0.584,
     rearDriveBias: 0,
@@ -2203,12 +2200,12 @@ const SAAS_SPECS: readonly Entry[] = [
     // 1984-1997 2715-01 in its factory low-octane commercial specification:
     // UZAM-412DE, 1478 cc, 49 kW and 102 Nm.
     // Factory 175/80 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_uzam_412de',
     // Moskvich/IZH four-speed with the 4.22 working-vehicle final drive.
     gearboxId: 'gearbox_izh_4',
     tankLitres: 46,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     // Rear leaf springs carrying a 500 kg payload; not the Zhiguli coil-sprung estate.
     suspension: SUSP_TRUCK,
@@ -2302,11 +2299,11 @@ const GTAV_SPECS: readonly Entry[] = [
     scale: 0.89255,
     mass: 1010,
     // Factory 175/70 R13; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_samara_1500',
     gearboxId: 'gearbox_samara_5',
     tankLitres: 43,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_SAMARA,
     steerLock: 0.596,
@@ -2445,11 +2442,11 @@ const CARFORGE_CARS: readonly Entry[] = [
     scale: 0.01,
     mass: 1400,
     // Factory 205/70R14 radial (gaz31.com); runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_zmz_402',
     gearboxId: 'gearbox_gaz_4_31029',
     tankLitres: 55,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     suspension: SUSP_VOLGA_24,
     steerLock: 0.612,
@@ -2487,11 +2484,11 @@ const CARFORGE_CARS: readonly Entry[] = [
     bodyClass: 'car',
     mass: 635,
     // Factory 135/80 R12; runs the road tyre.
-    tyre: KAMA_217,
+    tyre: ROAD_TYRE,
     engineId: 'engine_vaz_1111',
     gearboxId: 'gearbox_oka_4',
     tankLitres: 30,
-    wheelGrip: KAMA_217_GRIP,
+    wheelGrip: ROAD_TYRE_GRIP,
     brakeDecelG: BRAKES_SERVO_G,
     // MacPherson struts in front, trailing arms on an elastic cross-beam behind:
     // the Samara's layout, and its preset.
@@ -2593,18 +2590,18 @@ type KitRunningGear = Pick<
  */
 /**
  * VAZ-21102: kerb 1020 kg, 175/70 R13, 2111 engine, 167 km/h and 14.0 s (2110 manual).
- * Tank 43 l (drom.ru/catalog/lada/2110/specs/tank). Tyre the road one (`KAMA_217`); lock
+ * Tank 43 l (drom.ru/catalog/lada/2110/specs/tank). Tyre the road one (`ROAD_TYRE`); lock
  * `gt_vaz2110`'s, set on the manual's 5.2 m outer-wheel radius. Cd·A is
  * the tunnel's, 0.347 × 1.931 = 0.670 m², which puts the car at 171 km/h on the bench
  * (tools/reality.ts): 2.7% over the manual's 167, 0.6% over the repair manual's 170.
  */
 const GEAR_VAZ_21102: KitRunningGear = {
   mass: 1020,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_vaz_2111',
   gearboxId: 'gearbox_samara_5_tall',
   tankLitres: 43,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   steerLock: 0.598,
   frontWeightShare: 0.62,
@@ -2632,11 +2629,11 @@ const GEAR_VAZ_2111: KitRunningGear = { ...GEAR_VAZ_21102, mass: 1040, dragArea:
  */
 const GEAR_VAZ_2115: KitRunningGear = {
   mass: 985,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_vaz_2111',
   gearboxId: 'gearbox_samara_5_tall',
   tankLitres: 43,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   steerLock: 0.583,
   frontWeightShare: 0.6,
@@ -2670,7 +2667,7 @@ const GEAR_UAZ_2206: KitRunningGear = {
  */
 type KitOwnGear = KitRunningGear &
   Required<Pick<Entry, 'bodyClass' | 'rearDriveBias' | 'suspension' | 'handlingProfile'>> &
-  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff'>;
+  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff' | 'rearEngine'>;
 
 /**
  * Daewoo Nexia 1.5 GL (G15MF, five-speed), per its repair manual's table (3ruk.ru/vehicles/
@@ -2686,11 +2683,11 @@ type KitOwnGear = KitRunningGear &
 const GEAR_DAEWOO_NEXIA: KitOwnGear = {
   bodyClass: 'car',
   mass: 969,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_daewoo_g15mf',
   gearboxId: 'gearbox_opel_f16_nexia',
   tankLitres: 50,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
   steerLock: 0.65,
@@ -2713,11 +2710,11 @@ const GEAR_DAEWOO_NEXIA: KitOwnGear = {
 const GEAR_DAEWOO_ESPERO: KitOwnGear = {
   bodyClass: 'car',
   mass: 1128,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_daewoo_c20le',
   gearboxId: 'gearbox_opel_f16_nexia',
   tankLitres: 50,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
   steerLock: 0.628,
@@ -2739,11 +2736,11 @@ const GEAR_DAEWOO_ESPERO: KitOwnGear = {
 const GEAR_OPEL_ASTRA_F: KitOwnGear = {
   bodyClass: 'car',
   mass: 1010,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_opel_c16nz',
   gearboxId: 'gearbox_opel_f13_wr',
   tankLitres: 52,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
   steerLock: 0.594,
@@ -2765,11 +2762,11 @@ const GEAR_OPEL_ASTRA_F: KitOwnGear = {
 const GEAR_OPEL_VECTRA_A: KitOwnGear = {
   bodyClass: 'car',
   mass: 1130,
-  tyre: KAMA_217,
+  tyre: ROAD_TYRE,
   engineId: 'engine_opel_c20ne',
   gearboxId: 'gearbox_opel_f16_wr_355',
   tankLitres: 61,
-  wheelGrip: KAMA_217_GRIP,
+  wheelGrip: ROAD_TYRE_GRIP,
   brakeDecelG: BRAKES_SERVO_G,
   suspension: SUSP_SAMARA,
   steerLock: 0.519,
@@ -2778,6 +2775,123 @@ const GEAR_OPEL_VECTRA_A: KitOwnGear = {
   frontWeightShare: 0.62,
   dragArea: 0.62,
   aero: AERO_OPEL_VECTRA_A,
+};
+
+/*
+ * ---- the prototypes' running gear (`PROTOTYPE_MODELS`) ----
+ *
+ * Sourced as the kit cars' (the sheets in each comment); the road tyre is ROAD_TYRE at the
+ * car's own size, as on every road car. Their suspensions are the nearest preset with the
+ * layout's own axles, springs [E] where no rate is published.
+ */
+/**
+ * Caterham Seven: double wishbones and a bar in front; a de Dion rear on a lower A-frame
+ * (its apex the roll centre, [E] 0.25 m) without a bar (the Superlight adds one). Springs
+ * [E] a firm road car's, 1.7 / 1.9 Hz.
+ */
+const SUSP_CATERHAM_7: SuspensionTuning = { ...SUSP_SPORT, frontHz: 1.7, rearHz: 1.9, rearBar: 0 };
+/**
+ * Matra Murena: double wishbones on torsion bars in front, semi-trailing arms on coils at
+ * the rear, a bar at each end. The sport preset with an independent trailing-arm rear.
+ */
+const SUSP_MATRA_MURENA: SuspensionTuning = {
+  ...SUSP_SPORT,
+  rearAxle: 'independent',
+  rearRollCentreM: 0.12,
+  rearSwingArmM: 2.5,
+  rearPitchCentre: TRAILING_ARM_PITCH,
+  rearBar: 0.6,
+};
+/**
+ * Tatra 613: MacPherson struts and a bar in front, semi-trailing arms on coils at the rear
+ * with no bar (none is mentioned anywhere [E]). The everyday saloon's springs and dampers.
+ */
+const SUSP_TATRA_613: SuspensionTuning = {
+  ...SUSP_CAR,
+  rearAxle: 'independent',
+  rearRollCentreM: 0.12,
+  rearSwingArmM: 2.5,
+  frontPitchCentre: STRUT_PITCH,
+  rearPitchCentre: TRAILING_ARM_PITCH,
+  rearBar: 0,
+};
+
+/**
+ * Caterham Super Seven 1.6 K-series (1996-2000), Caterham's year-2000 range sheet
+ * (stevecarter.com/catvideo.htm, "1.6"), carfolio, automobile-catalog: kerb 550 kg, 180
+ * km/h, 0-100 in 6.4 s, a 36 l tank, unassisted 2.1-turn rack, 228 mm discs all round and
+ * no servo, an open differential (the LSD was an option). Axle split [E] 0.47: no figure
+ * is published; the engine behind the front axle, driver, fuel and spare at the back. The
+ * lock on [E] a 10 m kerb circle (the owner's handbook's for this width). No maker's Cd
+ * (automobile-catalog estimates 0.65): Cd·A set on the bench to the 180 km/h.
+ */
+const GEAR_CATERHAM_7: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 550,
+  tyre: ROAD_TYRE,
+  engineId: 'engine_rover_k16',
+  gearboxId: 'gearbox_ford_type9_caterham',
+  tankLitres: 36,
+  wheelGrip: ROAD_TYRE_GRIP,
+  brakeDecelG: BRAKES_UNASSISTED_G,
+  suspension: SUSP_CATERHAM_7,
+  steerLock: 0.535,
+  rearDriveBias: 1,
+  handlingProfile: 'road',
+  frontWeightShare: 0.47,
+  dragArea: 0.89,
+  aero: AERO_CATERHAM_7,
+};
+/**
+ * Matra Murena 2.2 (1981-83): kerb 1050 kg (motorsdb; others 1020-1033), 197 km/h, 0-100
+ * in 9.3 s, a 56 l tank, an unassisted rack, discs and servo [E], an open differential
+ * [E]. The engine across the car [E] 0.28 m ahead of the rear axle, the transaxle's
+ * differential on it. Axle split [E] 0.42. An 11.3 m circle. Cd 0.328 on [E] 1.70 m².
+ */
+const GEAR_MATRA_MURENA: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1050,
+  tyre: ROAD_TYRE,
+  engineId: 'engine_simca_180_22',
+  gearboxId: 'gearbox_matra_murena',
+  tankLitres: 56,
+  wheelGrip: ROAD_TYRE_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_MATRA_MURENA,
+  steerLock: 0.515,
+  rearDriveBias: 1,
+  handlingProfile: 'road',
+  frontWeightShare: 0.42,
+  rearEngine: { aheadOfRearAxleM: 0.28, transverse: true },
+  dragArea: 0.56,
+  aero: AERO_MATRA_MURENA,
+};
+/**
+ * Tatra 613 first series (1975-80), the factory description (t613.wz.cz/popis.html) and
+ * tatraportal.sk: kerb 1670 kg with 59.3 % on the rear axle, 190 km/h, 0-100 in 12.7 s
+ * (the factory's claim), a 72 l tank in two, an unassisted rack, ventilated discs all
+ * round with a servo, an open differential. The V8 lies along the car over the rear axle,
+ * its differential in the crankcase and its crank's middle on the axle line: its centre
+ * [E] 0.075 m behind the axle, the gearbox ahead. An 11.5 m kerb circle. No maker's Cd:
+ * Cd·A set on the bench to the 190 km/h.
+ */
+const GEAR_TATRA_613: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1670,
+  tyre: ROAD_TYRE,
+  engineId: 'engine_tatra_t613',
+  gearboxId: 'gearbox_tatra_613',
+  tankLitres: 72,
+  wheelGrip: ROAD_TYRE_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_TATRA_613,
+  steerLock: 0.64,
+  rearDriveBias: 1,
+  handlingProfile: 'road',
+  frontWeightShare: 1 - 0.593,
+  rearEngine: { aheadOfRearAxleM: -0.075, transverse: false },
+  dragArea: 1.0,
+  aero: AERO_TATRA_613,
 };
 
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
@@ -2930,6 +3044,10 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_astraf: { trunkGrid: G3x2, comfort: 4 },
   kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
+  // The prototypes: a Seven's shelf behind the seats, the Murena's rear boot, the Tatra's front one.
+  kit_caterham7: { trunkGrid: G2x2, comfort: 1 },
+  kit_murena: { trunkGrid: G3x2, comfort: 2 },
+  kit_tatra613: { trunkGrid: G4x2, comfort: 4 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };
 
@@ -2960,7 +3078,6 @@ function catalogueDef(e: Entry): CarModelDef {
     gearboxId: e.gearboxId,
     tankLitres: e.tankLitres,
     wheelGrip: e.wheelGrip,
-    lateralGripScale: MEASURED_SKIDPAD_SCALE[e.id] ?? 1,
     brakeDecelG: e.brakeDecelG,
     rearBrakeValve: e.rearBrakeValve,
     suspension: e.suspension ?? SUSP_CAR,
@@ -2968,6 +3085,7 @@ function catalogueDef(e: Entry): CarModelDef {
     rearDriveBias: e.rearDriveBias,
     handlingProfile: e.handlingProfile ?? 'classic',
     frontWeightShare: e.frontWeightShare,
+    rearEngine: e.rearEngine,
     antiRoll: e.antiRoll,
     rollCentre: e.rollCentre,
     tyre: e.tyre,
@@ -2987,13 +3105,34 @@ function catalogueDef(e: Entry): CarModelDef {
  */
 export const CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
 /**
+ * PROTOTYPES: a car's real running gear (its factory geometry, mass, axle split, engine,
+ * gearbox, tyres, brakes, suspension and aero) under a kit body borrowed from a car of
+ * about its shape, which the loader stretches to the factory box and whose wheels it
+ * sets on the factory wheelbase and tracks. Physics sees only the box and the running
+ * gear, so a prototype drives as the finished car will, before its body is built. In
+ * no list the world draws from (traffic, contracts, the shelf, the car lab): the dev
+ * spawn menu offers them. When its own body is built, a car's row moves to `KIT_CARS`.
+ */
+export const PROTOTYPE_MODELS: readonly CarModelDef[] = (
+  [
+    // The Oka's body: the smallest, so the least stretched to a Seven.
+    ['kit_caterham7', GEAR_CATERHAM_7, 'vaz1111', 'Caterham 7 (prototype)'],
+    // The 2108's: a low three-door wedge.
+    ['kit_murena', GEAR_MATRA_MURENA, 'vaz2108', 'Matra Murena (prototype)'],
+    // The GAZ-24's: the longest saloon in the kit.
+    ['kit_tatra613', GEAR_TATRA_613, 'gaz24', 'Tatra 613 (prototype)'],
+  ] satisfies readonly KitCarRow[]
+)
+  .map(kitEntry)
+  .map(catalogueDef);
+/**
  * The vendored packs and the carforge cars: resolvable by id (a kit car wears the Soviet
  * pack's wheel sets and runs on its sibling's gear) but in no list the game or the car
  * lab draws from, and a save naming one loads as its kit twin (save.ts).
  */
 const PACK_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 
-const BY_ID = new Map([...CAR_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
+const BY_ID = new Map([...CAR_MODELS, ...PROTOTYPE_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
 
 /**
  * The model a new game starts in and every unknown saved id resolves to. The

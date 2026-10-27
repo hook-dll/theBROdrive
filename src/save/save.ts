@@ -40,7 +40,7 @@ import {
   normalizeBonnetStorage,
   BONNET_SLOT_COUNT,
 } from '../vehicle/bonnet';
-import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel } from '../vehicle/carmodels';
+import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID, hasCarModel, PROTOTYPE_MODELS } from '../vehicle/carmodels';
 import { bootFreeAnchor, normalizeBoot, trunkCellCount } from '../vehicle/trunk';
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
@@ -933,7 +933,7 @@ const RETIRED_MODEL_IDS: Readonly<Record<string, string>> = {
 function worldModelId(saved: unknown): string {
   if (typeof saved !== 'string') return DEFAULT_CAR_MODEL_ID;
   const id = RETIRED_MODEL_IDS[saved] ?? saved;
-  if (CAR_MODELS.some((model) => model.id === id)) return id;
+  if (CAR_MODELS.some((model) => model.id === id) || PROTOTYPE_MODELS.some((model) => model.id === id)) return id;
   const twin = `kit_${id.slice(id.indexOf('_') + 1)}`;
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
 }

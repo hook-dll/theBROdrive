@@ -4,6 +4,23 @@
 
 ### Added
 
+- PROTOTYPE CARS (`vehicle/carmodels.ts` `PROTOTYPE_MODELS`, `CarModelDef.rearEngine`;
+  `vehicle/vehicle.ts` `applyChassisMass`; `parts/registry.ts` `PROTOTYPE_*_VARIANTS`;
+  `render/partmesh.ts`; `ui/menu.ts` spawn screen; `save/save.ts`; `tools/reality.ts`).
+  A car's real running gear under a borrowed kit body, stretched to its factory box, to
+  drive it before its body is built: Caterham 7 (1.6 K-series, on the Oka's body), Matra
+  Murena 2.2 (on the 2108's) and Tatra 613 (on the GAZ-24's). Only the dev spawn menu's
+  "Prototypes" group offers them; their engines and gearboxes are in no world list. A
+  mid or rear engine (`rearEngine`) now stands where it is in the masses, so the
+  Murena's and the Tatra's yaw inertia is their layout's. Bench: top speeds within 3 %;
+  0-100 the Tatra −5 %, the Murena +14 %, the Caterham +28 % (two aboard on 550 kg).
+- ONE GOOD ROAD TYRE (owner, 2026-10-27): every road car runs the Michelin MXV
+  (`ROAD_TYRE`, `ROAD_TYRE_GRIP` 0.62, profile 60) instead of the budget KAMA-217 (0.53,
+  profile 70). The grip is the step Car and Driver measured from budget tyres to the MXV
+  (0.78-0.79 g, 194-204 ft from 70 mph on four cars): × 1.17. The Samara family's
+  per-car skidpad scale (`lateralGripScale`, set on the budget tyre) is removed. Bench:
+  the 2108 corners at 0.76 g (was 0.71).
+
 - RACES AT THE TRACKS, part B: the race itself (`race/director.ts`, `session.ts`,
   `laps.ts`, `rival.ts`, `stake.ts`, `visuals.ts`, `ids.ts`, `ui/hudrace.ts`,
   `tools/race-bench.ts`, `tools/racelapworld.ts` new; `world/racetrack/track.ts`

@@ -156,7 +156,7 @@ No catalogue carries a Nexia, so the car names its whole running gear (`KitOwnGe
 | `mass` | 969 kg | the manual [F] |
 | `engineId` | `engine_daewoo_g15mf`: 55 kW at 5400, 123 Nm at 3300 (manual: 3200–3400), fuel cut 5800 (rated + 7 % [E]), idle 850 [E], 118 kg [E: the VAZ-2111's], `brakingCoeff` 0.0203 (10 % of peak torque at the cut, as the loose-part engines) | parts/registry.ts `FOREIGN_ENGINE_VARIANTS` |
 | `gearboxId` | `gearbox_opel_f16_nexia`: 3.545 / 1.952 / 1.276 / 0.892 / 0.707, R 3.333, final drive 3.944, efficiency 0.92, shift 0.36 s, 45 kg [E: the Samara's] | parts/registry.ts `FOREIGN_GEARBOX_VARIANTS` |
-| `tyre`, `wheelGrip` | `KAMA_217`, 0.53 (every road car's) | |
+| `tyre`, `wheelGrip` | `ROAD_TYRE`, `ROAD_TYRE_GRIP` (every road car's; KAMA-217 0.53 until 2026-10-27) | |
 | `tankLitres` | 50 | the manual |
 | `brakeDecelG` | servo 1.2 | the manual: vacuum servo |
 | `rearBrakeValve` | none | the manual names fixed regulators but prints no figure; none is invented (carmodels.ts note) |

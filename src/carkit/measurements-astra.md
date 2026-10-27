@@ -131,7 +131,7 @@ Lamp shapes, checked against "1996 Opel Astra 1.6i" (front), "1998 Opel Astra 1.
 | `mass` | 1010 | §1 |
 | `engineId` | `engine_opel_c16nz` (new): 55 kW at 5200, 125 Nm at 2800, red line 5800 [E: the Nexia's rule], 120 kg [E] | parts/registry.ts `FOREIGN_ENGINE_VARIANTS` |
 | `gearboxId` | `gearbox_opel_f13_wr` (new): 3.55 / 1.96 / 1.30 / 0.89 / 0.71, R 3.31, 3.94, efficiency 0.92, 45 kg [E] | `FOREIGN_GEARBOX_VARIANTS` |
-| `tyre`, `wheelGrip` | `KAMA_217`, 0.53 (every road car's) | |
+| `tyre`, `wheelGrip` | `ROAD_TYRE`, `ROAD_TYRE_GRIP` (every road car's; KAMA-217 0.53 until 2026-10-27) | |
 | `tankLitres` | 52 [E] | |
 | `brakeDecelG` | servo | front discs, rear drums |
 | `suspension` | `SUSP_SAMARA` | struts and a twist beam |

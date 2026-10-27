@@ -117,7 +117,7 @@ at 4.56.
 | `mass` | 1128 | drom.ru, carfolio |
 | `engineId` | `engine_daewoo_c20le` (new): 77 kW at 5000, 169 Nm at 2800, red line 5800 [E: the Nexia's rule], 135 kg [E] | parts/registry.ts `FOREIGN_ENGINE_VARIANTS`. partmesh `buildInline` 1.05. reality.ts `FACTORY_ENGINES` |
 | `gearboxId` | `gearbox_opel_f16_nexia` (reused): 3.545 / 1.952 / 1.276 / 0.892 / 0.707, 3.944 | §1 gearbox |
-| `tyre`, `wheelGrip` | `KAMA_217`, 0.53 (every road car's) | |
+| `tyre`, `wheelGrip` | `ROAD_TYRE`, `ROAD_TYRE_GRIP` (every road car's; KAMA-217 0.53 until 2026-10-27) | |
 | `tankLitres` | 50 | drom.ru |
 | `brakeDecelG` | servo | drom.ru |
 | `suspension` | `SUSP_SAMARA` | struts and twist beam (drom.ru) |

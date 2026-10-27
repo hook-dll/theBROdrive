@@ -37,10 +37,10 @@
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
 import { SurfaceType } from '../src/core/surfaces';
-import { CAR_MODELS, carModel } from '../src/vehicle/carmodels';
+import { CAR_MODELS, carModel, PROTOTYPE_MODELS } from '../src/vehicle/carmodels';
 import { carModelMeasure, preloadCarModels } from '../src/render/carmodel';
 import { createPartMesh } from '../src/render/partmesh';
-import { variantsOfKind } from '../src/parts/registry';
+import { variant, variantsOfKind } from '../src/parts/registry';
 import { engineTorqueNm } from '../src/vehicle/drivetrain';
 import {
   addLongGround,
@@ -565,8 +565,25 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // this bench (Nexia +22 %, Espero +18 %, Astra +10.5 %).
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.16 },
   },
-
-
+  // The prototypes (carmodels.ts `PROTOTYPE_MODELS`): held to the same factory figures.
+  kit_caterham7: {
+    wheelbase: 2.225, track: 1.27, radius: 0.289, top: 180, to100: 6.4,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.0, lat: null, hz: 1.7,
+    brake80: null, grossKg: 750,
+    source: "Caterham Super Seven 1.6 K-series: Caterham's year-2000 range sheet (stevecarter.com/catvideo.htm: 180 km/h, 0-60 mph 6.2 s, 0-100 6.4 s per auto-data); 10 m circle [E: the owner's handbook]; gross [E]; geometry kit_caterham7 row",
+  },
+  kit_murena: {
+    wheelbase: 2.435, track: 1.41, radius: 0.289, top: 197, to100: 9.3,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.65, lat: null, hz: 1.38,
+    brake80: null, grossKg: 1400,
+    source: 'Matra Murena 2.2: carfolio, motorsdb (190-200 km/h, 0-100 9.3-9.4 s, 11.3 m circle); gross [E]; geometry kit_murena row',
+  },
+  kit_tatra613: {
+    wheelbase: 2.98, track: 1.52, radius: 0.328, top: 190, to100: 12.7,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.75, lat: null, hz: 1.15,
+    brake80: null, grossKg: 2070,
+    source: "Tatra 613 first series: the factory description (t613.wz.cz/popis.html: 190 km/h, 11.5 m kerb circle), automobile-catalog's factory 0-100 12.7 s; gross [E]; geometry kit_tatra613 row",
+  },
 };
 
 /*
@@ -623,6 +640,10 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_opel_c20ne: { power: { kw: 85 }, powerRpm: 5200, torque: { nm: 170 }, torqueRpm: 2600, source: 'Opel C20NE; auto-data.net Opel Vectra A (facelift 1992) 2.0i (115 Hp)' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
+  // The prototypes' (carmodels.ts `PROTOTYPE_MODELS`).
+  engine_rover_k16: { power: { kw: 84 }, powerRpm: 6000, torque: { nm: 145 }, torqueRpm: 3000, source: "Rover K-series 1.6 16V; Caterham's year-2000 range sheet (stevecarter.com/catvideo.htm), carfolio" },
+  engine_simca_180_22: { power: { ps: 118 }, powerRpm: 5800, torque: { nm: 181 }, torqueRpm: 3000, source: 'Simca Type 180 2.2; Matra Murena 2.2, motorsdb, carfolio (18.5 mkg)' },
+  engine_tatra_t613: { power: { ps: 165 }, powerRpm: 5200, torque: { nm: 265 }, torqueRpm: 2500, source: 'Tatra T613 V8; the factory description (t613.wz.cz/popis.html), tatraportal.sk' },
 };
 
 /** A maker's power figure in kilowatts. */
@@ -727,7 +748,11 @@ console.log('--- engine: the registry against the maker\'s printed figures ---')
 console.log(
   'engine               kW   maker   dev    rpm  maker   curve kW  dev     Nm   maker   dev    rpm  maker        curve Nm  dev',
 );
-const engines = variantsOfKind('engine');
+// The world's engines, and the prototypes' own, which no world list holds.
+const engines = [
+  ...variantsOfKind('engine'),
+  ...new Set(PROTOTYPE_MODELS.map((m) => variant(m.engineId))),
+];
 for (const id of Object.keys(FACTORY_ENGINES)) {
   if (!engines.some((v) => v.id === id)) {
     failures++;

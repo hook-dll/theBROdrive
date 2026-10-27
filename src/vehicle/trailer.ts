@@ -172,7 +172,7 @@ const TARE_BOX_KG = TRAILER_TARE_KG - TARE_RUNNING_KG - TARE_DRAWBAR_KG;
  *
  * The tyre is a period 13-inch cross-ply (`tyreCurve`: peak at 8°, on loose ground
  * fading to 0.86 of it by 30°, 0.45 m of relaxation). Its own coefficient is a little
- * under the cars' KAMA road tyre (`KAMA_217_GRIP`, 0.53): narrow, hard and cheap. No
+ * under the cars' road tyre (`ROAD_TYRE_GRIP`, 0.62): narrow, hard and cheap. No
  * temperature model: a trailer tyre does no work but roll.
  */
 const TRAILER_TYRE = tyreCurve({ construction: 'crossply', aspect: 0.8 }, HANDLING_PROFILES.classic);

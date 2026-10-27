@@ -107,7 +107,7 @@ Lamp shapes, checked against two photos per end (front straight and 3/4, rear st
 | `mass` | 1130 | §1 |
 | `engineId` | `engine_opel_c20ne` (new): 85 kW at 5200, 170 Nm at 2600, red line 6000 [E], 135 kg [E] | parts/registry.ts `FOREIGN_ENGINE_VARIANTS`; partmesh `buildInline` 1.05; reality.ts `FACTORY_ENGINES` |
 | `gearboxId` | `gearbox_opel_f16_wr_355` (new): the F16 WR gears on 3.55, efficiency 0.92, 45 kg [E] | `FOREIGN_GEARBOX_VARIANTS` |
-| `tyre`, `wheelGrip` | `KAMA_217`, 0.53 (every road car's) | |
+| `tyre`, `wheelGrip` | `ROAD_TYRE`, `ROAD_TYRE_GRIP` (every road car's; KAMA-217 0.53 until 2026-10-27) | |
 | `tankLitres` | 61 | auto-data |
 | `brakeDecelG` | servo | ventilated front discs, rear drums |
 | `suspension` | `SUSP_SAMARA` | struts and a twist beam |

@@ -580,8 +580,8 @@ export function aligningMomentPeak(casterRatio: number): { readonly z: number; r
  * its slow recirculating-ball steering and live-axle balance. The GTA SA conversions
  * span later road cars and working 4x4/van chassis; forcing all of them through that
  * Soviet baseline is why visually modern cars felt delayed, vague and tail-light. The
- * TYRE is not the profile's: every road car runs the KAMA road tyre
- * (`KAMA_217` in carmodels.ts), whatever its profile.
+ * TYRE is not the profile's: every road car runs the one road tyre
+ * (`ROAD_TYRE` in carmodels.ts), whatever its profile.
  */
 export interface HandlingTuning {
   /** Rack speed, rad/s at the road wheel: see `STEER_RACK_SPEED_RAD_S`. */
@@ -590,7 +590,7 @@ export interface HandlingTuning {
   readonly lateralGripFraction: number;
   /**
    * Cornering scale on top of the tyre's own coefficient, for the profiles whose cars
-   * do NOT run the KAMA road tyre: `utility` (the Niva's and the UAZs' block treads)
+   * do NOT run the road tyre: `utility` (the Niva's and the UAZs' block treads)
    * and `sport` (the rally 2105's competition tyre). No data replaces these two, so
    * they stay as authored. 1.0 on `classic` and `road`: their cars share the one road
    * tyre, and a profile multiplier on it (`road` was 1.0824) had no source.
@@ -619,8 +619,8 @@ export interface TyreCurve {
   readonly longitudinalRelaxationM: number;
 }
 
-/** The aspect of the road radial (`KAMA_217`), for a car whose model names no tyre. */
-const ROAD_RADIAL_ASPECT = 0.7;
+/** The aspect of the road radial (`ROAD_TYRE`), for a car whose model names no tyre. */
+const ROAD_RADIAL_ASPECT = 0.6;
 
 /**
  * THE CAR'S OWN TYRE, from its sidewall:
