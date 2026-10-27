@@ -417,6 +417,25 @@
 
 ### Changed
 
+- AUDIO WORK PER FRAME, measured on a mock AudioContext over a 60 s traffic sweep (24
+  cars, three hovering at the sixth place; throwaway script, not kept): traffic voices
+  hold their car until a newcomer is 1.25x nearer (`TRAFFIC_STEAL_RATIO`; kept to 400 m,
+  given within 380 m), so two cars either side of the sixth place no longer trade a
+  voice back and forth; a released voice fades, is parked silent and goes to the next
+  car (`TRAFFIC_POOL` 3), its engine rebuilt in place by a 'character' message to the
+  worklet (engine-worklet.ts `EngineDsp`, 'sleep' while parked) instead of a new node:
+  44 engine worklets and 660 nodes built a minute before, none after (29 voices
+  re-targeted). Per-frame AudioParam targets go through `steer` (mixer.ts), which
+  skips one that has not moved (1e-4) — the param keeps gliding to its last target, so
+  the curve is the same: the cabin shell, every traffic voice, every engine, the driven
+  car's per-frame params, recorded beds and the sand; the driven car's seven panners are
+  not re-placed while it stands still. 95 → 34 writes a frame on foot near traffic, 155 →
+  35 sat in a parked car, 155 → 65 driving. No allocation left per frame on the traffic
+  path (two `Set`s, the engine character object and its key string, the map entries);
+  heap growth 5.2 → 1.6 kB a frame on foot, 6.6 → 2.6 kB driving (the rest is the engine's
+  number boxing). A traffic car beyond 120 m is panned equal-power instead of HRTF, back
+  to HRTF within 100 m; the switch is at ~-25 dB against the car close by.
+
 - THE ROAD'S SMALL FAULTS UNDER THE TYRES, AND IN THE HANDS (`RoadFaults`,
   `SurfaceProps.faults` in core/surfaces.ts; `Vehicle` THE GROUND THE COLLIDER DOES NOT
   HAVE; main.ts `updatePad`). Sealed surfaces carry invisible patches (proud or sunk,

@@ -13,7 +13,7 @@ import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer, setListenerPose, setPannerPosition, sliderGain } from './mixer';
 import { playCrash, VehicleAudio, type CarPose } from './vehicleaudio';
-import { TrafficAudio } from './trafficaudio';
+import { TRAFFIC_RELEASE_S, TrafficAudio } from './trafficaudio';
 import type { SampleName } from './samples';
 import { Ambience, type AmbienceFrame } from './ambience';
 import type { CabinOpenness } from './cabinopenness';
@@ -27,8 +27,19 @@ export type { PropellerVoice, SurfVoice } from './storyaudio';
 
 /** Traffic cars given a voice at once: the nearest few are all anyone can pick out. */
 const TRAFFIC_VOICES = 6;
-/** Beyond this a traffic car is not voiced at all, metres. */
+/** Beyond this a traffic car is not given a voice, metres. */
 const TRAFFIC_HEAR_M = 380;
+/** A voiced car keeps its voice out to this distance, metres. */
+const TRAFFIC_KEEP_M = 400;
+/**
+ * VOICE HYSTERESIS. A car among the nearest few takes a voice from one that has dropped
+ * out of them only when it is this much nearer (a ratio of distances). Without it two
+ * cars at about the same distance either side of the sixth place traded a voice back
+ * and forth, each trade a fade out and a fade in.
+ */
+const TRAFFIC_STEAL_RATIO = 1.25;
+/** Released voices kept parked for the next car that needs one (trafficaudio.ts). */
+const TRAFFIC_POOL = 3;
 /**
  * A traffic car's impact, m/s of unexplained velocity change (the `Vehicle` impact
  * detector), heard as a crash. Higher than the driven car's 0.3: a nudge in a jam is
@@ -49,13 +60,28 @@ interface TrafficCandidate {
   d2: number;
 }
 
+/** A traffic voice and whom it belongs to. */
+interface TrafficVoice {
+  readonly audio: TrafficAudio;
+  id: string;
+  /** Its car's offer this frame, null if the car was not offered. */
+  candidate: TrafficCandidate | null;
+  /** Mixer time a released voice's fade is over. */
+  parkAt: number;
+}
+
 export class GameAudio {
   private readonly mixer = new AudioMixer();
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
   private readonly ambience = new Ambience(this.mixer);
   private readonly radios = new Map<string, Radio>();
-  private readonly trafficVoices = new Map<string, TrafficAudio>();
+  /** Voiced cars by id, and the same voices as a list (at most TRAFFIC_VOICES). */
+  private readonly trafficVoices = new Map<string, TrafficVoice>();
+  private readonly trafficActive: TrafficVoice[] = [];
+  /** Released voices fading out, then parked ones waiting for another car. */
+  private readonly trafficReleasing: TrafficVoice[] = [];
+  private readonly trafficPool: TrafficVoice[] = [];
   private readonly trafficCandidates: TrafficCandidate[] = [];
   private trafficCandidateCount = 0;
   /** Per traffic car, when its last crash was heard; pruned to the cars still offered. */
@@ -251,29 +277,91 @@ export class GameAudio {
       c.state.impactMps = 0;
       if (impact > TRAFFIC_CRASH_MIN_MPS && c.d2 <= hearD2) this.trafficCrash(c, impact);
     }
-    if (this.trafficCrashAt.size > 0) {
-      const offered = new Set<string>();
-      for (let i = 0; i < count; i++) offered.add(list[i]!.id);
-      for (const id of this.trafficCrashAt.keys()) if (!offered.has(id)) this.trafficCrashAt.delete(id);
+    if (this.trafficCrashAt.size > 0) this.trafficCrashAt.forEach(this.pruneTrafficCrash);
+
+    // Each voice finds its car's offer; a car gone or out of earshot gives its voice up.
+    const active = this.trafficActive;
+    for (let v = 0; v < active.length; v++) active[v]!.candidate = null;
+    for (let i = 0; i < count; i++) {
+      const voice = this.trafficVoices.get(list[i]!.id);
+      if (voice) voice.candidate = list[i]!;
     }
-    const keep = new Set<string>();
+    const keepD2 = TRAFFIC_KEEP_M * TRAFFIC_KEEP_M;
+    for (let v = active.length - 1; v >= 0; v--) {
+      const candidate = active[v]!.candidate;
+      if (!candidate || candidate.d2 > keepD2) this.releaseTrafficVoice(v);
+    }
+    // The nearest few take a voice: a free one, or one from a car that has fallen out of
+    // them, if this car is clearly the nearer (TRAFFIC_STEAL_RATIO).
+    const stealD2 = TRAFFIC_STEAL_RATIO * TRAFFIC_STEAL_RATIO;
     for (let i = 0; i < Math.min(count, TRAFFIC_VOICES); i++) {
       const c = list[i]!;
       if (c.d2 > hearD2) break;
-      keep.add(c.id);
-      let voice = this.trafficVoices.get(c.id);
-      if (!voice) {
-        voice = new TrafficAudio(this.mixer);
-        this.trafficVoices.set(c.id, voice);
+      if (this.trafficVoices.has(c.id)) continue;
+      if (active.length >= TRAFFIC_VOICES) {
+        let farthest = 0;
+        for (let v = 1; v < active.length; v++) {
+          if (active[v]!.candidate!.d2 > active[farthest]!.candidate!.d2) farthest = v;
+        }
+        if (c.d2 * stealD2 >= active[farthest]!.candidate!.d2) continue;
+        this.releaseTrafficVoice(farthest);
       }
-      voice.update(c.state, c.x, c.y, c.z, this.listenerX, this.listenerY, this.listenerZ, dt);
+      this.acquireTrafficVoice(c);
     }
-    for (const [id, voice] of this.trafficVoices) {
-      if (!keep.has(id)) {
-        voice.release();
-        this.trafficVoices.delete(id);
+    for (let v = 0; v < active.length; v++) {
+      const voice = active[v]!;
+      const c = voice.candidate!;
+      voice.audio.update(c.state, c.x, c.y, c.z, this.listenerX, this.listenerY, this.listenerZ, dt);
+    }
+
+    // Faded voices are parked for the next car, or let go past the pool's size. A
+    // context that is not running (no gesture yet) plays nothing, so nothing to wait for.
+    const now = this.mixer.now;
+    const running = this.mixer.ctx.state === 'running';
+    const releasing = this.trafficReleasing;
+    for (let r = releasing.length - 1; r >= 0; r--) {
+      const voice = releasing[r]!;
+      if (running && now < voice.parkAt) continue;
+      releasing[r] = releasing[releasing.length - 1]!;
+      releasing.pop();
+      if (this.trafficPool.length < TRAFFIC_POOL) {
+        voice.audio.park();
+        this.trafficPool.push(voice);
+      } else {
+        voice.audio.dispose();
       }
     }
+  }
+
+  /** Drops a crash timestamp whose car is no longer offered (a `Map.forEach` callback). */
+  private readonly pruneTrafficCrash = (_at: number, id: string): void => {
+    const list = this.trafficCandidates;
+    for (let i = 0; i < this.trafficCandidateCount; i++) if (list[i]!.id === id) return;
+    this.trafficCrashAt.delete(id);
+  };
+
+  /** A parked voice, or a new one, for car `c`. */
+  private acquireTrafficVoice(c: TrafficCandidate): void {
+    let voice = this.trafficPool.pop();
+    if (voice) voice.audio.reuse();
+    else voice = { audio: new TrafficAudio(this.mixer), id: '', candidate: null, parkAt: 0 };
+    voice.id = c.id;
+    voice.candidate = c;
+    this.trafficVoices.set(c.id, voice);
+    this.trafficActive.push(voice);
+  }
+
+  /** Fades out the voice at `index` of the active list, to be parked when it is silent. */
+  private releaseTrafficVoice(index: number): void {
+    const active = this.trafficActive;
+    const voice = active[index]!;
+    active[index] = active[active.length - 1]!;
+    active.pop();
+    this.trafficVoices.delete(voice.id);
+    voice.audio.release();
+    voice.parkAt = this.mixer.now + TRAFFIC_RELEASE_S;
+    voice.candidate = null;
+    this.trafficReleasing.push(voice);
   }
 
   /**
@@ -436,8 +524,11 @@ export class GameAudio {
     this.ambience.dispose();
     for (const radio of this.radios.values()) radio.dispose();
     this.radios.clear();
-    for (const voice of this.trafficVoices.values()) voice.dispose();
+    for (const voice of [...this.trafficActive, ...this.trafficReleasing, ...this.trafficPool]) voice.audio.dispose();
     this.trafficVoices.clear();
+    this.trafficActive.length = 0;
+    this.trafficReleasing.length = 0;
+    this.trafficPool.length = 0;
     this.mixer.dispose();
   }
 }

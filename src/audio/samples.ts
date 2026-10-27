@@ -20,7 +20,7 @@
  */
 
 import type { AudioMixer } from './mixer';
-import { ramp } from './mixer';
+import { steer } from './mixer';
 
 /** Every recording the game ships. Keep in step with tools/sound/manifest.json. */
 export type SampleName =
@@ -151,6 +151,8 @@ export class Bed {
   private sources: AudioBufferSourceNode[] = [];
   private started = false;
   private rate = 1;
+  /** Last level and rate targets written (`steer`), NaN before the first. */
+  private readonly last = new Float64Array(2).fill(Number.NaN);
 
   constructor(
     private readonly mixer: AudioMixer,
@@ -167,16 +169,20 @@ export class Bed {
   /** Sets the level; starts the loop on the first audible call once it has loaded. */
   set(level: number, now: number, tau: number): void {
     if (!this.started && level > 0.0005) this.start();
-    ramp(this.gain.gain, level, now, tau);
+    steer(this.gain.gain, this.last, 0, level, now, tau);
   }
 
   /** Playback rate of both layers: a denser, brighter bed when > 1. */
   setRate(rate: number, now: number, tau = 0.1): void {
     this.rate = rate;
+    if (rate === this.last[1] || Math.abs(rate - this.last[1]!) <= 1e-4 * rate) return;
+    this.last[1] = rate;
     for (const src of this.sources) src.playbackRate.setTargetAtTime(rate, now, tau);
   }
 
   private start(): void {
+    // The layers start detuned apart; the next rate written sets them both, as before.
+    this.last[1] = Number.NaN;
     const buffer = this.bank.get(this.name);
     if (!buffer) return;
     this.started = true;

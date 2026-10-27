@@ -37,7 +37,7 @@
  */
 
 import { AUDIO_CONFIG } from '../config';
-import { AudioMixer, ramp, setPannerPosition } from './mixer';
+import { AudioMixer, setPannerPosition, steer } from './mixer';
 import { Bed, playOnce, THUNDER_SAMPLES, type SampleName } from './samples';
 
 const AMBIENCE_GAIN = AUDIO_CONFIG.ambienceGain;
@@ -142,6 +142,8 @@ export class Ambience {
   private readonly windLight: Bed;
   private readonly windStrong: Bed;
   private readonly sandGain: GainNode;
+  /** Last sand level written (`steer`). */
+  private readonly sandLast = new Float64Array(1).fill(Number.NaN);
   private readonly rain: Bed;
   private readonly roof: Bed;
   private readonly grasshoppers: Bed;
@@ -196,7 +198,7 @@ export class Ambience {
     const strongT = clamp01((windT - 0.35) / 0.5);
     this.windLight.set(WIND_LIGHT * (0.35 + 0.65 * Math.min(1, windT * 2)) * (1 - 0.6 * strongT), now, 0.6);
     this.windStrong.set(WIND_STRONG * strongT * strongT, now, 0.6);
-    ramp(this.sandGain.gain, 0.05 * f.drift * windT + 0.035 * f.dust, now, 0.3);
+    steer(this.sandGain.gain, this.sandLast, 0, 0.05 * f.drift * windT + 0.035 * f.dust, now, 0.3);
 
     // --- rain -------------------------------------------------------------------
     // Through a shut cabin the rain is the roof's drumming more than the road's hiss;

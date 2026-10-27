@@ -157,6 +157,8 @@ export class AudioMixer {
   /** The world bus's cabin shell, per ear (0 left, 1 right); see `setCabinShell`. */
   private readonly shellFilters: readonly [BiquadFilterNode, BiquadFilterNode];
   private readonly shellGains: readonly [GainNode, GainNode];
+  /** Last targets written to the shell's four params (`steer`). */
+  private readonly shellLast = new Float64Array(4).fill(Number.NaN);
 
   constructor() {
     // The rate is NAMED, not left to the device. Left to it, Chrome reported 48 kHz
@@ -252,11 +254,10 @@ export class AudioMixer {
    */
   setCabinShell(left: number | null, right: number | null): void {
     const now = this.now;
-    const ears = [left, right] as const;
     for (let i = 0; i < 2; i++) {
-      const open = ears[i] ?? 1;
-      this.shellFilters[i]!.frequency.setTargetAtTime(SHELL_SHUT_HZ * (SHELL_OPEN_HZ / SHELL_SHUT_HZ) ** open, now, SHELL_RAMP_S);
-      this.shellGains[i]!.gain.setTargetAtTime(SHELL_SHUT_GAIN + (1 - SHELL_SHUT_GAIN) * open, now, SHELL_RAMP_S);
+      const open = (i === 0 ? left : right) ?? 1;
+      steer(this.shellFilters[i]!.frequency, this.shellLast, i, SHELL_SHUT_HZ * (SHELL_OPEN_HZ / SHELL_SHUT_HZ) ** open, now, SHELL_RAMP_S);
+      steer(this.shellGains[i]!.gain, this.shellLast, 2 + i, SHELL_SHUT_GAIN + (1 - SHELL_SHUT_GAIN) * open, now, SHELL_RAMP_S);
     }
   }
 
@@ -635,8 +636,40 @@ export function ramp(param: AudioParam, value: number, now: number, tau = 0.05):
   param.setTargetAtTime(value, now, tau);
 }
 
+/** Below this (relative to the value, absolute under 1) a per-frame target has not moved. */
+const STEER_EPS = 1e-4;
+
+/**
+ * A per-frame target for a param that is written every frame: `setTargetAtTime` only
+ * when it has moved since the last target written, which `last[slot]` remembers (NaN
+ * writes unconditionally). The param keeps converging on its last target, so a
+ * skipped write leaves exactly the curve a repeated one would have drawn; re-issuing
+ * the same target only adds events to the param's timeline. Every write to the param
+ * must go through here (or set its slot back to NaN), or the cache is wrong.
+ */
+export function steer(param: AudioParam, last: Float64Array, slot: number, value: number, now: number, tau: number): void {
+  const prev = last[slot]!;
+  if (value === prev || (value !== 0 && Math.abs(value - prev) <= STEER_EPS * Math.max(1, Math.abs(value)))) return;
+  last[slot] = value;
+  param.setTargetAtTime(value, now, tau);
+}
+
 /** A source that moves further than this between two updates is snapped, not glided. */
 const PANNER_SNAP_M = 40;
+
+/** Puts a spatial node at a position now, cancelling any glide (see `setPannerPosition`). */
+export function snapPannerPosition(panner: PannerNode, x: number, y: number, z: number, now: number): void {
+  if (!panner.positionX) {
+    panner.setPosition(x, y, z);
+    return;
+  }
+  panner.positionX.cancelScheduledValues(now);
+  panner.positionX.setValueAtTime(x, now);
+  panner.positionY.cancelScheduledValues(now);
+  panner.positionY.setValueAtTime(y, now);
+  panner.positionZ.cancelScheduledValues(now);
+  panner.positionZ.setValueAtTime(z, now);
+}
 
 /**
  * Sets a spatial node's position, using the per-axis AudioParams every current
@@ -662,10 +695,7 @@ export function setPannerPosition(
     // 1000 m back, the car would sit a kilometre from the ear and fall silent.
     const jump = Math.hypot(x - panner.positionX.value, y - panner.positionY.value, z - panner.positionZ.value);
     if (jump > PANNER_SNAP_M) {
-      for (const [param, v] of [[panner.positionX, x], [panner.positionY, y], [panner.positionZ, z]] as const) {
-        param.cancelScheduledValues(now);
-        param.setValueAtTime(v, now);
-      }
+      snapPannerPosition(panner, x, y, z, now);
       return;
     }
     panner.positionX.setTargetAtTime(x, now, tau);

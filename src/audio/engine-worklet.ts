@@ -153,23 +153,13 @@ class Lowpass {
   }
 }
 
-class EngineProcessor extends AudioWorkletProcessor {
-  static get parameterDescriptors() {
-    return [
-      { name: 'rpm', defaultValue: 800, minValue: 0, maxValue: 12000, automationRate: 'k-rate' },
-      { name: 'load', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
-      { name: 'running', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
-      // Doppler / time scale: 1 is as-is. Scales every frequency INCLUDING the pipe.
-      { name: 'pitch', defaultValue: 1, minValue: 0.5, maxValue: 2, automationRate: 'k-rate' },
-      { name: 'destroyed', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
-      { name: 'idleRpm', defaultValue: 800, minValue: 0, maxValue: 5000, automationRate: 'k-rate' },
-      { name: 'redlineRpm', defaultValue: 6000, minValue: 100, maxValue: 12000, automationRate: 'k-rate' },
-    ];
-  }
-
+/**
+ * One engine's whole synthesis state, built from its character. The processor below
+ * holds one and swaps it for a fresh one on a 'character' message, so a pooled traffic
+ * voice takes another car's engine without a new worklet node.
+ */
+class EngineDsp {
   private readonly ch: EngineCharacter;
-  /** Cleared by a 'stop' message; returning false lets the browser collect the node. */
-  private alive = true;
   private rngState: number;
 
   // Crank.
@@ -277,9 +267,8 @@ class EngineProcessor extends AudioWorkletProcessor {
   private readonly shellHz: number;
   private readonly roughness: number;
 
-  constructor(options: { processorOptions: EngineCharacter }) {
-    super(options);
-    this.ch = options.processorOptions;
+  constructor(character: EngineCharacter) {
+    this.ch = character;
     const { cylinders, seed, displacementL } = this.ch;
     this.rngState = (Math.floor(seed * 0xffffffff) ^ 0x5bd1e995) >>> 0 || 1;
 
@@ -326,24 +315,22 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.shellHz = (128 - 16 * size) * (0.92 + 0.16 * this.rand01());
     this.knock.set(900 + 500 * this.rand01(), 140);
     this.thumpHz = 42 + 16 * this.rand01();
+  }
 
-    this.port.onmessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string } | null;
-      if (data?.type === 'stop') {
-        this.alive = false;
-      } else if (data?.type === 'crank') {
-        const crank = data as { seconds?: number; catches?: boolean };
-        this.crankTotal = typeof crank.seconds === 'number' && crank.seconds > 0 ? crank.seconds : 0.55 + 0.35 * this.rand01();
-        this.crankLeft = this.crankTotal;
-        this.crankCatches = crank.catches !== false;
-        this.catchWait = 0;
-        this.spinDown = 0;
-      } else if (data?.type === 'crank-stop' && this.crankLeft > 0) {
-        // The key let go mid-crank: the starter drops out and the crank runs down.
-        this.crankLeft = 0;
-        this.runDown(0);
-      }
-    };
+  /** A 'crank' or 'crank-stop' message from the main thread (enginevoice.ts). */
+  message(data: { type?: string } | null): void {
+    if (data?.type === 'crank') {
+      const crank = data as { seconds?: number; catches?: boolean };
+      this.crankTotal = typeof crank.seconds === 'number' && crank.seconds > 0 ? crank.seconds : 0.55 + 0.35 * this.rand01();
+      this.crankLeft = this.crankTotal;
+      this.crankCatches = crank.catches !== false;
+      this.catchWait = 0;
+      this.spinDown = 0;
+    } else if (data?.type === 'crank-stop' && this.crankLeft > 0) {
+      // The key let go mid-crank: the starter drops out and the crank runs down.
+      this.crankLeft = 0;
+      this.runDown(0);
+    }
   }
 
   /** One cylinder's combustion event: adds its kicks to this sample's accumulators. */
@@ -401,12 +388,7 @@ class EngineProcessor extends AudioWorkletProcessor {
     this.sputterLeft = sputter;
   }
 
-  process(
-    _inputs: Float32Array[][],
-    outputs: Float32Array[][],
-    parameters: Record<string, Float32Array>,
-  ): boolean {
-    if (!this.alive) return false;
+  process(outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean {
     const out = outputs[0];
     if (!out || out.length === 0) return true;
     const exhaustOut = out[0]!;
@@ -757,6 +739,63 @@ class EngineProcessor extends AudioWorkletProcessor {
 /** Valve-train noise exists while the crank turns, fired or not. */
 function running01(combustion: number, spinDown: number): number {
   return combustion > 0 || spinDown > 0 ? 1 : 0.5;
+}
+
+/**
+ * The node's processor. 'character' replaces the engine with a fresh one (every bit of
+ * state as a new node would have it) and wakes the processor; 'sleep' parks it silent
+ * at almost no cost while its voice waits in the traffic pool; 'stop' ends it for good.
+ */
+class EngineProcessor extends AudioWorkletProcessor {
+  static get parameterDescriptors() {
+    return [
+      { name: 'rpm', defaultValue: 800, minValue: 0, maxValue: 12000, automationRate: 'k-rate' },
+      { name: 'load', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'running', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      // Doppler / time scale: 1 is as-is. Scales every frequency INCLUDING the pipe.
+      { name: 'pitch', defaultValue: 1, minValue: 0.5, maxValue: 2, automationRate: 'k-rate' },
+      { name: 'destroyed', defaultValue: 0, minValue: 0, maxValue: 1, automationRate: 'k-rate' },
+      { name: 'idleRpm', defaultValue: 800, minValue: 0, maxValue: 5000, automationRate: 'k-rate' },
+      { name: 'redlineRpm', defaultValue: 6000, minValue: 100, maxValue: 12000, automationRate: 'k-rate' },
+    ];
+  }
+
+  private dsp: EngineDsp;
+  /** Cleared by a 'stop' message; returning false lets the browser collect the node. */
+  private alive = true;
+  private asleep = false;
+
+  constructor(options: { processorOptions: EngineCharacter }) {
+    super(options);
+    this.dsp = new EngineDsp(options.processorOptions);
+    this.port.onmessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; character?: EngineCharacter } | null;
+      if (data?.type === 'stop') {
+        this.alive = false;
+      } else if (data?.type === 'sleep') {
+        this.asleep = true;
+      } else if (data?.type === 'character' && data.character) {
+        this.dsp = new EngineDsp(data.character);
+        this.asleep = false;
+      } else {
+        this.dsp.message(data);
+      }
+    };
+  }
+
+  process(
+    _inputs: Float32Array[][],
+    outputs: Float32Array[][],
+    parameters: Record<string, Float32Array>,
+  ): boolean {
+    if (!this.alive) return false;
+    if (this.asleep) {
+      const out = outputs[0];
+      if (out) for (let c = 0; c < out.length; c++) out[c]!.fill(0);
+      return true;
+    }
+    return this.dsp.process(outputs, parameters);
+  }
 }
 
 registerProcessor('bro-engine', EngineProcessor);

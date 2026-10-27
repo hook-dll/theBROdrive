@@ -53,7 +53,7 @@ import { AUDIO_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { EngineVoice } from './enginevoice';
-import { AudioMixer, ramp, setPannerPosition } from './mixer';
+import { AudioMixer, ramp, setPannerPosition, steer } from './mixer';
 import { Bed, playOnce, type SampleName } from './samples';
 
 /** Where the listener is relative to the car. */
@@ -282,6 +282,14 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
+/** `steer` slots of the per-frame params in `VehicleAudio.update`. */
+const S = {
+  exhaust: 0, bay: 1, whineHz: 2, whine: 3, diffHz: 4, diff: 5, windHp: 6, windLp: 7, wind: 8,
+  buffet: 9, sealHz: 10, seal: 11, roar: 12, hissHz: 13, hiss: 14, treadRate: 15, tread: 16,
+  gritRate: 17, gritHz: 18, grit: 19, scrabbleRate: 20, scrabbleHz: 21, scrabble: 22, spray: 23,
+  rotorHz: 24, rubHz: 25, rub: 26, steam: 27,
+} as const;
+
 export class VehicleAudio {
   private readonly out: GainNode;
   private readonly cabinLowpass: BiquadFilterNode;
@@ -353,6 +361,10 @@ export class VehicleAudio {
   private readonly rotorLfo: OscillatorNode;
 
   private readonly sources: AudioBufferSourceNode[] = [];
+  /** Last target written to each per-frame param (`S` slots, `steer`). */
+  private readonly last = new Float64Array(28).fill(Number.NaN);
+  /** The pose the sources were last placed at; a car standing still is not re-placed. */
+  private readonly placed = new Float64Array(5).fill(Number.NaN);
 
   /** One-shots placed at the manifold (nose) and the silencer (tail). */
   private readonly noseFx: GainNode;
@@ -763,8 +775,9 @@ export class VehicleAudio {
     // Through the cabin the bay is a firewall away and the tailpipe three metres
     // behind a closed boot; from outside the tailpipe dominates.
     const engineCabin = this.engineHeardAs === 'cabin';
-    ramp(this.exhaustGain.gain, ENGINE_GAIN * (engineCabin ? 0.75 : 1), now, 0.08);
-    ramp(this.bayGain.gain, ENGINE_GAIN * (engineCabin ? 1.3 : 0.65), now, 0.08);
+    const last = this.last;
+    steer(this.exhaustGain.gain, last, S.exhaust, ENGINE_GAIN * (engineCabin ? 0.75 : 1), now, 0.08);
+    steer(this.bayGain.gain, last, S.bay, ENGINE_GAIN * (engineCabin ? 1.3 : 0.65), now, 0.08);
 
     const speed = Math.abs(state.forwardMps);
     const load = clamp01(state.throttle);
@@ -772,13 +785,13 @@ export class VehicleAudio {
     // --- gearbox ----------------------------------------------------------------
     const whineLevel = GEAR_WHINE[state.gearLabel] ?? 0.1;
     const shaftHz = state.rpm / 60;
-    this.whineOsc.frequency.setTargetAtTime(Math.max(20, shaftHz * GEAR_MESH_TEETH), now, 0.03);
+    steer(this.whineOsc.frequency, last, S.whineHz, Math.max(20, shaftHz * GEAR_MESH_TEETH), now, 0.03);
     // Whine rides on torque through the mesh: drive or engine braking, not coasting.
     const torque = state.engineRunning ? 0.35 + 0.65 * load : 0;
-    ramp(this.whineGain.gain, WHINE_GAIN * whineLevel * torque * clamp01(speed / 2), now, 0.06);
+    steer(this.whineGain.gain, last, S.whine, WHINE_GAIN * whineLevel * torque * clamp01(speed / 2), now, 0.06);
     const wheelHz = speed / (2 * Math.PI * ROTOR_RADIUS_M);
-    this.diffOsc.frequency.setTargetAtTime(Math.max(20, wheelHz * FINAL_DRIVE_MESH), now, 0.05);
-    ramp(this.diffGain.gain, WHINE_GAIN * 0.35 * clamp01(speed / 25) * (0.4 + 0.6 * load), now, 0.1);
+    steer(this.diffOsc.frequency, last, S.diffHz, Math.max(20, wheelHz * FINAL_DRIVE_MESH), now, 0.05);
+    steer(this.diffGain.gain, last, S.diff, WHINE_GAIN * 0.35 * clamp01(speed / 25) * (0.4 + 0.6 * load), now, 0.1);
 
     // --- wind -------------------------------------------------------------------
     this.gustPhase += dt;
@@ -786,16 +799,16 @@ export class VehicleAudio {
       0.8 + 0.12 * Math.sin(this.gustPhase * 0.9) + 0.08 * Math.sin(this.gustPhase * 2.3 + 1.7);
     const air = Math.max(0, pose.airMps);
     const windT = clamp01(air / WIND_FULL_MPS);
-    this.windHighpass.frequency.setTargetAtTime(110 + 380 * windT, now, 0.1);
+    steer(this.windHighpass.frequency, last, S.windHp, 110 + 380 * windT, now, 0.1);
     // Shut, the cabin dulls the rush and the panels drum (the buffet); an open window lets
     // the rush in bright and makes the drumming worse, as it does at speed.
     const shell = this.shell;
-    this.windLowpass.frequency.setTargetAtTime(2600 - 1200 * shell + 2200 * windT, now, 0.1);
-    ramp(this.windGain.gain, windT * windT * WIND_GAIN * gust * (1 - 0.4 * shell), now, 0.12);
-    ramp(this.buffetGain.gain, windT * windT * WIND_GAIN * 1.6 * (cabin ? 1 + 0.8 * (1 - shell) : 0.35) * gust, now, 0.12);
+    steer(this.windLowpass.frequency, last, S.windLp, 2600 - 1200 * shell + 2200 * windT, now, 0.1);
+    steer(this.windGain.gain, last, S.wind, windT * windT * WIND_GAIN * gust * (1 - 0.4 * shell), now, 0.12);
+    steer(this.buffetGain.gain, last, S.buffet, windT * windT * WIND_GAIN * 1.6 * (cabin ? 1 + 0.8 * (1 - shell) : 0.35) * gust, now, 0.12);
     const sealT = clamp01((air - 18) / 20);
-    this.sealFilter.frequency.setTargetAtTime(1150 + 500 * sealT + 90 * Math.sin(this.gustPhase * 0.6), now, 0.2);
-    ramp(this.sealGain.gain, cabin ? sealT * sealT * WIND_GAIN * 0.45 * gust : 0, now, 0.2);
+    steer(this.sealFilter.frequency, last, S.sealHz, 1150 + 500 * sealT + 90 * Math.sin(this.gustPhase * 0.6), now, 0.2);
+    steer(this.sealGain.gain, last, S.seal, cabin ? sealT * sealT * WIND_GAIN * 0.45 * gust : 0, now, 0.2);
 
     // --- tyres ------------------------------------------------------------------
     const voice = SURFACE_VOICES[state.surface] ?? SURFACE_VOICES[SurfaceType.Asphalt];
@@ -812,21 +825,23 @@ export class VehicleAudio {
       this.textureTarget = 0.9 + Math.random() * 0.2;
     }
     this.texture += (this.textureTarget - this.texture) * clamp01((speed * dt) / 3);
-    ramp(
+    steer(
       this.roarGain.gain,
+      last,
+      S.roar,
       TYRE_GAIN * 0.9 * rollT ** 1.3 * voice.roar * (0.7 + 0.6 * rough) * contact * (cabin ? 1.3 : 1) * this.texture,
       now,
       0.09,
     );
-    this.hissFilter.frequency.setTargetAtTime(voice.hissHz * (0.8 + 0.4 * rollT) * (0.9 + 0.1 * this.texture), now, 0.1);
-    ramp(this.hissGain.gain, TYRE_GAIN * 0.25 * rollT * rollT * voice.hiss * contact * this.texture, now, 0.09);
-    this.treadSource.playbackRate.setTargetAtTime(1 + speed / 5, now, 0.1);
-    ramp(this.treadGain.gain, TYRE_GAIN * 1.1 * rollT ** 1.4 * voice.hiss * contact * this.texture, now, 0.09);
+    steer(this.hissFilter.frequency, last, S.hissHz, voice.hissHz * (0.8 + 0.4 * rollT) * (0.9 + 0.1 * this.texture), now, 0.1);
+    steer(this.hissGain.gain, last, S.hiss, TYRE_GAIN * 0.25 * rollT * rollT * voice.hiss * contact * this.texture, now, 0.09);
+    steer(this.treadSource.playbackRate, last, S.treadRate, 1 + speed / 5, now, 0.1);
+    steer(this.treadGain.gain, last, S.tread, TYRE_GAIN * 1.1 * rollT ** 1.4 * voice.hiss * contact * this.texture, now, 0.09);
     // Grain density and brightness both follow speed: the stones come faster.
     // Played slower than recorded, the grains are longer and duller as well as fewer.
-    this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);
-    this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
-    ramp(this.gritGain.gain, TYRE_GAIN * 0.35 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
+    steer(this.gritSource.playbackRate, last, S.gritRate, 0.3 + speed / 16, now, 0.1);
+    steer(this.gritFilter.frequency, last, S.gritHz, voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
+    steer(this.gritGain.gain, last, S.grit, TYRE_GAIN * 0.35 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
     // --- skid -------------------------------------------------------------------
     // Each axle's loudest tyre (`TYRE_VOICE`): its slip past its own peak, gated by how
     // fast the patch actually slides, on the surface under it. A hard surface sings, a
@@ -844,9 +859,9 @@ export class VehicleAudio {
     const rearLoose = rearVoice.squeal ? 0 : rear * rearVoice.scrabble;
     const looseVoice = frontLoose >= rearLoose ? frontVoice : rearVoice;
     const loose = Math.max(frontLoose, rearLoose);
-    this.scrabbleSource.playbackRate.setTargetAtTime(0.6 + speed / 6, now, 0.05);
-    this.scrabbleFilter.frequency.setTargetAtTime(looseVoice.scrabbleHz, now, 0.1);
-    ramp(this.scrabbleGain.gain, SCRABBLE_GAIN * loose, now, 0.05);
+    steer(this.scrabbleSource.playbackRate, last, S.scrabbleRate, 0.6 + speed / 6, now, 0.05);
+    steer(this.scrabbleFilter.frequency, last, S.scrabbleHz, looseVoice.scrabbleHz, now, 0.1);
+    steer(this.scrabbleGain.gain, last, S.scrabble, SCRABBLE_GAIN * loose, now, 0.05);
     // The recorded roll carries loose stone; the synthetic grains above only add bite.
     // A sliding tyre turns it over faster and louder: the crunch.
     const crunch = TYRE_VOICE.crunch * Math.max(frontLoose * frontVoice.stones, rearLoose * rearVoice.stones);
@@ -858,7 +873,7 @@ export class VehicleAudio {
     );
     // Spray: a wet road is a hiss that swamps everything else the tyre does.
     const wetRoad = voice.squeal ? pose.wet : pose.wet * 0.4;
-    ramp(this.sprayGain.gain, TYRE_GAIN * 1.1 * wetRoad * rollT ** 1.5 * contact, now, 0.15);
+    steer(this.sprayGain.gain, last, S.spray, TYRE_GAIN * 1.1 * wetRoad * rollT ** 1.5 * contact, now, 0.15);
 
     this.joints(voice, speed, dt, contact);
 
@@ -868,9 +883,9 @@ export class VehicleAudio {
     const brake = clamp01(state.brake + (state.handbrake ? 0.7 : 0));
     const moving = clamp01((speed - BRAKE_MIN_MPS) / (BRAKE_FULL_MPS - BRAKE_MIN_MPS));
     const rotorHz = Math.min(ROTOR_RATE_MAX_HZ, Math.max(ROTOR_RATE_MIN_HZ, wheelHz));
-    this.rotorLfo.frequency.setTargetAtTime(rotorHz, now, 0.12);
-    this.rubFilter.frequency.setTargetAtTime(RUB_FREQ_SLOW + (RUB_FREQ_FAST - RUB_FREQ_SLOW) * moving, now, 0.1);
-    ramp(this.rubGain.gain, brake * moving * (1 - lockT) * contact * RUB_GAIN, now, 0.06);
+    steer(this.rotorLfo.frequency, last, S.rotorHz, rotorHz, now, 0.12);
+    steer(this.rubFilter.frequency, last, S.rubHz, RUB_FREQ_SLOW + (RUB_FREQ_FAST - RUB_FREQ_SLOW) * moving, now, 0.1);
+    steer(this.rubGain.gain, last, S.rub, brake * moving * (1 - lockT) * contact * RUB_GAIN, now, 0.06);
 
     this.cooling(state, load, dt, now);
 
@@ -917,6 +932,13 @@ export class VehicleAudio {
 
   private placeSources(pose: CarPose, now: number): void {
     const { x, y, z, forwardX: fx, forwardZ: fz } = pose;
+    const placed = this.placed;
+    if (placed[0] === x && placed[1] === y && placed[2] === z && placed[3] === fx && placed[4] === fz) return;
+    placed[0] = x;
+    placed[1] = y;
+    placed[2] = z;
+    placed[3] = fx;
+    placed[4] = fz;
     setPannerPosition(this.nose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
     setPannerPosition(this.body, x, y, z, now, 0.02);
     setPannerPosition(this.tail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
@@ -949,8 +971,10 @@ export class VehicleAudio {
 
     this.boil += ((state.overheatStalled ? 1 : 0) - this.boil) * Math.min(1, dt / 1.5);
     const flutter = 0.65 + 0.35 * Math.random();
-    this.steamFilter.frequency.setTargetAtTime(3600 + 1600 * Math.random(), now, 0.05);
-    ramp(this.steamGain.gain, BOIL_GAIN * this.boil * flutter, now, 0.05);
+    // At rest the boil decays towards 0 for ever; under -100 dB it is silence.
+    const steam = this.boil > 1e-4 ? BOIL_GAIN * this.boil * flutter : 0;
+    if (steam > 0) this.steamFilter.frequency.setTargetAtTime(3600 + 1600 * Math.random(), now, 0.05);
+    steer(this.steamGain.gain, this.last, S.steam, steam, now, 0.05);
     if (this.boil > 0.2 && Math.random() < 1.8 * this.boil * dt) {
       // Coolant gurgling up the filler neck: a few wet low bubbles.
       const bubbles = 1 + Math.floor(Math.random() * 3);
