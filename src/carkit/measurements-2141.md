@@ -100,15 +100,22 @@ The tailgate runs from the roof's rear (3.38 at the rail) nearly all glass to th
 
 | s | Plan outermost | Spec wSill / wCrease / wBelt |
 |---|---|---|
-| 0.107 | 0.620 (the bumper's corner); 0.654 at 0.136 | 0.64 / 0.66 / 0.645 |
-| 0.22 | 0.711 | 0.69 / 0.71 / 0.695 |
-| 0.336 | 0.737 | 0.72 / 0.74 / 0.725 |
-| 0.55 | 0.783–0.800 | 0.77 / 0.79 / 0.775 |
+| 0.107 | 0.620 (the bumper's corner); 0.654 at 0.136; front view: the indicator's outer edge ±0.744 face-on | 0.725 / 0.745 / 0.73 |
+| 0.22 | 0.711 | 0.78 / 0.80 / 0.785 |
+| 0.336 | 0.737 | 0.80 / 0.825 / 0.81 |
+| 0.55 | 0.783–0.800 | 0.81 / 0.84 / 0.825 |
 | 0.91–3.24 | 0.831–0.849 (0.854 over the rear arch's lip); front view ±0.857 at 0.6, ±0.836 at 0.89 | 0.81 / 0.845 / 0.83 |
 | 3.88 | 0.791 | 0.77 / 0.80 / 0.785 |
 | 4.12 | 0.769 | 0.75 / 0.78 / 0.765 |
 | 4.245 | 0.749 | 0.73 / 0.755 / 0.745 |
 | 4.27 | 0.734; the lamps' outer edge ±0.761 seen from behind [D rear] | 0.72 / 0.74 / 0.73 |
+
+The nose (s 0.107–0.55) does not follow the plan column: the drawing's plan view tapers
+from the screen to the face, against its own front view (the indicator's outer edge ±0.744
+face-on, a sliver of wing outboard) and the photos, where the wings run nearly straight to
+a lightly rounded face (owner 2026-10-27, HISTORY "AZLK-2141, the nose in plan"). Refs
+`planHalfWidth`: ±0.77 at 0.15, 0.805 at 0.25, 0.825 at 0.35, 0.84 at 0.55, 0.845 at 0.91
+(±0.025); built 0.775 / 0.815 / 0.834 / 0.84 / 0.842.
 
 `crease` **0.62** everywhere: the flank is widest between 0.54 and 0.75 [D front, rear]. Side glass: the A pillar's outer line runs from ±0.757 at 0.99 to ±0.578 at 1.363 [D front], 0.48 m in per m up: its foot ±0.80 at the belt (`shoulder` inset **0.03**, rise 0.015) and ±0.59 at the rail (`railHalf` **0.59**; the D pillar's ±0.589 at 1.349 [D rear]); the roof's edge ±0.56 (`railInset` 0.03).
 

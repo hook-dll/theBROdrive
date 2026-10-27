@@ -1268,6 +1268,21 @@ onto `w124_side.png` registered on its hubs (measurements-w124.md §10).
 
 Every other car `identical` (kit-fingerprint); w124 re-recorded, 12 363 → 12 194 triangles.
 
+## Mercedes W124, the tail in plan (2026-10-27)
+
+- **«вряд ли корма мерседеса должна иметь такие углы - смотри вид сверху»** (his lab shot
+  from above: the tail a box, square corners, the wings standing as strips beside the
+  lid). → The stations held the full ±0.85–0.87 to the back light's foot (s 3.96) and
+  still ±0.80–0.82 at the tail (4.68), turning in only over the last 2 cm: the drawing's
+  plan narrows all the way, ±0.868 at 3.93 to ±0.752 at 4.68 and ±0.717 at the face. → The
+  tail station ±0.74 / 0.755 / 0.72 (sill / crease / belt), the face ±0.70 / 0.715 / 0.68:
+  one straight taper from the back light's foot, within 1.5 cm of the plan at every
+  station, no station between; the amber indicator's split moved in to ±0.64 to stay on
+  the narrower face. New check `planHalfWidth` (kit-drawing.ts, any car: [s, half width]
+  pairs read off a plan view, judged only where refs give it); refs/w124.json has six.
+  Every other car `identical`; w124 re-recorded, 12 209 triangles.
+  *mercedes.ts stations 4.68 / 4.7, `cornerLamps`; tools/kit-drawing.ts*.
+
 ## Tens: the firewall lining in the front doors' edges (2026-10-27)
 
 - **kit-zfight failed on the 2110 and 2112**: `kit_cabin/cabin_trim` (interior.ts
@@ -1289,6 +1304,20 @@ Every other car `identical` (kit-fingerprint); w124 re-recorded, 12 363 → 12 1
 
 Every other car `identical` (kit-fingerprint); vaz2110, vaz2111, vaz2112 re-recorded (cabin),
 triangle counts unchanged.
+
+## AZLK-2141, the nose in plan (2026-10-27)
+
+- **«что-то подсказывает мне, что перед москвича не должен так сужаться»** (his lab shot
+  from above: the nose tapering from the screen to a narrow front). → The stations
+  followed the drawing's plan view, which tapers all the way (±0.66 at the face, ±0.71 at
+  0.22, ±0.74 at 0.336, ±0.79 at 0.55, full ±0.845 only at the hub). That plan contradicts
+  the drawing's own front view, where the wraparound indicator's outer edge stands ±0.744
+  face-on with only a sliver of wing outboard of it, and the photos: the real car's wings
+  run nearly straight to the face, the corners lightly rounded. → Face ±0.745 (crease),
+  ±0.80 at 0.22, ±0.825 at 0.336, ±0.84 at 0.55, then the flank; refs/azlk2141.json gets
+  five `planHalfWidth` stations (0.15–0.91), built 0.775 / 0.815 / 0.834 / 0.84 / 0.842.
+  Every other car `identical`; azlk2141 re-recorded, 12 580 triangles. *azlk.ts stations
+  0.107–0.55*.
 
 ## Failed approaches (do not retry)
 

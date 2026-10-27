@@ -11,12 +11,12 @@
     }
   },
   "azlk2141": {
-    "triangles": 12583,
+    "triangles": 12580,
     "zones": {
-      "bay": "179a127dc9c9056a",
+      "bay": "dfe23b80365a930f",
       "boot": "d19e4dd7bd8a3c4d",
       "cabin": "8ff820b6c8bef031",
-      "exterior": "a9ae224c3dd3f8c",
+      "exterior": "f2a6f2498efd538c",
       "under": "9b74751040ca3eaf",
       "wheel": "89506a99881e7546"
     }
@@ -285,12 +285,12 @@
     }
   },
   "w124": {
-    "triangles": 12194,
+    "triangles": 12209,
     "zones": {
       "bay": "63e7f0930df94567",
-      "boot": "320342595aad2cb",
+      "boot": "883c10b97c043dd2",
       "cabin": "4bfa81d22cf03ba",
-      "exterior": "ff7300fa1dad3127",
+      "exterior": "32560c304212e473",
       "under": "4a593efdc301d9f3",
       "wheel": "a62fec5c09a7ab72"
     }

@@ -27,6 +27,8 @@
  *   mirror                      the left door mirror's glass centre [s, y];
  *   roofHalfWidth               the car's half width at the rail's height (the roof's edge);
  *   beltHalfWidth               the skin's half width 5 cm under the belt at the front door;
+ *   planHalfWidth               at each s the refs list, [s, the shell's half width there]
+ *                               (the outline from above, bumpers included);
  *   moulding                    the front door's waist strip [y0, y1];
  *   bonnet, bootLid             the lid's skin on the centre line [s0, s1].
  *   Dash (the cabin as built): gauges (`panel_dim_*` nodes) and their rows (by height),
@@ -136,7 +138,7 @@ const TOL: Record<string, number> = {
   // The visible glass: the generator edges every pane with its rubber inside the opening.
   beltY: 0.04, railY: 0.04, doorBottomY: 0.025, moulding: 0.025,
   sideGlassBelt: 0.04, sideGlassRail: 0.04, doorFront: 0.03, doorRear: 0.03, bonnet: 0.03, bootLid: 0.03,
-  mirror: 0.05, roofHalfWidth: 0.02, beltHalfWidth: 0.02, wheelDiameter: 0.03,
+  mirror: 0.05, roofHalfWidth: 0.02, beltHalfWidth: 0.02, planHalfWidth: 0.02, wheelDiameter: 0.03,
 };
 
 // ---------------------------------------------------------------- measuring
@@ -344,6 +346,15 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
     if (segs.length === 0) continue;
     const ss = segs.flat().map((p) => car.s(p[2]));
     out[key] = [r3(Math.min(...ss)), r3(Math.max(...ss))];
+  }
+  // The plan's half width at each station the refs give (the outline from above: the
+  // widest point of the shell, bumpers included, across the car at that s).
+  const plan = refs?.planHalfWidth?.v;
+  if (Array.isArray(plan)) {
+    out.planHalfWidth = (plan as number[][]).map(([at]) => {
+      const segs = slice(s, shell, 2, car.z(at!));
+      return [at!, segs.length > 0 ? r3(Math.max(...segs.flat().map((p) => Math.abs(p[0])))) : 0];
+    });
   }
   return out;
 }

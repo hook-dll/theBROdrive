@@ -545,3 +545,24 @@ zfight pass (no slit), proportions pass, reality pass, mirrors L100 R100, dents 
 triangles 12 194, drawing 20/20, dash 9/9; frozen: re-recorded (`--write w124`) after the
 arches' shelf change; every other car `identical`. No lab captures (the owner looks in the
 car lab himself).
+
+## 11. The tail in plan (2026-10-27)
+
+His words, on a lab shot from above: «вряд ли корма мерседеса должна иметь такие углы -
+смотри вид сверху». The tail was a box: ±0.87 to s 4.10, ±0.83 at 4.68, square corners.
+
+**Plan** [D plan, 5.806 mm/px, centre y 629; the outline's top and bottom rows per column,
+bumper included]: ±0.868 at s 3.93 (x 700), ±0.851 at 4.04 (720), ±0.813 at 4.27 (760),
+±0.793 at 4.45 (790), ±0.769 at 4.62 (820), ±0.752 at 4.68 (830), ±0.717 at 4.71 (835);
+the widest ±0.877 at 3.58–3.69 (the drawing's scale reads 1 % wide there against the
+factory's 1740). A straight line from ±0.87 at 3.96 to ±0.755 at 4.68 passes within 1 cm of
+every one. Built: tail station (4.68) `wSill` / `wCrease` / `wBelt` 0.74 / 0.755 / 0.72, the
+face (4.70) 0.70 / 0.715 / 0.68; the amber indicator's split ±0.64 (was ±0.69, off the
+narrower face). Measured from above on the built car: ±0.855 / 0.825 / 0.79 / 0.775 / 0.765
+/ 0.725 at 4.10 / 4.30 / 4.50 / 4.60 / 4.68 / 4.70. Judged by `planHalfWidth` in
+refs/w124.json (new in kit-drawing.ts, ±0.02).
+
+### Checks (`npm run kit-check -- w124`, 2026-10-27, the tail in plan)
+
+zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, triangles 12 209,
+drawing 21/21, dash 9/9; frozen: re-recorded (`--write w124`).

@@ -28,7 +28,8 @@
     "doorBottomY": { "v": 0.324, "tol": 0.03, "src": "D side y 274 (P1 0.30), measurements-2141.md §1" },
     "mirror": { "v": [1.705, 1.008], "src": "D side x 309-331, y 143-166, measurements-2141.md §1" },
     "roofHalfWidth": { "v": 0.59, "src": "D front the A pillar's outer line ±0.578-0.59 at the rail 1.325-1.363, D rear the D pillar's ±0.589 at 1.349 (measurements-2141.md §1.2); the roof's edge over the rail's chamfer is ±0.56" },
-    "beltHalfWidth": { "v": 0.836, "src": "D front ±0.836 at 0.89, measurements-2141.md §1.2" }
+    "beltHalfWidth": { "v": 0.836, "src": "D front ±0.836 at 0.89, measurements-2141.md §1.2" },
+    "planHalfWidth": { "v": [[0.15, 0.77], [0.25, 0.805], [0.35, 0.825], [0.55, 0.84], [0.91, 0.845]], "tol": 0.025, "src": "D front: the indicator's outer edge ±0.744 face-on at the face (x 927 on centre 1056.25), the flank ±0.836-0.857 behind; the drawing's plan view tapers (±0.65 at 0.14 → ±0.79 at 0.55) against its own front view and the photos (owner 2026-10-27: the 2141's front from above is nearly square, not narrowing), measurements-2141.md §1.2" }
   },
   "dash": {
     "photo": { "src": "P2", "view": "driver" },

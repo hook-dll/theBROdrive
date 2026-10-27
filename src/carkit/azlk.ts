@@ -36,20 +36,23 @@ export const BODY_2141: KitBody = {
   length: 4.35, // [F 4350: drom.ru, ru.wikipedia, njcar.ru]; drawn tips 4.286 at the hub scale
   platform: 'samara',
   stations: [
-    // The face [D side: the lamps' foot x 40, s 0.107, on the bumper's top 0.563–0.577]: its
-    // corners round in plan (±0.62 at s 0.107, ±0.654 at 0.136, ±0.71 at 0.22, ±0.737 at
-    // 0.336, ±0.785 at 0.55, ±0.843 at the hub [D plan]). The bonnet's centre line [D side,
+    // The face [D side: the lamps' foot x 40, s 0.107, on the bumper's top 0.563–0.577]: a
+    // wide, nearly square front in plan, the wings running almost straight to the face and
+    // only its corners lightly rounded (owner 2026-10-27: "перед москвича не должен так
+    // сужаться"; the drawing's plan read ±0.62 at 0.107 → ±0.79 at 0.55, a taper its front
+    // view and the photos deny): the indicator's outer edge ±0.744 face-on [D front] at the
+    // face, ±0.80 at 0.22, the flank nearly full (±0.84) by 0.55. The bonnet's centre line [D side,
     // the top line: 0.806 at s 0.19, 0.834 at 0.31, 0.88 at 0.54, 0.914 at 0.88, 0.937 at 1.14,
     // 0.955 at the cowl], its crown over the wings' top growing evenly from 0.01 at the lip
     // to 0.03 at the cowl (HISTORY: a crown that grows and shrinks twists the bonnet into
     // slivers): `belt` = deck − shoulder rise − crown. The wings' top line [D side: 0.806 at
     // the lip's corner → 0.945 at the cowl] is within 2 cm of it.
-    { s: 0.107, sill: 0.25, crease: 0.62, belt: 0.755, deck: 0.78, wSill: 0.64, wCrease: 0.66, wBelt: 0.645 },
-    { s: 0.22, sill: 0.25, crease: 0.62, belt: 0.785, deck: 0.812, wSill: 0.69, wCrease: 0.71, wBelt: 0.695 },
+    { s: 0.107, sill: 0.25, crease: 0.62, belt: 0.755, deck: 0.78, wSill: 0.725, wCrease: 0.745, wBelt: 0.73 },
+    { s: 0.22, sill: 0.25, crease: 0.62, belt: 0.785, deck: 0.812, wSill: 0.78, wCrease: 0.8, wBelt: 0.785 },
     // The indicator's end on the flank [D side x 80].
-    { s: 0.336, sill: 0.25, crease: 0.62, belt: 0.811, deck: 0.84, wSill: 0.72, wCrease: 0.74, wBelt: 0.725 },
-    { s: 0.55, sill: 0.25, crease: 0.62, belt: 0.848, deck: 0.88, wSill: 0.77, wCrease: 0.79, wBelt: 0.775 },
-    // Over the front hub the flank reaches its full ±0.843 [D plan; front view ±0.857 at
+    { s: 0.336, sill: 0.25, crease: 0.62, belt: 0.811, deck: 0.84, wSill: 0.8, wCrease: 0.825, wBelt: 0.81 },
+    { s: 0.55, sill: 0.25, crease: 0.62, belt: 0.848, deck: 0.88, wSill: 0.81, wCrease: 0.84, wBelt: 0.825 },
+    // Over the front hub the flank reaches its full ±0.845 [front view ±0.857 at
     // 0.6, ±0.836 at 0.89].
     { s: 0.91, sill: 0.22, crease: 0.62, belt: 0.879, deck: 0.917, wSill: 0.81, wCrease: 0.845, wBelt: 0.83 },
     // The cowl: the A pillar's outer line meets the bonnet here [D side (255, 163)].

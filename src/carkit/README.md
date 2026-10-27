@@ -947,6 +947,8 @@ nothing), `screenFoot`, `screenTop`,
 `beltY`, `railY` (the visible side glass's foot and top at the front door), `sideGlassBelt`,
 `sideGlassRail` (every pane's run along the car), `doorFront`, `doorRear` (shut lines 10 cm
 under the belt), `doorBottomY`, `mirror` `[s, y]`, `roofHalfWidth`, `beltHalfWidth`,
+`planHalfWidth` (`[[s, half width], …]` read off a plan view: the shell's outline from
+above at each listed s, bumpers included),
 `moulding` `[y0, y1]`, `bonnet`, `bootLid`. A future car's dash keys come from a photo of
 THIS car's dash (`photo: { src, view }`): `gauges`, `dialRows`, `clusterAt`, `clock`,
 `wheelSpokes`, `wheelDiameter`, `glovebox`, `stack`, `console`, `vents`. Existing cars

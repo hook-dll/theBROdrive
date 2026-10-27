@@ -67,16 +67,20 @@ export const BODY_W124: KitBody = {
     // and no hump (owner, 2026-10-27: «что это за конструкция?»). The wing's top edge (the
     // belt row) runs straight under it, the crown across easing from 3 cm at the glass to
     // 1.5 at the tail (3 cm there folds the tail's top at the lid's cut), so the deck's
-    // sides run into the wings with no step. The tail's corners rounding in [D2 rear: ±0.86
-    // at the bumper, ±0.84 at the belt; D plan: ±0.80 at s 4.45, ±0.765 at 4.67].
-    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.015, wSill: 0.805, wCrease: 0.82, wBelt: 0.782 },
+    // sides run into the wings with no step. In plan the tail narrows straight from the
+    // back light's foot to the tail [D plan, 5.806 mm/px: ±0.868 at s 3.93, ±0.851 at 4.04,
+    // ±0.813 at 4.27, ±0.793 at 4.45, ±0.769 at 4.62, ±0.752 at 4.68, ±0.717 at 4.71]: the
+    // line from ±0.87 here to ±0.755 passes within 1 cm of every one, so no station between.
+    // Owner, 2026-10-27: the tail from above was a box with square corners («вряд ли корма
+    // мерседеса должна иметь такие углы»; it held ±0.82 to the tail).
+    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.015, wSill: 0.74, wCrease: 0.755, wBelt: 0.72 },
     // The tail face [D side x 828–835: upright from the deck's edge 0.99 at s 4.70]: the
     // lid's rear panel above the lamps (0.858 [D side y 183]) across, and down between them
     // to their foot (0.655 [P R: the lid's foot just under the lamps']), its sides along the
     // lamps' leaning inner edges [P carsized rear, 340 px/m across: the lamps ±0.472 at their
     // foot to ±0.582 at their top, the lid's foot ±0.456]: cut at ±0.572 at the top, in by
     // 0.112 to ±0.46 at the foot (`notchWall`).
-    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.86, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.79, wCrease: 0.8, wBelt: 0.775 },
+    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.86, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.7, wCrease: 0.715, wBelt: 0.68 },
   ],
   // The side glass's foot ±0.765 over the skin's ±0.835 [D2 front: the glass ±0.735 at 1.05,
   // ±0.61 at the rail].
@@ -238,15 +242,16 @@ export const LOOK_W124: KitLook = {
     // Tail lamps 0.665–0.855 [D side y 183–216; D2 rear 0.64–0.83], their inner edges leaning
     // along the lid's cut, 8–11 mm clear of it [P carsized rear: ±0.472 at the foot to ±0.582
     // at the top], wrapping round onto the wings to s 4.52 [D side x 800]. Top band the
-    // reversing lamp inside and the amber indicator outside from ±0.69, the red tail and
-    // brake lamp below split at ±0.62 [P R, R34, carsized rear: the bands 44 % / 56 % of the
-    // lamp's height]; fluted at about 3 cm [P carsized rear, R34].
+    // reversing lamp inside and the amber indicator outside from ±0.64 (±0.69 on the rear
+    // view, where the corner's rounding starts: the tail face now ends at ±0.68), the red
+    // tail and brake lamp below split at ±0.62 [P R, R34, carsized rear: the bands 44 % / 56 %
+    // of the lamp's height]; fluted at about 3 cm [P carsized rear, R34].
     {
       end: 'rear',
       ribs: 2,
       points: [
         { x: [0.535, 0.58], y: [0.774, 0.855], role: 'reverse' },
-        { x: 0.69, y: [0.774, 0.855], role: 'blinker' },
+        { x: 0.64, y: [0.774, 0.855], role: 'blinker' },
         { y: [0.774, 0.855], role: 'blinker' },
         { s: 4.53, y: [0.779, 0.85] },
       ],
