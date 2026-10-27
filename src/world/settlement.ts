@@ -13,8 +13,8 @@ import type { Road } from './road';
  * and on the lay-by's side one long pad with its service band (§6.3): the signpost, the
  * teddy shelter, the post, the toy box, the parking row of three angled slots (a haul's
  * load waits in the first, hauls are handed in in the second, a car for sale sometimes
- * stands in the third), the garage machine at some (`poiHasMachine`) and sometimes the
- * pumps. Every other roadside stop is one house in front of its own short lay-by.
+ * stands in the third), the garage and claw machines at some (`poiHasMachine`) and
+ * sometimes the pumps. Every other roadside stop is one house in front of its own short lay-by.
  *
  * PURE: a function of the seed and the slot, with no road or terrain sampling beyond
  * `halfWidthAt`, which is itself a function of the seed. Two worlds read it: world/poi.ts
@@ -72,6 +72,12 @@ export interface SettlementLayout {
    * elsewhere, so nothing stands in its place.
    */
   readonly garage: SettlementSpot | null;
+  /**
+   * The CLAW machine (world/claw.ts), on the service band beside the garage machine's
+   * spot, between it and the pumps. Settlements only, and only where
+   * `poiHasMachine(seed, post, 'claw')`: null elsewhere.
+   */
+  readonly claw: SettlementSpot | null;
   /** The toy box's stand (world/toybox.ts), between the post and the stop; its car comes out in the marked bay in front of it. Settlements only. */
   readonly toybox: SettlementSpot | null;
   /**
@@ -165,8 +171,8 @@ const LOT_CHANCE = 0.3;
  * The first `MACHINE_SURE_POSTS` posts have every kind, so the road's start teaches
  * each one; past them each kind is there by its own roll, independent of the other
  * kind's and of everything else the stop rolls. The garage machine sells car parts,
- * paint, cans and small goods (world/vending.ts); the claw machine (stickers) is the
- * next machine and has its roll here already, read by nothing yet.
+ * paint, cans and small goods (world/vending.ts); the claw machine gives sticker
+ * figurines (world/claw.ts).
  */
 export type MachineKind = 'garage' | 'claw';
 const MACHINE_SURE_POSTS = 3;
@@ -198,7 +204,9 @@ export function poiHasMachine(seed: number, postIndex: number, kind: MachineKind
  * is laid straight along the road's tangent at its middle (world/haulbay.ts), 17 m of
  * it, so the toy box before it and the garage machine after it stand 12 m from its middle; the
  * bay's end is 2.3 m short of the row's first slot on a straight, and the row's straight
- * ends come up to 1.1 m nearer it on the tightest curves.
+ * ends come up to 1.1 m nearer it on the tightest curves. The claw machine stands 1.9 m
+ * past the garage machine, and the pumps' island 0.6 m further on than it stood before
+ * the claw (+26), so the three keep 0.7 m between them on a straight.
  */
 const SHELTER_ALONG_M = -9.8;
 const SHELTER_IN_M = 1.05;
@@ -210,8 +218,11 @@ const TOYBOX_IN_M = 1.35;
 const PARKING_ALONG_M = 9.5;
 const GARAGE_ALONG_M = 21.5;
 const GARAGE_IN_M = 1.3;
-/** The pumps' island, +24…+28. */
-const PUMPS_ALONG_M = 26;
+/** The claw machine, its 0.86 m body and the ledge in front its back on the garage's line. */
+const CLAW_ALONG_M = 23.4;
+const CLAW_IN_M = 1.23;
+/** The pumps' island, +24.6…+28.6. */
+const PUMPS_ALONG_M = 26.6;
 const PUMPS_IN_M = 1.0;
 
 /**
@@ -253,13 +264,16 @@ export const SIGNPOST_OUT_M = 1.0;
  * placement bench (tools/poi-placement.ts) measures houses, the lay-by and one another
  * against these.
  */
-export const SERVICE_HALF: Readonly<Record<'post' | 'garage' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
+export const SERVICE_HALF: Readonly<Record<'post' | 'garage' | 'claw' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
   // The card machines (world/cardmachine.ts), 1.36 x 1.0 m and the control deck across
   // their front standing out to 0.78 m from the middle, the cheeks' stripes (the
   // garage's pegboard and tools) on the flanks. They stand 1.3 m in (1.2 when they were
   // 0.8 m deep), so their backs keep to the same line.
   post: [0.7, 0.8],
   garage: [0.7, 0.8],
+  // The claw machine (world/claw.ts), 0.9 x 0.86 m and the ledge across its front
+  // standing out to 0.63 m from the middle.
+  claw: [0.5, 0.65],
   // The toy box's stand (world/toybox.ts), its largest variant: the podium or the
   // carousel, 1.44 m across, and the lectern at its front corner with the handwheel
   // standing out of it. Its back 0.4 m in from the asphalt's edge.
@@ -373,6 +387,7 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       houses: [house],
       post: null,
       garage: null,
+      claw: null,
       toybox: null,
       shelter: null,
       parking: null,
@@ -498,6 +513,7 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       houses,
       post: spot(s0 + POST_ALONG_M, side, padOuter - POST_IN_M, face),
       garage: poiHasMachine(seed, slotPost(roll.slot), 'garage') ? spot(s0 + GARAGE_ALONG_M, side, padOuter - GARAGE_IN_M, face) : null,
+      claw: poiHasMachine(seed, slotPost(roll.slot), 'claw') ? spot(s0 + CLAW_ALONG_M, side, padOuter - CLAW_IN_M, face) : null,
       toybox: spot(s0 + TOYBOX_ALONG_M, side, padOuter - TOYBOX_IN_M, face),
       shelter: spot(s0 + SHELTER_ALONG_M, side, padOuter - SHELTER_IN_M, face),
       parking: spot(s0 + PARKING_ALONG_M, side, padOuter - PARKING_IN_M, noseOut),

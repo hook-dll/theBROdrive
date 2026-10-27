@@ -525,7 +525,7 @@ export type DevSpawnItemRequest =
   | { readonly type: 'camera' }
   | { readonly type: 'football' }
   | { readonly type: 'pocket_watch' }
-  | { readonly type: 'sticker_envelope'; readonly stickerKind: StickerKind };
+  | { readonly type: 'sticker_figurine'; readonly stickerKind: StickerKind };
 
 function driveLayout(rearDriveBias: number): DriveLayout {
   if (rearDriveBias <= 0) return 'FWD';
@@ -3127,7 +3127,7 @@ export class MainMenu {
       /**
        * Dev item dispenser. Fluid capacities mirror gas-stop stock; bubble gum uses
        * the same five-charge pack found there. Every row drops a real world pickup,
-       * the sticker rows one signed envelope of each design in the catalog.
+       * the sticker rows one figurine of each design in the catalog.
        */
       const renderItemScreen = (): void => {
         panel.textContent = '';
@@ -3212,7 +3212,7 @@ export class MainMenu {
         }
 
         const stickerHeading = el('div', 'menu-body-group');
-        stickerHeading.textContent = `sticker envelopes · ${STICKERS.length}`;
+        stickerHeading.textContent = `sticker figurines · ${STICKERS.length}`;
         list.appendChild(stickerHeading);
         for (const sticker of STICKERS) {
           const row = button('menu-body', '');
@@ -3222,7 +3222,7 @@ export class MainMenu {
           size.textContent = `${Math.round(sticker.widthM * 100)} × ${Math.round(sticker.heightM * 100)} cm`;
           row.append(name, size);
           row.addEventListener('click', () => {
-            hooks.spawnItem?.({ type: 'sticker_envelope', stickerKind: sticker.kind });
+            hooks.spawnItem?.({ type: 'sticker_figurine', stickerKind: sticker.kind });
             finish('resume');
           });
           list.appendChild(row);

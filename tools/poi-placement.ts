@@ -224,7 +224,7 @@ const MAX_VERGE_M = 22;
       name: structureDef(house.structure).id,
       rect: houseRect(seedRoad, house),
     }));
-    for (const name of ['post', 'garage', 'toybox', 'pumps', 'shelter'] as const) {
+    for (const name of ['post', 'garage', 'claw', 'toybox', 'pumps', 'shelter'] as const) {
       const at = stop.layout[name];
       if (!at) continue;
       const pose = spotPose(seedRoad, at);
@@ -663,7 +663,7 @@ const MAX_VERGE_M = 22;
           slot: false,
         });
       };
-      for (const name of ['post', 'garage', 'toybox', 'pumps', 'shelter'] as const) {
+      for (const name of ['post', 'garage', 'claw', 'toybox', 'pumps', 'shelter'] as const) {
         addSpot(name, layout[name], SERVICE_HALF[name][0], SERVICE_HALF[name][1]);
       }
       if (layout.parking) {

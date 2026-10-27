@@ -9,6 +9,8 @@ import type { WorldOrigin } from '../world/origin';
 const BLEND_S = 0.45;
 /** Wheel travel, in the reader's normalised units, that turns one card. */
 const WHEEL_NOTCH = 1;
+/** Cursor travel on screen, pixels, that leans a steered machine's held stick all the way over. */
+const STICK_TRAVEL_PX = 60;
 
 /**
  * WORKING A MACHINE UP CLOSE (world/keybox.ts, world/toybox.ts): F on a fixture with a
@@ -21,7 +23,10 @@ const WHEEL_NOTCH = 1;
  *    instead, until the button is let go; the mouse wheel turns it a detent at a time;
  *  - Escape, the right button or a step away (a movement key) let go of it, and the
  *    camera eases back to the eyes; so does the machine itself when what it did is out
- *    in the world (`FixtureContext.stepBack`: a car boxed, a key in the drawer).
+ *    in the world (`FixtureContext.stepBack`: a car boxed, a key in the drawer);
+ *  - a machine STEERED by the movement keys (`WorldFixture.steer`, the claw machine's
+ *    stick, world/claw.ts) gets them, and the jump key, every tick instead: they do not
+ *    let go of it. Its held stick is dragged across the screen rather than round an axle.
  *
  * The card machines are not framed: they are worked by walking up to them
  * (`WorldFixture.reach`, player/interaction.ts).
@@ -48,6 +53,8 @@ export class MachineFocus {
   private wheel = 0;
   /** While a part is held: the cursor's angle round its axle on screen, last tick. */
   private gripAngle: number | null = null;
+  /** While a steered machine's stick is held: where the cursor took it. */
+  private readonly gripNdc = new THREE.Vector2();
   private readonly pivotNdc = new THREE.Vector3();
   /** This tick's cursor ray, relative frame. */
   private readonly rayDir = new THREE.Vector3(0, 0, 1);
@@ -155,8 +162,8 @@ export class MachineFocus {
       this.leave(true);
       return;
     }
-    // A step away lets go of it, and the step is taken.
-    if (this.input.isMoveKey(e.code)) this.leave(true);
+    // A step away lets go of it, and the step is taken; a machine the keys steer keeps them.
+    if (!this.fixture?.steer && this.input.isMoveKey(e.code)) this.leave(true);
   };
 
   private track(e: PointerEvent): void {
@@ -197,7 +204,11 @@ export class MachineFocus {
     const d = this.rayDir;
     let sound: FoleyEvent | null = null;
     // The player stands still while his hands are on it; F still works what the cursor
-    // is on, and a click is F.
+    // is on, and a click is F. A machine the movement keys steer (`WorldFixture.steer`)
+    // gets them instead.
+    const keysX = f.moveX;
+    const keysZ = f.moveZ;
+    const jump = f.jump;
     f.moveX = 0;
     f.moveZ = 0;
     f.jump = false;
@@ -206,9 +217,12 @@ export class MachineFocus {
       this.grabbing = fixture.grab?.(this.origin.x, this.origin.z, o.x, o.y, o.z, d.x, d.y, d.z) ?? false;
       // Not a part that takes the hand: the click is F on whatever is under the cursor.
       if (!this.grabbing) f.interact = true;
-      else this.gripAngle = this.screenAngle(fixture);
+      else {
+        this.gripAngle = this.screenAngle(fixture);
+        this.gripNdc.copy(this.ndc);
+      }
     }
-    if (this.grabbing) {
+    if (this.grabbing && !fixture.steer) {
       // The hand goes round the axle as the screen shows it: what it turned since the
       // last tick turns the part.
       const angle = this.screenAngle(fixture);
@@ -217,14 +231,25 @@ export class MachineFocus {
         sound = fixture.drag?.(turn - 2 * Math.PI * Math.round(turn / (2 * Math.PI))) ?? sound;
       }
       this.gripAngle = angle;
-      if (this.upPending) {
-        sound = fixture.release?.() ?? sound;
-        this.grabbing = false;
-      }
-    } else {
-      f.interactDown ||= this.mouseHeld;
     }
+    if (this.grabbing && this.upPending) {
+      sound = fixture.release?.() ?? sound;
+      this.grabbing = false;
+    }
+    if (!this.grabbing) f.interactDown ||= this.mouseHeld;
     this.upPending = false;
+    if (fixture.steer) {
+      // A held stick leans the way the hand has moved since it took it, as the screen
+      // shows it, all the way over at `STICK_TRAVEL_PX`; let go, the keys steer.
+      let x = keysX;
+      let z = keysZ;
+      if (this.grabbing) {
+        const rect = this.canvas.getBoundingClientRect();
+        x = Math.max(-1, Math.min(1, ((this.ndc.x - this.gripNdc.x) * rect.width) / 2 / STICK_TRAVEL_PX));
+        z = Math.max(-1, Math.min(1, ((this.ndc.y - this.gripNdc.y) * rect.height) / 2 / STICK_TRAVEL_PX));
+      }
+      sound = fixture.steer(x, z, jump, this.context()) ?? sound;
+    }
     if (Math.abs(this.wheel) >= WHEEL_NOTCH) {
       const notches = Math.trunc(this.wheel / WHEEL_NOTCH);
       this.wheel -= notches * WHEEL_NOTCH;

@@ -3,6 +3,7 @@ import { parseCalendarEpoch } from '../game/calendar';
 import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
 import type {
   CarState,
+  ClawMachineState,
   HaulState,
   HeadlightMode,
   PlayerState,
@@ -187,6 +188,8 @@ export function installVehicleAutosave(
       case 'vend_sold':
       // Something given into a card machine's grid or taken out (world/cardmachine.ts).
       case 'machine_grid':
+      // A try at a claw machine (world/claw.ts): the shells, the count and what it won.
+      case 'claw_try':
       case 'lot_pay':
       case 'car_buy':
       // A car into or out of the toy box (world/toybox.ts).
@@ -662,6 +665,7 @@ export function migrateState(raw: unknown): WorldState {
     flattenedProps: migrateNumberArray(obj.flattenedProps),
     vendingSold: migrateVendingSold(obj.vendingSold),
     machineGrids,
+    clawMachines: migrateClawMachines(obj.clawMachines),
   };
 }
 
@@ -757,6 +761,27 @@ function migrateVendingSold(value: unknown): Record<string, number[]> {
     if (id.startsWith('vend:')) continue;
     const sold = migrateNumberArray(slots).filter((slot) => Number.isInteger(slot) && slot >= 0);
     if (sold.length > 0) out[id] = sold;
+  }
+  return out;
+}
+
+/**
+ * Each claw machine's record (world/claw.ts), by its id. Absent before version 8: no
+ * machine was ever tried. A malformed entry drops that machine's record, which only
+ * fills its heap again and starts its count anew.
+ */
+function migrateClawMachines(value: unknown): Record<string, ClawMachineState> {
+  const out: Record<string, ClawMachineState> = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const obj = raw as Record<string, unknown>;
+    const taken = [...new Set(migrateNumberArray(obj.taken).filter((slot) => Number.isInteger(slot) && slot >= 0))];
+    out[id] = {
+      tries: Math.max(0, Math.trunc(numOr(obj.tries, 0))),
+      sinceWin: Math.max(0, Math.trunc(numOr(obj.sinceWin, 0))),
+      taken,
+    };
   }
   return out;
 }
@@ -1323,12 +1348,15 @@ function migrateItem(raw: unknown, where: string): Item {
       }
       return item;
     }
+    // The sticker envelope of a save before version 8 is the figurine of its sticker now:
+    // the claw machine's prize, worked the same way in hand (world/claw.ts).
     case 'sticker_envelope':
+    case 'sticker_figurine':
       if (!isStickerKind(obj.stickerKind)) {
-        throw new Error(`Save data is malformed: sticker envelope at ${where} is invalid`);
+        throw new Error(`Save data is malformed: sticker figurine at ${where} is invalid`);
       }
       return {
-        type: 'sticker_envelope',
+        type: 'sticker_figurine',
         id: obj.id,
         stickerKind: obj.stickerKind,
       };

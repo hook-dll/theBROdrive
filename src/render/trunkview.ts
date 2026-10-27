@@ -35,9 +35,9 @@ const CONDITION_PROGRAM_KEY = 'condition-rust-dirt-v1';
 /**
  * Display pose inside a holder whose +Z points at the eye (Euler XYZ). The generic
  * pose is the three-quarter view the trunk always showed from behind the car, now
- * kept for every viewpoint; flat items (photograph, pocket watch) and the boy's things
- * (their face: the TV's screen, the radio's dial) keep their authored +Z face
- * square-ish to the eye instead.
+ * kept for every viewpoint; flat items (photograph, pocket watch, a sticker figurine)
+ * and the boy's things (their face: the TV's screen, the radio's dial) keep their
+ * authored +Z face square-ish to the eye instead.
  */
 const POSE_GENERIC = new THREE.Euler(0.22, 0.52 - Math.PI, 0.08);
 const POSE_FLAT = new THREE.Euler(0.22, 0.52, 0.08);
@@ -280,7 +280,8 @@ export class TrunkView {
       if (!grid) {
         this.fitToCell(mesh, holder);
       } else {
-        const flat = item.type === 'photograph' || item.type === 'pocket_watch' || item.type === 'contract_cargo';
+        const flat =
+          item.type === 'photograph' || item.type === 'pocket_watch' || item.type === 'contract_cargo' || item.type === 'sticker_figurine';
         mesh.rotation.copy(flat ? POSE_FLAT : POSE_GENERIC);
         if (item.type === 'pocket_watch') this.pocketWatches.push(mesh);
         _box.setFromObject(mesh).getSize(_size);

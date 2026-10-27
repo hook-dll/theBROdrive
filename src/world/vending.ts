@@ -37,8 +37,8 @@ import { box } from './poi/kit';
  * spray cans of a random paint (the colour is on the card), empty cans of 5, 10 or 20
  * litres, and the small goods: bubble gum and sun shades of a random tint. Not every
  * machine has every kind. No fluid is sold here: an empty can, a dry engine or radiator
- * is filled at a settlement's pumps (world/pumps.ts) or from another can. Sticker
- * envelopes are not sold here: they are the claw machine's.
+ * is filled at a settlement's pumps (world/pumps.ts) or from another can. Stickers are
+ * not sold here: the claw machine gives them (world/claw.ts).
  *
  * Prices are not set here: the economy prices each item (`itemPrice`,
  * economy/economy.ts), the same count of shells down the whole road, and every price a

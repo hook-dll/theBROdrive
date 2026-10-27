@@ -30,7 +30,7 @@ target (the tow bar between two cars, a machine, a pump, a key box, a loose part
 item, a trailer, a compartment's cell), a prompt, a lit crosshair, or a kit car's body
 within reach (3.5 m), even where nothing on it answers. Then, first match wins:
 
-1. a sticker envelope in hand aimed at a car: F (or a click) sticks it;
+1. a sticker figurine in hand aimed at a car: F (or a click) sticks its sticker on and uses it up;
 2. the world target's action (pick up, open, take, stow, hitch, press), unless an
    unnamed kit part shares the ray and nothing is prompted;
 3. the kit seat got into through an open side door, when F can do something there (sit,
@@ -62,6 +62,13 @@ of the hose's 4 m hangs it back.
 A sticker being tried on is mirrored with the middle mouse button (the pad's B, the touch
 strip's MIRROR); the wheel turns it, Shift+wheel sizes it, the right button resets it.
 
+A machine worked up close (the toy box, a key box, the claw machine) is framed by the
+first F on it, and the cursor is the hand until Escape, the right button or a step away
+lets go (`src/player/machinefocus.ts`). The CLAW machine keeps the movement keys: WASD or
+the arrows move the claw (so does its joystick, dragged with the mouse), Space or a click
+on DROP drops it for a try; only Escape and the right button let go. Its prize door is
+emptied with F where the player stands, without framing (`src/world/claw.ts`).
+
 ## Cars: doors, getting in and out
 
 The kit cars (`src/carkit`) are worked part by part (`src/player/interaction.ts`,
@@ -79,7 +86,7 @@ cannot take with his load says why.
   tailgate and the fuel flap. A side door's window is that door: the hand stops at the
   shut glass. Nothing is worked through glass on foot, so a panel seen through a window
   (the far door) does not answer. Windows, vents and everything in the cabin are not
-  reached from outside, even through an open door. A sticker envelope in hand makes the
+  reached from outside, even through an open door. A sticker figurine in hand makes the
   car a surface to stick on, not a set of panels. A door, the bonnet and the boot each
   sound their latch as they open and their slam as they land shut; getting in and out is
   silent.

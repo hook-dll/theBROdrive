@@ -897,6 +897,15 @@ function renderDesign(kind: StickerKind, w: number, h: number): HTMLCanvasElemen
   return out;
 }
 
+/**
+ * True for a die-cut design (a white rim cut round the print), false for one printed on
+ * clear film: a claw machine's figurine is cut to the first's outline and stands the
+ * second on a block (render/figurine.ts).
+ */
+export function stickerDieCut(kind: StickerKind): boolean {
+  return DESIGNS[kind].cut;
+}
+
 /** The shared atlas, drawn on first use; `rects` in texture UV (v up). */
 export function stickerAtlas(): { texture: THREE.CanvasTexture; rects: Map<StickerKind, AtlasRect> } {
   if (atlas) return atlas;

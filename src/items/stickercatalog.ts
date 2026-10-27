@@ -14,7 +14,7 @@
 
 export interface StickerDef {
   readonly kind: string;
-  /** What the envelope says it holds. */
+  /** What the sticker is called (a figurine's label, world/claw.ts's prizes). */
   readonly label: string;
   /** Width and height on the panel, metres. */
   readonly widthM: number;

@@ -14,7 +14,7 @@ import type {
   FluidCanItem,
   FluidKind,
   SprayCanItem,
-  StickerEnvelopeItem,
+  StickerFigurineItem,
   ToolItem,
 } from '../items/items';
 import { contractThing, drainCan, INVENTORY_ITEM_LIMIT, itemLabel, itemMass, litreText, spongeSpent } from '../items/items';
@@ -674,9 +674,9 @@ export class Interaction {
   private prevSecondary = false;
   /**
    * How the held sticker is being worn while it is tried on: turned, sized and
-   * mirrored by the player, kept while the same envelope stays in hand.
+   * mirrored by the player, kept while the same figurine stays in hand.
    */
-  private stickerStyle: { envelopeId: string; rollOffset: number; scale: number; mirror: boolean } | null = null;
+  private stickerStyle: { figurineId: string; rollOffset: number; scale: number; mirror: boolean } | null = null;
   private readonly stickerPoint = new THREE.Vector3();
   private readonly stickerNormal = new THREE.Vector3();
   private readonly stickerNormalMatrix = new THREE.Matrix3();
@@ -973,11 +973,11 @@ export class Interaction {
     ) {
       this.towActionValue = null;
     }
-    const envelope = this.inventory.held?.type === 'sticker_envelope' ? this.inventory.held : null;
+    const figurine = this.inventory.held?.type === 'sticker_figurine' ? this.inventory.held : null;
     // The mouse wheel turns the dial of the machine the player stands at and looks at
     // (a sticker in hand keeps the wheel for itself).
     const target = resolved.target;
-    if (envelope === null && target.kind === 'world-fixture' && target.id === this.engagedFixture) {
+    if (figurine === null && target.kind === 'world-fixture' && target.id === this.engagedFixture) {
       this.scrollNotches += input.zoomDelta;
       const notches = Math.trunc(this.scrollNotches);
       if (notches !== 0) {
@@ -987,9 +987,9 @@ export class Interaction {
     } else {
       this.scrollNotches = 0;
     }
-    if (envelope) {
+    if (figurine) {
       const trying = this.updateStickerMode(
-        envelope,
+        figurine,
         resolved,
         input,
         pressed || primaryPressed,
@@ -1011,15 +1011,15 @@ export class Interaction {
     this.holdOpenStorage(resolved, eyeX, eyeY, eyeZ);
     // A sticker in hand turns the car into a surface, not a door: getting in, the bonnet
     // and the boot are not offered while it is held (an already open boot still takes
-    // the envelope into a cell). What is offered is the hint to aim at the car.
-    const stickerBlocksCar = envelope !== null && this.isClosedCarTarget(resolved.target);
-    const prompt = envelope !== null && (stickerBlocksCar || resolved.target.kind === 'none')
+    // the figurine into a cell). What is offered is the hint to aim at the car.
+    const stickerBlocksCar = figurine !== null && this.isClosedCarTarget(resolved.target);
+    const prompt = figurine !== null && (stickerBlocksCar || resolved.target.kind === 'none')
       ? STICKER_HINT
       : (this.nozzle ? this.nozzlePrompt(resolved) : null) ?? this.promptFor(resolved);
     // A kit car's part in the aim is unnamed: the crosshair lights on it. A sticker in hand
     // makes the car a surface, not a set of doors.
     const kitRig = resolved.vehicle?.kit ?? null;
-    const kitPart = envelope === null && kitRig ? resolved.kitPart : null;
+    const kitPart = figurine === null && kitRig ? resolved.kitPart : null;
 
     if (input.usePrimary) this.usePrimary(dt, resolved);
     const aimedAt = resolved.target;
@@ -1119,17 +1119,17 @@ export class Interaction {
   }
 
   /**
-   * STICKER MODE: an envelope in hand is the editing tool. Aimed at a car's paint or
+   * STICKER MODE: a sticker figurine in hand is the editing tool. Aimed at a car's paint or
    * glass, the sticker is shown there live, see-through, exactly as it will be —
    * a decal clipped to the panels that can carry it, on top of every sticker
    * already there — and follows the crosshair. The wheel turns it, Shift+wheel sizes
    * it, the middle button (the pad's B, the touch strip's MIRROR) mirrors it, right click
    * puts it back upright at catalogue size, F or click sticks it. Returns null when the
-   * crosshair is not on a car, so the rest of the world stays usable with the envelope in
-   * hand.
+   * crosshair is not on a car, so the rest of the world stays usable with the figurine in
+   * hand. Sticking it on uses the figurine up.
    */
   private updateStickerMode(
-    held: StickerEnvelopeItem,
+    held: StickerFigurineItem,
     resolved: Resolved,
     input: InputFrame,
     confirm: boolean,
@@ -1143,8 +1143,8 @@ export class Interaction {
     dirY: number,
     dirZ: number,
   ): InteractionResult | null {
-    if (this.stickerStyle?.envelopeId !== held.id) {
-      this.stickerStyle = { envelopeId: held.id, rollOffset: 0, scale: 1, mirror: false };
+    if (this.stickerStyle?.figurineId !== held.id) {
+      this.stickerStyle = { figurineId: held.id, rollOffset: 0, scale: 1, mirror: false };
     }
     const style = this.stickerStyle;
     const t = resolved.target;
@@ -1199,7 +1199,7 @@ export class Interaction {
       mirror: style.mirror,
     };
     if (confirm) {
-      this.world.apply({ t: 'sticker_place', carId, sticker, envelopeId: held.id });
+      this.world.apply({ t: 'sticker_place', carId, sticker, figurineId: held.id });
       this.inventory.remove(held.id);
       this.stickerStyle = null;
       this.onStickerPreview(null, null, false);
@@ -2287,7 +2287,7 @@ export class Interaction {
     // The flap is poured into, not picked up: F there still gets in as it does at the body.
     if (target.kind === 'filler') return false;
     if (target.kind === 'car-body' || target.kind === 'car-entry') {
-      return this.inventory.held?.type === 'sticker_envelope';
+      return this.inventory.held?.type === 'sticker_figurine';
     }
     return true;
   }
@@ -2397,7 +2397,7 @@ export class Interaction {
       const bodyPrompt = this.bodyToolPrompt(held, car);
       if (held?.type === 'spray_can') return this.sprayPrompt(held, car);
       if (bodyPrompt) return bodyPrompt;
-      if (held?.type === 'sticker_envelope') return '[F] preview sticker placement';
+      if (held?.type === 'sticker_figurine') return '[F] preview sticker placement';
     }
 
     if (t.kind === 'trailer') {
@@ -2803,8 +2803,9 @@ export class Interaction {
     if (t.kind === 'world-fixture') {
       const fixture = this.worldFixtures.get(t.id);
       // A machine worked up close is framed by the first F; from then on F (or a click)
-      // works the part under the cursor.
-      if (fixture?.focus && this.focusedFixture !== t.id) {
+      // works the part under the cursor. A part the machine works from where the player
+      // stands (a claw machine's prize door) is worked at once.
+      if (fixture?.focus && this.focusedFixture !== t.id && (fixture.frames?.() ?? true)) {
         this.hooks.focus(t.id);
         return;
       }

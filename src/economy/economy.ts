@@ -156,7 +156,8 @@ export const PRICE_TABLE = {
   bubble_gum: 1,
   spray_can: 3,
   sun_shades: 4,
-  sticker_envelope: 2,
+  /** One try at a claw machine (world/claw.ts), won or not. */
+  clawTry: 2,
 } as const;
 
 /**
@@ -200,7 +201,8 @@ const CAR_SHELLS_MAX = 10;
 
 /**
  * Shells a machine asks for this item: its count in `PRICE_TABLE`, by kind for a part
- * and by size for a can. Zero for items no machine sells (contract cargo).
+ * and by size for a can. Zero for items no machine sells (contract cargo, a claw
+ * machine's figurine: its tries are paid, `PRICE_TABLE.clawTry`, not the prize).
  */
 export function itemShells(item: Item): number {
   switch (item.type) {
@@ -214,8 +216,6 @@ export function itemShells(item: Item): number {
       return PRICE_TABLE.spray_can;
     case 'sun_shades':
       return PRICE_TABLE.sun_shades;
-    case 'sticker_envelope':
-      return PRICE_TABLE.sticker_envelope;
     default:
       return 0;
   }

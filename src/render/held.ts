@@ -349,9 +349,9 @@ export class HeldItemView {
         oy += Math.sin(progress * Math.PI * 4 * WATCH_SHAKE_CYCLES) * envelope * WATCH_SHAKE_Y;
         roll += shake * WATCH_SHAKE_ROLL;
       }
-    } else if (item?.type === 'photograph') {
-      // The photograph is itself the display: square it to the eye instead of
-      // presenting its paper edge in the generic carry pose.
+    } else if (item?.type === 'photograph' || item?.type === 'sticker_figurine') {
+      // The photograph and a sticker figurine are themselves the display: square them to
+      // the eye instead of presenting an edge in the generic carry pose.
       pitch -= TILT_PITCH;
       yaw -= TILT_YAW;
       roll -= TILT_ROLL;

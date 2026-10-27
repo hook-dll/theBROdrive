@@ -311,9 +311,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       case 'pocket_watch':
         item = { type: 'pocket_watch', id: ctx.world.runtimePartId() };
         break;
-      case 'sticker_envelope':
+      case 'sticker_figurine':
         item = {
-          type: 'sticker_envelope',
+          type: 'sticker_figurine',
           id: ctx.world.runtimePartId(),
           stickerKind: request.stickerKind,
         };
@@ -528,11 +528,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   /**
    * Like `jumpTo`, but to post stop `index`, ending on foot 1.7 m in front of its machine
-   * (`machine`: the «ПОЧТА», the toy box beside it, the settlement's garage machine, or
-   * the teddy shelter) and facing it: the shortest way to a machine for a scripted
-   * session. False when the stop has no such machine (a garage past post 2 is by chance).
+   * (`machine`: the «ПОЧТА», the toy box beside it, the settlement's garage or claw
+   * machine, or the teddy shelter) and facing it: the shortest way to a machine for a
+   * scripted session. False when the stop has no such machine (a garage or a claw machine
+   * past post 2 is by chance).
    */
-  const devStandAtPost = (index: number, machine: 'post' | 'toybox' | 'garage' | 'shelter' = 'post'): boolean => {
+  const devStandAtPost = (index: number, machine: 'post' | 'toybox' | 'garage' | 'claw' | 'shelter' = 'post'): boolean => {
     if (ctx.world.state.player.drivingCarId) {
       ctx.hud.setToast('step out of the car first');
       return false;
@@ -610,10 +611,11 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     debris: ctx.debris,
     fixtures: ctx.fixtures,
     // `postAt(i)`: post stop i ({ index, s }); `standAtPost(i)` jumps there and stands
-    // the player on foot a step in front of its «ПОЧТА» machine, facing it, or of its
-    // toy box, garage machine or teddy shelter with `standAtPost(i, 'toybox' | 'garage' | 'shelter')`.
+    // the player on foot a step in front of its «ПОЧТА» machine, facing it, or of its toy
+    // box, garage machine, claw machine or teddy shelter with
+    // `standAtPost(i, 'toybox' | 'garage' | 'claw' | 'shelter')`.
     postAt: (index: number) => postStop(ctx.world.seed, index),
-    standAtPost: (index: number, machine: 'post' | 'toybox' | 'garage' | 'shelter' = 'post') => devStandAtPost(index, machine),
+    standAtPost: (index: number, machine: 'post' | 'toybox' | 'garage' | 'claw' | 'shelter' = 'post') => devStandAtPost(index, machine),
     sky: ctx.sky,
     trailers: ctx.trailers,
     road: ctx.road,

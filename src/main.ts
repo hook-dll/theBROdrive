@@ -2891,7 +2891,7 @@ async function boot(): Promise<void> {
     // and then, like a car answering its key fob, until the crosshair finds one — then
     // the sticker itself, printed on the paint, is the feedback.
     const stickerHint =
-      driving === null && inventory.held?.type === 'sticker_envelope' && stickerPreviewCarId === null;
+      driving === null && inventory.held?.type === 'sticker_figurine' && stickerPreviewCarId === null;
     if (stickerHint && !stickerHintActive) stickerHintClock = 0;
     stickerHintActive = stickerHint;
     const hintPhase = stickerHintClock % STICKER_WINK_PERIOD_S;

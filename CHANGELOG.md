@@ -4,6 +4,60 @@
 
 ### Added
 
+- THE CLAW MACHINE GIVES STICKERS (shells phase 6; `world/claw.ts` new, `render/figurine.ts`
+  new, `render/stickerart.ts` `stickerDieCut`, `world/settlement.ts`, `world/poi.ts`,
+  `world/fixturefield.ts` `frames`/`steer`, `player/machinefocus.ts`,
+  `player/interaction.ts`, `items/items.ts`, `economy/economy.ts`, `game/state.ts`,
+  `save/save.ts`, `render/partmesh.ts`, `render/held.ts`, `render/trunkview.ts`,
+  `app/devtools.ts`, `ui/menu.ts`, `main.ts`, `tools/poi-placement.ts`,
+  `tools/look/stickermode.mjs`, `tools/claw-odds.ts` new, `game-design2.md` §6.3, §7.7,
+  §8.1, §12, §18). A crane
+  cabinet stands at every settlement whose `poiHasMachine(seed, post, 'claw')` roll came up
+  (posts 0–2 always, half past them), on the service band at +23.4 beside the garage
+  machine (`SettlementLayout.claw`, `SERVICE_HALF.claw`); the pumps' island moved from +26
+  to +26.6 to keep 0.7 m between the three. Raspberry base, a glass box drawn as its frame
+  and glints (no see-through material), a CLAW marquee, a gantry with a three-pronged claw
+  on a cable, a felt floor covered by a heap of 48 STICKER FIGURINES, a chute with an
+  acrylic guard over a prize door, a joystick and a DROP button on the ledge. Worked up
+  close: F frames it; the movement keys or the joystick dragged by the cursor move the claw
+  (`WorldFixture.steer`: a steered machine keeps the movement keys and the jump key, and a
+  held stick reads the cursor's travel across the screen); DROP (click, or Space) takes
+  `PRICE_TABLE.clawTry` 2 shells of the machine's kind, refusing with a rattle when short or
+  while the prize door holds a figurine. The claw descends, closes, rises, returns to the
+  chute and opens. THE GRIP is settled at DROP and saved with the try (`claw_try`): the
+  claw closes on the highest figurine within 13 cm, or on nothing over bare felt; a
+  figurine held is carried to the chute on a seeded roll of the machine and its try count
+  (`HOLD_CHANCE` 0.15), always on the fifth try since the last win (`PITY_TRIES`), and
+  otherwise slips out at a seeded point of the way up or over and falls back on the heap:
+  measured by `tools/claw-odds.ts` (4 000 machines × 60 tries in one visit, the heap
+  thinning as it is won): aimed at a figurine one win in 3.77 tries, never more than five;
+  the claw dropped anywhere it reaches, one in 4.04 (13.8% of drops over bare felt or the
+  chute's corner). A win lands in the prize door, a one-cell grid like a card machine's
+  (`machine_grid` at `claw:<poi>`, saved at DROP), taken with F where the player stands
+  (`WorldFixture.frames`: the door does not frame). THE HEAP is seeded per machine from the
+  whole sticker catalogue; won slots are kept (`WorldState.clawMachines[id].taken`) and the
+  next unwon slot fills the gap when the machine is next built. Figurines are not physics
+  bodies: each is dropped at the lowest of six rolled spots under a 12 cm dome, three
+  layers deep on average and eight at most; a dropped one falls under gravity, bounces once
+  and lies where it landed, the ones on a lifted one settle into its gap at once. DRAWN
+  CHEAPLY: the whole heap is ONE mesh (`render/figurine.ts` `FigurineBatch`: every
+  figurine's triangles in one buffer, the sign board's material and program), and a
+  figurine moving in or out of it rewrites only its own range of the buffer, once; only
+  the one figurine in the claw or falling is drawn by itself. The heap and the machine's
+  workings are built only in the physics band. Per machine: the cabinet 12 draws, 1 128
+  triangles; the heap 1 draw (2 while a figurine moves), about 5 700 triangles in the
+  browser (124 a die-cut figurine at 32 outline rays, 76 a block; headless 3 648), where
+  the first cut drew 24 figurines as 24 draws of about 4 200 triangles. THE FIGURINE
+  (`StickerFigurineItem`, `sticker_figurine`, `createFigurineMesh`) is a 17 cm block,
+  3.5 cm thick, cut to the sticker's die-cut outline read off the sticker atlas (clear-film
+  designs on a rounded block), its print on the face; one draw in the sign board's program,
+  no new shader. In hand it is the sticker tool the envelope was: applied to a car it
+  places its sticker exactly as before (`sticker_place` now carries `figurineId`) and is
+  used up. The sticker envelope is gone — item, mesh, label and `PRICE_TABLE` entry; the
+  dev item menu spawns figurines. `standAtPost(i, 'claw')` stands at a stop's claw machine.
+  SAVES: `SAVE_VERSION` 8 adds `clawMachines` (tries, tries since the last win, slots
+  won); an envelope in an older save loads as the figurine of its sticker.
+
 - CHASSIS AND DRIVELINE TOWARD BEAMNG FEEL (`vehicle/vehicle.ts`, `vehicle/vehicletuning.ts`,
   `vehicle/carmodels.ts`, `vehicle/drivetrain.ts`, `parts/registry.ts` `SuspensionTuning`
   `frontPitchCentre`/`rearPitchCentre`/`frontSwingArmM`/`rearSwingArmM`, `PitchCentre`;

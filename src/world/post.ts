@@ -45,7 +45,7 @@ import { box, mergeKitStatics } from './poi/kit';
  * The GRID takes things in too: a thing bound here, put into the empty cell, lies there a
  * moment while the machine draws it in, and the pay goes into the player's jar as
  * shells (economy/economy.ts `contractPay`: the route's kilometres, twice that urgent and
- * on time; §7.7: no envelope, stickers are only bought). A thing this post will not sign
+ * on time; §7.7: no sticker, they are won at the claw machine). A thing this post will not sign
  * for goes in as a RETURN TO SENDER: no pay, the job closed undelivered and FINED
  * `FINE_SHELLS` (economy/economy.ts `fine`) — once, with the closing saved first — unless
  * this is the post it was taken at (the boy only changed his mind), and never for a

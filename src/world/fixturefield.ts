@@ -103,6 +103,20 @@ export interface WorldFixture {
   /** The machine is framed (true) or let go of (false). */
   setFocused?(focused: boolean, ctx: FixtureContext): void;
   /**
+   * Whether F on the part the last `aim` hit frames the machine (`focus`), or works it
+   * from where the player stands: a claw machine's prize door is emptied without framing
+   * (world/claw.ts). Omitted: every part frames.
+   */
+  frames?(): boolean;
+  /**
+   * A framed machine STEERED by the movement keys (a claw machine's stick, world/claw.ts):
+   * every fixed tick while framed, `x` toward the viewer's right and `z` away from him,
+   * each -1..1, from the movement keys or from the held part dragged off its axle on
+   * screen (`grab`, `pivot`); `jump` is the jump key's edge. With it, a movement key no
+   * longer lets go of the machine (Escape and the right button still do). The sound, or null.
+   */
+  steer?(x: number, z: number, jump: boolean, ctx: FixtureContext): FoleyEvent | null;
+  /**
    * A machine worked by WALKING UP to it (world/cardmachine.ts): metres from the player's
    * feet at ABSOLUTE (`x`, `z`) to where it is worked, or Infinity out of its reach. The
    * nearest in reach is engaged (`engage`, player/interaction.ts) while he stands on foot.

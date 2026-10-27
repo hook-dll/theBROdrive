@@ -284,9 +284,13 @@ export function isBrokenThing(item: Item | null | undefined): boolean {
   return item?.type === 'contract_cargo' && item.progress?.broken === true;
 }
 
-/** A sticker in its envelope (the claw machine's prize to come), consumed only when its sticker is confirmed on a car. */
-export interface StickerEnvelopeItem {
-  readonly type: 'sticker_envelope';
+/**
+ * A STICKER FIGURINE, the claw machine's prize (world/claw.ts): a thick die-cut block in
+ * the outline of one sticker with its print on the face (render/figurine.ts). In hand it
+ * is the sticker tool: applied to a car it puts its sticker there and is used up.
+ */
+export interface StickerFigurineItem {
+  readonly type: 'sticker_figurine';
   readonly id: string;
   readonly stickerKind: StickerKind;
 }
@@ -309,7 +313,7 @@ export type Item =
   | FootballItem
   | PocketWatchItem
   | ContractCargoItem
-  | StickerEnvelopeItem;
+  | StickerFigurineItem;
 
 /**
  * Density, kg/litre. Petrol is the light one; water is water and oil is a shade
@@ -400,9 +404,8 @@ export function itemLabel(item: Item): string {
       const name = item.party ? 'teddy passenger' : thing.name;
       return `${name}${to}${clock}${worn}`;
     }
-    case 'sticker_envelope':
-      // The name is on the envelope; the picture is seen when it is tried on.
-      return `sticker envelope · ${stickerDef(item.stickerKind).label}`;
+    case 'sticker_figurine':
+      return `sticker figurine · ${stickerDef(item.stickerKind).label}`;
   }
 }
 
@@ -451,8 +454,8 @@ export function itemMass(item: Item): number {
       return 0.12;
     case 'contract_cargo':
       return contractThing(item).massKg;
-    case 'sticker_envelope':
-      return 0.08;
+    case 'sticker_figurine':
+      return 0.05;
   }
 }
 

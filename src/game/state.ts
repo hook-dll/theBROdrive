@@ -44,7 +44,7 @@ function clamp01(value: number): number {
  * and it does not follow the player to another car. The car IS the save file.
  */
 export interface StickerState {
-  /** Physical envelope id consumed to create this permanent decal. */
+  /** Physical figurine id consumed to create this permanent decal. */
   readonly id: string;
   /** Sticker design id, from the built-in pack. */
   readonly kind: StickerKind;
@@ -323,8 +323,25 @@ export interface HaulState {
  *  - 7: no haul cards. Each post's pick-up slot holds a haul by itself
  *    (`haulRounds`); a load an older save had waiting for a card is dropped, and the
  *    bulky card's haul offer is drawn again as a bulky thing.
+ *  - 8: claw machines (`clawMachines`), and the sticker envelope is the sticker figurine
+ *    (`StickerFigurineItem`): an envelope an older save holds loads as the figurine of
+ *    its sticker.
  */
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
+
+/**
+ * A claw machine's own record (world/claw.ts), by its fixture id (`claw:<poi>`). Its heap
+ * is a pure function of the seed and the slots not yet won; this is what the player did
+ * to it.
+ */
+export interface ClawMachineState {
+  /** Tries paid for here, ever: the key of each try's seeded grip. */
+  tries: number;
+  /** Tries since the last win (or since the first try): the fifth always holds. */
+  sinceWin: number;
+  /** Heap slots won out of it, for good. */
+  taken: number[];
+}
 
 export interface WorldState {
   readonly seed: number;
@@ -423,9 +440,13 @@ export interface WorldState {
    * id (`post:<index>`, `garage:<poi>`), in order: what lies in its one cell, then what an
    * older save's eight-cell grid left waiting to drop into it — what it gave and the
    * player has not taken yet. A thing lying there is out of the post's stock, its
-   * contract active (contracts/registry.ts `activeContracts`). Absent: an empty grid.
+   * contract active (contracts/registry.ts `activeContracts`). A claw machine's prize
+   * door (`claw:<poi>`, world/claw.ts) is kept here too: the figurine it won. Absent: an
+   * empty grid.
    */
   machineGrids: Record<string, (Item | null)[]>;
+  /** What the player did to each claw machine (world/claw.ts), by its id. Absent: never tried. */
+  clawMachines: Record<string, ClawMachineState>;
 }
 
 export type WorldDelta =
@@ -524,7 +545,7 @@ export type WorldDelta =
   | { t: 'item_drop'; item: Item; x: number; y: number; z: number }
   | { t: 'item_pickup'; itemId: string }
   | { t: 'prop_flatten'; propId: number }
-  | { t: 'sticker_place'; carId: string; sticker: StickerState; envelopeId: string }
+  | { t: 'sticker_place'; carId: string; sticker: StickerState; figurineId: string }
   | { t: 'inventory'; items: readonly Item[]; selected: number }
   | { t: 'wearable'; shades: SunShadesItem | null }
   | { t: 'record'; s: number }
@@ -534,6 +555,11 @@ export type WorldDelta =
   | { t: 'vend_sold'; machineId: string; slot: number }
   /** A card machine's grid rewritten (world/cardmachine.ts): something given into it or taken out. */
   | { t: 'machine_grid'; machineId: string; cells: readonly (Item | null)[] }
+  /**
+   * A try paid for at a claw machine (world/claw.ts): its counters move on, and `won` is
+   * the heap slot it won, or null for a try that held nothing.
+   */
+  | { t: 'claw_try'; machineId: string; won: number | null }
   /** A lot car paid for: its asking price goes, its papers are the player's. */
   | { t: 'car_buy'; carId: string }
   /** A lot car's price taken by its key box (world/keybox.ts): its key is the player's to take. */
@@ -608,6 +634,7 @@ export function newWorldState(seed: number): WorldState {
     flattenedProps: [],
     vendingSold: {},
     machineGrids: {},
+    clawMachines: {},
   };
 }
 
@@ -1018,6 +1045,17 @@ export class GameWorld {
         if (delta.cells.some((item) => item !== null)) s.machineGrids[delta.machineId] = delta.cells.slice();
         else delete s.machineGrids[delta.machineId];
         break;
+      case 'claw_try': {
+        const claw = s.clawMachines[delta.machineId] ?? (s.clawMachines[delta.machineId] = { tries: 0, sinceWin: 0, taken: [] });
+        claw.tries++;
+        if (delta.won === null) {
+          claw.sinceWin++;
+        } else {
+          claw.sinceWin = 0;
+          if (!claw.taken.includes(delta.won)) claw.taken.push(delta.won);
+        }
+        break;
+      }
       case 'car_buy': {
         const car = s.cars[delta.carId];
         if (car) {
@@ -1099,12 +1137,12 @@ export class GameWorld {
       }
       case 'sticker_place': {
         const car = s.cars[delta.carId];
-        const envelope = s.player.carried.findIndex(
-          (item) => item.id === delta.envelopeId && item.type === 'sticker_envelope',
+        const figurine = s.player.carried.findIndex(
+          (item) => item.id === delta.figurineId && item.type === 'sticker_figurine',
         );
-        if (car && envelope >= 0) {
+        if (car && figurine >= 0) {
           car.stickers.push(delta.sticker);
-          s.player.carried.splice(envelope, 1);
+          s.player.carried.splice(figurine, 1);
         }
         break;
       }

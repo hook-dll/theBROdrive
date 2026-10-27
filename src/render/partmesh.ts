@@ -27,6 +27,7 @@ import type {
 } from '../items/items';
 import { contractThing, isBrokenThing, spongeSpent } from '../items/items';
 import { makeFlatMaterial } from './materials';
+import { createFigurineMesh } from './figurine';
 import { applyComicShading } from './comic';
 import {
   AXIS_X,
@@ -1071,15 +1072,6 @@ function createPhotographMesh(imageDataUrl: string): THREE.Group {
   return root;
 }
 
-function buildStickerEnvelopeInto(b: MeshBuilder): void {
-  const paper = flat(0xd8c8ad, 0.9);
-  const fold = flat(0xb9a78c, 0.92);
-  const seal = flat(0x8e2231, 0.72);
-  b.box('sticker_envelope', 0.23, 0.15, 0.012, paper, [0, 0, 0]);
-  b.box('sticker_envelope_fold', 0.18, 0.008, 0.014, fold, [0, 0.015, 0.002], [0, 0, -0.34]);
-  b.cylinder('sticker_envelope_seal', 0.027, 0.027, 0.008, 14, seal, [0, -0.005, 0.011], AXIS_Z);
-}
-
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -1273,8 +1265,8 @@ export function createItemMesh(item: Item): THREE.Object3D {
       const broken = isBrokenThing(item);
       return buildGroup(itemBlueprint(thingModelKey(thing, broken), (b) => buildThingInto(b, thing, broken)).instructions);
     }
-    case 'sticker_envelope':
-      return buildGroup(itemBlueprint('sticker_envelope', buildStickerEnvelopeInto).instructions);
+    case 'sticker_figurine':
+      return createFigurineMesh(item.stickerKind);
   }
 }
 
