@@ -232,12 +232,21 @@ const MEDICINE_CAP_RELEASE_PROGRESS = 0.23;
 /**
  * A collision is full strong motor at this impact speed, m/s.
  *
- * COLLISIONS ONLY. The pad used to carry the whole road: suspension bumps, the surface's
- * texture under the tyres, slide, side slip and the steering going light. On these
- * roads that is a motor running for the whole drive, and the player asked for the
- * one event worth feeling in the hands — hitting something.
+ * The strong motor is COLLISIONS ONLY. The pad once carried the whole road on it —
+ * bumps, texture, slide, side slip, the steering going light — and the player asked for
+ * the one event worth feeling in the hands: hitting something.
  */
 const RUMBLE_IMPACT_FULL_MPS = 4;
+/**
+ * THE ROAD on the weak motor (`VehicleAudioState.roadFeelMps`, the suspension's speed
+ * above the body's own motion): nothing under `RUMBLE_ROAD_FLOOR_MPS`, which a smooth
+ * road and a car swaying on its springs stay under, rising to `RUMBLE_ROAD_MAX` of the
+ * motor at `RUMBLE_ROAD_FULL_MPS`, a seam taken at speed. The weak motor is the light
+ * high-frequency one, so the road reads as a texture in the hands, not a shake [E].
+ */
+const RUMBLE_ROAD_FLOOR_MPS = 0.05;
+const RUMBLE_ROAD_FULL_MPS = 0.6;
+const RUMBLE_ROAD_MAX = 0.6;
 
 /** A rumble channel is a fraction of a motor's strength, so everything is clamped to 0..1. */
 function clamp01(x: number): number {
@@ -2503,7 +2512,10 @@ async function boot(): Promise<void> {
     // Read BEFORE the audio layer consumes it: `impactMps` is an event accumulator that
     // whoever voices it zeroes on read, so this is the last place it can be seen.
     rumbleFrame.strong = clamp01(driving.audio.impactMps / RUMBLE_IMPACT_FULL_MPS) * gain;
-    rumbleFrame.weak = 0;
+    rumbleFrame.weak =
+      clamp01((driving.audio.roadFeelMps - RUMBLE_ROAD_FLOOR_MPS) / (RUMBLE_ROAD_FULL_MPS - RUMBLE_ROAD_FLOOR_MPS)) *
+      RUMBLE_ROAD_MAX *
+      gain;
     rumbleFrame.leftTrigger = 0;
     rumbleFrame.rightTrigger = 0;
     pads.vibrate(rumbleFrame, performance.now());

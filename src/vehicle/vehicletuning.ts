@@ -1539,6 +1539,19 @@ export const UNSPRUNG_MASS_KG = 38;
  * is no sharper than at 40.
  */
 export const CONTACT_PATCH_M = 0.16;
+/**
+ * Farthest a wheel's patch may move in one body step and still have the road's faults
+ * read along the way (`RoadFaults`, at each wheel substep), metres. 3 m is 180 m/s at
+ * 60 Hz: anything longer is a teleport or a rebuild, and the faults are read where the
+ * patch has landed.
+ */
+export const FAULT_TRACK_JUMP_M = 3;
+/**
+ * The road feel's high-pass on the strut speed, Hz (`VehicleAudioState.roadFeelMps`):
+ * above the body's 1-1.5 Hz ride and its 2-3 Hz pitch and roll, so a car swaying on
+ * its springs reads as quiet and a seam or a rough patch does not [E].
+ */
+export const ROAD_FEEL_HIGHPASS_HZ = 4;
 
 /** This wheel's tyre rate (N/m). */
 export function tyreVerticalRate(radius: number): number {

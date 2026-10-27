@@ -7,7 +7,7 @@
  * "reacts to the quality of the road surface" is implemented.
  */
 
-import { hash01, Noise2D } from './rng';
+import { hash01, hashUnit3, Noise2D } from './rng';
 
 export const enum SurfaceType {
   Asphalt = 0,
@@ -245,6 +245,13 @@ export interface SurfaceProps {
    * A fresh sealed deck keeps half of this (`subColliderShare`).
    */
   readonly texture: number;
+  /**
+   * A SEALED surface's small discrete faults under the tyres (`RoadFaults`): the
+   * patches, faulted cracks and small holes a driver feels as a tick through the seat
+   * every few tens of metres. Absent on loose ground, whose unevenness is the fields
+   * above.
+   */
+  readonly faults?: SealedFaults;
   /** Base albedo for the surface material. */
   readonly color: number;
   /**
@@ -284,6 +291,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // It was 0x9e9c9d, a flat 0.27 everywhere: concrete's value, and the road did not
     // read against the sand (owner, 2026-10-16).
     texture: 0.009,
+    // ISO 8608 class A-B: seams and patch edges every few tens of metres, no holes.
+    faults: { seamM: 0.012, seamShare: 0.45, potholeM: 0, potholeShare: 0 },
     color: 0x757475,
     dust: 0.0,
     smoke: 1.0,
@@ -303,6 +312,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     hummock: 0.016,
     // Older and paler than the kept surface, 0.16 as drawn; still asphalt, not concrete.
     texture: 0.014,
+    // Class B-C: taller, denser seams and the odd small hole.
+    faults: { seamM: 0.018, seamShare: 0.5, potholeM: 0.025, potholeShare: 0.08 },
     color: 0x7e7a78,
     dust: 0.1,
     smoke: 0.85,
@@ -421,6 +432,8 @@ export const SURFACES: Record<SurfaceType, SurfaceProps> = {
     // Slabs are smoother than asphalt between their joints, and the joints are in
     // the collider's own rows rather than here.
     texture: 0.007,
+    // The slab joints are the collider's; this is only a little faulting between them.
+    faults: { seamM: 0.006, seamShare: 0.2, potholeM: 0, potholeShare: 0 },
     color: 0x9a978f,
     dust: 0.0,
     smoke: 1.0,
@@ -646,6 +659,128 @@ export class RoadTexture {
     const fine = this.fine.at(x / TEXTURE_SHORT_WAVELENGTH, z / TEXTURE_SHORT_WAVELENGTH);
     const coarse = this.coarse.at(x / TEXTURE_LONG_WAVELENGTH, z / TEXTURE_LONG_WAVELENGTH);
     return (fine + TEXTURE_LONG_GAIN * coarse) / (1 + TEXTURE_LONG_GAIN);
+  }
+}
+
+/**
+ * A sealed surface's discrete faults (`SurfaceProps.faults`, `RoadFaults`).
+ *
+ *   seamM, seamShare        the step height of a patch's or a faulted crack's edge,
+ *                           metres, and the share of `FAULT_CELL_M` cells holding one
+ *   potholeM, potholeShare  a small hole's depth, metres, and the share holding one
+ */
+export interface SealedFaults {
+  readonly seamM: number;
+  readonly seamShare: number;
+  readonly potholeM: number;
+  readonly potholeShare: number;
+}
+
+/**
+ * The lattice the faults are dealt on, metres: at most one fault a cell, centred
+ * anywhere in it, and none reaching further than `FAULT_REACH_M` from its centre — under
+ * half a cell, so the four cells around the nearest lattice corner are all a sample
+ * has to read.
+ */
+const FAULT_CELL_M = 10;
+const FAULT_REACH_M = 2.4;
+/**
+ * The cut edge of a patch or a crack, metres [E: a sawn or broken edge, near vertical].
+ * The tyre's own envelope (`CONTACT_PATCH_M`, 0.16 m) is what turns it into the ramp a
+ * wheel actually climbs.
+ */
+const FAULT_EDGE_M = 0.02;
+/** How far behind its step a faulted crack's raised side settles back to the mat, metres. */
+const FAULT_FADE_M = 1;
+/** Half the length of a faulted crack, metres: a lane's width. */
+const FAULT_CRACK_HALF_M = 1.75;
+// Hash tags keep each fault property's random stream independent.
+const TAG_FAULT_OCCUPANCY = 0x6a0f17;
+const TAG_FAULT_KIND = 0x2c4e91;
+const TAG_FAULT_X = 0x7d1c03;
+const TAG_FAULT_Z = 0x1f9a6b;
+const TAG_FAULT_ANGLE = 0x48b2d5;
+const TAG_FAULT_SIZE = 0x3e5a07;
+const TAG_FAULT_HEIGHT = 0x5c7731;
+
+/**
+ * THE SMALL FAULTS OF A SEALED ROAD, felt rather than seen: a patch sitting proud of
+ * the mat (or sunk into it) with a step at each edge, a transverse crack whose one side
+ * has settled, a small hole. Each is centimetres high and shorter than the 60 Hz step
+ * covers at speed, which is why it lives here and is read at the WHEEL SUBSTEP
+ * (`Vehicle`, THE GROUND THE COLLIDER DOES NOT HAVE), not in the collider and not in the
+ * smooth `texture` field: a 12 mm seam crossed at 100 km/h is gone between two steps.
+ *
+ * HOW BIG. ISO 8608 grades a road by its displacement PSD, `Gd(n0)` at 0.1 cycle/m
+ * with a slope of −2: class A (very good) has a geometric mean of 16·10⁻⁶ m³, B 64,
+ * C 256. Integrated over the 0.67-10 cycle/m band these faults live in, that is
+ * `σ² = Gd(n0) · n0² · (1/n1 − 1/n2)`: 0.5 mm RMS for A, 0.9 mm for B, 1.9 mm for C.
+ * The heights are [E]: patch and crack faulting of 1-2 cm, holes of 2-3 cm; the shares
+ * are set so the faults a wheel path meets stay inside the class each surface is meant
+ * to be (asphalt A-B, cracked asphalt B-C), measured in the commit that added them.
+ *
+ * Deterministic in (seed, world position), and absolute like `RoadTexture`: the same
+ * crack is under the same wheel after every floating-origin rebase, for every car.
+ */
+export class RoadFaults {
+  private readonly seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed | 0;
+  }
+
+  /**
+   * Height of the faults of `faults` at an ABSOLUTE world position, metres: zero almost
+   * everywhere, positive on a raised patch or a crack's high side, negative in a hole.
+   */
+  at(x: number, z: number, faults: SealedFaults): number {
+    const bx = Math.floor(x / FAULT_CELL_M - 0.5);
+    const bz = Math.floor(z / FAULT_CELL_M - 0.5);
+    return (
+      this.cell(x, z, bx, bz, faults) +
+      this.cell(x, z, bx + 1, bz, faults) +
+      this.cell(x, z, bx, bz + 1, faults) +
+      this.cell(x, z, bx + 1, bz + 1, faults)
+    );
+  }
+
+  /** The fault cell (`cx`, `cz`) holds, at (`x`, `z`), metres. */
+  private cell(x: number, z: number, cx: number, cz: number, faults: SealedFaults): number {
+    const s = this.seed;
+    const roll = hashUnit3(s ^ TAG_FAULT_OCCUPANCY, cx, cz);
+    const seam = roll < faults.seamShare;
+    if (!seam && roll >= faults.seamShare + faults.potholeShare) return 0;
+
+    const dx = x - (cx + hashUnit3(s ^ TAG_FAULT_X, cx, cz)) * FAULT_CELL_M;
+    const dz = z - (cz + hashUnit3(s ^ TAG_FAULT_Z, cx, cz)) * FAULT_CELL_M;
+    if (dx * dx + dz * dz > FAULT_REACH_M * FAULT_REACH_M) return 0;
+    const size = hashUnit3(s ^ TAG_FAULT_SIZE, cx, cz);
+    const scale = 0.5 + 0.5 * hashUnit3(s ^ TAG_FAULT_HEIGHT, cx, cz);
+    if (!seam) {
+      // A small hole: steep walls, a flat bottom.
+      const radius = 0.12 + 0.18 * size;
+      const inside = radius - Math.hypot(dx, dz);
+      return inside > 0 ? -faults.potholeM * scale * Math.min(1, inside / FAULT_EDGE_M) : 0;
+    }
+
+    const angle = Math.PI * hashUnit3(s ^ TAG_FAULT_ANGLE, cx, cz);
+    const ca = Math.cos(angle);
+    const sa = Math.sin(angle);
+    const u = dx * ca + dz * sa;
+    const v = dz * ca - dx * sa;
+    const kind = hashUnit3(s ^ TAG_FAULT_KIND, cx, cz);
+    if (kind < 0.6) {
+      // A patch, most of them laid proud of the mat and some sunk into it.
+      const halfLong = 0.8 + 1.0 * size;
+      const halfWide = 0.6 + 0.9 * (1 - size);
+      const inside = Math.min(halfLong - Math.abs(u), halfWide - Math.abs(v));
+      if (inside <= 0) return 0;
+      const height = (kind < 0.42 ? 1 : -1) * faults.seamM * scale;
+      return height * Math.min(1, inside / FAULT_EDGE_M);
+    }
+    // A faulted crack: a sharp step on one side, the slab settling back over a metre.
+    if (Math.abs(v) > FAULT_CRACK_HALF_M || u < 0 || u > FAULT_FADE_M) return 0;
+    return faults.seamM * scale * Math.min(1, u / FAULT_EDGE_M) * (1 - u / FAULT_FADE_M);
   }
 }
 

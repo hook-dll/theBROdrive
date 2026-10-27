@@ -417,6 +417,22 @@
 
 ### Changed
 
+- THE ROAD'S SMALL FAULTS UNDER THE TYRES, AND IN THE HANDS (`RoadFaults`,
+  `SurfaceProps.faults` in core/surfaces.ts; `Vehicle` THE GROUND THE COLLIDER DOES NOT
+  HAVE; main.ts `updatePad`). Sealed surfaces carry invisible patches (proud or sunk,
+  a step at each edge), faulted transverse cracks and, on cracked asphalt, small holes:
+  asphalt 6-12 mm steps, 13-14 a km per wheel path, 1.1 mm RMS along it (ISO 8608
+  class B; fresh mats half); cracked asphalt 9-18 mm steps and 12-25 mm holes, 15-16 a
+  km, 1.8 mm (class C); concrete 3-6 mm. They are read at every wheel substep along
+  the patch's path through the step (`groundTrack`, replacing `profileRate`): a 60 Hz
+  sample keeps 0.68 of the 1.74 m/s a 12 mm seam hands the tyre at 100 km/h, the
+  substeps all of it. Body vertical RMS on the bench road rose 1-3%: the hubs take the
+  faults, as a car's do. THE PAD'S WEAK MOTOR now carries the road
+  (`VehicleAudioState.roadFeelMps`: the hubs' hop speed and the strut speed above
+  4 Hz, RMS over the wheels; nothing under 0.05 m/s, 0.6 of the motor at 0.6 m/s); the
+  strong motor stays on collisions. Measured cruising: 0.06-0.14 m/s mean on asphalt,
+  0.08-0.20 on cracked, p95 0.12-0.44. The stale note that the rumble carried
+  `steeringLightness` is corrected (nothing reads it).
 - THE CAMERAS SHOW THE BODY ON ITS SPRINGS (`render/cameras.ts`, `HEAD_MOTION`; with
   Settings → Camera shake, either style). The chase camera takes a third of the body's
   pitch and roll, a third of a second late (`bodyShare` 0.35, `bodyOmega` 3/s, read to

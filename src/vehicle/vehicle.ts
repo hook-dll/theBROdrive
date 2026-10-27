@@ -20,7 +20,15 @@ import type { StickerState } from '../game/state';
 import { GRAPHICS_CONFIG } from '../config';
 import type { PhysicsWorld, Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
-import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare, subColliderShare } from '../core/surfaces';
+import {
+  MicroRelief,
+  RoadFaults,
+  RoadTexture,
+  SURFACES,
+  SurfaceType,
+  sinkageShare,
+  subColliderShare,
+} from '../core/surfaces';
 import { hash01 } from '../core/rng';
 import { WorldOrigin, type Rebasable, type RebaseShift } from '../world/origin';
 import { DAY_LENGTH, MIRROR_FIELD, type CarState, type GameWorld } from '../game/state';
@@ -131,6 +139,8 @@ import {
   DRAG_CD,
   DRIVELINE_SHAFT_DAMPING_RATIO,
   DRIVELINE_SHAFT_RATE_NM_PER_RAD,
+  FAULT_TRACK_JUMP_M,
+  ROAD_FEEL_HIGHPASS_HZ,
   FLUID_DENSITY_OIL,
   FOOT_BRAKE_GRIP_RATIO,
   FOOT_BRAKE_REAR_BIAS,
@@ -510,13 +520,32 @@ interface WheelVisual {
   /** This tyre's vertical carcass rate, N/m. Nothing to do with the springs. */
   tyreRateN: number;
   /**
-   * Enveloped sub-collider ground height under this wheel (m) and its rate (m/s).
+   * Enveloped sub-collider ground height under this wheel at the end of the step (m).
    * "Enveloped" because a tyre cannot see detail shorter than the patch it stands on:
    * the profile is low-passed over CONTACT_PATCH_M of TRAVEL before it gets here, so
    * the filter is in metres and does not soften with speed.
    */
   profileHeight: number;
-  profileRate: number;
+  /**
+   * The same ground at the end of each wheel SUBSTEP of this step (m), and where the
+   * last step left it (`groundBefore`): the smooth fields interpolated along the step,
+   * the road's small faults (`RoadFaults`) sampled and enveloped at every substep, so a
+   * seam a car crosses between two body steps still reaches the hub. `groundRate` is
+   * the current substep's rate of it (m/s), written by `stepWheelHop`.
+   */
+  readonly groundTrack: Float64Array;
+  groundBefore: number;
+  /** Mean of the hub's hop speed squared over the last step's substeps, m²/s² (`settleHub`). */
+  hopSpeedSq: number;
+  /** The strut's speed low-passed at `ROAD_FEEL_HIGHPASS_HZ`, m/s: what is taken off it for the road feel. */
+  travelRateLow: number;
+  groundRate: number;
+  /** The smooth fields' enveloped part of `profileHeight`, and the faults' (m). */
+  smoothHeight: number;
+  faultHeight: number;
+  /** Last step's patch, ABSOLUTE world x and z, for the faults' substep samples; NaN after air. */
+  faultX: number;
+  faultZ: number;
   /**
    * Wheel-hop state: the hub's displacement (m, up toward the body) and its rate (m/s)
    * on the tyre's carcass rate, under the suspension. Stepped at the wheel SUBSTEP
@@ -786,6 +815,14 @@ export interface VehicleAudioState {
   // --- ground ---
   /** The surface under most of the loaded wheels. */
   surface: SurfaceType;
+  /**
+   * The road under the wheels, as a LEVEL rather than an event, m/s: the RMS over the
+   * wheels of last step's suspension speed above the body's own motion — the hubs' hop
+   * speed over the substeps (`hopSpeedSq`) and the strut's speed above 4 Hz
+   * (`travelRateLow`). Near zero on a smooth road, rising on texture and seams. The
+   * pad's weak motor reads it (main.ts `updatePad`); nobody zeroes it.
+   */
+  roadFeelMps: number;
 
   // --- events, ACCUMULATED: the largest since the audio layer last consumed them ---
   /**
@@ -1489,6 +1526,8 @@ export class Vehicle implements Rebasable {
   private readonly microRelief: MicroRelief;
   /** The sealed-surface texture field, seeded from the same world (see `RoadTexture`). */
   private readonly roadTexture: RoadTexture;
+  /** The sealed surfaces' small faults, same seed (see `RoadFaults`). */
+  private readonly roadFaults: RoadFaults;
   private readonly invRotationScratch = { x: 0, y: 0, z: 0, w: 1 };
   private readonly localVelScratch = { x: 0, y: 0, z: 0 };
   private readonly bodyRightScratch = { x: 0, y: 0, z: 0 };
@@ -1551,6 +1590,7 @@ export class Vehicle implements Rebasable {
     surface: SurfaceType.Asphalt,
     bumpMps: 0,
     bumpStopMps: 0,
+    roadFeelMps: 0,
     impactMps: 0,
     crankSeq: 0,
     crankSeconds: 0,
@@ -1594,6 +1634,7 @@ export class Vehicle implements Rebasable {
     this.origin = origin;
     this.microRelief = new MicroRelief(world.seed);
     this.roadTexture = new RoadTexture(world.seed);
+    this.roadFaults = new RoadFaults(world.seed);
     this.model = carModel(carState.modelId);
     this.handling = HANDLING_PROFILES[this.model.handlingProfile];
     this.tyre = tyreCurve(this.model.tyre, this.handling);
@@ -1857,7 +1898,8 @@ export class Vehicle implements Rebasable {
    * axle has lost while it is working, read off the last tyre pass. Near 0 in ordinary
    * cornering; it climbs as the front tyres pass their peak and the pneumatic trail
    * collapses, which is the cue a real wheel gives in the hands before the nose washes
-   * wide. The pad's rumble carries it (main.ts); nothing in the physics reads it.
+   * wide. Nothing reads it at present: the pad carries only impacts and the road
+   * (main.ts `updatePad`), and nothing in the physics reads it either.
    */
   get steeringLightness(): number {
     return this.steerLightnessValue;
@@ -2424,7 +2466,15 @@ export class Vehicle implements Rebasable {
         pitchLinkN: 0,
         tyreRateN: tyreVerticalRate(wheel.radius),
         profileHeight: 0,
-        profileRate: 0,
+        groundTrack: new Float64Array(WHEEL_SUBSTEPS),
+        groundBefore: 0,
+        hopSpeedSq: 0,
+        travelRateLow: 0,
+        groundRate: 0,
+        smoothHeight: 0,
+        faultHeight: 0,
+        faultX: Number.NaN,
+        faultZ: Number.NaN,
         hopZ: 0,
         hopV: 0,
         hopGripScale: 1,
@@ -3485,7 +3535,7 @@ export class Vehicle implements Rebasable {
 
       // THE GROUND THE COLLIDER DOES NOT HAVE.
       //
-      // Two fields, both sampled at the wheel's own ABSOLUTE contact position so the
+      // Four fields, all sampled at the wheel's own ABSOLUTE contact position so the
       // same ripple is under the same patch of world for every car and across every
       // floating-origin rebase:
       //
@@ -3499,38 +3549,60 @@ export class Vehicle implements Rebasable {
       //                used to have exactly zero of this, which is why a smooth
       //                stretch reported no road feel at all: the collider's own rows
       //                are 1.33 m apart and there was nothing between them.
+      //   faults       a sealed surface's small discrete faults (`RoadFaults`): patch
+      //                edges, faulted cracks, small holes, a centimetre or two. Read at
+      //                every wheel SUBSTEP along the patch's path through the step,
+      //                because one is shorter than a body step covers at speed.
       //
-      // A fresh sealed deck carries half of all three, rising to all of it as the road
+      // A fresh sealed deck carries half of all of them, rising to all as the road
       // wears (`subColliderShare`): on a new mat it is texture, not bumps.
       //
-      // The sum is then ENVELOPED over the contact patch. A tyre stands on 160 mm of
+      // Each is then ENVELOPED over the contact patch. A tyre stands on 160 mm of
       // road and cannot see anything shorter, so the filter is a low-pass over
       // DISTANCE TRAVELLED, not over time: the same ripple is equally sharp at 40 and
       // at 100 km/h, and detail below the patch length is attenuated at both.
-      const profileTarget =
-        ground && w.grounded
-          ? subColliderShare(surfaceType, this.physics.surfaces.lookupWear(ground.handle)) *
-            (surface.microRelief *
-              this.microRelief.at(
-                w.contactPoint.x + this.origin.x,
-                w.contactPoint.z + this.origin.z,
-              ) +
-              surface.hummock *
-                this.microRelief.hummockAt(
-                  w.contactPoint.x + this.origin.x,
-                  w.contactPoint.z + this.origin.z,
-                ) +
-              surface.texture *
-                this.roadTexture.at(
-                  w.contactPoint.x + this.origin.x,
-                  w.contactPoint.z + this.origin.z,
-                ))
-          : 0;
+      const onProfile = ground !== null && w.grounded;
+      const wearShare = onProfile ? subColliderShare(surfaceType, this.physics.surfaces.lookupWear(ground.handle)) : 0;
+      const patchX = w.contactPoint.x + this.origin.x;
+      const patchZ = w.contactPoint.z + this.origin.z;
+      const smoothTarget = onProfile
+        ? wearShare *
+          (surface.microRelief * this.microRelief.at(patchX, patchZ) +
+            surface.hummock * this.microRelief.hummockAt(patchX, patchZ) +
+            surface.texture * this.roadTexture.at(patchX, patchZ))
+        : 0;
       const rolled = Math.abs(fwdSpeed) * dt;
-      const envelope = 1 - Math.exp(-rolled / CONTACT_PATCH_M);
+      const smoothBefore = w.smoothHeight;
+      w.smoothHeight += (smoothTarget - w.smoothHeight) * (1 - Math.exp(-rolled / CONTACT_PATCH_M));
+      const substeps = this.wheelSubsteps;
+      const subEnvelope = 1 - Math.exp(-rolled / substeps / CONTACT_PATCH_M);
+      const faults = onProfile ? surface.faults : undefined;
+      // Where the patch was a step ago; a jump longer than any step covers is a
+      // teleport, and the faults are read where the patch is now.
+      let fromX = w.faultX;
+      let fromZ = w.faultZ;
+      if (!((patchX - fromX) ** 2 + (patchZ - fromZ) ** 2 < FAULT_TRACK_JUMP_M * FAULT_TRACK_JUMP_M)) {
+        fromX = patchX;
+        fromZ = patchZ;
+      }
       const beforeProfile = w.profileHeight;
-      w.profileHeight += (profileTarget - w.profileHeight) * envelope;
-      w.profileRate = w.grounded ? (w.profileHeight - beforeProfile) / dt : 0;
+      for (let k = 0; k < substeps; k++) {
+        const along = (k + 1) / substeps;
+        const faultTarget = faults
+          ? wearShare * this.roadFaults.at(fromX + (patchX - fromX) * along, fromZ + (patchZ - fromZ) * along, faults)
+          : 0;
+        w.faultHeight += (faultTarget - w.faultHeight) * subEnvelope;
+        w.groundTrack[k] = smoothBefore + (w.smoothHeight - smoothBefore) * along + w.faultHeight;
+      }
+      w.profileHeight = w.smoothHeight + w.faultHeight;
+      w.groundBefore = beforeProfile;
+      if (!w.grounded) {
+        // In the air the hub sees no ground moving under it this step.
+        w.groundTrack.fill(w.profileHeight, 0, substeps);
+        w.groundBefore = w.profileHeight;
+      }
+      w.faultX = onProfile ? patchX : Number.NaN;
+      w.faultZ = onProfile ? patchZ : Number.NaN;
 
       // The tyre model in updateWheelDynamics owns drive and brake; the contacts only
       // hold the body up (vehicle/tyrecontact.ts).
@@ -4713,6 +4785,7 @@ export class Vehicle implements Rebasable {
       // The hub's substeps start from a tyre that carries `loadN` (`stepWheelHop`).
       w.hopGripScale = 1;
       w.hopBodyForceN = 0;
+      w.hopSpeedSq = 0;
       w.tyreLoadMeanN = 0;
 
       w.inContact = inContact;
@@ -4763,7 +4836,7 @@ export class Vehicle implements Rebasable {
     for (let step = 0; step < substeps; step++) {
       // THE HUBS first: this substep's tyre load (`hopGripScale`) is what the wheels below
       // read their capacity at.
-      this.stepWheelHop(h, (step + 1) * share, share, dt, hopRelax);
+      this.stepWheelHop(h, step, share, hopRelax);
       // The crank turns with the gearbox end of the shaft while the clutch is locked, and
       // that end turns with the DRIVEN wheels (their mean, which is what an open
       // differential gives it) less the shaft's wind-up rate. So a tyre breaking loose
@@ -5575,10 +5648,11 @@ export class Vehicle implements Rebasable {
 
   /**
    * Wheel-loop substeps per fixed step (vehicletuning.ts `WHEEL_SUBSTEPS`). The traffic
-   * sets its cars to `TRAFFIC_WHEEL_SUBSTEPS` once, at spawn.
+   * sets its cars to `TRAFFIC_WHEEL_SUBSTEPS` once, at spawn. Never more than
+   * `WHEEL_SUBSTEPS`: each wheel's ground track (`groundTrack`) is sized for that.
    */
   setWheelSubsteps(substeps: number): void {
-    this.wheelSubsteps = Math.max(1, Math.round(substeps));
+    this.wheelSubsteps = Math.min(WHEEL_SUBSTEPS, Math.max(1, Math.round(substeps)));
   }
 
   /**
@@ -6183,9 +6257,9 @@ export class Vehicle implements Rebasable {
    * 10-14 Hz, so `ω·dt` was over 1: the implicit step that kept it stable also damped it
    * to nothing, and the hub could not ring once over a ripple. At the 480 Hz substep
    * `ω·h` is 0.14 and the mode keeps the damping its tyre and damper give it. The profile
-   * is read where the patch is DURING the step, interpolated along the step's rise
-   * (`profileRate`), and the body still receives the force once a step, as the mean the
-   * substeps made (`hopBodyForceN`).
+   * is read where the patch is DURING the step (`groundTrack`: the smooth fields along
+   * the step's rise, the road's faults sampled at every substep), and the body still
+   * receives the force once a step, as the mean the substeps made (`hopBodyForceN`).
    *
    * THE TYRE CANNOT PULL. A tyre presses on the road and nothing else: when the hub is
    * flung up off a ripple faster than the road falls away, `loadN + F_t` would go
@@ -6204,7 +6278,7 @@ export class Vehicle implements Rebasable {
    * A BEAM axle with both wheels down is one unsprung body (`stepBeamAxleHop`); with one
    * end in the air, the end still down rides alone.
    */
-  private stepWheelHop(h: number, t: number, share: number, dt: number, airRelax: number): void {
+  private stepWheelHop(h: number, k: number, share: number, airRelax: number): void {
     for (const w of this.wheels) {
       if (w.beamPartner !== null && beamAxleDown(w, w.beamPartner)) continue;
       if (!(w.inContact && w.loadN > 0)) {
@@ -6225,7 +6299,7 @@ export class Vehicle implements Rebasable {
         w.hopV > 0 ? 1 : DAMPER_REBOUND_LOW_SPEED_GAIN,
       );
       const cTyre = 2 * TYRE_DAMPING_RATIO * Math.sqrt(w.tyreRateN * mUnsprung);
-      const ground = w.profileHeight - w.profileRate * dt * (1 - t);
+      const ground = this.substepGround(w, k, h);
       const touching = this.tyreTouches(w, ground, cTyre);
 
       // Solved for the new velocity with every spring and damper evaluated at it, so the
@@ -6233,19 +6307,29 @@ export class Vehicle implements Rebasable {
       // matrix and the tyre's share is the constant that unloads it exactly.
       const kTyre = touching ? w.tyreRateN : 0;
       const cTyreIn = touching ? cTyre : 0;
-      const drive = touching ? w.tyreRateN * ground + cTyre * w.profileRate : -w.loadN;
+      const drive = touching ? w.tyreRateN * ground + cTyre * w.groundRate : -w.loadN;
       const kTotal = kSusp + kTyre;
       const cTotal = cSusp + cTyreIn;
       w.hopV = (mUnsprung * w.hopV + h * (drive - kTotal * w.hopZ)) / (mUnsprung + h * cTotal + h * h * kTotal);
       w.hopZ += w.hopV * h;
       this.settleHub(w, ground, cTyre, touching, kSusp * w.hopZ + cSusp * w.hopV, share);
     }
-    this.stepBeamAxleHop(h, t, share, dt);
+    this.stepBeamAxleHop(h, k, share);
+  }
+
+  /**
+   * The ground under this hub at the end of substep `k` (`groundTrack`), and its rate
+   * over the substep into `groundRate`.
+   */
+  private substepGround(w: WheelVisual, k: number, h: number): number {
+    const ground = w.groundTrack[k]!;
+    w.groundRate = (ground - (k > 0 ? w.groundTrack[k - 1]! : w.groundBefore)) / h;
+    return ground;
   }
 
   /** Whether this hub's tyre is pressing on the road at the start of the substep. */
   private tyreTouches(w: WheelVisual, ground: number, cTyre: number): boolean {
-    return w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.profileRate - w.hopV) > 0;
+    return w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.groundRate - w.hopV) > 0;
   }
 
   /**
@@ -6262,11 +6346,12 @@ export class Vehicle implements Rebasable {
     share: number,
   ): void {
     const tyreN = touching
-      ? Math.max(0, w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.profileRate - w.hopV))
+      ? Math.max(0, w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.groundRate - w.hopV))
       : 0;
     w.hopGripScale = (tyreN * this.tyreLoadFactor(tyreN)) / (w.loadN * this.tyreLoadFactor(w.loadN));
     w.tyreLoadMeanN += tyreN * share;
     w.hopBodyForceN += Math.max(-w.loadN, suspensionForceN) * share;
+    w.hopSpeedSq += w.hopV * w.hopV * share;
   }
 
   /**
@@ -6305,7 +6390,7 @@ export class Vehicle implements Rebasable {
    * air on the COLLIDER is not stepped here (`beamAxleDown`): the grounded end rides
    * alone in `stepWheelHop` and the airborne one relaxes, as on an independent axle.
    */
-  private stepBeamAxleHop(h: number, t: number, share: number, dt: number): void {
+  private stepBeamAxleHop(h: number, k: number, share: number): void {
     const gyrationSq = BEAM_AXLE_GYRATION_SQ;
     for (const [a, b] of this.beamAxles) {
       if (!beamAxleDown(a, b)) continue;
@@ -6334,16 +6419,16 @@ export class Vehicle implements Rebasable {
       );
       const tyreDampA = 2 * TYRE_DAMPING_RATIO * Math.sqrt(a.tyreRateN * massA);
       const tyreDampB = 2 * TYRE_DAMPING_RATIO * Math.sqrt(b.tyreRateN * massB);
-      const groundA = a.profileHeight - a.profileRate * dt * (1 - t);
-      const groundB = b.profileHeight - b.profileRate * dt * (1 - t);
+      const groundA = this.substepGround(a, k, h);
+      const groundB = this.substepGround(b, k, h);
       const touchA = this.tyreTouches(a, groundA, tyreDampA);
       const touchB = this.tyreTouches(b, groundB, tyreDampB);
       const tyreKA = touchA ? a.tyreRateN : 0;
       const tyreKB = touchB ? b.tyreRateN : 0;
       const tyreCA = touchA ? tyreDampA : 0;
       const tyreCB = touchB ? tyreDampB : 0;
-      const driveA = touchA ? a.tyreRateN * groundA + tyreDampA * a.profileRate : -a.loadN;
-      const driveB = touchB ? b.tyreRateN * groundB + tyreDampB * b.profileRate : -b.loadN;
+      const driveA = touchA ? a.tyreRateN * groundA + tyreDampA * a.groundRate : -a.loadN;
+      const driveB = touchB ? b.tyreRateN * groundB + tyreDampB * b.groundRate : -b.loadN;
       const stiffA = springSelf + tyreKA;
       const stiffB = springSelf + tyreKB;
 
@@ -6399,6 +6484,8 @@ export class Vehicle implements Rebasable {
    * in with the tyres' (`updateWheelDynamics`, `applyAntiRollBars`).
    */
   private resolveTravel(dt: number): void {
+    let feelSq = 0;
+    const lowBlend = 1 - Math.exp(-2 * Math.PI * ROAD_FEEL_HIGHPASS_HZ * dt);
     for (const w of this.wheels) {
       const inContact = w.tyre.inContact;
       const previousCompressionM = w.compressionM;
@@ -6409,6 +6496,13 @@ export class Vehicle implements Rebasable {
       if (inContact && previousCompressionM > 0 && dt > 0) {
         const joltMps = (w.compressionM - previousCompressionM) / dt;
         if (joltMps > this.audioState.bumpMps) this.audioState.bumpMps = joltMps;
+        // THE ROAD FEEL (`VehicleAudioState.roadFeelMps`): the strut's speed above the
+        // body's own heave and roll, and the hub's hop on the sub-collider road.
+        w.travelRateLow += (joltMps - w.travelRateLow) * lowBlend;
+        const fast = joltMps - w.travelRateLow;
+        feelSq += fast * fast + w.hopSpeedSq;
+      } else {
+        w.travelRateLow = 0;
       }
 
       // BUMP STOP. The travel limit is a rigid clamp; a real stop is rubber that starts
@@ -6454,6 +6548,7 @@ export class Vehicle implements Rebasable {
       }
       w.barN = 0;
     }
+    this.audioState.roadFeelMps = Math.sqrt(feelSq / Math.max(1, this.wheels.length));
 
     // THE BARS. An axle with a wheel in the air contributes nothing — a bar needs both
     // ends on the ground to have a difference worth resisting.
