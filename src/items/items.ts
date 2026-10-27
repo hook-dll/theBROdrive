@@ -284,7 +284,7 @@ export function isBrokenThing(item: Item | null | undefined): boolean {
   return item?.type === 'contract_cargo' && item.progress?.broken === true;
 }
 
-/** A sticker bought at a shop, consumed only when its sticker is confirmed on a car. */
+/** A sticker in its envelope (the claw machine's prize to come), consumed only when its sticker is confirmed on a car. */
 export interface StickerEnvelopeItem {
   readonly type: 'sticker_envelope';
   readonly id: string;

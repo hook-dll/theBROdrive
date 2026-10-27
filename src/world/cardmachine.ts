@@ -13,7 +13,7 @@ import { box, C, cylinder, material, mergeKitStatics, type V3 } from './poi/kit'
 import { addStatic, yawRotation } from './props/scatter';
 
 /**
- * THE CARD MACHINE: the one cabinet the POST (world/post.ts) and the SHOP
+ * THE CARD MACHINE: the one cabinet the POST (world/post.ts) and the GARAGE machine
  * (world/vending.ts) are built as, worked by walking up to it.
  *
  * Within `ENGAGE_M` of the front of its control deck the machine is ENGAGED
@@ -24,7 +24,7 @@ import { addStatic, yawRotation } from './props/scatter';
  *    showing falls toward the viewer and the next card is there under it. F on the dial
  *    is one card on; the mouse wheel, aimed at the machine, turns it either way.
  *  - the BUTTON on the deck under the showcase takes what the card offers (the post's
- *    TAKE, the shop's BUY): it appears in the GRID.
+ *    TAKE, the garage's BUY): it appears in the GRID.
  *  - the GRID is the machine's one opening, low on the front: ONE cell, the boot's twin
  *    (vehicle/trunk.ts, drawn by render/trunkview.ts while engaged, `grid`). One thing
  *    lies there at a time, whatever its size; F on it takes it into the hands or the
@@ -37,15 +37,18 @@ import { addStatic, yawRotation } from './props/scatter';
  *  - SHELLS: what it sells is taken straight out of the player's jar, in the one kind of
  *    shell the machine takes; short of that kind, the button rattles and gives nothing.
  *
- * The cabinet is an arcade cabinet, the owner's pick of three trial designs (2026-10-26):
- * black cheeks with art stripes and a T-moulding, a hood overhanging the top with the
- * stripes across its face, a lit strip and a row of bulbs under it. Under the hood one
+ * The post's cabinet is an arcade cabinet, the owner's pick of three trial designs
+ * (2026-10-26): black cheeks with art stripes and a T-moulding, a hood overhanging the
+ * top with the stripes across its face, a lit strip and a row of bulbs under it. The
+ * garage machine's is a workshop's tool wall (2026-10-27): dark steel and rivets, a
+ * pegboard with tools on each flank, a hazard band and a spanner emblem on the hood,
+ * oil run down its foot (`CardMachineLook.cabinet`). Under the hood both have one
  * row: the card window in a black bezel on the viewer's left, a lit SHOWCASE niche on his
- * right that the kind dresses (the shop's ware on the card, the post's parcel). Under the
+ * right that the kind dresses (the garage's ware on the card, the post's parcel). Under the
  * row a control deck across the whole front, sloping up to the cabinet and bevelled
  * back down under it, so the grid below is seen past it: the dial on the deck under the
  * cards it turns, the button under the showcase it gives from. No title board, no coin
- * door: the kind's colour, the button's name and the cards say what it is.
+ * door: the cabinet, the kind's colour, the button's name and the cards say what it is.
  *
  * Nothing on the front shares a plane with a face of another colour (the depth buffer
  * could not tell them apart and the faces flickered): a plate laid on a face stands at
@@ -222,8 +225,13 @@ function deckGeometry(): THREE.BufferGeometry {
 }
 const DECK_GEOMETRY = deckGeometry();
 
-/** What a machine kind dresses the common cabinet with. */
+/**
+ * What a machine kind dresses the common cabinet with. `cabinet` picks the shell round
+ * the common front (window, showcase, deck, opening): the ARCADE cabinet (the post) or
+ * the GARAGE cabinet (world/vending.ts), see `dressCabinet`.
+ */
 export interface CardMachineLook {
+  readonly cabinet: 'arcade' | 'garage';
   readonly body: number;
   readonly buttonLabel: string;
   readonly buttonColour: number;
@@ -285,9 +293,49 @@ function frameBars(root: THREE.Group, x: number, y: number, w: number, h: number
   box(root, [w, bar, d], [x, y - h / 2 - bar / 2, z], colour);
 }
 
-/** The cheeks and stripes, the hood, the window's bezel, the showcase, the deck and the opening. */
+/**
+ * The shell round the front, the window's bezel, the showcase, the deck and the opening.
+ * The arcade shell (`dressArcadeShell`) and the garage shell (`dressGarageShell`) differ
+ * only outside the front's working parts, so the hand finds the dial, the button and
+ * the grid in the same places on both; the deck's lip takes the shell's trim colour.
+ */
 function dressCabinet(root: THREE.Group, look: CardMachineLook): void {
   box(root, [INNER_W, H - HOOD_H, D], [0, (H - HOOD_H) / 2, 0], look.body);
+  const trim = look.cabinet === 'garage' ? dressGarageShell(root) : dressArcadeShell(root);
+
+  // The window's black bezel; the window's frame stands out of it (`buildCardMachine`).
+  box(root, [CARD_W + 0.14, CARD_H + 0.16, 0.012], [CARD_X, CARD_Y, FRONT - 0.006], CABINET_BLACK);
+
+  // The showcase: a pale back, its frame standing out round it, a lamp under its top.
+  box(root, [NICHE_W, NICHE_H, 0.012], [NICHE_X, NICHE_Y, NICHE_BACK + 0.006], 0xbcb8aa);
+  frameBars(root, NICHE_X, NICHE_Y, NICHE_W, NICHE_H, NICHE_BAR, NICHE_DEPTH, CABINET_BLACK);
+  box(root, [NICHE_W - 0.03, 0.01, 0.02], [NICHE_X, NICHE_Y + NICHE_H / 2 - 0.005, FRONT - NICHE_DEPTH + 0.025], LAMP);
+
+  // The deck: its black body, the kind's colour on its face, a moulding along its lip.
+  const deck = new THREE.Mesh(DECK_GEOMETRY, material(CABINET_BLACK));
+  deck.castShadow = deck.receiveShadow = true;
+  root.add(deck);
+  const slope = POD_D / Math.cos(POD_SLOPE);
+  box(
+    root,
+    [2 * (POD_HALF_W - DECK_PLATE_INSET), DECK_PLATE_T, slope - 2 * DECK_PLATE_EDGE],
+    [0, (POD_LOW + POD_HIGH) / 2 + (DECK_NORMAL[0] * DECK_PLATE_T) / 2, FRONT - POD_D / 2 + (DECK_NORMAL[1] * DECK_PLATE_T) / 2],
+    look.body,
+    [-POD_SLOPE, 0, 0],
+  );
+  box(root, [2 * POD_HALF_W + 0.012, POD_LIP + 0.008, 0.012], [0, POD_LOW - POD_LIP / 2, FRONT - POD_D - 0.006], trim);
+
+  // The opening under the deck: a dark plate in a metal frame, the grid's cell over it.
+  box(root, [CELL_W + 0.04, CELL_H + 0.04, 0.012], [0, GRID_Y, FRONT - 0.006], 0x0e1011);
+  frameBars(root, 0, GRID_Y, CELL_W + 0.04, CELL_H + 0.04, OPENING_BAR, OPENING_DEPTH, C.darkMetal);
+}
+
+/**
+ * The ARCADE shell, the owner's pick of three trial designs (2026-10-26): black cheeks
+ * with art stripes and a T-moulding, a hood overhanging the top with the stripes across
+ * its face, a lit strip and a row of bulbs under it. Returns the trim colour.
+ */
+function dressArcadeShell(root: THREE.Group): number {
   for (const sx of [-1, 1]) {
     const x = sx * (W / 2 - CHEEK / 2);
     box(root, [CHEEK, H, D], [x, H / 2, 0], CABINET_BLACK);
@@ -313,32 +361,113 @@ function dressCabinet(root: THREE.Group, look: CardMachineLook): void {
   for (let k = 0; k < 11; k++) {
     disc(root, 0.011, 0.014, 8, [-0.55 + k * 0.11, H - HOOD_H + 0.015, hoodFace - 0.0065], 0xfff3c4);
   }
+  return MOULDING;
+}
 
-  // The window's black bezel; the window's frame stands out of it (`buildCardMachine`).
-  box(root, [CARD_W + 0.14, CARD_H + 0.16, 0.012], [CARD_X, CARD_Y, FRONT - 0.006], CABINET_BLACK);
+/** The garage shell's finishes: dark steel, its rivets, the pegboard and the oil. */
+const STEEL_DARK = 0x2b3034;
+const STEEL = 0x6b7176;
+const RIVET = 0xa9aeb1;
+const PEGBOARD = 0x8c7a58;
+const PEG_HOLE = 0x2a241b;
+const HAZARD = [0xd9a52b, 0x1a1b1d] as const;
+const OIL = 0x141210;
+const TOOL_HANDLE = 0xb03a2e;
 
-  // The showcase: a pale back, its frame standing out round it, a lamp under its top.
-  box(root, [NICHE_W, NICHE_H, 0.012], [NICHE_X, NICHE_Y, NICHE_BACK + 0.006], 0xbcb8aa);
-  frameBars(root, NICHE_X, NICHE_Y, NICHE_W, NICHE_H, NICHE_BAR, NICHE_DEPTH, CABINET_BLACK);
-  box(root, [NICHE_W - 0.03, 0.01, 0.02], [NICHE_X, NICHE_Y + NICHE_H / 2 - 0.005, FRONT - NICHE_DEPTH + 0.025], LAMP);
+/**
+ * The GARAGE shell, a workshop's tool wall standing at the lay-by: dark steel cheeks
+ * with a row of rivets up each front edge, on each flank a pegboard with its holes and
+ * a spanner and a hammer hung on it, a steel hood with a hazard band across its face
+ * and a round plate in its middle with a spanner on it (the machine's emblem), a work
+ * lamp's strip under the hood, a ridged steel kick plate, and oil stains run down the
+ * foot of the front. Every plate stands at least 5 mm proud of what it lies on. Returns
+ * the trim colour.
+ */
+function dressGarageShell(root: THREE.Group): number {
+  for (const sx of [-1, 1]) {
+    const x = sx * (W / 2 - CHEEK / 2);
+    box(root, [CHEEK, H, D], [x, H / 2, 0], STEEL_DARK);
+    // Rivets up the cheek's front edge, domes out of its face.
+    for (let k = 0; k < 13; k++) {
+      disc(root, 0.009, 0.01, 8, [x, 0.12 + k * 0.15, FRONT - 0.005], RIVET);
+    }
+    // The pegboard on the flank, its holes in a grid, the tools hung clear of them.
+    const face = sx * (W / 2 + 0.006);
+    box(root, [0.006, 1.1, 0.8], [sx * (W / 2 + 0.003), 1.05, 0], PEGBOARD);
+    for (let row = 0; row < 7; row++) {
+      for (let col = 0; col < 6; col++) {
+        const z = -0.33 + col * 0.132;
+        const y = 0.6 + row * 0.15;
+        // The tools hang over the middle columns' upper rows: no hole behind them.
+        if (col >= 1 && col <= 4 && row >= 2) continue;
+        box(root, [0.005, 0.014, 0.014], [face + sx * 0.0025, y, z], PEG_HOLE);
+      }
+    }
+    // A spanner hung on a slant: its shank and an open jaw at each end, the jaw's gap
+    // the board's colour standing 5 mm proud of it, out along the shank.
+    const tool = face + sx * 0.007;
+    const slant = 0.35;
+    box(root, [0.008, 0.36, 0.035], [tool, 1.2, -0.12], RIVET, [slant, 0, 0]);
+    for (const end of [-1, 1]) {
+      const y = 1.2 + end * 0.17 * Math.cos(slant);
+      const z = -0.12 + end * 0.17 * Math.sin(slant);
+      cylinder(root, 0.034, 0.034, 0.008, 12, [tool, y, z], RIVET, [0, 0, Math.PI / 2]);
+      box(
+        root,
+        [0.01, 0.034, 0.026],
+        [tool + sx * 0.004, y + end * 0.022 * Math.cos(slant), z + end * 0.022 * Math.sin(slant)],
+        PEGBOARD,
+        [slant, 0, 0],
+      );
+    }
+    // A hammer beside it: a red handle and a steel head.
+    box(root, [0.008, 0.32, 0.03], [tool, 1.15, 0.17], TOOL_HANDLE);
+    box(root, [0.012, 0.05, 0.14], [tool + sx * 0.003, 1.33, 0.17], STEEL_DARK);
+  }
+  // The ridged kick plate along the foot.
+  box(root, [INNER_W, 0.1, 0.02], [0, 0.05, FRONT - 0.01], STEEL);
+  for (let k = 0; k < 12; k++) {
+    box(root, [0.05, 0.012, 0.008], [-0.55 + k * 0.1, 0.05 + (k % 2 === 0 ? 0.02 : -0.02), FRONT - 0.024], RIVET, [0, 0, k % 2 === 0 ? 0.6 : -0.6]);
+  }
+  // Oil run down the front: blotches on the kick plate under its ridges, and on the body
+  // beside the opening.
+  box(root, [0.14, 0.05, 0.006], [-0.38, 0.06, FRONT - 0.023], OIL, [0, 0, 0.15]);
+  box(root, [0.08, 0.04, 0.006], [0.41, 0.045, FRONT - 0.023], OIL, [0, 0, -0.3]);
+  box(root, [0.035, 0.16, 0.006], [-0.5, 0.3, FRONT - 0.003], OIL);
+  box(root, [0.07, 0.035, 0.006], [-0.5, 0.21, FRONT - 0.003], OIL);
+  box(root, [0.025, 0.1, 0.006], [0.53, 0.5, FRONT - 0.003], OIL);
 
-  // The deck: its black body, the kind's colour on its face, a moulding along its lip.
-  const deck = new THREE.Mesh(DECK_GEOMETRY, material(CABINET_BLACK));
-  deck.castShadow = deck.receiveShadow = true;
-  root.add(deck);
-  const slope = POD_D / Math.cos(POD_SLOPE);
-  box(
-    root,
-    [2 * (POD_HALF_W - DECK_PLATE_INSET), DECK_PLATE_T, slope - 2 * DECK_PLATE_EDGE],
-    [0, (POD_LOW + POD_HIGH) / 2 + (DECK_NORMAL[0] * DECK_PLATE_T) / 2, FRONT - POD_D / 2 + (DECK_NORMAL[1] * DECK_PLATE_T) / 2],
-    look.body,
-    [-POD_SLOPE, 0, 0],
-  );
-  box(root, [2 * POD_HALF_W + 0.012, POD_LIP + 0.008, 0.012], [0, POD_LOW - POD_LIP / 2, FRONT - POD_D - 0.006], MOULDING);
-
-  // The opening under the deck: a dark plate in a metal frame, the grid's cell over it.
-  box(root, [CELL_W + 0.04, CELL_H + 0.04, 0.012], [0, GRID_Y, FRONT - 0.006], 0x0e1011);
-  frameBars(root, 0, GRID_Y, CELL_W + 0.04, CELL_H + 0.04, OPENING_BAR, OPENING_DEPTH, C.darkMetal);
+  // The hood: dark steel, the hazard band across its face either side of the emblem.
+  box(root, [INNER_W, HOOD_H, D + HOOD_OVER], [0, H - HOOD_H / 2, -HOOD_OVER / 2], STEEL_DARK);
+  const hoodFace = FRONT - HOOD_OVER;
+  const hazardY = H - HOOD_H / 2;
+  for (let k = 0; k < 8; k++) {
+    for (const sx of [-1, 1]) {
+      box(root, [0.055, 0.07, 0.012], [sx * (0.17 + 0.0275 + k * 0.055), hazardY, hoodFace - 0.003], HAZARD[k % 2]);
+    }
+  }
+  // Rivets along the hood's top and bottom edges, clear of the emblem's plate.
+  for (let k = 0; k < 11; k++) {
+    const x = -0.55 + k * 0.11;
+    if (Math.abs(x) < 0.12) continue;
+    for (const y of [H - 0.03, H - HOOD_H + 0.03]) {
+      disc(root, 0.008, 0.01, 8, [x, y, hoodFace - 0.005], RIVET);
+    }
+  }
+  // The emblem: a round plate, a spanner across it on a slant with an open jaw at each end.
+  disc(root, 0.115, 0.012, 24, [0, hazardY, hoodFace - 0.006], STEEL);
+  const lean = Math.PI / 4;
+  box(root, [0.03, 0.15, 0.008], [0, hazardY, hoodFace - 0.016], RIVET, [0, 0, lean]);
+  for (const end of [-1, 1]) {
+    const ex = -end * 0.075 * Math.sin(lean);
+    const ey = hazardY + end * 0.075 * Math.cos(lean);
+    disc(root, 0.034, 0.008, 16, [ex, ey, hoodFace - 0.016], RIVET);
+    // The jaw's gap: the plate's colour standing proud of the jaw, out along the shank.
+    box(root, [0.026, 0.034, 0.008], [ex - end * 0.022 * Math.sin(lean), ey + end * 0.022 * Math.cos(lean), hoodFace - 0.024], STEEL, [0, 0, lean]);
+  }
+  // The work lamp's strip under the hood.
+  box(root, [INNER_W - 0.06, 0.012, HOOD_OVER - 0.02], [0, H - HOOD_H - 0.006, FRONT - HOOD_OVER / 2], LAMP);
+  return STEEL;
 }
 
 /** The dial: a knurled knob with a finger post, over tick marks on the deck. */

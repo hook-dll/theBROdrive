@@ -5,36 +5,40 @@ import { hash01, pick } from '../core/rng';
 import { formatPrice, itemPrice } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { itemLabel, type Item, type ShadeTint } from '../items/items';
-import { STICKERS } from '../items/stickercatalog';
-import type { PartInstance } from '../parts/registry';
+import { IMPORT_ENGINE_IDS, variantsOfKind, type PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import type { Poi } from './poi';
-import { box, C } from './poi/kit';
+import { box } from './poi/kit';
 
 /**
- * The SHOP machines: where the small things a driver needs are bought.
+ * THE GARAGE MACHINE: where a driver buys what his car needs, at the settlements that
+ * have one (world/settlement.ts `poiHasMachine`: posts 0..2 always, past them half).
  *
- * A card machine (world/cardmachine.ts), the post's twin: the wheel turns through a card
- * for each thing still in it, the showcase beside the window holds the one the card
- * names, and BUY takes its price out of the player's jar and lays the thing in the
- * machine's grid, where he takes it as from a boot. Short, the button springs back with
- * a rattle, nothing is given, and the card says the shells are short; with the grid's one
- * cell taken (a thing bought and not taken), it refuses before taking any shells.
- * What lies in the grid is saved (`WorldState.machineGrids`), so a thing paid for and
- * left there waits for him.
+ * A card machine (world/cardmachine.ts), the post's twin in a workshop's cabinet (dark
+ * steel, rivets, a pegboard with tools on its flanks, a spanner on its hood): the wheel
+ * turns through a card for each thing still in it, the showcase beside the window holds
+ * the one the card names, and BUY takes its price out of the player's jar and lays the
+ * thing in the machine's grid, where he takes it as from a boot. Short, the button
+ * springs back with a rattle, nothing is given, and the card says the shells are short;
+ * with the grid's one cell taken (a thing bought and not taken), it refuses before
+ * taking any shells. What lies in the grid is saved (`WorldState.machineGrids`), so a
+ * thing paid for and left there waits for him.
  *
  * What a machine holds is a pure function of the stop's seed, so it needs no saved stock
  * of its own: `vendingSold` records which slots were paid for, and those stay empty for
  * good. A machine never restocks.
  *
- * Every machine draws from one short list (game-design2.md §8): one or two spray cans of
- * a random paint (the colour is on the card), sun shades of a random tint, an air
- * filter, a turbine, empty cans of 5, 10 or 20 litres, bubble gum and four or five
- * envelopes of random stickers. Not every machine has every kind. No fluid is sold here:
- * an empty can is filled at a settlement's pumps (world/pumps.ts) or from another can.
+ * Every machine draws from one short list (game-design2.md §8): car parts (an air
+ * filter, a turbine, a radiator, a gearbox, an engine — the engines and gearboxes the
+ * catalogue's cars are built with, not the imports the scrapyards keep), one or two
+ * spray cans of a random paint (the colour is on the card), empty cans of 5, 10 or 20
+ * litres, and the small goods: bubble gum and sun shades of a random tint. Not every
+ * machine has every kind. No fluid is sold here: an empty can, a dry engine or radiator
+ * is filled at a settlement's pumps (world/pumps.ts) or from another can. Sticker
+ * envelopes are not sold here: they are the claw machine's.
  *
  * Prices are not set here: the economy prices each item (`itemPrice`,
  * economy/economy.ts), the same count of shells down the whole road, and every price a
@@ -42,32 +46,50 @@ import { box, C } from './poi/kit';
  */
 
 /** Most things one machine is stocked with. */
-const SHOP_SLOTS = 12;
+const GARAGE_SLOTS = 12;
 
-/** Domain tag for the vending rolls. */
-const VENDING_DOMAIN = 0x56454e32; // 'VEN2'
+/** Domain tag for the garage rolls. */
+const GARAGE_DOMAIN = 0x47415231; // 'GAR1'
 
-type Ware = 'spray' | 'shades' | 'air_filter' | 'turbine' | 'can5' | 'can10' | 'can20' | 'gum' | 'sticker';
+type Ware =
+  | 'air_filter'
+  | 'turbine'
+  | 'radiator'
+  | 'gearbox'
+  | 'engine'
+  | 'spray'
+  | 'can5'
+  | 'can10'
+  | 'can20'
+  | 'gum'
+  | 'shades';
 
 const SHADE_TINTS: readonly ShadeTint[] = ['green', 'yellow', 'red'];
 const CAN_WARES: readonly Ware[] = ['can5', 'can5', 'can10', 'can10', 'can20'];
+/** The engines and gearboxes a machine may hold: those a car is built with, no import. */
+const ENGINE_IDS: readonly string[] = variantsOfKind('engine', 'car')
+  .filter((v) => !IMPORT_ENGINE_IDS.includes(v.id))
+  .map((v) => v.id);
+const GEARBOX_IDS: readonly string[] = variantsOfKind('gearbox', 'car').map((v) => v.id);
+const RADIATOR_IDS: readonly string[] = variantsOfKind('radiator', 'car').map((v) => v.id);
 
 /** How each ware looks in the showcase: a coloured block of its size, metres [w, h, d]. */
 const PRODUCT_LOOK: Readonly<Record<Ware, { readonly colour: number; readonly size: readonly [number, number, number] }>> = {
-  spray: { colour: 0xffffff, size: [0.05, 0.15, 0.05] },
-  shades: { colour: 0x28251f, size: [0.13, 0.045, 0.03] },
   air_filter: { colour: 0xc87a35, size: [0.14, 0.07, 0.1] },
   turbine: { colour: 0x9a9a92, size: [0.13, 0.12, 0.1] },
+  radiator: { colour: 0x8a8f7a, size: [0.2, 0.14, 0.03] },
+  gearbox: { colour: 0x7a7d80, size: [0.18, 0.12, 0.1] },
+  engine: { colour: 0x4a4c50, size: [0.2, 0.16, 0.1] },
+  spray: { colour: 0xffffff, size: [0.05, 0.15, 0.05] },
   can20: { colour: 0x5a6238, size: [0.15, 0.17, 0.08] },
   can10: { colour: 0x5a6238, size: [0.12, 0.14, 0.07] },
   can5: { colour: 0x5a6238, size: [0.1, 0.12, 0.06] },
   gum: { colour: 0xd46a9a, size: [0.1, 0.05, 0.04] },
-  sticker: { colour: 0xe6dcc2, size: [0.12, 0.085, 0.012] },
+  shades: { colour: 0x28251f, size: [0.13, 0.045, 0.03] },
 };
 
 /** A pair of shades shows its lens colour in the window, as the item itself does. */
 const SHADE_LOOK: Readonly<Record<ShadeTint, number>> = { green: 0x416a42, yellow: 0xb78e32, red: 0x8b3934 };
-
 
 function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
   const can = (capacity: number): Item => ({ type: 'fluid_can', id, fluid: null, capacity, litres: 0 });
@@ -77,14 +99,18 @@ function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
     return { type: 'part', id, part: instance };
   };
   switch (ware) {
-    case 'spray':
-      return { type: 'spray_can', id, paint: pick(CAR_PAINTS, seed, VENDING_DOMAIN, slot, 43).hex, charge: 1 };
-    case 'shades':
-      return { type: 'sun_shades', id, tint: pick(SHADE_TINTS, seed, VENDING_DOMAIN, slot, 45) };
     case 'air_filter':
       return part('air_filter');
     case 'turbine':
       return part('turbine_standard');
+    case 'radiator':
+      return part(pick(RADIATOR_IDS, seed, GARAGE_DOMAIN, slot, 47));
+    case 'gearbox':
+      return part(pick(GEARBOX_IDS, seed, GARAGE_DOMAIN, slot, 49));
+    case 'engine':
+      return part(pick(ENGINE_IDS, seed, GARAGE_DOMAIN, slot, 51));
+    case 'spray':
+      return { type: 'spray_can', id, paint: pick(CAR_PAINTS, seed, GARAGE_DOMAIN, slot, 43).hex, charge: 1 };
     case 'can5':
       return can(5);
     case 'can10':
@@ -93,79 +119,81 @@ function makeWare(ware: Ware, id: string, seed: number, slot: number): Item {
       return can(20);
     case 'gum':
       return { type: 'bubble_gum', id, charges: 5 };
-    case 'sticker':
-      return {
-        type: 'sticker_envelope',
-        id,
-        stickerKind: pick(STICKERS, seed, VENDING_DOMAIN, slot, 47).kind,
-      };
+    case 'shades':
+      return { type: 'sun_shades', id, tint: pick(SHADE_TINTS, seed, GARAGE_DOMAIN, slot, 45) };
   }
 }
 
 /**
  * The wares a machine was stocked with, in window order: each kind is there by its own
- * roll and in its own count, and a machine that drew more than its window holds gives
- * up gum, then cans, then a sticker until it fits.
+ * roll and in its own count, the parts first, then paint, cans and the small goods; a
+ * machine that drew more than its window holds gives up gum, then cans, until it fits.
  */
-function vendingWares(seed: number): Ware[] {
-  const roll = (k: number): number => hash01(seed, VENDING_DOMAIN, k);
+function garageWares(seed: number): Ware[] {
+  const roll = (k: number): number => hash01(seed, GARAGE_DOMAIN, k);
   const count = (k: number, chance: number, min: number, max: number): number =>
     roll(k) < chance ? min + Math.floor(roll(k + 1) * (max - min + 1)) : 0;
   const counts = {
-    spray: count(10, 0.85, 1, 2),
-    shades: count(12, 0.6, 1, 1),
-    air_filter: count(14, 0.6, 1, 1),
-    turbine: count(16, 0.3, 1, 1),
-    cans: count(18, 0.9, 1, 3),
-    gum: count(20, 0.7, 1, 2),
-    sticker: count(22, 0.85, 4, 5),
+    air_filter: count(10, 0.6, 1, 1),
+    turbine: count(12, 0.3, 1, 1),
+    radiator: count(14, 0.4, 1, 1),
+    gearbox: count(16, 0.25, 1, 1),
+    engine: count(18, 0.2, 1, 1),
+    spray: count(20, 0.85, 1, 2),
+    cans: count(22, 0.9, 1, 3),
+    gum: count(24, 0.7, 1, 2),
+    shades: count(26, 0.6, 1, 1),
   };
   const total = (): number => Object.values(counts).reduce((sum, n) => sum + n, 0);
-  while (total() > SHOP_SLOTS && counts.gum > 0) counts.gum--;
-  while (total() > SHOP_SLOTS && counts.cans > 1) counts.cans--;
-  while (total() > SHOP_SLOTS && counts.sticker > 4) counts.sticker--;
+  while (total() > GARAGE_SLOTS && counts.gum > 0) counts.gum--;
+  while (total() > GARAGE_SLOTS && counts.cans > 1) counts.cans--;
   const wares: Ware[] = [];
   const add = (ware: Ware, n: number): void => {
     for (let i = 0; i < n; i++) wares.push(ware);
   };
-  add('spray', counts.spray);
-  add('shades', counts.shades);
   add('air_filter', counts.air_filter);
   add('turbine', counts.turbine);
-  for (let i = 0; i < counts.cans; i++) wares.push(pick(CAN_WARES, seed, VENDING_DOMAIN, 30 + i));
+  add('radiator', counts.radiator);
+  add('gearbox', counts.gearbox);
+  add('engine', counts.engine);
+  add('spray', counts.spray);
+  for (let i = 0; i < counts.cans; i++) wares.push(pick(CAN_WARES, seed, GARAGE_DOMAIN, 30 + i));
   add('gum', counts.gum);
-  add('sticker', counts.sticker);
+  add('shades', counts.shades);
   return wares;
 }
 
 /** What a machine was stocked with, by slot, and the ware behind each (for its look). */
-function vendingStock(
+function garageStock(
   world: GameWorld,
   poi: Poi,
 ): { readonly items: (Item | null)[]; readonly wares: (Ware | null)[] } {
-  const items = new Array<Item | null>(SHOP_SLOTS).fill(null);
-  const wares = new Array<Ware | null>(SHOP_SLOTS).fill(null);
-  vendingWares(poi.variantSeed).forEach((ware, slot) => {
-    items[slot] = makeWare(ware, world.generatedPartId('vend', poi.index, slot), poi.variantSeed, slot);
+  const items = new Array<Item | null>(GARAGE_SLOTS).fill(null);
+  const wares = new Array<Ware | null>(GARAGE_SLOTS).fill(null);
+  garageWares(poi.variantSeed).forEach((ware, slot) => {
+    items[slot] = makeWare(ware, world.generatedPartId('garage', poi.index, slot), poi.variantSeed, slot);
     wares[slot] = ware;
   });
   return { items, wares };
 }
 
-const SHOP_LOOK = { body: C.fadedBlue, buttonLabel: 'BUY', buttonColour: 0xb03a2e } as const;
-registerCardMachineSigns(SHOP_LOOK);
+/** Workshop steel on the body and the deck, a hazard-yellow BUY. */
+const GARAGE_LOOK = { cabinet: 'garage', body: 0x46525c, buttonLabel: 'BUY', buttonColour: 0xd9a52b } as const;
+registerCardMachineSigns(GARAGE_LOOK);
 
 /** What the card says a ware is, and the colour of its band. */
 const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: string; readonly line: string }>> = {
-  spray: { band: '#8a3f6e', kind: 'PAINT', line: 'a spray can of this colour' },
-  shades: { band: '#6e5a2a', kind: 'SHADES', line: 'sun shades for the drive' },
   air_filter: { band: '#2f4f7a', kind: 'PART', line: 'a new air filter for the engine' },
   turbine: { band: '#2f4f7a', kind: 'PART', line: 'a standard turbine' },
+  radiator: { band: '#2f4f7a', kind: 'PART', line: 'dry — water it at a pump' },
+  gearbox: { band: '#2f4f7a', kind: 'PART', line: 'a gearbox for a car' },
+  engine: { band: '#2f4f7a', kind: 'ENGINE', line: 'dry — oil it at a pump' },
+  spray: { band: '#8a3f6e', kind: 'PAINT', line: 'a spray can of this colour' },
   can5: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
   can10: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
   can20: { band: '#4f6a3a', kind: 'CAN', line: 'empty — fill it at a pump' },
   gum: { band: '#a2457a', kind: 'GUM', line: 'five chews — a bubble rights a car' },
-  sticker: { band: '#b0702a', kind: 'STICKER', line: 'sealed — a sticker you see once it is open' },
+  shades: { band: '#6e5a2a', kind: 'SHADES', line: 'sun shades for the drive' },
 };
 
 /**
@@ -173,7 +201,7 @@ const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: s
  * In the physics band it is solid and registers its fixture (id pushed to `registered`,
  * for the chunk to forget). `disposers` gets the card materials.
  */
-export function buildShop(
+export function buildGarage(
   ctx: ChunkContext,
   poi: Poi,
   x: number,
@@ -186,16 +214,19 @@ export function buildShop(
   registered: string[],
   disposers: Array<() => void>,
 ): void {
-  const parts = buildCardMachine(ctx, poi.s, x, z, yaw, SHOP_LOOK, group, bodies, colliders, disposers);
-  const id = shopId(poi.index);
-  const { items, wares } = vendingStock(ctx.world, poi);
+  const parts = buildCardMachine(ctx, poi.s, x, z, yaw, GARAGE_LOOK, group, bodies, colliders, disposers);
+  // The machine's key in `WorldState.vendingSold` and `machineGrids`, and its fixture id.
+  // `vend:<poi>` was the mixed shop's before the garage machine replaced it: save/save.ts
+  // drops that one's sold slots and moves what lay in its grid to this key.
+  const id = `garage:${poi.index}`;
+  const { items, wares } = garageStock(ctx.world, poi);
 
   // The showcase: every ware still in the machine standing on its floor, only the one
   // on the card shown.
   const root = parts.root;
-  const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(SHOP_SLOTS).fill(null);
+  const products: (THREE.Object3D | null)[] = new Array<THREE.Object3D | null>(GARAGE_SLOTS).fill(null);
   const sold = ctx.world.state.vendingSold[id] ?? [];
-  for (let slot = 0; slot < SHOP_SLOTS; slot++) {
+  for (let slot = 0; slot < GARAGE_SLOTS; slot++) {
     const ware = wares[slot];
     const item = items[slot];
     if (!ware || !item || sold.includes(slot)) continue;
@@ -208,16 +239,11 @@ export function buildShop(
     products[slot] = product;
   }
 
-  const machine = new ShopMachine(ctx.world, id, items, wares, products, parts);
+  const machine = new GarageMachine(ctx.world, id, items, wares, products, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));
 }
 
-/** The machine's key in `WorldState.vendingSold`, and its fixture id. */
-function shopId(poiIndex: number): string {
-  return `vend:${poiIndex}`;
-}
-
-class ShopMachine extends CardMachine {
+class GarageMachine extends CardMachine {
   /** The slots still for sale, in window order: the cards. */
   private readonly available: number[];
   /** The slot whose BUY the jar was too short for, painted on its card until it turns. */
@@ -234,7 +260,7 @@ class ShopMachine extends CardMachine {
     super(id, parts, world);
     const sold = world.state.vendingSold[id] ?? [];
     this.available = [];
-    for (let slot = 0; slot < SHOP_SLOTS; slot++) {
+    for (let slot = 0; slot < GARAGE_SLOTS; slot++) {
       if (items[slot] && !sold.includes(slot)) this.available.push(slot);
     }
     this.start();
@@ -262,7 +288,7 @@ class ShopMachine extends CardMachine {
         bandText: 'SOLD OUT',
         corner: '',
         headline: 'EMPTY',
-        lines: ['everything here has been bought', 'the next shop is down the road'],
+        lines: ['everything here has been bought', 'the next garage is down the road'],
         footer: 'the machine never restocks',
       });
       return;

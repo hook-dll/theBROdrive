@@ -67,6 +67,7 @@ import { box, mergeKitStatics } from './poi/kit';
  */
 
 const POST_LOOK = {
+  cabinet: 'arcade',
   body: 0x3e5f86,
   buttonLabel: 'TAKE',
   buttonColour: 0x3f8a4a,

@@ -600,7 +600,9 @@ export function migrateState(raw: unknown): WorldState {
   const machineGrids: Record<string, (Item | null)[]> = {};
   for (const [id, value] of Object.entries(recordField(obj.machineGrids, 'machineGrids'))) {
     const cells = migrateStorage(value, MACHINE_GRID_CELL_COUNT, `machine "${id}" grid`);
-    if (cells.some((item) => item !== null)) machineGrids[id] = cells;
+    // What the mixed shop (`vend:<poi>`) had given and the player had not taken waits in
+    // the garage machine of the same stop (world/vending.ts), where the stop has one.
+    if (cells.some((item) => item !== null)) machineGrids[id.startsWith('vend:') ? `garage:${id.slice(5)}` : id] = cells;
   }
 
   const looseParts: Record<string, { part: PartInstance; x: number; y: number; z: number }> = {};
@@ -745,11 +747,14 @@ function migrateWeatherFromS(value: unknown, seed: number, recordS: number): num
 /**
  * Vending slots sold, by machine id. Absent on every save from before the machines:
  * nothing sold. A malformed entry drops that machine's record, which only restocks it.
+ * The mixed shop's records (`vend:<poi>`) are dropped: its stock left with it, and the
+ * garage machine that stands in its place rolls its own (world/vending.ts).
  */
 function migrateVendingSold(value: unknown): Record<string, number[]> {
   const out: Record<string, number[]> = {};
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
   for (const [id, slots] of Object.entries(value as Record<string, unknown>)) {
+    if (id.startsWith('vend:')) continue;
     const sold = migrateNumberArray(slots).filter((slot) => Number.isInteger(slot) && slot >= 0);
     if (sold.length > 0) out[id] = sold;
   }

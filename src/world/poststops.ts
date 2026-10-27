@@ -3,7 +3,7 @@ import { ROAD_LENGTH } from './road';
 
 /**
  * THE POST NETWORK: the settlements down the road, each with its «ПОЧТА» machine
- * (world/post.ts) and its shop. Stop 0 IS THE START: a new game opens on its lay-by
+ * (world/post.ts) and, at some, a garage machine. Stop 0 IS THE START: a new game opens on its lay-by
  * (story/site.ts), `START_POST_S` up the road from the turning circle at the road's end
  * (world/terminus.ts). Stops 1-3 follow at 2.5-4 km each, and
  * every later one at 2.5-8 km. The sequence is monotonic along the road: stop `index`

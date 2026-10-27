@@ -1,7 +1,7 @@
 import { hash01 } from '../core/rng';
 import { DWELLING_HALF_EXTENTS } from './dwellings/bounds';
 import { DWELLINGS } from './dwellings/list';
-import { dwellingFootprint, MAST_IDS, roadsideSlot, roadsideSlotOfIndex, structureIsMast, type RoadsideSlot } from './poislots';
+import { dwellingFootprint, MAST_IDS, roadsideSlot, roadsideSlotOfIndex, slotPost, structureIsMast, type RoadsideSlot } from './poislots';
 import { CURVE_WIDENING_M, halfWidthAt } from './roadprofile';
 import type { Poi } from './poi';
 import type { Road } from './road';
@@ -13,8 +13,8 @@ import type { Road } from './road';
  * and on the lay-by's side one long pad with its service band (§6.3): the signpost, the
  * teddy shelter, the post, the toy box, the parking row of three angled slots (a haul's
  * load waits in the first, hauls are handed in in the second, a car for sale sometimes
- * stands in the third), the shop and sometimes the pumps. Every other roadside
- * stop is one house in front of its own short lay-by.
+ * stands in the third), the garage machine at some (`poiHasMachine`) and sometimes the
+ * pumps. Every other roadside stop is one house in front of its own short lay-by.
  *
  * PURE: a function of the seed and the slot, with no road or terrain sampling beyond
  * `halfWidthAt`, which is itself a function of the seed. Two worlds read it: world/poi.ts
@@ -66,8 +66,12 @@ export interface SettlementLayout {
   readonly houses: readonly SettlementHouse[];
   /** On the pad's service band, its back to the asphalt's outer edge, facing the road. Settlements only. */
   readonly post: SettlementSpot | null;
-  /** Ditto. Settlements only. */
-  readonly shop: SettlementSpot | null;
+  /**
+   * The GARAGE machine (world/vending.ts), on the pad's service band like the post.
+   * Settlements only, and only where `poiHasMachine(seed, post, 'garage')`: null
+   * elsewhere, so nothing stands in its place.
+   */
+  readonly garage: SettlementSpot | null;
   /** The toy box's stand (world/toybox.ts), between the post and the stop; its car comes out in the marked bay in front of it. Settlements only. */
   readonly toybox: SettlementSpot | null;
   /**
@@ -157,6 +161,29 @@ const PUMPS_CHANCE = 0.5;
 const LOT_CHANCE = 0.3;
 
 /**
+ * THE MACHINES BY STOP: which vending machines a settlement has, by its post's index.
+ * The first `MACHINE_SURE_POSTS` posts have every kind, so the road's start teaches
+ * each one; past them each kind is there by its own roll, independent of the other
+ * kind's and of everything else the stop rolls. The garage machine sells car parts,
+ * paint, cans and small goods (world/vending.ts); the claw machine (stickers) is the
+ * next machine and has its roll here already, read by nothing yet.
+ */
+export type MachineKind = 'garage' | 'claw';
+const MACHINE_SURE_POSTS = 3;
+const MACHINE_CHANCE: Readonly<Record<MachineKind, number>> = { garage: 0.5, claw: 0.5 };
+const MACHINE_KEY: Readonly<Record<MachineKind, number>> = { garage: 1, claw: 2 };
+const MACHINE_DOMAIN = 0x4d434831; // 'MCH1'
+
+/**
+ * Whether the settlement of post stop `postIndex` (world/poststops.ts) has a machine of
+ * `kind`: always at posts 0..2, past them by a seeded roll. Pure in (seed, postIndex, kind).
+ */
+export function poiHasMachine(seed: number, postIndex: number, kind: MachineKind): boolean {
+  if (postIndex < MACHINE_SURE_POSTS) return true;
+  return hash01(seed, MACHINE_DOMAIN, MACHINE_KEY[kind], postIndex) < MACHINE_CHANCE[kind];
+}
+
+/**
  * The service band (game-design2.md §6.3 table), along the pad from the stop (`s`),
  * metres, and in from the pad's outer edge (`u`), to each thing's centre: each stands
  * with its back about 0.4 m in from the asphalt's edge. The signpost
@@ -169,7 +196,7 @@ const LOT_CHANCE = 0.3;
  * them everywhere. The toy box's marked bay (world/toybox.ts `toyBay`) lies in front of
  * the post and the stand, between them and the parking line, −6.7…−1.3. The parking row
  * is laid straight along the road's tangent at its middle (world/haulbay.ts), 17 m of
- * it, so the toy box before it and the shop after it stand 12 m from its middle; the
+ * it, so the toy box before it and the garage machine after it stand 12 m from its middle; the
  * bay's end is 2.3 m short of the row's first slot on a straight, and the row's straight
  * ends come up to 1.1 m nearer it on the tightest curves.
  */
@@ -181,8 +208,8 @@ const TOYBOX_ALONG_M = -2.6;
 const TOYBOX_IN_M = 1.35;
 /** The parking row's middle slot, along the road: the row spans about +1…+18. */
 const PARKING_ALONG_M = 9.5;
-const SHOP_ALONG_M = 21.5;
-const SHOP_IN_M = 1.3;
+const GARAGE_ALONG_M = 21.5;
+const GARAGE_IN_M = 1.3;
 /** The pumps' island, +24…+28. */
 const PUMPS_ALONG_M = 26;
 const PUMPS_IN_M = 1.0;
@@ -226,13 +253,13 @@ export const SIGNPOST_OUT_M = 1.0;
  * placement bench (tools/poi-placement.ts) measures houses, the lay-by and one another
  * against these.
  */
-export const SERVICE_HALF: Readonly<Record<'post' | 'shop' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
+export const SERVICE_HALF: Readonly<Record<'post' | 'garage' | 'toybox' | 'pumps' | 'shelter', readonly [number, number]>> = {
   // The card machines (world/cardmachine.ts), 1.36 x 1.0 m and the control deck across
-  // their front standing out to 0.78 m from the middle, the cheeks' stripes on the flanks.
-  // They stand 1.3 m in (1.2 when they were 0.8 m deep), so their backs keep to the same
-  // line.
+  // their front standing out to 0.78 m from the middle, the cheeks' stripes (the
+  // garage's pegboard and tools) on the flanks. They stand 1.3 m in (1.2 when they were
+  // 0.8 m deep), so their backs keep to the same line.
   post: [0.7, 0.8],
-  shop: [0.7, 0.8],
+  garage: [0.7, 0.8],
   // The toy box's stand (world/toybox.ts), its largest variant: the podium or the
   // carousel, 1.44 m across, and the lectern at its front corner with the handwheel
   // standing out of it. Its back 0.4 m in from the asphalt's edge.
@@ -345,7 +372,7 @@ function loneStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       structure: roll.structure,
       houses: [house],
       post: null,
-      shop: null,
+      garage: null,
       toybox: null,
       shelter: null,
       parking: null,
@@ -470,7 +497,7 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
       structure,
       houses,
       post: spot(s0 + POST_ALONG_M, side, padOuter - POST_IN_M, face),
-      shop: spot(s0 + SHOP_ALONG_M, side, padOuter - SHOP_IN_M, face),
+      garage: poiHasMachine(seed, slotPost(roll.slot), 'garage') ? spot(s0 + GARAGE_ALONG_M, side, padOuter - GARAGE_IN_M, face) : null,
       toybox: spot(s0 + TOYBOX_ALONG_M, side, padOuter - TOYBOX_IN_M, face),
       shelter: spot(s0 + SHELTER_ALONG_M, side, padOuter - SHELTER_IN_M, face),
       parking: spot(s0 + PARKING_ALONG_M, side, padOuter - PARKING_IN_M, noseOut),

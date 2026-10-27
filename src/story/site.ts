@@ -2,7 +2,7 @@
  * The story start: where a new game begins.
  *
  * The start is post stop 0 (world/poststops.ts `START_POST_S`), a settlement like every
- * other: its houses, its lay-by, its «ПОЧТА» and «МАГАЗИН» machines, all built by the
+ * other: its houses, its lay-by, its «ПОЧТА» and garage machines, all built by the
  * ordinary POI streams. This module adds only what a new game puts there: the starter
  * car parked on the lay-by's parking line beside the machines, the player on foot
  * between the car and the post, and a handful of keepsakes on the pad.
@@ -58,7 +58,7 @@ function computeSite(seed: number, road: Road, terrain: Terrain): StorySite {
   const post = roadsideStop(seed, START_SLOT)?.layout.post;
   if (!layby || !post) throw new Error('The start settlement has no lay-by');
 
-  // Parked where a passing car parks, at the stop itself: between the post and the shop,
+  // Parked where a passing car parks, at the stop itself: between the post and the garage machine,
   // clear of the places traffic takes near the pad's far ends (world/traffic.ts
   // `LAYBY_SLOT_END_M`). Nose the way that side's traffic runs.
   const parkLat = laybyParkLateral(layby);

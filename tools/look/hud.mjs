@@ -73,11 +73,11 @@ try {
   await sleep(600);
   await shot('foot-far-left');
 
-  // A post's shop, prices on its cards; then the cards painted alone.
-  await page.evaluate(() => window.__bro.standAtPost(1, 'shop'));
+  // A post's garage machine, prices on its cards; then the cards painted alone.
+  await page.evaluate(() => window.__bro.standAtPost(1, 'garage'));
   await until(page, () => window.__bro.settled(), null, 120000, 'the post');
   await sleep(2500);
-  await shot('shop');
+  await shot('garage');
   // The jar: 12 shells, then 40 more pour in and the full jar loses two over the rim;
   // then a price of 3 is taken out.
   await sleep(1500);

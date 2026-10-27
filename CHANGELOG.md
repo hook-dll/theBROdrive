@@ -122,6 +122,34 @@
 
 ### Changed
 
+- THE SHOP BECOMES THE GARAGE MACHINE, AND NOT EVERY SETTLEMENT HAS ONE (shells phase 5;
+  `world/vending.ts`, `world/cardmachine.ts`, `world/settlement.ts`, `world/poi.ts`,
+  `world/post.ts`, `save/save.ts`, `game/state.ts`, `app/devtools.ts`,
+  `tools/poi-placement.ts`, `tools/look/hud.mjs`, `game-design2.md` §6.3, §6.4, §8, §12,
+  §18). The one mixed «МАГАЗИН» machine is split. The GARAGE machine (`buildGarage`,
+  `GarageMachine`) sells car parts and paint: an air filter, a turbine, a radiator, a
+  gearbox and an engine (engines and gearboxes drawn from those the catalogue's cars are
+  built with, the imports stay at the scrapyards; engine and radiator sold dry), 1–2 spray
+  cans, 1–3 empty cans of 5/10/20 L, and the small goods, gum and sun shades; each kind by
+  its own roll (`GAR1` domain), 12 slots, gum then cans given up when it overflows. Its
+  cabinet is a workshop's tool wall, not the arcade cabinet (`CardMachineLook.cabinet`
+  `'garage'`, `dressGarageShell`): dark steel cheeks with rivets up their front edges, a
+  pegboard with a spanner and a hammer on each flank, a hazard band and a round spanner
+  emblem on the hood, a ridged kick plate and oil run down the foot, steel deck lip, a
+  yellow BUY. Sticker envelopes leave vending: the item, its opening and its price stay
+  for the claw machine to come. PLACEMENT (`poiHasMachine(seed, post, kind)`, kinds
+  `'garage' | 'claw'`): the settlements of posts 0, 1 and 2 always have the garage
+  machine; every later one has it by a seeded 50% roll on the world seed and its post
+  index, independent of everything else the stop rolls; without one,
+  `SettlementLayout.garage` is null and its place on the pad is empty. The claw kind has
+  its own roll already (also sure at posts 0–2), read by nothing yet. `SettlementLayout.shop`
+  and `SERVICE_HALF.shop` are now `garage`; `standAtPost(i, 'shop')` is
+  `standAtPost(i, 'garage')` and returns false where a stop has no machine. SAVES: no
+  shape change, `SAVE_VERSION` stays. The machine's id is `garage:<poi>` (was
+  `vend:<poi>`) and its items' ids `garage:…`; on load the old shop's `vendingSold`
+  records are dropped (its stock is gone) and what lay in its grid moves to
+  `garage:<poi>`, where it waits if that stop has a garage machine.
+
 - STICKERS ARE ONLY DECORATION (shells phase 4; `contracts/offers.ts`, `world/post.ts`,
   `items/things.ts`, `economy/economy.ts`, `world/toybox.ts`, `save/save.ts`,
   `game-design2.md` §7.2, §7.3, §12). Stickers no longer do anything in the game: the

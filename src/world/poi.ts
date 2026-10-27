@@ -5,7 +5,7 @@ import { GAMEPLAY_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
 import type { MarketField } from './market';
-import { buildShop } from './vending';
+import { buildGarage } from './vending';
 import { disposeKitMerged } from './poi/kit';
 import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
@@ -646,8 +646,8 @@ function buildLot(
  * road: its layout (world/settlement.ts) — a lone house, or a settlement's houses on both
  * sides, its «ПОЧТА» machine (world/post.ts), toy box (world/toybox.ts), teddy shelter
  * (world/shelter.ts) and parking row (world/haulbay.ts) with the car for sale and its key
- * box in the third slot, the shop's machine, the pumps (world/pumps.ts). True when it
- * built reflectors (the pumps'), which follow the night.
+ * box in the third slot, the garage machine where it has one, the pumps (world/pumps.ts).
+ * True when it built reflectors (the pumps'), which follow the night.
  */
 function buildPoi(
   ctx: ChunkContext,
@@ -701,9 +701,9 @@ function buildPoi(
       }
     }
   }
-  if (layout.shop) {
-    const pose = spotPose(ctx.road, layout.shop);
-    buildShop(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+  if (layout.garage) {
+    const pose = spotPose(ctx.road, layout.garage);
+    buildGarage(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
   }
   if (layout.pumps) {
     const pose = spotPose(ctx.road, layout.pumps);
