@@ -241,6 +241,13 @@ export interface WheelSpec {
    */
   readonly rearArchRise?: number;
   /**
+   * The front arch's top over the hub, over the tyre radius, where it differs from a
+   * circle: its outline becomes a half ellipse `arch` wide and this high, as `rearArchRise`
+   * for the rear (the W124's front arch, higher than it is wide: close round the tyre's
+   * sides, clear over its top). Absent: a circle.
+   */
+  readonly frontArchRise?: number;
+  /**
    * Both arches' skin outlines as superellipses of this power instead of circles (or the
    * rear's half ellipse): flatter tops and steeper sides, the UAZ-2206's square-cut arches.
    * Absent: round.
@@ -251,6 +258,11 @@ export interface WheelSpec {
    * reaching further ahead of the wheel than behind it. Absent: on the hubs.
    */
   readonly archShift?: readonly [number, number];
+  /**
+   * Segments round each arch (tub columns, spaced evenly in angle). Absent: 12. Fewer on
+   * a car whose triangle count is tight (the W124's 8: a 7 mm chord on its 0.34 arch).
+   */
+  readonly archSegments?: number;
   /**
    * The arches' ends stop at the sill: where the sill stands above the hub (the UAZes'
    * high bodies), the skin's arch edge and the wheel well's wall never run below the sill
@@ -293,14 +305,6 @@ export interface KitCarSpec {
   readonly bonnet?: { readonly inset: number; readonly rear?: number; readonly nose?: { readonly y: number; readonly half: readonly [number, number] } };
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
-  /**
-   * The silencer's top and the tail pipe this far under the floor (the shell's underside
-   * over their run) instead of at the clearance: a body standing high over its axles (the
-   * UAZs', floor 0.42-0.56 over a 0.22 clearance), where a silencer at the clearance hangs
-   * a hand's width under the tail. The pipe runs under the rear axle as before and climbs
-   * behind it. Absent: the silencer SILENCER_TUCK over the clearance (bay.ts `exhaust`).
-   */
-  readonly exhaustTuck?: number;
   /**
    * A tailgate hinged upright at its left or right edge (a rear door, the UAZ-469's on its
    * right), opening sideways; `'split'`: two leaves cut on the centre line, each hinged at

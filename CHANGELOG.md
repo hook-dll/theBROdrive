@@ -4,6 +4,21 @@
 
 ### Added
 
+- THE EXHAUST UNDER THE FLOOR, every car (owner, 2026-10-27: "flatter, neater, less
+  hanging out underneath"; `src/carkit/bay.ts` `exhaust`). A Ø36 pipe 10 mm under the
+  shell's floor wherever it is, a flat oval resonator (0.11 × 0.06) and silencer (0.30 ×
+  0.07) [E], under the rear axle and up behind it, the tail pipe under the bumper's
+  lowest edge (`exterior.ts` `bumperFoot`); never under clearance + 2 mm, rising into the
+  floor as into a tunnel where the floor is lower. One rule for all: `exhaustTuck` (the
+  UAZs) is gone. Only `exhaust_trim` moved on every car (same triangles; the UAZs 12
+  fewer); fingerprints not re-recorded until the owner has looked. Sills raised for the
+  old exhaust can return: the W124 now, the Vectra A and the Volgas later.
+- W124, owner's review 1: arches measured on the side photo and drawing (front a half
+  ellipse 0.343 × 0.371 that hugs the tyre, new `frontArchRise`; rear kept, 0.39 over the
+  hub; `archSegments` 8), and checked from now on for any car (`kit-drawing`
+  `archFront` / `archRear`); the boot deck highest at the lid's front edge falling to the
+  tail, not a hump; fluted head lamps (`ribs`); the sill at the drawing (0.19, doors
+  0.21); overhangs confirmed 0.815 / 1.125 (angurten.de); 13 621 → 12 444 triangles.
 - THE ENGINE IS STARTED AND STOPPED (owner, 2026-10-27: no key item, but every car can
   be started and stopped). E (`engine`, bindable) from the driver's seat: stop drops the
   engine into its stall and run-down; start turns the starter for 0.55-0.9 s, and the

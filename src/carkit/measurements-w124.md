@@ -1,8 +1,9 @@
 # Mercedes-Benz W124 saloon: sources, figures, feature inventory
 
-Status: **first draft 2026-10-27, awaiting the owner's review** (README "Workflow" step 2).
-The owner reviewed §4 and §5; the missing fields he asked for were built first (§7), then
-the car (`mercedes.ts`, §7). Review sheet `build/kitcheck/w124/review.png`, drawing overlays
+Status: **first draft 2026-10-27, reworked the same day after the owner's first review (§8),
+awaiting his next look** (README "Workflow" step 2). The owner reviewed §4 and §5; the
+missing fields he asked for were built first (§7), then the car (`mercedes.ts`, §7). Review
+sheet `build/kitcheck/w124/review.png`, drawing overlays
 `build/kitcheck/w124/drawing-side.png`, `drawing-front.png`.
 
 Tags: **[D]** drawing, **[P]** photo, **[F]** factory/catalogue, **[E]** estimate.
@@ -293,7 +294,7 @@ sweep 90° without the real arm's lift]. Interior blue cloth and dash from DASH.
 - **Sill and doors' bottom** 0.255 / 0.275 (built door bottom 0.291) over the drawn 0.19 /
   0.21: the shell's floor is the sill, and the classic platform's exhaust (resonator top
   0.245) stood through a floor at 0.19 (kit-zfight), as on the Vectra. The cladding runs
-  0.29–0.47.
+  0.29–0.47. (Resolved in §8: the sill is at the drawing.)
 - **Front side glass** from 1.448 at the belt, not the drawing's frame line 1.533: the
   glass right behind the thin A pillar (working rules).
 - **Silhouette advice** (kit-drawing, not judged): side IoU 0.705 (the drawing's door
@@ -301,7 +302,8 @@ sweep 90° without the real arm's lift]. Interior blue cloth and dash from DASH.
   drawing's thick A pillar; s 3.59–4.16 a faint second line from the roof to the boot at
   s 4.1 (the glass's drawn line and the built one agree, backLightFoot passes). Front IoU
   0.967: x ±0.5–0.72 3–4 cm low at the roof's edge.
-- **Triangles** 13 621, over the 13 000 warning (cladding, ribs, wrapped bumpers).
+- **Triangles** 13 621, over the 13 000 warning (cladding, ribs, wrapped bumpers); 12 444
+  after §8.
 - **0–100** 12.4 s against the catalogue's 11.1 (`CATALOGUE_OPTIMISTIC`, as the other
   foreign cars), top 204 km/h, turn 4.11 m (W124Gear's bench, tools/reality.ts).
 
@@ -309,3 +311,86 @@ sweep 90° without the real arm's lift]. Interior blue cloth and dash from DASH.
 
 zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, drawing 18/18,
 dash 9/9, frozen: recorded with `tools/kit-fingerprint.ts --write w124` after the draft.
+
+## 8. The owner's first review (2026-10-27)
+
+His words on the draft: «форма колёсных арок, вздутый багажник»; «а разве спереди не
+ребристые фонари?»; the sill «нужно делать по чертежу» (the exhaust made flatter instead,
+bay.ts, the Exhaust change); «треугольники - ну явно же есть, где сэкономить»; and, on a
+Mercedes 190 (W201) side photo, «как видишь передний свес у 190e довольно короткий».
+
+**Sources added.** [P S] `side.jpg` (an E 260, pre-1989, no cladding; the shapes are the
+same) registered on its hubs, (425, 930) and (1352, 947): 331 px/m along, heights from the
+tyres' ground line (y 1025 front, 1048 rear). Its top outline reads 2–3 cm low near the roof
+(1.40 against 1.43) and the centre-line back glass stands ahead of where it is (perspective,
+the camera ~8 m off): the boot's and the back light's centre line are read on [D], the arches
+on [P S] (their lips lie on the side's plane, with the tyres). [A] angurten.de's W124
+saloon table: 4740 = 815 + 2800 + 1125. The owner's own photo (saved as
+`photos/w124/side_drivedata.jpg`) is a Mercedes 190 (W201, 2665 wheelbase), not a W124: used
+only for the family trait he names, a short front overhang; nothing is measured on it.
+
+**Front overhang** (the 190E remark). The W124's is 0.815 [A; D the drawn hubs 0.81], 0.290
+of the wheelbase (the 190's ~0.28 by eye on his photo: the same trait). Ours was 0.82 from
+the hubs (FACTORY_GEOMETRY `kit_w124` sets no `frontOverhang`, so the loader keeps the
+kit's hubs): 5 mm long, now 0.815 / 3.615 (rear overhang 1.125 [A]). What read as a long
+nose was the front arch's black ring ahead of the tyre (below).
+
+**Arches.** Measured as the opening's outline over the hub, s from the hub (± ahead/behind):
+
+| | top over the hub | at 0.10 | at 0.20 | at 0.30 | at the hub's height |
+|---|---|---|---|---|---|
+| Front [P S], near (rear) edge | 0.371 | +0.32 | +0.29 | +0.21 | +0.35 (−0.34 ahead, the bumper's end) |
+| Front [D] | 0.366 | | ±0.31 at 0.21 | | ±0.37–0.38 (a circle) |
+| Front, the draft | 0.374 (circle `arch` 1.18) | ±0.36 | ±0.32 | ±0.24 | ±0.374 |
+| Rear [P S], near (front) edge | 0.39–0.40 | −0.36 | −0.315 | −0.26 | −0.39 |
+| Rear [D] | 0.383 | | | | +0.40 |
+| Rear, the draft | 0.387 (circle `rearArch` 1.22) | ±0.37 | ±0.33 | ±0.245 | ±0.387 |
+
+The tops were right; the front arch is narrower than a circle low down: on the photo it
+hugs the tyre's sides (3 cm of black at the hub's height against the draft's 5.7) and stays
+clear over its top. Built: a half ellipse 0.343 wide and 0.371 high, new `frontArchRise`
+1.17 over `arch` 1.08 (the front counterpart of `rearArchRise`). The rear arch measures as
+the draft's circle (not lower than the front: higher, 0.39 against 0.37), so it is kept.
+The front bumper now wraps back to the arch's edge (`wrapTo` 0.47). kit-drawing measures
+the openings now (`archFront`, `archRear`: [top, ahead, behind]): built [0.372, 0.342,
+0.342] and [0.388, 0.378, 0.386] against [0.371, 0.34, 0.35] and [0.39, 0.39, 0.40].
+
+**Boot** («вздутый»). The draft's deck rose from the back light's foot (1.015 at 3.96) to
+1.05 at s 4.35 and fell to 1.0 at the tail: a hump in the boot's middle. [D side, the
+centre-line outline]: 1.016 at 3.98 (the glass's foot), 1.056 at 4.10–4.13 (the lid's front
+edge), 1.051 at 4.19–4.27, 1.045 at 4.30, 1.033 at 4.45, 1.016 at 4.59, 1.004 at 4.68, then
+the upright tail face; [P S]: level, 1.066 at 4.10 to 1.038 at 4.67. Built: the deck up to
+1.055 at the lid's front edge (station 4.08, replacing 4.35) and straight to 1.02 at 4.68,
+the corner over the tail face crisp (4.68 → 4.70); the wing's top edge rises with the lid
+(belt 1.02 at 4.08, 0.985 at 4.68) so the deck keeps one 1.5 cm crown across (kit-surface
+found a dent at the back light's foot while the crown changed from 1 to 4 cm there).
+
+**Head lamps fluted.** The head lamp's glass and the indicator are fluted [P F]; drawn as
+the tail lamps' dark lines (`ribs: 3` on the front unit; the owner: dark lines are fine).
+
+**Triangles.** 13 621 → 12 444 (kit-surface). Where they went (`installProvenance`, by
+emitter): the shell's skin 2330, its jambs and inner skins ~1600, the placeholder wheels
+1344 (the pack's replace them in the game), the cabin's lining 535. Cut, without changing
+how the car reads:
+
+| Cut | Triangles |
+|---|---|
+| `archSegments` 8 (12 by default; a 7 mm chord on the 0.34 arch), and no station at s 3.3: the belt straight 0.925 → 0.946 from the B pillar to the rear door's edge (station 3.555, on its column); measured together with the boot's and arches' changes | 461 |
+| the rear door's rear edge bent at the flap's two rows (0.92, 0.80: `foot.knee`) instead of a 4-segment round (5 extra side rows along the whole car); within 12 mm of the drawn line | 437 |
+| the rear door's foot sharp (its 3 cm round was 4 more rows) | 112 |
+| `roofDrop` three points each end instead of six (within 4 mm of the drawn roof) | 371 |
+| added: the front lamps' ribs (+84); the boot's even crown (+10); the sill at the drawing (+110) | −204 |
+
+**Sill to the drawing.** With the exhaust flattened for every car (bay.ts: the pipe 10 mm
+under the shell's floor, flat cans), the sill is the drawn 0.19 from the front arch to the
+rear (stations 0.96–3.555, was 0.255) and the doors' bottom 0.21 (was 0.275): built door
+bottom 0.226 against 0.21 ± 0.025, the `accepted` deviation in `refs/w124.json` removed.
+kit-zfight passes.
+
+### Checks (`npm run kit-check -- w124`, 2026-10-27, after the review)
+
+zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, triangles 12 444,
+drawing 20/20 (with `archFront`, `archRear`), dash 9/9; frozen: re-recorded with
+`tools/kit-fingerprint.ts --write w124`. Silhouette advice unchanged in kind: side IoU
+0.706 (s 0.10–0.25 the drawn star, s 1.52–1.61 the drawing's thick A pillar, s 3.59–4.08
+the drawing's second line from the roof to the boot), front 0.968.

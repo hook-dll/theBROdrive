@@ -52,6 +52,14 @@ function bumperBand(frame: BodyFrame, end: 1 | -1): { y0: number; y1: number } {
   return { y0, y1: y0 + bumper.height };
 }
 
+/** The lowest of a bumper: its band's foot, or its overriders' where they hang lower. */
+export function bumperFoot(frame: BodyFrame, end: 1 | -1): number {
+  const { y0, y1 } = bumperBand(frame, end);
+  const bumper = (end > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper;
+  const o = bumper.kind === 'blade' ? bumper.overriders : null;
+  return o ? Math.min(y0, (y0 + y1) / 2 - o.drop - o.half[1]) : y0;
+}
+
 interface SweepPoint {
   readonly x: number;
   readonly z: number;

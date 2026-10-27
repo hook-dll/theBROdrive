@@ -23,14 +23,15 @@
  *  - the shell's dark floor at sill height closes every space from below, so what is
  *    meant to be seen from under the car hangs below it, and the lowest of it (the
  *    classic's and the Niva's differentials, the Samara's fuel tank) stands at exactly
- *    the factory clearance (`clearance`); the silencers are tucked up SILENCER_TUCK above it,
- *    or on a high body (`exhaustTuck`, the UAZs) hang just under the floor.
+ *    the factory clearance (`clearance`); the exhaust is tucked EXHAUST_GAP under the
+ *    floor over its whole run, never lower than just over the clearance (`exhaust`).
  */
 
 import * as THREE from 'three';
 import { LINING_DEPTH, type BodyFrame } from './body';
 import { PartBuilder, type KitSlot, type Vec3 } from './builder';
 import { addBuilt, type KitContext } from './context';
+import { bumperFoot } from './exterior';
 import { engineCoverEnd, engineCoverRoom, loadSpaceStart } from './interior';
 
 /** Ground clearance of the lowest part under the car: the factory figure the body was fitted to. */
@@ -41,8 +42,6 @@ const NIVA_CLEARANCE = 0.22;
 function clearance(frame: BodyFrame): number {
   return frame.spec.platform === 'niva' || frame.spec.platform === 'van' ? NIVA_CLEARANCE : CLEARANCE;
 }
-/** The silencer hangs this far above the lowest point, tucked up under the floor. */
-const SILENCER_TUCK = 0.025;
 /** Room under a lid's deck line: its 0.035 inner skin plus a hair, so nothing shows through. */
 const LID_ROOM = 0.045;
 /** Inner panels stand this far inside the wheel wells' walls. */
@@ -214,8 +213,12 @@ function rod(b: PartBuilder, slot: KitSlot, a: Vec3, c: Vec3, radius: number, si
   b.pop();
 }
 
-/** A bent pipe through `path`; its rings are carried along without twisting. */
-function tube(b: PartBuilder, slot: KitSlot, path: readonly Vec3[], radius: number, sides: number): void {
+/**
+ * A bent pipe through `path`; its rings are carried along without twisting. `ridge`
+ * turns the section half a side so a corner, not a face, is on top and at the bottom: a
+ * level pipe along a floor then has no face in the floor's plane.
+ */
+function tube(b: PartBuilder, slot: KitSlot, path: readonly Vec3[], radius: number, sides: number, ridge = false): void {
   const pts = path.map((p) => new THREE.Vector3(...p));
   const n = pts.length;
   const tangents = pts.map((_, i) => pts[Math.min(n - 1, i + 1)]!.clone().sub(pts[Math.max(0, i - 1)]!).normalize());
@@ -229,7 +232,7 @@ function tube(b: PartBuilder, slot: KitSlot, path: readonly Vec3[], radius: numb
     binormal.crossVectors(tangents[i]!, normal);
     const ring: Vec3[] = [];
     for (let k = 0; k < sides; k++) {
-      const a = (k / sides) * Math.PI * 2;
+      const a = ((k + (ridge ? 0.5 : 0)) / sides) * Math.PI * 2;
       const c = Math.cos(a) * radius;
       const s = Math.sin(a) * radius;
       const p = pts[i]!;
@@ -868,36 +871,116 @@ function buildUnderbody(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, class
   else samaraChassis(frame, b, eb, route);
 }
 
+/** The exhaust pipe's radius (a saloon's 36-40 mm pipe [E]). */
+const PIPE_R = 0.018;
+/** The exhaust hangs this far under the shell's floor: its pipe's top, its cans' tops. */
+const EXHAUST_GAP = 0.01;
+/** Its lowest stands this far over the clearance: the axle, the diff or the tank stay the lowest point. */
+const EXHAUST_LIFT = 0.002;
+/** The cans: flat ovals, low and wide [E]. Resonator and silencer: half width, height, the oval's bevel. */
+const RESONATOR = { half: 0.055, height: 0.06, bevel: 0.022 };
+const SILENCER = { half: 0.15, height: 0.07, bevel: 0.026 };
+/** The silencer's longest; it stands at the back of its room, where the floor has risen most. */
+const SILENCER_LENGTH = 0.45;
 /**
- * Exhaust from the down-pipe's start under the bay: resonator, silencer at the clearance, tail
- * pipe out at the right rear. With `exhaustTuck` the silencer and the tail pipe hang that far
- * under the floor over their run instead, the pipe climbing to them just short of the silencer.
+ * A can with less room than this between the floor's gap and its lowest stands up into the
+ * floor instead (where the tunnel is), its top TUNNEL_RISE over the floor: clear of the
+ * floor's plane and under the cabin's carpet (`FLOOR_RISE`, interior.ts).
  */
-function exhaust(frame: BodyFrame, b: PartBuilder, down: readonly Vec3[], x: number, y: number, resonator: readonly [number, number], silencer: readonly [number, number], silencerX: number): void {
+const CAN_MIN = 0.045;
+const TUNNEL_RISE = 0.012;
+
+/** The lowest any of the exhaust reaches: just over the clearance. */
+function exhaustLow(frame: BodyFrame): number {
+  return clearance(frame) + EXHAUST_LIFT;
+}
+
+/** The floor's lowest over s0..s1 (it is straight between stations, so at a station or an end). */
+function floorMin(frame: BodyFrame, s0: number, s1: number): number {
+  return Math.min(...stationsBetween(frame, s0, s1).map((s) => floorY(frame, s)));
+}
+
+/**
+ * The exhaust pipe's centre over s0..s1: its top EXHAUST_GAP under the floor, or, where the
+ * floor stands lower over the clearance than the pipe is thick, its bottom at `exhaustLow`
+ * and its top up in the floor (the tunnel; its section stands on a corner there, so no
+ * face lies along the floor's plane).
+ */
+function pipeUnder(frame: BodyFrame, s0: number, s1: number): number {
+  return Math.max(exhaustLow(frame) + PIPE_R, floorMin(frame, s0, s1) - EXHAUST_GAP - PIPE_R);
+}
+
+/** A can's bottom and top over s0..s1: under the floor as `pipeUnder`, up to `height` tall. */
+function canUnder(frame: BodyFrame, s0: number, s1: number, height: number): [number, number] {
+  const low = exhaustLow(frame);
+  const floor = floorMin(frame, s0, s1);
+  const top = floor - EXHAUST_GAP;
+  if (top - low >= CAN_MIN) return [Math.max(low, top - height), top];
+  return [low, Math.min(low + height, Math.max(low + CAN_MIN, floor + TUNNEL_RISE))];
+}
+
+/** A flat oval can along the car, centred on x, over s0..s1 between y0 and y1. */
+function can(b: PartBuilder, frame: BodyFrame, x: number, half: number, bevel: number, [y0, y1]: readonly [number, number], s0: number, s1: number): void {
+  bevelS(b, frame, 'trim', [x - half, y0, s0], [x + half, y1, s1], Math.min(bevel, (y1 - y0) / 2 - 0.002));
+}
+
+/** The pipe's path from the bay to the silencer, and what it passes on the way. */
+interface ExhaustRoute {
+  /** The down-pipe's start under the bay (`BayRoute.outlet`), car frame. */
+  readonly outlet: Vec3;
+  /** Its one bend: this far across and back from the outlet, halfway down to the run. */
+  readonly bend: readonly [dx: number, ds: number];
+  /** Where the run under the floor begins. */
+  readonly from: number;
+  /** The highest the bend may stand (the Samara's anti-roll bar, just behind it). */
+  readonly cap?: number;
+  /** The run's x, the resonator's on it. */
+  readonly x: number;
+  readonly resonator: readonly [number, number];
+  /** The rear axle or beam the pipe passes under, behind the resonator: its centre at most `y` at `s`. */
+  readonly axle: { readonly s: number; readonly y: number };
+  /** The room behind the axle the silencer stands in (SILENCER_LENGTH at its back). */
+  readonly silencerRoom: readonly [number, number];
+  readonly silencerX: number;
+}
+
+/**
+ * The exhaust, one rule on every car: from the down-pipe's start under the bay, the pipe
+ * runs EXHAUST_GAP under the shell's floor, through a flat resonator, under the rear axle
+ * or beam and up behind it into a flat silencer, both tucked under the floor as the pipe
+ * is, and the tail pipe out at the right rear under the bumper's foot. Nothing of it goes
+ * lower than `exhaustLow`, so the clearance stays the axle's, the diff's or the tank's.
+ */
+function exhaust(frame: BodyFrame, b: PartBuilder, route: ExhaustRoute): void {
   const spec = frame.spec;
-  const C = clearance(frame);
+  const { outlet, bend, from, x, resonator, axle, silencerRoom, silencerX } = route;
+  const silencer = [Math.max(silencerRoom[0], silencerRoom[1] - SILENCER_LENGTH), silencerRoom[1]] as const;
+  const low = exhaustLow(frame) + PIPE_R;
+  const ahead = axle.s - 0.2;
+  // Level under the axle until past what crosses just behind it (the classic's Panhard rod).
+  const behind = axle.s + 0.17;
   b.color(COLOURS.exhaust);
-  tube(b, 'trim', [...down, at(frame, x, y, resonator[0])], 0.022, 6);
-  bevelS(b, frame, 'trim', [x - 0.075, C + 0.006, resonator[0]], [x + 0.075, y + 0.04, resonator[1]], 0.025);
+  // Down from the bay, bent once, to the run's height; level from there through the
+  // resonator to just ahead of the axle.
+  const runY = pipeUnder(frame, from, ahead);
+  const os = frame.zNose - outlet[2];
+  // The down-pipe's start no lower than the rest (the 2141's bay floor is near the clearance).
+  const start = at(frame, outlet[0], Math.max(low, outlet[1]), os);
+  const bent = at(frame, outlet[0] + bend[0], Math.max(low, Math.min((start[1] + runY) / 2, route.cap ?? Infinity)), os + bend[1]);
+  tube(b, 'trim', [start, bent, at(frame, x, runY, from), at(frame, x, runY, resonator[0])], PIPE_R, 6, true);
+  can(b, frame, x, RESONATOR.half, RESONATOR.bevel, canUnder(frame, resonator[0], resonator[1], RESONATOR.height), resonator[0], resonator[1]);
+
+  // Under the axle, and up behind it into the silencer.
+  const ys = canUnder(frame, silencer[0], silencer[1], SILENCER.height);
+  const silencerY = (ys[0] + ys[1]) / 2;
+  const pass = Math.max(low, Math.min(pipeUnder(frame, ahead, behind), axle.y));
+  tube(b, 'trim', [at(frame, x, runY, resonator[1]), at(frame, x, pass, ahead), at(frame, silencerX, pass, behind), at(frame, silencerX, silencerY, silencer[0])], PIPE_R, 6, true);
+  can(b, frame, silencerX, SILENCER.half, SILENCER.bevel, ys, silencer[0], silencer[1]);
+
+  // The tail pipe: under the tail's floor and out at the right rear under the bumper's foot.
   const tail = spec.stations[spec.stations.length - 1]!.s;
-  const tuck = spec.exhaustTuck;
-  if (tuck === undefined) {
-    tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0])], 0.022, 6);
-    bevelS(b, frame, 'trim', [silencerX - 0.13, C + SILENCER_TUCK, silencer[0]], [silencerX + 0.13, C + SILENCER_TUCK + 0.085, silencer[1]], 0.035);
-    tube(b, 'trim', [at(frame, silencerX - 0.03, y + 0.007, silencer[1]), at(frame, silencerX - 0.08, y + 0.03, tail - 0.05), at(frame, -0.45, y + 0.045, spec.length - 0.03)], 0.022, 6);
-    return;
-  }
-  // The floor is straight between stations, so its lowest over a run is at a station or an end.
-  const under = (s0: number, s1: number): number => Math.min(...stationsBetween(frame, s0, s1).map((s) => floorY(frame, s))) - tuck;
-  const top = under(silencer[0], silencer[1]);
-  const mid = top - 0.0425;
-  // Under the axle as before, then up into the silencer's front face, behind whatever
-  // crosses the car ahead of it (the classic's Panhard rod at silencer[0] − 0.08).
-  tube(b, 'trim', [at(frame, x, y, resonator[1]), at(frame, x, y, silencer[0] - 0.25), at(frame, silencerX, y, silencer[0] - 0.06), at(frame, silencerX, mid, silencer[0] + 0.01)], 0.022, 6);
-  bevelS(b, frame, 'trim', [silencerX - 0.13, top - 0.085, silencer[0]], [silencerX + 0.13, top, silencer[1]], 0.035);
-  // Out under the tail's floor, its top `tuck` under it.
-  const ty = under(silencer[1], tail) - 0.022;
-  tube(b, 'trim', [at(frame, silencerX - 0.03, mid, silencer[1] - 0.01), at(frame, silencerX - 0.08, ty, tail - 0.05), at(frame, -0.45, ty, spec.length - 0.03)], 0.022, 6);
+  const exit = Math.max(low, Math.min(pipeUnder(frame, silencer[1], tail), bumperFoot(frame, -1) - EXHAUST_GAP - PIPE_R));
+  tube(b, 'trim', [at(frame, silencerX - 0.03, silencerY, silencer[1]), at(frame, silencerX - 0.08, exit, tail - 0.05), at(frame, -0.45, exit, spec.length - 0.03)], PIPE_R, 6, true);
 }
 
 /**
@@ -971,23 +1054,22 @@ function classicChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route
   }
   rod(b, 'trim', at(frame, 0.5, R - 0.03, w.rear + 0.13), at(frame, -0.45, rf - 0.012, w.rear + 0.13), 0.014, 5);
 
-  // Exhaust along the right of the tunnel, under the axle, out at the right rear. On the
-  // Niva it keeps outboard of the transfer box and its resonator behind it.
-  const ex = niva ? -0.22 : -0.17;
-  const ey = C + 0.035;
-  const o = route.outlet;
-  const os = frame.zNose - o[2];
-  exhaust(
-    frame,
-    eb,
-    [o, at(frame, o[0] - 0.01, (o[1] + ey) / 2, os + 0.06), at(frame, ex, ey + 0.02, firewall + 0.05), at(frame, ex, ey, firewall + 0.25)],
-    ex,
-    ey,
-    niva ? [firewall + 0.85, Math.min(firewall + 1.25, w.rear - 0.4)] : [firewall + 0.55, firewall + 1.0],
+  // Exhaust along the right of the propshaft, inside the floor's crossmembers, under the
+  // axle, out at the right rear. On the Niva it keeps outboard of the transfer box and its
+  // resonator behind it.
+  const ex = niva ? -0.22 : -0.09;
+  exhaust(frame, eb, {
+    outlet: route.outlet,
+    bend: [-0.01, 0.06],
+    from: firewall + 0.25,
+    x: ex,
+    resonator: niva ? [firewall + 0.85, Math.min(firewall + 1.25, w.rear - 0.4)] : [firewall + 0.55, firewall + 1.0],
+    // Under the axle's tubes, 10 mm clear, and the Panhard rod just behind them, 4 mm clear.
+    axle: { s: w.rear, y: Math.min(R - 0.035 - 0.01, Math.min(R - 0.03, rf - 0.012) - 0.014 - 0.004) - PIPE_R },
     // Short of the tail panel: the boot lid's end on a saloon, the body's last station on an estate.
-    [w.rear + 0.21, Math.min(w.rear + 0.78, (spec.bootEnd ?? spec.stations[spec.stations.length - 1]!.s) - 0.2)],
-    ex,
-  );
+    silencerRoom: [w.rear + 0.21, Math.min(w.rear + 0.78, (spec.bootEnd ?? spec.stations[spec.stations.length - 1]!.s) - 0.2)],
+    silencerX: niva ? -0.22 : -0.17,
+  });
 }
 
 /**
@@ -1099,21 +1181,20 @@ function samaraChassis(frame: BodyFrame, b: PartBuilder, eb: PartBuilder, route:
   }
   across(b, frame, 'trim', [[beamS - 0.04, bf - 0.005], [beamS - 0.03, bf - 0.055], [beamS + 0.03, bf - 0.055], [beamS + 0.04, bf - 0.005]], -0.575, 0.575);
 
-  // Exhaust: from behind the engine's place, along the left of centre past the tank, under the
-  // beam, then across to the silencer on the right.
-  const ex = 0.06;
-  const ey = CLEARANCE + 0.022;
-  const o = route.outlet;
-  const os = frame.zNose - o[2];
+  // Exhaust: from behind the engine's place, under the anti-roll bar, along the left of
+  // centre past the tank, under the beam, then across to the silencer on the right.
   const tail = spec.stations[spec.stations.length - 1]!.s;
-  exhaust(
-    frame,
-    eb,
-    [o, at(frame, o[0] + 0.02, (o[1] + ey) / 2, os + 0.12), at(frame, ex, ey + 0.015, os + 0.35), at(frame, ex, ey, cowl + 0.2)],
-    ex,
-    ey,
-    [cowl + 0.5, cowl + 0.9],
-    [w.rear + 0.12, Math.min(w.rear + 0.5, tail - 0.2)],
-    -0.3,
-  );
+  exhaust(frame, eb, {
+    outlet: route.outlet,
+    bend: [0.02, 0.12],
+    from: frame.zNose - route.outlet[2] + 0.35,
+    // 8 mm under the anti-roll bar, the run's slope behind the bend included.
+    cap: by - 0.012 - 0.008 - PIPE_R,
+    x: 0.06,
+    resonator: [cowl + 0.5, cowl + 0.9],
+    // 3 mm under the beam's foot.
+    axle: { s: beamS, y: bf - 0.055 - 0.003 - PIPE_R },
+    silencerRoom: [w.rear + 0.12, Math.min(w.rear + 0.5, tail - 0.2)],
+    silencerX: -0.3,
+  });
 }

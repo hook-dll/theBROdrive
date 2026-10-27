@@ -156,9 +156,6 @@ export const BODY_UAZ469: KitBody = {
   flap: { s0: 1.95, s1: 2.08, y0: 0.56, y1: 0.76, side: 'left' },
   // The rear door hinged on its right edge, its lock (a hasp) on the left [P "… 07"].
   tailgateHinge: 'right',
-  // The silencer behind the rear axle and the tail pipe on hangers 3 cm under the floor
-  // (0.42-0.56 here, 0.2+ over the 0.22 clearance) [E].
-  exhaustTuck: 0.03,
 };
 
 /**
@@ -389,8 +386,6 @@ export const BODY_UAZ2206: KitBody = {
   // The filler's recess on the right panel [P]; one each side on the car.
   flap: { s0: 1.44, s1: 1.56, y0: 0.72, y1: 0.9 },
   tailgateHinge: 'split',
-  // The silencer and tail pipe 3 cm under the floor (0.42-0.52 behind the rear axle) [E].
-  exhaustTuck: 0.03,
 };
 
 /**

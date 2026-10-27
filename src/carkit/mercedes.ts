@@ -24,13 +24,13 @@ import type { KitLook } from './spec';
 import type { KitBody } from './specs';
 
 /**
- * Mercedes-Benz W124 230 E saloon: overhangs 0.82 / 1.12 over a 2800 wheelbase [F; D the drawn
- * hubs centred]. The face at s 0.06 behind the bumper (reach 0.06 [D x 21 / 31]); the
+ * Mercedes-Benz W124 230 E saloon: overhangs 0.815 / 1.125 over a 2800 wheelbase [F; D the
+ * drawn hubs]. The face at s 0.06 behind the bumper (reach 0.06 [D x 21 / 31]); the
  * bonnet rising from its lip 0.78 to 0.986 at the cowl (s 1.341); the A pillar to the rail
  * at 1.893; the roof 1.43 from 2.47 to 3.17, falling into the back light from 3.48 to its
- * foot at 3.96 (1.015); the boot 1.04–1.05 to the tail and the lid down the tail face
- * between the corner lamps. Sill 0.19, door bottoms 0.22, belt 0.922 along the doors rising
- * to 0.95 at the C pillar.
+ * foot at 3.96 (1.015); the boot deck up to 1.055 at the lid's front edge and nearly level
+ * to the tail (1.02), the lid down the tail face between the corner lamps. Sill 0.19, door
+ * bottoms 0.22, belt 0.922 along the doors rising to 0.95 at the C pillar.
  */
 export const BODY_W124: KitBody = {
   length: 4.74, // [F MB archive 4740; the drawing's 4755]
@@ -46,22 +46,26 @@ export const BODY_W124: KitBody = {
     // outline at 0.85–0.87].
     { s: 0.22, sill: 0.29, crease: 0.565, belt: 0.83, deck: 0.855, wSill: 0.84, wCrease: 0.86, wBelt: 0.825 },
     { s: 0.5, sill: 0.28, crease: 0.58, belt: 0.875, deck: 0.9, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
-    { s: 0.96, sill: 0.26, crease: 0.59, belt: 0.915, deck: 0.951, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
+    { s: 0.96, sill: 0.19, crease: 0.59, belt: 0.915, deck: 0.951, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     // The cowl [D side (255, 161)].
-    { s: 1.341, sill: 0.255, crease: 0.6, belt: 0.922, deck: 0.986, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
+    { s: 1.341, sill: 0.19, crease: 0.6, belt: 0.922, deck: 0.986, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     // The belt under the side glass [D side y 172: 0.922 along the doors; 0.946 at the rear
-    // door's rear edge (x 636)]. The sill 0.255 over the drawn 0.19 [D side y 297]: the
-    // shell's floor is the sill, and the classic's exhaust under it (its resonator's top at
-    // 0.245, bay.ts) stood through a floor at 0.19 (kit-zfight), as on the Vectra.
-    { s: 2.5, sill: 0.255, crease: 0.6, belt: 0.925, deck: 0.94, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
-    { s: 3.3, sill: 0.255, crease: 0.6, belt: 0.945, deck: 0.97, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
+    // door's rear edge (x 636)]: straight from the B pillar to the rear door's edge, so no
+    // station between. The sill 0.19 [D side y 297], arch to arch.
+    { s: 2.5, sill: 0.19, crease: 0.6, belt: 0.925, deck: 0.94, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
+    { s: 3.555, sill: 0.19, crease: 0.6, belt: 0.946, deck: 0.971, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     // rearBase: the back light's foot (x 706, 1.015) [D side]; the sill behind the rear arch
     // up to the bumper's foot.
     { s: 3.96, sill: 0.26, crease: 0.6, belt: 0.985, deck: 1.015, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
-    // The boot [D side: 1.045–1.056 at s 4.07–4.3, 1.027 at 4.5, 1.016 at 4.62]; the tail's
-    // corners rounding in [D2 rear: ±0.86 at the bumper, ±0.84 at the belt].
-    { s: 4.35, sill: 0.3, crease: 0.6, belt: 1.0, deck: 1.05, wSill: 0.84, wCrease: 0.86, wBelt: 0.82 },
-    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.0, wSill: 0.8, wCrease: 0.82, wBelt: 0.782 },
+    // The boot deck: up from the back light's foot to the lid's front edge, then nearly
+    // level, falling 3.5 cm straight to a crisp corner over the tail [D side: 1.016 at s
+    // 3.98, 1.056 at 4.10–4.13, 1.045 at 4.30, 1.033 at 4.45, 1.016 at 4.59, 1.004 at 4.68;
+    // P S: 1.066 at 4.10 to 1.038 at 4.67, level]; no hump (owner, 2026-10-27). The
+    // tail's corners rounding in [D2 rear: ±0.86 at the bumper, ±0.84 at the belt]. The
+    // wing's top edge (the belt row) rises with the lid, so the deck keeps one crown across
+    // (1.5 cm) from the lid's front edge to the tail.
+    { s: 4.08, sill: 0.27, crease: 0.6, belt: 1.02, deck: 1.055, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
+    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.985, deck: 1.02, wSill: 0.805, wCrease: 0.82, wBelt: 0.782 },
     // The tail face [D side x 828–835: upright from the deck's edge 0.99 at s 4.70]: the
     // lid's rear panel above the lamps (0.858 [D side y 183]) across, and down between them
     // to their foot (0.655 [P R: the lid's foot just under the lamps']), cut at ±0.42 (the
@@ -100,8 +104,11 @@ export const BODY_W124: KitBody = {
       // 1.109, 3.527 at 0.99], the door's frame behind it.
       { s: 3.53, top: 3.19, upper: 'door2' },
       // The rear door's rear edge [D side x 636 from the belt down to 0.85, then forward round
-      // the rear arch's front to the sill], kept 2 cm ahead of the arch (3.233).
-      { s: 3.555, top: 3.21, upper: 'body', foot: { y: 0.85, s: 3.21, round: [0.1, 0.03] } },
+      // the rear arch's front to the sill], kept 2 cm ahead of the arch (3.228). Bent at the
+      // fuel flap's two rows (0.92, 0.80) instead of rounded, and sharp at its foot: within
+      // 12 mm of the drawn line, and every point of it is a side row along the whole car (a
+      // 4-segment round cost 356 triangles, the foot's 3 cm one 112).
+      { s: 3.555, top: 3.21, upper: 'body', foot: { y: 0.92, s: 3.21, knee: [3.535, 0.8] } },
       // The C pillar, body colour, to the back light's foot; the roof runs back over the back
       // light's top to 3.56 at 1.354 [D side x 635], where it ends in a small lip.
       { s: 3.96, top: 3.56 },
@@ -117,8 +124,9 @@ export const BODY_W124: KitBody = {
     // The roof's line [D side: 1.378 at s 1.92, 1.395 at 2.01, 1.407 at 2.1, 1.418 at 2.21,
     // 1.424 at 2.33, 1.43 from 2.47 to 3.17, 1.418 at 3.26, 1.407 at 3.34, 1.389 at 3.43,
     // 1.372 at 3.49, 1.354 at 3.55]; at the front less, the side glass's top staying level
-    // under it.
-    roofDrop: [[1.893, 0.03], [2.0, 0.02], [2.1, 0.012], [2.2, 0.006], [2.33, 0.002], [2.47, 0], [3.17, 0], [3.26, 0.012], [3.34, 0.023], [3.43, 0.041], [3.49, 0.058], [3.56, 0.078]],
+    // under it. Three points each end: within 4 mm of the drawn line (every point is a bend
+    // in the roof and the side strips).
+    roofDrop: [[1.893, 0.03], [2.15, 0.0085], [2.47, 0], [3.17, 0], [3.35, 0.024], [3.56, 0.078]],
     glassBottom: 0.01,
     glassTop: 0.02,
     screenBottom: 0.03, // [E]
@@ -133,18 +141,26 @@ export const BODY_W124: KitBody = {
     pillar: 0.07, // [E]
   },
   wheels: {
-    front: 0.82, // [D the drawn hubs 0.81 / 3.63, centred on 2800]
-    rear: 3.62, // wheelbase 2800 [F]
+    // Overhangs 0.815 / 1.125 [angurten.de 'Baureihe 124 Limousine': 815 + 2800 + 1125 =
+    // 4740; D the drawn hubs 0.81 / 1.125].
+    front: 0.815,
+    rear: 3.615, // wheelbase 2800 [F]
     radius: 0.317, // 195/65 R15 [F]: 190.5 + 126.75
     width: 0.195, // [F]
     frontHalfTrack: 0.7505, // 1501 [F]
     rearHalfTrack: 0.7455, // 1491 [F]
-    // Front: the arch's top 0.69 [D side y 212], 0.373 over the hub.
-    arch: 1.18,
-    // Rear: its top 0.705 [D side y 209].
+    // Front: close round the tyre's sides, clear over its top: a half ellipse 0.343 wide at
+    // the hub's height and 0.371 high [P S, the near (rear) edge: ±0.35 at the hub,
+    // 0.33 at 0.10 over it, 0.29 at 0.20, 0.21 at 0.30, top 0.371; D side: top 0.366].
+    arch: 1.08,
+    frontArchRise: 1.17,
+    // Rear: a circle, top 0.387 over the hub [D side: 0.383; P S: 0.39–0.40, the near
+    // (front) edge 0.39 at the hub, 0.36 at 0.10, 0.315 at 0.20, 0.26 at 0.30].
     rearArch: 1.22,
+    // 8 segments round each arch (12 by default): the triangle budget (owner, 2026-10-27).
+    archSegments: 8,
   },
-  doorBottom: 0.275, // [D side y 292–295: 0.21], over the raised sill (the stations')
+  doorBottom: 0.21, // [D side y 292–295: 0.204–0.222]
   bonnetFront: 0.06,
   // The bonnet covers the whole top, its side shut lines along the wings' top, cut round the
   // grille shell [P F34, F34r].
@@ -183,13 +199,16 @@ export const LOOK_W124: KitLook = {
   handles: { front: 2.12, rear: 3.35, y: 0.82, half: 0.065 },
   waist: null,
   // Axle to axle (the arches cut it): the front wing behind its arch, both doors [P].
-  cladding: { top: 0.47, finish: 'tone', span: [0.82, 3.62], edge: { finish: 'chrome', height: 0.01 } },
+  cladding: { top: 0.47, finish: 'tone', span: [0.815, 3.615], edge: { finish: 'chrome', height: 0.01 } },
   repeater: null, // the indicator wraps round instead (1989–93) [P]
   cornerLamps: [
     // Head lamp and indicator, one flat glass 0.57–0.76 [D side y 200–233; D2 front
     // 0.555–0.75 from ±0.36 out to ±0.77]: the amber indicator its outer quarter from ±0.68,
-    // wrapping round the corner onto the wing [P F34, F34r; D side: the unit to x 82].
+    // wrapping round the corner onto the wing [P F34, F34r; D side: the unit to x 82]. Fluted
+    // glass [P F: fine flutes on the head lamp and the indicator] as dark lines (owner,
+    // 2026-10-27: "тёмные полосы в качестве ребристости это ок").
     {
+      ribs: 3,
       points: [
         { x: 0.37, y: [0.57, 0.755], role: 'head' },
         { x: 0.68, y: [0.57, 0.755], role: 'blinker' },
@@ -227,7 +246,7 @@ export const LOOK_W124: KitLook = {
     // 0.222], a black band 0.35–0.47 with the chrome line over it [P F34 bumper: the line
     // 21 % down the bumper, the band's foot 62 %]; its sides back along the wings to the
     // front arch [D side x 105], the corners rounded [D plan r ≈ 0.2].
-    bumper: { kind: 'moulded', drop: 0.113, height: 0.315, finish: 'tone', moulding: { y: 0.41, height: 0.12, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.2, wrapTo: 0.45 },
+    bumper: { kind: 'moulded', drop: 0.113, height: 0.315, finish: 'tone', moulding: { y: 0.41, height: 0.12, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.2, wrapTo: 0.47 },
     items: [
       // The chrome shell standing out of the face between the lamps, 0.52–0.79 at ±0.33 with
       // its frame [D2 front], horizontal chrome slats on a dark back [P F34, F34r].

@@ -12,6 +12,10 @@
  * fits it to the passport: drawings are read in that frame), never from the spec:
  *   length, width, height       the body's box (no mirrors, wheels, light bar);
  *   wheelbase, overhangs        the `kit_wheel_*` nodes;
+ *   archFront, archRear         each wheel arch's opening from the left: [its top over the
+ *                               hub, its reach ahead of and behind the hub at the hub's
+ *                               height] (the opening: a line from the left meets a wheel, the
+ *                               well or nothing, not the body within 3 cm of its skin);
  *   screenFoot, screenTop       the windscreen glass in profile: its foremost and rearmost
  *                               points [s, y]; backLightTop / backLightFoot the rear glass's;
  *   beltY, railY                lines from the left (+x) at the front door's middle: the
@@ -127,7 +131,7 @@ function readRefs(id: string): RefFile | undefined {
 
 /** Default tolerance per key (metres), see the header. */
 const TOL: Record<string, number> = {
-  length: 0.015, width: 0.015, height: 0.015, wheelbase: 0.015, overhangFront: 0.03, overhangRear: 0.03,
+  length: 0.015, width: 0.015, height: 0.015, wheelbase: 0.015, overhangFront: 0.03, overhangRear: 0.03, archFront: 0.03, archRear: 0.03,
   screenFoot: 0.03, screenTop: 0.03, backLightTop: 0.03, backLightFoot: 0.03,
   // The visible glass: the generator edges every pane with its rubber inside the opening.
   beltY: 0.04, railY: 0.04, doorBottomY: 0.025, moulding: 0.025,
@@ -171,10 +175,37 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
   out.width = r3(2 * w);
   out.height = r3(h);
   const fl = nodeAt(car.root, 'kit_wheel_fl'), rl = nodeAt(car.root, 'kit_wheel_rl');
+  // Wipers and mirrors are skipped by the lines from the left below.
+  const fitting = (t: number): boolean => /wiper|mirror/.test(info(t).path);
   if (fl && rl) {
     out.wheelbase = r3(car.s(rl[2]) - car.s(fl[2]));
     out.overhangFront = r3(car.s(fl[2]) - s0);
     out.overhangRear = r3(s1 - car.s(rl[2]));
+    // The wheel arches' openings seen from the left: what a line from the left at (s, y)
+    // meets is the body if it is no wheel and lies within 3 cm of the side's skin (the
+    // skin, its lip, a bumper or cladding over it), and the opening otherwise (the tyre, the
+    // well's wall, nothing). [top, ahead, behind]: the opening's top over the hub (the
+    // highest within 0.1 of it along the car), and its reach ahead of and behind the hub
+    // 5 mm over the hub's height.
+    const body = (ss: number, y: number): boolean => {
+      const hit = grid.nearest([3, y, car.z(ss)], [-1, 0, 0], 6, fitting);
+      return hit !== null && info(hit.tri).zone !== 'wheel' && 3 - hit.t > car.frame.sideX(ss, y) - 0.03;
+    };
+    for (const [key, hub] of [['archFront', fl], ['archRear', rl]] as const) {
+      const hs = car.s(hub[2]), hy = hub[1];
+      let top = 0;
+      for (let ds = -0.1; ds <= 0.1 + 1e-9; ds += 0.01) {
+        let y = hy + 0.05;
+        while (y < hy + 0.8 && !body(hs + ds, y)) y += 0.002;
+        top = Math.max(top, y - hy);
+      }
+      const reach = (dir: 1 | -1): number => {
+        let d = 0.1;
+        while (d < 0.8 && !body(hs + dir * d, hy + 0.005)) d += 0.002;
+        return d;
+      };
+      out[key] = [r3(top), r3(reach(-1)), r3(reach(1))];
+    }
   }
   // The greenhouse in profile: the side silhouette's front edge (the A pillar's line,
   // scanning back from ahead of the cowl) and rear edge (the back light's, scanning
@@ -183,7 +214,6 @@ function measureBody(car: KitCar, s: Soup, grid: RayGrid, refs: Record<string, R
   // top), carried to the corner's own y: where the bonnet or the boot lid runs nearly
   // level, the edge at that very height would be anywhere along it. With no reference, at
   // the glass's lowest and highest point. Wipers and mirrors are skipped.
-  const fitting = (t: number): boolean => /wiper|mirror/.test(info(t).path);
   // A forward-control van's cowl (the UAZ-2206's 0.40) stands less than 0.6 behind the
   // tip: the front scan then starts at the tip, not ahead of it.
   const edge = (y: number, front: boolean): number | undefined => {

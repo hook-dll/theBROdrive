@@ -68,8 +68,12 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    the inventory step); the owner's missing fields built (`moulding.edge`, `cladding` with
    its `edge`, `cornerLamps[].ribs`, `wipers: 1`, `mirrorFinish`, the `tone` finish and
    `KitLook.tone`) and the first draft made 2026-10-27 (`mercedes.ts`, on its own running
-   gear `GEAR_MERCEDES_W124`): **draft, awaiting the owner's review** (review sheet
-   `build/kitcheck/w124/review.png`).
+   gear `GEAR_MERCEDES_W124`). The owner's first review the same day (arches, a bloated
+   boot, fluted head lamps, the sill to the drawing, triangles) reworked
+   (`measurements-w124.md` §8: the front arch a half ellipse `frontArchRise`, the boot deck
+   level from the lid's front edge, `ribs` on the head lamps, sill 0.19 / doors 0.21 after
+   the flatter exhaust, 13 621 → 12 444 triangles with `archSegments`): **draft, awaiting
+   his next look** (review sheet `build/kitcheck/w124/review.png`).
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).
@@ -353,7 +357,7 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | Espero | pass | pass | pass | L100 R100 | 0 | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |
 | Vectra A | pass | pass | pass | L100 R100 | 0 | 13 866 | 12/12 (door bottom 0.255 accepted: the silencer) | 4/4 |
-| W124 (draft) | pass | pass | pass (0-100 12.4 vs 11.1 accepted, `CATALOGUE_OPTIMISTIC`) | L100 R100 | 0 | 13 621 (over the 13 000 warning) | 18/18 (front glass from the A pillar and door bottom 0.291 accepted: the classic exhaust under the floor) | 9/9 |
+| W124 (draft, review 1) | pass | pass | pass (0-100 12.4 vs 11.1 accepted, `CATALOGUE_OPTIMISTIC`) | L100 R100 | 0 | 12 444 | 20/20 (front glass from the A pillar accepted; sill and door bottom at the drawing) | 9/9 |
 
 Dents and drawing round (2026-10-19): kit-surface passes on all 27 (05 bonnet ends at the drawn 0.90, the scuttle behind it; 05 belt width at s 3.33; 2104 tail lean; 2115 wing belt; Niva corner plan through ±0.786 with a station at 0.4; GAZ-24 boot one convex curve; UAZ-469 sill tucked from the wing; deck and lid quads folded outward (body.ts); 2206 nose lean; Espero tail corners at 0.925; 2107 grille bars without hidden back faces). Drawing: roofHalfWidth is now read at the rail (it was 3 cm under a crowned top); the front door's glass run is its longest (vent wings, quarter lights); Nexia/AZLK roof refs corrected to the A pillar line at the rail; 05 shoulder rise 0.035 (front view ±0.773 at 0.90), a black sail ahead of the door glass (mirrorS on it). Still out of tolerance: 2103/2106 waist strip (the ref is read in the vaz_2103/2106.jpg frames, ~7 % taller than BODY_124: re-register it), 2108 bonnet lip, 2109 front door, the tens' screen foot, mirror, glass at the rail and boot, the Niva's screen foot and belt width, the Oka's belt width, the GAZ-24's screen foot, rail and door, the GAZ-31029's door and boot lid, the AZLK's front glass edge and mirror, the UAZ-2206's screen and glass runs, the Nexia's belt width. The 2107's 0-100 was not looked at.
 

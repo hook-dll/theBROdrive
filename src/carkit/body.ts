@@ -369,9 +369,10 @@ export class BodyFrame {
       const r = w.radius * this.archFactor(axle);
       const d = s - this.archCentre(axle);
       if (Math.abs(d) > r) continue;
-      // A low rear arch is a half ellipse; every other arch a circle on the hub. A squared
-      // arch (`archSquare`) is a superellipse of that power: a flatter top, steeper sides.
-      const rise = axle === w.rear ? w.rearArchRise : undefined;
+      // A low rear arch (or a tall front one) is a half ellipse; every other arch a circle on
+      // the hub. A squared arch (`archSquare`) is a superellipse of that power: a flatter
+      // top, steeper sides.
+      const rise = axle === w.rear ? w.rearArchRise : w.frontArchRise;
       const n = w.archSquare;
       const y = n !== undefined
         ? w.radius + (rise === undefined ? r : w.radius * rise) * Math.pow(Math.max(0, 1 - Math.abs(d / r) ** n), 1 / n)
@@ -566,7 +567,7 @@ export function tubColumns(frame: BodyFrame): number[] {
   for (const axle of [w.front, w.rear]) {
     const r = w.radius * frame.archFactor(axle);
     const c = frame.archCentre(axle);
-    const n = 12;
+    const n = w.archSegments ?? 12;
     for (let i = 0; i <= n; i++) {
       // Cosine spacing: short facets where the arch turns down.
       const t = (1 - Math.cos((i / n) * Math.PI)) / 2;

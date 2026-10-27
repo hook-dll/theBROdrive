@@ -151,7 +151,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
 | `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107/2110`. |
-| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). The bay is laid out in a `BayRoom`: under the bonnet (`bonnetRoom`, the shell's walls round it), or on a van in the cabin under the engine cover (`coverRoom`, interior.ts `engineCoverRoom`), with the same four bonnet cells. |
+| `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). The exhaust is one rule on every car (`exhaust`): the pipe (Ø36, its section standing on a corner) runs `EXHAUST_GAP` (10 mm) under the shell's floor, wherever that floor is, from the down-pipe through a flat oval resonator (0.11 × 0.06) inside the floor crossmembers, dips under the rear axle (and the classic's Panhard rod) or the Samara's beam, and climbs behind it into a flat oval silencer (0.30 × 0.07, at the back of its room, where the floor has risen); the tail pipe leaves under the tail's floor and exits at the right rear under the bumper's foot (exterior.ts `bumperFoot`). Nothing of it goes below 2 mm over the clearance (`exhaustLow`): where the floor stands too low for that (the Nivas, the Oka, a sill drawn low), the pipe rises into the floor and a can stands up into it (`TUNNEL_RISE`, 12 mm over it, under the cabin's carpet), as a real tunnel takes them. The UAZs' high floors follow the same rule (it replaced their `exhaustTuck`). The bay is laid out in a `BayRoom`: under the bonnet (`bonnetRoom`, the shell's walls round it), or on a van in the cabin under the engine cover (`coverRoom`, interior.ts `engineCoverRoom`), with the same four bonnet cells. |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `simplify.ts` | `simplifyFlats`: the finished car's flat runs merged into the fewest, fattest triangles and zero-area ones dropped (step 9 of [How the body is built](#how-the-body-is-built)). |
 | `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices ([Draw calls](#draw-calls-one-car-three-draws)). |
@@ -379,7 +379,11 @@ front edge at the belt, and the A pillar looks far too wide (HISTORY.md).
 `rearArch?` (the rear arch's own factor where it is tighter than the front's: the 2110's
 1.0 is as wide as the tyre; absent, the rear takes `arch`), `rearArchRise?` (the rear
 arch's top over the hub, over the tyre radius, where it is lower than a circle: its skin
-and liner become a half ellipse; the 2110's 0.81 covers the tyre's top), `archToSill?`
+and liner become a half ellipse; the 2110's 0.81 covers the tyre's top), `frontArchRise?`
+(the same for the front arch: a half ellipse `arch` wide and this high; the W124's 1.17 over
+1.08 stands close round the tyre's sides and clear over its top), `archSegments?` (segments
+round each arch, tub columns at even angles; absent 12; the W124's 8 for its triangle
+budget), `archToSill?`
 (the arch's edge in the skin and the well's inner wall never run below the sill there
 (`BodyFrame.archEdgeY`): on a body whose sill stands over the hub, the UAZes', the arch's
 ends stop at the sill instead of hanging to the hub's height as a skirt beside the tyre;
@@ -929,7 +933,10 @@ One per car, written in step 2 from the measurements file: the REAL car's number
 (the drawing's side/front view: `image`, `crop`, and the pixel→metre registration from the
 measurements file's scale table: `s = (px − s[0])·s[1]`, `x = (px − x[0])·x[1]`, `y = (y[0] −
 py)·y[1]`). Body keys: `length`, `width`, `height` (listed against kit-proportions' 3 %
-stretch, not judged), `wheelbase`, `overhangFront/Rear`, `screenFoot`, `screenTop`,
+stretch, not judged), `wheelbase`, `overhangFront/Rear`, `archFront`, `archRear` (each
+arch's opening from the side, `[top over the hub, reach ahead of the hub, reach behind it]`
+at the hub's height; the opening is what a line from the left sees as a wheel, the well or
+nothing), `screenFoot`, `screenTop`,
 `backLightTop`, `backLightFoot` (profile corners `[s, y]`, judged across the measured edge),
 `beltY`, `railY` (the visible side glass's foot and top at the front door), `sideGlassBelt`,
 `sideGlassRail` (every pane's run along the car), `doorFront`, `doorRear` (shut lines 10 cm
@@ -1054,8 +1061,10 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).
 
-Lowest point of the body: 0.170 m, the factory ground clearance (the classic's diff, the
-Samara's fuel tank; silencers 25 mm above it).
+Lowest point of the body: 0.170 m (0.220 on the Nivas and UAZs), the factory ground
+clearance (the classic's diff, the Samara's fuel tank). The exhaust never reaches it: its
+lowest is 2 mm over it (bay.ts `exhaustLow`), and wherever the floor leaves room it hangs
+10 mm under the floor (`EXHAUST_GAP`), well above it.
 
 ## Telling the classics apart: 2101 / 2103 / 2105 / 2106 / 2107
 

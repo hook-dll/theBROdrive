@@ -1105,6 +1105,69 @@ each measurements file's "Review 2".
   hidden as built. A save naming `kit_uaz469_police` loads on `kit_uaz469`. The plain
   UAZ-469 is unchanged.
 
+## Mercedes W124, the owner's first review (2026-10-27)
+
+- **«форма колёсных арок»; «передний свес у 190e довольно короткий» (on a W201 photo).** →
+  The draft's arches were circles (front 1.18 R, 0.374) whose tops were right (side photo
+  0.371, drawing 0.366), but the photo's front arch hugs the tyre's sides: 3 cm of black at
+  the hub's height, not 5.7; the ring of black ahead of the tyre read as a long nose. The
+  overhang itself was 0.82 against the published 0.815 (angurten.de; W201 traits only, its
+  photo is no W124). → The front arch a half ellipse 0.343 wide and 0.371 high (new
+  `WheelSpec.frontArchRise`, the front counterpart of `rearArchRise`); the rear kept (it
+  measures as the circle, higher than the front, not lower); the hubs 0.815 / 3.615; the
+  front bumper wrapped back to the arch. kit-drawing measures each arch's opening now
+  (`archFront`, `archRear`), so later cars can be held to their photos. *spec.ts, body.ts
+  `archY`, mercedes.ts, tools/kit-drawing.ts, refs/w124.json*.
+- **«вздутый багажник».** → The deck rose from the back light's foot to a peak at s 4.35
+  and fell to the tail: a hump. The drawing's centre line peaks at the lid's front edge
+  (1.056 at 4.10) and falls straight to the tail (1.004 at 4.68); the side photo is level.
+  → The deck station moved to the lid's front edge (4.08, 1.055), straight to a crisp
+  corner at 4.68 (1.02); the wing's top edge rises with the lid so the crown across stays
+  1.5 cm (a crown changing from 1 to 4 cm over 12 cm was a dent, kit-surface). *mercedes.ts
+  stations*.
+- **«а разве спереди не ребристые фонари?»** → Only the tail units had `ribs`. → `ribs: 3`
+  on the front unit (dark lines, the owner's choice). *mercedes.ts `cornerLamps`*.
+- **«треугольники - ну явно же есть, где сэкономить»** (13 621). → The provenance census:
+  every point of a raked shut line and of `roofDrop` is a side row or a roof bend along the
+  whole car, and each arch adds 15 tub columns. → The rear door's edge bent at the flap's
+  existing rows and sharp at its foot (`foot.knee`, 549 triangles), `roofDrop` thinned
+  (371), 8 arch segments (new `WheelSpec.archSegments`) and one station fewer (with the
+  boot, 461); the ribs, the boot's crown and the lowered sill added 204: 13 621 → 12 444.
+  *mercedes.ts, body.ts `tubColumns`; measurements-w124.md §8*.
+- **The sill «по чертежу»** (0.255 / doors 0.275 over the drawn 0.19 / 0.21). → The
+  classic exhaust stood through a floor at 0.19. → The exhaust made flatter for every car
+  (the Exhaust change, bay.ts), then the W124's sill 0.19 and doors' bottom 0.21; the
+  `accepted` deviation in refs/w124.json removed. *mercedes.ts stations, `doorBottom`*.
+
+## Exhaust under the floor (2026-10-27)
+
+- **«выхлоп у всех машин разный, это мы выхлоп везде одинаковый добавляем, а ведь его можно
+  сделать и более плоским, более аккуратным, менее торчащим снизу. порог нужно делать по
+  чертежу» (owner, on the W124 draft).** → The exhaust hung from the clearance, not from
+  the car: the run at 35 mm (classic) or 22 mm (Samara) over it, the resonator from 6 mm
+  over it up to the run plus 4 cm, the silencer 25 mm over it and 85 mm tall
+  (`SILENCER_TUCK`), whatever the floor above. Where a sill is drawn low the cans stood
+  up through the shell's floor, so the Vectra A (drawn 0.205 → 0.22 / 0.25), the W124
+  (0.19 → 0.255), the GAZ-24 and 31029 (a level 0.262 over the drawn 0.24–0.26) had their
+  sills raised over the drawing for kit-zfight; on a high body (the UAZs) the silencer
+  hung a hand under the tail, which a per-car `exhaustTuck` patched. → One rule on every
+  car, from the floor: the pipe (Ø36, its section on a corner, so no face lies along a
+  floor) runs 10 mm under the shell's floor wherever it is (`EXHAUST_GAP`); the resonator
+  (0.11 × 0.06) and the silencer (0.30 × 0.07, at the back of its room where the floor has
+  risen) are flat ovals tucked the same way; the pipe dips under the rear axle and the
+  Panhard rod (classic) or the beam (Samara) and climbs behind it; the tail pipe exits
+  under the rear bumper's foot (exterior.ts `bumperFoot`). Nothing goes below 2 mm over
+  the clearance (`exhaustLow`), so the diff, the axle or the tank stays the lowest point;
+  where the floor is too low for the pipe or a can (the Nivas, the Oka, a sill at its
+  drawing) they rise into it, as into a real tunnel, a can's top 12 mm over the floor
+  under the carpet. The classic's run moved inboard (x −0.09) inside the floor's
+  crossmembers. `exhaustTuck` is gone (the rule subsumes it, 10 mm instead of 30 mm under
+  the UAZs' floors). 152 triangles per car as before (the UAZs 164 → 152). Every car's
+  exhaust moved (owner's request); fingerprints not re-recorded. kit-zfight: no exhaust
+  cluster on any car; the Vectra at its drawn 0.205 sill (0.30 at the back light's foot)
+  and the W124 at 0.19 pass too. *bay.ts `exhaust`, `pipeUnder`, `canUnder`, `tube`
+  `ridge`; exterior.ts `bumperFoot`; spec.ts, uaz.ts*.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
