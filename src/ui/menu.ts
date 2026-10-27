@@ -1,6 +1,6 @@
 import type { DriveSummary, SaveBackend, SaveListing, SaveMeta } from '../save/save';
 import type { WorldState } from '../game/state';
-import { BINDABLE_ACTIONS, isSystemControlCode } from '../core/input';
+import { BINDABLE_ACTIONS, formatKey, isSystemControlCode } from '../core/input';
 import { gamepads, PAD } from '../core/gamepad';
 import {
   DAY_CYCLE_MAX_MINUTES,
@@ -872,16 +872,6 @@ export interface PauseHooks {
   giveShells?: () => void;
   /** Puts the player and the driven car on the road at a kilometre. Dev only. */
   jumpToKm?: (km: number) => void;
-}
-
-/** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
-function formatKey(code: string): string {
-  if (code.startsWith('Key')) return code.slice(3);
-  if (code.startsWith('Digit')) return code.slice(5);
-  if (code.startsWith('Numpad')) return `Numpad ${code.slice(6)}`;
-  if (code === 'Mouse0') return 'LMB';
-  if (code === 'Mouse2') return 'RMB';
-  return code.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
 /** What the settings screen needs from the sheet that opens it: the title or the pause. */

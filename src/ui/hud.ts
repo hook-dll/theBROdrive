@@ -28,6 +28,11 @@ export interface DrivingReadout {
   engineRunning: boolean;
   engineDestroyed: boolean;
   /**
+   * The key that starts the engine (`InputReader.keyLabel('engine')`) while it is stopped
+   * and the player sits in the driver's seat; null otherwise. The display then tells him.
+   */
+  engineStartKey: string | null;
+  /**
    * Engine coolant temperature, or null when the car has no engine fitted (the
    * gauge then reads nothing rather than lying about a cold engine).
    */
@@ -188,6 +193,7 @@ export class Hud {
    */
   private autopilotFaces: AutopilotMode | null = null;
   private engineOff = false;
+  private engineStartKey: string | null = null;
   private radioText: string | null = null;
   private radioOffUntil = 0;
   private displayMessage = '';
@@ -326,6 +332,7 @@ export class Hud {
       if (!driving) {
         this.warningsSignature = '';
         this.engineOff = false;
+        this.engineStartKey = null;
         this.refreshSegmentDisplay();
         this.gyro.setPedals(null);
       }
@@ -359,6 +366,7 @@ export class Hud {
     const signature = warnings.join('   ');
     if (signature !== this.warningsSignature) this.warningsSignature = signature;
     this.engineOff = !readout.engineRunning;
+    this.engineStartKey = readout.engineStartKey;
     this.refreshSegmentDisplay();
     this.gyro.setPedals(readout.pedals);
   }
@@ -426,6 +434,7 @@ export class Hud {
     let problemMessage = this.warningsSignature;
     if (this.engineOff) {
       problemMessage += `${problemMessage ? '   ' : ''}ENGINE OFF`;
+      if (this.engineStartKey) problemMessage += ` - ${this.engineStartKey} START`;
     }
     const hasProblems = problemMessage.length > 0;
     const radioMessage = this.radioText === RADIO_OFF_MESSAGE && now >= this.radioOffUntil

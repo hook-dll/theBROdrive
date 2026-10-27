@@ -61,6 +61,8 @@ export interface InputFrame {
   toggleLights: boolean;
   toggleLeftIndicator: boolean;
   toggleRightIndicator: boolean;
+  /** Start or stop the engine of the car the player drives: tap, consumed by the driver's seat. */
+  toggleEngine: boolean;
   cycleCamera: boolean;
   /** Step the car radio: off → station 1 → station 2 → off. Tap, consumed by audio. */
   radioCycle: boolean;
@@ -136,6 +138,7 @@ export function emptyInput(): InputFrame {
     toggleLights: false,
     toggleLeftIndicator: false,
     toggleRightIndicator: false,
+    toggleEngine: false,
     cycleCamera: false,
     radioCycle: false,
     recenterCamera: false,
@@ -191,6 +194,7 @@ export const BINDABLE_ACTIONS: readonly {
   // while driving impossible.
   { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
+  { id: 'engine', label: 'Start / stop engine', defaultKeys: ['KeyE'] },
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },
@@ -232,6 +236,16 @@ export function isSystemControlCode(code: string): boolean {
     || code === 'NumpadAdd'
     || code === 'Minus'
     || code === 'NumpadSubtract';
+}
+
+/** Turns a KeyboardEvent.code into something a human reads: KeyW -> W. */
+export function formatKey(code: string): string {
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Numpad ${code.slice(6)}`;
+  if (code === 'Mouse0') return 'LMB';
+  if (code === 'Mouse2') return 'RMB';
+  return code.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
 /**
@@ -663,6 +677,12 @@ export class InputReader {
     this.keys = next;
   }
 
+  /** The first key bound to `action`, as a human reads it (`formatKey`); '' when unbound. */
+  keyLabel(action: string): string {
+    const code = this.keys[action]?.[0];
+    return code === undefined ? '' : formatKey(code);
+  }
+
   /**
    * Produces the frame for this tick. Mutates and returns an internal object, so
    * callers must not retain it across ticks.
@@ -789,6 +809,7 @@ export class InputReader {
       this.anyPressed(this.keys.indicatorLeft) || (this.driving && this.padPressed(PAD.DLeft));
     f.toggleRightIndicator =
       this.anyPressed(this.keys.indicatorRight) || (this.driving && this.padPressed(PAD.DRight));
+    f.toggleEngine = this.driving && this.anyPressed(this.keys.engine);
     f.cycleCamera =
       this.anyPressed(this.keys.camera) || taps?.camera === true || this.padPressed(PAD.Y);
     // Mouse driving is the mouse's own mode, so the pad has no button for it, and on

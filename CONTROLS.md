@@ -22,7 +22,7 @@ two actions share the key by default and can be split in Settings → Controls.
 ## One interaction key: F
 
 `F` (the bindable "Interact", the pad's X, the touch overlay's F) is every interaction
-there is; `E` is bound to nothing. One press means one thing, decided by the aim
+there is; `E` is the engine's switch (below). One press means one thing, decided by the aim
 (`Interaction.fixedUpdate`, `src/player/interaction.ts`).
 
 **On foot** the press belongs to the aim when the aim shows something: a named world
@@ -131,6 +131,35 @@ cannot take with his load says why.
 
 Cars without a kit body keep the old rule: F at the car's body enters, and exits on the
 left.
+
+## The engine: E
+
+`E` (the bindable "Start / stop engine") starts and stops the engine of the car the
+player drives, from the driver's seat only; from another seat it toasts "only the driver
+can do that". There is no key item and no ignition to find: every car starts on `E`
+(`Vehicle.toggleEngine`, `src/vehicle/vehicle.ts`).
+
+- **Stop:** the engine stops at once and spins down; the throttle does nothing, the
+  display reads `ENGINE OFF - E START`, and the kit dash goes dark (needles on their pins,
+  warning lamps out, volts 0).
+- **Start:** the starter turns for 0.55-0.9 s, no torque meanwhile, and at its end the
+  engine catches and idles if it can run (fuel, the engine and its air filter fitted, not
+  boiled). If it cannot, the starter turns and nothing fires: a failed start, and the
+  engine stays stopped. `E` while cranking lets go of the key.
+- **In gear, a stopped engine only drags.** Nothing fires and nothing idles it, so it
+  never moves the car; the crank turns only as the wheels turn it, and its compression
+  holds the car back (`Drivetrain.update`): pushed at 3 m/s in first it is down to
+  0.6 m/s after 3 s (neutral: 1.4 m/s), and on a 6% slope in first it crawls at
+  0.1 m/s where in neutral it rolls away.
+- **Stalls stay stopped.** An engine that runs dry, loses a part or boils over is stopped
+  as if switched off; after refuelling, refitting or cooling, `E` starts it again.
+- **E stops the autopilot too.** Stopping the engine while the autopilot drives switches
+  the autopilot off, as `P` does ("autopilot off"); starting the engine engages nothing.
+  An engaged autopilot that finds the engine stopped (a stall) starts it itself, once it
+  can run.
+- Getting out leaves the engine as it is: a running car idles on. The switch is saved
+  with the car (`CarState.engineStopped`). Traffic and every car nobody has switched off
+  run as before.
 
 ## Gamepad (Xbox-style, W3C "standard" mapping)
 

@@ -364,7 +364,6 @@ export class VehicleAudio {
   private boil = 0;
 
   private lastGearLabel = '';
-  private wasRunning = false;
   private active = false;
   private perspective: CarPerspective = 'outside';
   /** How much of the cabin's shell is around the listener: 1 shut, 0 open or outside. */
@@ -663,7 +662,6 @@ export class VehicleAudio {
     ramp(this.out.gain, active ? 1 : 0, this.mixer.now, 0.12);
     ramp(this.engineOut.gain, active ? 1 : 0, this.mixer.now, 0.12);
     if (!active) {
-      this.wasRunning = false;
       this.lastHandbrake = null;
     }
   }
@@ -760,9 +758,8 @@ export class VehicleAudio {
     this.placeSources(pose, now);
 
     // --- engine -----------------------------------------------------------------
+    // The starter is the voice's own: it follows the car's crank events (`crankSeq`).
     this.engine.update(state);
-    if (state.engineRunning && !this.wasRunning) this.engine.crank();
-    this.wasRunning = state.engineRunning;
     // Through the cabin the bay is a firewall away and the tailpipe three metres
     // behind a closed boot; from outside the tailpipe dominates.
     const engineCabin = this.engineHeardAs === 'cabin';

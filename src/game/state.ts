@@ -115,6 +115,13 @@ export interface CarState {
    */
   engineTempC: number;
   /**
+   * The engine is stopped: the driver switched it off (`Vehicle.stopEngine`), it stalled
+   * (the tank ran dry, it boiled) or a start failed, and nothing turns it again until the
+   * driver starts it (`Vehicle.startEngine`). Absent: it runs whenever fuel and parts let
+   * it, which is every car nobody has switched off.
+   */
+  engineStopped?: true;
+  /**
    * Boot cells. `null` is an empty cell; the array's LENGTH is the car's capacity,
    * fixed at spawn from the model, so a save carries the layout it was created with.
    */
@@ -501,6 +508,7 @@ export type WorldDelta =
   | { t: 'car_bonnet'; carId: string; cell: number; item: Item | null }
   | { t: 'car_fluid'; carId: string; fluid: 'water' | 'oil'; litres: number }
   | { t: 'car_engine_temp'; carId: string; celsius: number }
+  | { t: 'car_engine'; carId: string; stopped: boolean }
   | { t: 'car_storage'; carId: string; cell: number; item: Item | null }
   /** One place in a car's cabin (vehicle/cabin.ts) laid on or cleared. */
   | { t: 'car_cabin'; carId: string; place: number; item: Item | null }
@@ -976,6 +984,13 @@ export class GameWorld {
         car.engineTempC = Number.isFinite(delta.celsius)
           ? Math.min(400, Math.max(-60, delta.celsius))
           : 30;
+        break;
+      }
+      case 'car_engine': {
+        const car = s.cars[delta.carId];
+        if (!car) break;
+        if (delta.stopped) car.engineStopped = true;
+        else delete car.engineStopped;
         break;
       }
       case 'car_storage': {

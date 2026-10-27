@@ -122,6 +122,15 @@ const PART_THROTTLE_PUMPING_FADE = 0.1;
  * coast-down stays ~2.5-4 m/s² instead of climbing past 5.
  */
 const OVER_REV_BRAKE_GAIN = 0.2;
+/**
+ * Crank speed, rad/s, over which a STOPPED engine's drag in gear comes in (`update`,
+ * `engineRunning` false). Its compression and pumping oppose the crank turning, so the
+ * drag takes the sign against the motion; faded in from rest instead of switching sign
+ * there, so it can never push a car standing still, only resist one moving. About 30 rpm
+ * [E: chosen short; the crank's inertia (0.18 kg·m² for a 1.5) over the drag's slope
+ * there (2.5 · 0.03 · 110 Nm / 3 ≈ 2.8 N·m·s) is ~65 ms, fifteen of the 240 Hz substeps].
+ */
+const STOPPED_DRAG_FADE_RAD_S = 3;
 
 /**
  * Part-throttle automatic shift points, as fractions of redline. The wide gap is
@@ -805,6 +814,7 @@ export class Drivetrain {
     autoShift: boolean,
     reverseRequested: boolean,
     forwardDemand: number,
+    engineRunning: boolean,
   ): DrivetrainOutput {
 
     dt = dt > 0 ? dt : 0;
@@ -855,7 +865,8 @@ export class Drivetrain {
       // (but never reaches) the redline at full — or the thermal ceiling, so a driver
       // blipping a boiling engine cannot rev it past the limit the gears respect.
       const ceilingRpm = engine.redlineRpm * this.thermalRevLimit * 0.95;
-      let targetRpm = engine.idleRpm + demand * Math.max(0, ceilingRpm - engine.idleRpm);
+      // A stopped engine runs down to rest: nothing fires, nothing governs it.
+      let targetRpm = engineRunning ? engine.idleRpm + demand * Math.max(0, ceilingRpm - engine.idleRpm) : 0;
       // Mid-shift the engine management steers the crank toward the speed the NEW gear
       // will take: fuel is cut while the pedal would carry it past that (both modes —
       // lifting for the change is what every driver does), and in the automatic mode
@@ -863,7 +874,7 @@ export class Drivetrain {
       // downshift is matched by the driver's own blip or not at all. A gear going in
       // below idle is a pull-away: the crank follows the pedal up to the bite the
       // launch will hold it at, as a driver raises the revs with the clutch down.
-      if (this.gear !== GEAR_NEUTRAL) {
+      if (this.gear !== GEAR_NEUTRAL && engineRunning) {
         const gearboxRpm = inputRad * RPM_PER_RAD_PER_SEC;
         if (gearboxRpm < engine.idleRpm) {
           targetRpm = Math.min(targetRpm, biteRpm);
@@ -878,8 +889,26 @@ export class Drivetrain {
       this.engagement = 0;
       this.updateBoost(dt, demand, engine);
       // Idle burn: keeping the engine turning with no load in neutral.
-      const idling = this.gear === GEAR_NEUTRAL && this.shiftTimer <= 0;
+      const idling = this.gear === GEAR_NEUTRAL && this.shiftTimer <= 0 && engineRunning;
       return { driveTorqueNm: 0, rpm: this.rpmValue, fuelBurnLitres: idling ? this.idleBurnLps * dt : 0 };
+    }
+
+    if (!engineRunning) {
+      // A gear in and the engine stopped: no idle governor, no launch. The driver's foot is
+      // off the clutch, so the crank turns only as the wheels turn it, and it drags them —
+      // the closed-throttle overrun drag at the crank's true speed, its pumping share faded
+      // in over STOPPED_DRAG_FADE_RAD_S so it always opposes the motion. Pushed or rolling
+      // downhill in gear, the car is held back; standing, it is not pushed.
+      this.clutch = 'locked';
+      this.engagement = 1;
+      this.updateBoost(dt, 0, engine);
+      const speed = Math.abs(inputRad);
+      this.rpmValue = Math.min(speed * RPM_PER_RAD_PER_SEC, engine.redlineRpm);
+      const pumping = PUMPING_LOSS_FRACTION * engine.peakTorqueNm;
+      const dragNm =
+        CLOSED_THROTTLE_BRAKE_FACTOR *
+        (engine.brakingCoeff * this.brakeCrankSpeed(speed, engine) + pumping * Math.min(1, speed / STOPPED_DRAG_FADE_RAD_S));
+      return { driveTorqueNm: -Math.sign(inputRad) * dragNm * total, rpm: this.rpmValue, fuelBurnLitres: 0 };
     }
 
     // A gear is in and the clutch is closing or closed. Below idle at the gearbox side

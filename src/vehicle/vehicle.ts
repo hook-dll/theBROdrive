@@ -790,6 +790,17 @@ export interface VehicleAudioState {
   bumpStopMps: number;
   /** Largest unexplained horizontal speed loss (a collision), m/s. Zeroed on read. */
   impactMps: number;
+  // --- the starter: a change of `crankSeq` is an event, the other two its payload ---
+  /**
+   * Bumped by every start the driver makes (`Vehicle.startEngine`) and by a start cut
+   * short (`stopEngine` while cranking). The audio cranks on a change it sees, never on
+   * the value it first finds, so a voice picking up a car already running stays silent.
+   */
+  crankSeq: number;
+  /** That crank's length, seconds; 0 when the crank was cut short. */
+  crankSeconds: number;
+  /** Whether the engine catches at the crank's end; false: the starter turns, nothing fires. */
+  crankCatches: boolean;
 }
 
 /**
@@ -1029,6 +1040,13 @@ const DOME_ANGLE = 1.25;
  * measured box's centre to the millimetre.
  */
 const SPOT_REACH_MARGIN_M = 0.5;
+/**
+ * How long the starter turns before the engine catches, seconds: a warm carburettor four
+ * fires within a second [E: the engine voice's own crank, audio/engine-worklet.ts, which
+ * this replaced as the source of the length]. Each start draws its own from the range.
+ */
+const CRANK_MIN_S = 0.55;
+const CRANK_SPREAD_S = 0.35;
 
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
@@ -1130,9 +1148,10 @@ export class Vehicle implements Rebasable {
   private kitHandbrake = 0;
   /**
    * The ignition is on: somebody drives this car (the player or the traffic), latched in
-   * the fixed step. A parked car's oil gauge and voltmeter rest on their pins and its
-   * warning lamps are dark, but for the lamps of the lights themselves (indicators, side
-   * lights, main beam): those circuits need no key.
+   * the fixed step, and the driver has not switched the engine off (`keyOff`). A parked
+   * car's oil gauge and voltmeter rest on their pins and its warning lamps are dark, but
+   * for the lamps of the lights themselves (indicators, side lights, main beam): those
+   * circuits need no key.
    */
   private kitIgnition = false;
   /** The kit courtesy lamp's node, which the cabin's light hangs from (`syncDomeLight`). */
@@ -1339,6 +1358,19 @@ export class Vehicle implements Rebasable {
    */
   private overheatStalled = false;
   /**
+   * The engine switch, mirrored into `CarState.engineStopped` (`setStopped`). Set by the
+   * driver (`stopEngine`), by a stall (the tank dry, the parts gone, the overheat latch)
+   * and by a start that did not catch; cleared only by a start that does. False on every
+   * car nobody has switched off: it runs whenever fuel and parts let it.
+   */
+  private stopped: boolean;
+  /** The driver switched the engine off himself: the key is out and the dash goes dark. */
+  private keyOff: boolean;
+  /** Seconds left of the starter turning (`startEngine`); 0 when not cranking. */
+  private crankLeft = 0;
+  /** Starts made in this car's life, each drawing its own crank length (`hash01`). */
+  private crankCount = 0;
+  /**
    * Seconds this engine has been RUN with no oil in it, decayed while it has oil.
    * See the destruction block in `fixedUpdate`.
    */
@@ -1509,6 +1541,9 @@ export class Vehicle implements Rebasable {
     bumpMps: 0,
     bumpStopMps: 0,
     impactMps: 0,
+    crankSeq: 0,
+    crankSeconds: 0,
+    crankCatches: false,
   };
   /** Per-surface loaded-wheel count for the step, for `audioState.surface`. */
   private readonly surfaceVotes = new Uint8Array(8);
@@ -1627,6 +1662,9 @@ export class Vehicle implements Rebasable {
       this.model.rearDriveBias,
     );
 
+    this.stopped = carState.engineStopped === true;
+    // A car saved switched off or stalled is found with the key out.
+    this.keyOff = this.stopped;
     this.localFuel = carState.fuelLitres;
     this.lastAuthFuel = carState.fuelLitres;
     this.localWater = carState.waterLitres;
@@ -1961,13 +1999,88 @@ export class Vehicle implements Rebasable {
 
 
   /**
-   * The fuel/parts gate, plus the overheat stall. A critically hot engine is NOT
-   * running: it has nipped up on its own oil film and will not turn again until the
-   * coolant is back under the warning line, which is the only reason a temperature
-   * gauge is worth watching.
+   * Whether the engine COULD turn: the fuel/parts gate, plus the overheat stall. A
+   * critically hot engine cannot: it has nipped up on its own oil film and will not
+   * turn again until the coolant is back under the warning line, which is the only
+   * reason a temperature gauge is worth watching.
    */
-  get engineRunning(): boolean {
+  get engineCanRun(): boolean {
     return !this.overheatStalled && bonnetCanRun(this.car.bonnet, this.localFuel);
+  }
+
+  /** Turning and making torque: not switched off or stalled, not cranking, and able to. */
+  get engineRunning(): boolean {
+    return !this.stopped && this.crankLeft <= 0 && this.engineCanRun;
+  }
+
+  /** Switched off, stalled, or still cranking: what the driver's start key would start. */
+  get engineStopped(): boolean {
+    return this.stopped;
+  }
+
+  /** The starter is turning (`startEngine`). */
+  get engineCranking(): boolean {
+    return this.crankLeft > 0;
+  }
+
+  /**
+   * Turns the starter. For a crank of its own length the engine gives no torque; at its
+   * end it runs if it can (`engineCanRun`), else it stays stopped: the starter turned and
+   * nothing caught. Does nothing on an engine running or already cranking.
+   */
+  startEngine(): void {
+    if (!this.stopped || this.crankLeft > 0) return;
+    this.keyOff = false;
+    this.crankCount++;
+    const seconds = CRANK_MIN_S + CRANK_SPREAD_S * hash01(Math.floor(this.bouncePhase * 0x7fffffff), this.crankCount);
+    this.crankLeft = seconds;
+    const audio = this.audioState;
+    audio.crankSeq++;
+    audio.crankSeconds = seconds;
+    audio.crankCatches = this.engineCanRun;
+  }
+
+  /** Switches the engine off, or cuts a crank short. The key comes out: the dash goes dark. */
+  stopEngine(): void {
+    if (this.crankLeft > 0) {
+      this.crankLeft = 0;
+      const audio = this.audioState;
+      audio.crankSeq++;
+      audio.crankSeconds = 0;
+      audio.crankCatches = false;
+    }
+    this.keyOff = true;
+    this.setStopped(true);
+    this.audioState.engineRunning = false;
+  }
+
+  /** The driver's one key: a stopped engine is started, a running or cranking one stopped. */
+  toggleEngine(): void {
+    if (this.stopped && this.crankLeft <= 0) this.startEngine();
+    else this.stopEngine();
+  }
+
+  private setStopped(stopped: boolean): void {
+    if (this.stopped === stopped) return;
+    this.stopped = stopped;
+    this.world.apply({ t: 'car_engine', carId: this.car.id, stopped });
+  }
+
+  /**
+   * Runs the starter down, and in a driven step (`stalls`) latches a stall: an engine
+   * that can no longer run (the tank dry, a part taken, the overheat latch) is stopped,
+   * and once fuel, the part or a cool block is back it waits for the driver to start it.
+   */
+  private stepEngineSwitch(dt: number, stalls: boolean): void {
+    if (this.crankLeft > 0) {
+      this.crankLeft -= dt;
+      if (this.crankLeft > 0) return;
+      this.crankLeft = 0;
+      if (this.engineCanRun) this.setStopped(false);
+      this.audioState.engineRunning = this.engineRunning;
+    } else if (stalls && !this.stopped && !this.engineCanRun) {
+      this.setStopped(true);
+    }
   }
 
   /** The live cooling state: dashboard readout, prompts and the harness read this. */
@@ -2522,7 +2635,8 @@ export class Vehicle implements Rebasable {
     braking: boolean,
   ): void {
     this.lamps.adoptLiveState();
-    this.kitIgnition = true;
+    this.kitIgnition = !this.keyOff;
+    this.stepEngineSwitch(dt, false);
     const t = this.chassisBody.translation(this.railTranslation);
     const v = this.railVelocity;
     v.x = (x - this.origin.x - t.x) / dt;
@@ -2629,6 +2743,7 @@ export class Vehicle implements Rebasable {
     if (!tyres) return;
     this.lamps.adoptLiveState();
     this.kitIgnition = false;
+    this.stepEngineSwitch(dt, false);
     // Nobody is driving this one, so no step of its own explains its velocity. Leaving
     // the impact detector primed across that gap would report the whole standing
     // interval as one collision the moment the player got back in.
@@ -2911,6 +3026,7 @@ export class Vehicle implements Rebasable {
     }
 
     this.resyncBodyCondition();
+    this.stepEngineSwitch(dt, true);
 
     // The solver runs between fixedUpdate calls. Sampling here therefore compares
     // its completed result against the velocity cached before the prior solve.
@@ -3000,7 +3116,7 @@ export class Vehicle implements Rebasable {
     const throttle = this.engineRunning ? throttleInput * this.tcsScale : 0;
     this.kitThrottle = throttleInput;
     this.kitHandbrake = input.handbrake ? 1 : 0;
-    this.kitIgnition = true;
+    this.kitIgnition = !this.keyOff;
     // The intake, read from the bonnet every step: a turbo bolted on or a filter
     // swapped at the roadside is felt on the next tick, and the filter's breath
     // includes the wear driven since its last write.
@@ -3451,8 +3567,9 @@ export class Vehicle implements Rebasable {
       this.parkingHoldRequested = true;
     }
 
-    // Consume fuel locally and emit throttled absolute deltas.
-    if (this.stepFuelBurnLitres > 0) {
+    // Consume fuel locally and emit throttled absolute deltas. A stopped engine burns none:
+    // the drivetrain still turns its crank model at idle, but nothing is firing.
+    if (this.engineRunning && this.stepFuelBurnLitres > 0) {
       this.localFuel = Math.max(0, this.localFuel - this.stepFuelBurnLitres);
       this.fuelEmitTimer += dt;
       if (this.fuelEmitTimer >= FUEL_EMIT_INTERVAL) {
@@ -4204,7 +4321,8 @@ export class Vehicle implements Rebasable {
     kit.set('handbrake', this.kitHandbrake);
     kit.set('gear', this.drivetrain.gearIndex);
     kit.set('speed', this.speedKmh);
-    kit.set('rpm', this.drivetrain.rpm);
+    // A stopped engine's tachometer rests on its pin; the drivetrain's crank model idles on.
+    kit.set('rpm', this.engineRunning ? this.drivetrain.rpm : 0);
     const fuel = this.model.tankLitres > 0 ? this.localFuel / this.model.tankLitres : 0;
     kit.set('fuel', fuel);
     kit.set('temp', this.cooling.gaugeFraction);
@@ -4656,6 +4774,7 @@ export class Vehicle implements Rebasable {
         automatic,
         input.reverse,
         input.throttle,
+        this.engineRunning,
       );
       if (drive.driveTorqueNm !== 0) this.stepDriveTorque = true;
       this.stepFuelBurnLitres += drive.fuelBurnLitres;

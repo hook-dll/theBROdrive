@@ -81,6 +81,7 @@ function paint(): void {
     waterFraction: index >= 3 ? 0.15 : 0.9,
     oilFraction: 0.8,
     engineRunning: sample.zone !== 'critical',
+    engineStartKey: null,
     engineDestroyed: false,
     autopilotMode: null,
     pedalLever: null,

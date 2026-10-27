@@ -45,10 +45,11 @@
  * place them at the two ends of the car and filter them differently through a cabin.
  *
  * Starting and stopping are the processor's own: a 'crank' message runs the starter
- * and the first catching cycles; dropping `running` is a stall, not a switch — the
- * last cylinders sputter and miss for half a second, a carburettor coughs, the crank
- * runs down through compression-only strokes, and the block rocks back on its
- * mounts as it stops.
+ * for the car's crank time and, if it `catches`, the first catching cycles; one that
+ * does not catch turns on compression alone and runs down; 'crank-stop' lets the key go
+ * mid-crank. Dropping `running` is a stall, not a switch — the last cylinders sputter
+ * and miss for half a second, a carburettor coughs, the crank runs down through
+ * compression-only strokes, and the block rocks back on its mounts as it stops.
  */
 
 // AudioWorkletGlobalScope is not in the DOM lib.
@@ -185,6 +186,13 @@ class EngineProcessor extends AudioWorkletProcessor {
   // Start / stop.
   private crankLeft = 0;
   private crankTotal = 0.72;
+  /** Whether this crank fires at its end (the 'crank' message's `catches`). */
+  private crankCatches = true;
+  /**
+   * Seconds a catching crank's end waits for `running` (the car's own crank ends on its
+   * fixed step, a frame or so from this one's); held at the catch's revs meanwhile.
+   */
+  private catchWait = 0;
   private flare = 0;
   private spinDown = 0;
   private spinRpm = 0;
@@ -324,9 +332,16 @@ class EngineProcessor extends AudioWorkletProcessor {
       if (data?.type === 'stop') {
         this.alive = false;
       } else if (data?.type === 'crank') {
-        this.crankTotal = 0.55 + 0.35 * this.rand01();
+        const crank = data as { seconds?: number; catches?: boolean };
+        this.crankTotal = typeof crank.seconds === 'number' && crank.seconds > 0 ? crank.seconds : 0.55 + 0.35 * this.rand01();
         this.crankLeft = this.crankTotal;
+        this.crankCatches = crank.catches !== false;
+        this.catchWait = 0;
         this.spinDown = 0;
+      } else if (data?.type === 'crank-stop' && this.crankLeft > 0) {
+        // The key let go mid-crank: the starter drops out and the crank runs down.
+        this.crankLeft = 0;
+        this.runDown(0);
       }
     };
   }
@@ -378,6 +393,14 @@ class EngineProcessor extends AudioWorkletProcessor {
     return (this.rand() + this.rand() + this.rand()) * 0.577;
   }
 
+  /** Lets the crank run down from its present revs, sputtering for `sputter` seconds first. */
+  private runDown(sputter: number): void {
+    this.spinDown = 1;
+    this.spinRpm = this.rpmNow;
+    this.sputterTotal = sputter > 0 ? sputter : 1;
+    this.sputterLeft = sputter;
+  }
+
   process(
     _inputs: Float32Array[][],
     outputs: Float32Array[][],
@@ -422,13 +445,37 @@ class EngineProcessor extends AudioWorkletProcessor {
     let starter = 0;
     if (this.crankLeft > 0) {
       // Cranking: the starter turns the engine at ~200 rpm through compression
-      // strokes; the last third of it the cylinders begin to catch.
+      // strokes; on a start that catches, the cylinders begin to fire in its last third.
       this.crankLeft -= blockSeconds;
       const t = 1 - this.crankLeft / this.crankTotal;
-      effRpm = 190 + 50 * Math.sin(t * 17) + (t > 0.7 ? (t - 0.7) * 2000 : 0);
-      combustion = t > 0.68 ? Math.min(1, (t - 0.68) * 4) * (this.rand01() < 0.8 ? 1 : 0.2) : 0;
-      starter = t < 0.85 ? 1 : 0;
-      if (this.crankLeft <= 0) this.flare = 1;
+      if (this.crankCatches) {
+        effRpm = 190 + 50 * Math.sin(t * 17) + (t > 0.7 ? (t - 0.7) * 2000 : 0);
+        combustion = t > 0.68 ? Math.min(1, (t - 0.68) * 4) * (this.rand01() < 0.8 ? 1 : 0.2) : 0;
+        starter = t < 0.85 ? 1 : 0;
+      } else {
+        // Nothing fires: the starter turns it on compression alone to the end.
+        effRpm = 190 + 50 * Math.sin(t * 17);
+        combustion = 0;
+        starter = 1;
+      }
+      if (this.crankLeft <= 0) {
+        this.crankLeft = 0;
+        if (this.crankCatches) {
+          this.flare = 1;
+          this.catchWait = running ? 0 : 0.25;
+        } else {
+          this.runDown(0);
+        }
+      }
+    } else if (this.catchWait > 0 && !running) {
+      // Caught, waiting a moment for the car to say so; if it never does, it dies.
+      this.catchWait -= blockSeconds;
+      effRpm = this.rpmNow;
+      combustion = 1;
+      if (this.catchWait <= 0) {
+        this.catchWait = 0;
+        this.runDown(0.3);
+      }
     } else if (this.spinDown > 0) {
       if (this.sputterLeft > 0) {
         // Still catching now and then: the revs sag and lurch rather than fall.
@@ -449,6 +496,7 @@ class EngineProcessor extends AudioWorkletProcessor {
         this.shudderEnv = 1;
       }
     } else if (running) {
+      this.catchWait = 0;
       effRpm = targetRpm;
     } else {
       effRpm = 0;

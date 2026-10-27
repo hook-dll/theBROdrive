@@ -3029,6 +3029,9 @@ export class Autopilot {
   drive(dt: number, vehicle: Vehicle, out: InputFrame, originX: number, originZ: number): void {
     if (!this.engagedValue) return;
     out.autoShift = true;
+    // A driver's first act: an engine switched off or stalled is started, once it can run.
+    // Until it catches the controllers below see it stopped and give it no throttle.
+    if (vehicle.engineStopped && !vehicle.engineCranking && vehicle.engineCanRun) vehicle.startEngine();
     if (this.laybyCourse) this.driveLayby(dt, vehicle, out, this.laybyCourse, originX, originZ);
     else this.driveControls(dt, vehicle, out, originX, originZ);
     this.modulateBrake(dt, vehicle, out);

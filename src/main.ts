@@ -1859,7 +1859,7 @@ async function boot(): Promise<void> {
     if (driving && !controlled) {
       player.setEnabled(false);
       if (f.cycleCamera) camera.cycleDriving();
-      if (f.toggleAutopilot || f.toggleLights || f.toggleLeftIndicator || f.toggleRightIndicator) {
+      if (f.toggleAutopilot || f.toggleLights || f.toggleLeftIndicator || f.toggleRightIndicator || f.toggleEngine) {
         hud.setToast('only the driver can do that');
       }
       // Moving to another seat leaves an engaged autopilot driving: it is the car's
@@ -1895,6 +1895,16 @@ async function boot(): Promise<void> {
         hud.setToast(
           autopilot.engaged ? `autopilot: ${autopilot.mode}` : 'autopilot off',
         );
+      }
+      // The engine's switch is the driver's. Stopping it is taking the car back: an engaged
+      // autopilot goes off, exactly as P switches it off. Starting it engages nothing.
+      if (f.toggleEngine) {
+        const stopping = !driving.engineStopped || driving.engineCranking;
+        driving.toggleEngine();
+        if (stopping && autopilot.engaged) {
+          autopilot.setEngaged(false);
+          hud.setToast('autopilot off');
+        }
       }
       autopilot.setOncomingGap(traffic.nearestOncomingDistance(activeS, 1));
       if (autopilot.engaged) {
@@ -2881,6 +2891,9 @@ async function boot(): Promise<void> {
         oilFraction: oilCap > 0 ? (car?.oilLitres ?? 0) / oilCap : 1,
         engineRunning: driving.engineRunning,
         engineDestroyed: driving.engineDestroyed,
+        // How to start it, for the driver of a stopped engine (the starter not already turning).
+        engineStartKey:
+          s.player.seat === 'driver' && driving.engineStopped && !driving.engineCranking ? input.keyLabel('engine') : null,
         // Null while the player steers, which keeps the panel's frame plain: it reports
         // WHO is driving, not whether an autopilot exists.
         autopilotMode: autopilot.engaged ? autopilot.mode : null,

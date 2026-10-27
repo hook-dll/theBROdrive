@@ -41,6 +41,9 @@ export class EngineVoice {
   private pending: EngineCharacter | null = null;
   private ready = false;
   private disposed = false;
+  /** The car whose starter this voice follows, and the last crank count it saw of it. */
+  private crankOf: VehicleAudioState | null = null;
+  private crankSeq = 0;
 
   constructor(private readonly mixer: AudioMixer) {
     this.exhaust = mixer.ctx.createGain();
@@ -63,6 +66,20 @@ export class EngineVoice {
       if (this.ready) this.build(character);
       else this.pending = character;
     }
+    // The starter, on a change of the car's crank count (`VehicleAudioState.crankSeq`).
+    // The first count a voice sees of a car is where it picks up, never an event: a voice
+    // given a car already running plays no start.
+    if (state !== this.crankOf) {
+      this.crankOf = state;
+      this.crankSeq = state.crankSeq;
+    } else if (state.crankSeq !== this.crankSeq) {
+      this.crankSeq = state.crankSeq;
+      this.node?.port.postMessage(
+        state.crankSeconds > 0
+          ? { type: 'crank', seconds: state.crankSeconds, catches: state.crankCatches }
+          : { type: 'crank-stop' },
+      );
+    }
     const p = this.params;
     if (!p) return;
     const now = this.mixer.now;
@@ -75,11 +92,6 @@ export class EngineVoice {
     // rather than have the browser warn about it every frame.
     p.idleRpm.setValueAtTime(Math.min(5000, Math.max(0, state.idleRpm)), now);
     p.redlineRpm.setValueAtTime(Math.min(12000, Math.max(100, state.redlineRpm)), now);
-  }
-
-  /** Runs the starter and the first catching cycles. */
-  crank(): void {
-    this.node?.port.postMessage({ type: 'crank' });
   }
 
   private build(character: EngineCharacter): void {
