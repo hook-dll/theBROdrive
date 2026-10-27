@@ -10,7 +10,7 @@ import { laybyLevel, laybyParkLateral, laybysBetween, type Layby } from '../src/
 import { WorldOrigin } from '../src/world/origin';
 import { ROAD_HALF_WIDTH, Road } from '../src/world/road';
 import { roadSurfaceY, SurfaceField } from '../src/world/roadsurface';
-import { DENSITY_FLOOR, RoadTraffic } from '../src/world/traffic';
+import { RoadTraffic } from '../src/world/traffic';
 import { TRAFFIC_CAPS, type ComputeLevel } from '../src/game/settings';
 import { RAILS_REFUSALS, resetTrafficProfile } from '../src/core/trafficprofile';
 import { Terrain } from '../src/world/terrain';
@@ -357,8 +357,8 @@ check(
   `${Object.keys(world.state.cars).length} persistent traffic cars`,
 );
 // Keep the stream moving through several generations. Passing has a dedicated,
-// authored playground scenario; this random stream owns the collision-free queue.
-// It is also the phase the profile is taken over: a stream at play's pace.
+// authored playground scenario. It is also the phase the profile is taken over: a
+// stream at play's pace.
 let aheadSum = 0;
 let liveSum = 0;
 let distributionSamples = 0;
@@ -398,14 +398,15 @@ check(
 const meanAhead = aheadSum / distributionSamples;
 const meanLive = liveSum / distributionSamples;
 const streamed = traffic.status;
-check(
-  'mixed traffic queues without collision',
-  streamed.impacts === 0,
-  `${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
+// Crashes between traffic cars are accepted (owner, 2026-10-28: who sows chaos may fly
+// off): a frantic third in the stream means the mixed stream's impacts are reported, not
+// gated. The turnaround and lay-by phases below still gate their own.
+console.log(
+  `INFO mixed traffic: ${streamed.impacts} impact(s), ${streamed.passes} pass(es), ${streamed.count} live`,
 );
 check(
-  'traffic density varies within the ceiling',
-  largestCount <= CAP && smallestPopulated < largestCount,
+  'traffic stays within the ceiling',
+  largestCount <= CAP,
   `${streamed.count} live, range ${smallestPopulated}-${largestCount}, cap ${streamed.cap.toFixed(0)}`,
 );
 check(
@@ -474,11 +475,10 @@ check(
     narrowCap === expected && wideCap === expected,
     `cap ${narrowCap} narrow, ${wideCap} wide, ${expected} expected`,
   );
-  const floor = Math.ceil(expected * DENSITY_FLOOR);
   check(
-    'density targets stay between the floor and replenishment cap',
-    narrowTarget >= floor && narrowTarget <= expected && wideTarget >= floor && wideTarget <= expected,
-    `${narrowTarget} narrow, ${wideTarget} wide, range ${floor}-${expected}`,
+    'the target is the replenishment cap on two lanes and four',
+    narrowTarget === expected && wideTarget === expected,
+    `${narrowTarget} narrow, ${wideTarget} wide, ${expected} expected`,
   );
   narrowTraffic.dispose();
   check(
@@ -603,15 +603,10 @@ check(
   coordinator.dispose();
 }
 
-// THE DENSITY ACTUALLY ROTATES, AND THE ROTATION IS THE POINT.
-//
-// A single draw held for 36-72 s means the range has to be wide enough to reach both
-// its quiet and its busy end within a drive. The range is `[DENSITY_FLOOR * cap, cap]`
-// (0.7, the owner's call), so a long drive must come within a car of each end. Sampled
-// over many re-rolls rather than one, because one draw proves nothing about a
-// distribution.
+// THE STREAM HOLDS ITS CAP (owner, 2026-10-28): no rotating density. The target is the
+// cap at every step of a drive, and a changed cap is the new target at once.
 {
-  const rotating = new RoadTraffic(
+  const holding = new RoadTraffic(
     physics,
     new GameWorld(newWorldState(SEED)),
     new THREE.Scene(),
@@ -620,27 +615,19 @@ check(
     loadCarModel,
     () => true,
   );
-  let lowest = Infinity;
-  let highest = 0;
-  // 900 s of driving, sampled per step: a re-roll is 36-72 s apart, so a short window
-  // proves nothing about a distribution — 200 s caught four consecutive draws inside a
-  // third of the range and read as a stuck rotation when the rotation was working.
-  for (let step = 0; step < Math.ceil(900 / FIXED_DT); step++) {
-    rotating.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
-    const target = rotating.status.target;
-    if (target > 0) {
-      lowest = Math.min(lowest, target);
-      highest = Math.max(highest, target);
-    }
+  let off = 0;
+  for (let step = 0; step < Math.ceil(120 / FIXED_DT); step++) {
+    holding.fixedUpdate(FIXED_DT, PLAYER_S, 0, 0, 0);
+    if (holding.status.target !== holding.status.cap) off++;
   }
-  const cap = Math.round(rotating.status.cap);
-  const floor = Math.ceil(cap * DENSITY_FLOOR);
+  holding.cap = 7;
+  const afterChange = holding.status.target;
   check(
-    'the density rotates over a long drive',
-    lowest <= floor + 1 && highest >= cap - 1,
-    `${lowest}-${highest} against a range of ${floor}-${cap}`,
+    'the stream holds its cap over a drive and follows a changed cap at once',
+    off === 0 && afterChange === 7,
+    `${off} steps off the cap of ${holding.status.cap} in 120 s; target ${afterChange} after cap = 7`,
   );
-  rotating.dispose();
+  holding.dispose();
 }
 
 // THE ROAD'S END TURNS CARS ROUND INSTEAD OF EATING THEM.
@@ -697,6 +684,8 @@ check(
   let strandedOnPad = 0;
   const padTime = new Map<string, number>();
   const impactsBefore = ending.status.impacts;
+  const endingCars = ending as unknown as { carList: { fullDetailFor: number; vehicle: Vehicle }[] };
+  let turnImpacts = 0;
   for (let i = 0; i < Math.ceil(180 / FIXED_DT); i++) {
     ending.fixedUpdate(FIXED_DT, endS, 0, 0, 0);
     physics.step();
@@ -716,6 +705,14 @@ check(
       if (s < 40) reachedEnd.add(id);
       else if (s > 150 && reachedEnd.has(id)) cameBack.add(id);
     });
+    // Crashes between stream cars are accepted (owner, 2026-10-28); what this gates is
+    // the turn itself: an impact (`fullDetailFor` just set to its crash hold) on a car
+    // in the last 40 m of road or on the paving.
+    for (const car of endingCars.carList) {
+      if (car.fullDetailFor !== 5) continue;
+      const p = car.vehicle.absoluteTranslation({ x: 0, y: 0, z: 0 });
+      if (Math.hypot(p.x, p.z + TERMINUS_CENTRE_M) <= TERMINUS_PAD_M || road.project(p.x, p.z, 60).s < 40) turnImpacts++;
+    }
     if (i % 12 === 0) await Bun.sleep(0);
   }
   check(
@@ -730,8 +727,8 @@ check(
   );
   check(
     'the turn costs no collisions',
-    ending.status.impacts === impactsBefore,
-    `${ending.status.impacts - impactsBefore} impact(s) while turning`,
+    turnImpacts === 0,
+    `${turnImpacts} impact(s) at the road's end; ${ending.status.impacts - impactsBefore} in the whole stream (accepted)`,
   );
   ending.dispose();
 }
@@ -755,7 +752,13 @@ check(
     () => true,
   );
   // Bench-only access to the live records, to follow each stop through its phases.
-  type StopCar = { id: string; roadLateral: number; vehicle: Vehicle; layby: { phase: string } | null };
+  type StopCar = {
+    id: string;
+    roadLateral: number;
+    vehicle: Vehicle;
+    fullDetailFor: number;
+    layby: { phase: string } | null;
+  };
   const stopCars = stops as unknown as { carList: StopCar[] };
   const lastPhase = new Map<string, string>();
   const parkLateral = laybyParkLateral(layby);
@@ -764,12 +767,16 @@ check(
   let parkedAstray = 0;
   let worstParkedOffset = 0;
   const impactsBefore = stops.status.impacts;
+  let laybyImpacts = 0;
   for (let i = 0; i < Math.ceil(LAYBY_WATCH_S / FIXED_DT); i++) {
     stops.fixedUpdate(FIXED_DT, layby.s, 0, 0, 0);
     physics.step();
     stops.postStep();
     for (const car of stopCars.carList) {
       const phase = car.layby?.phase;
+      // Crashes between stream cars are accepted (owner, 2026-10-28); what this gates is
+      // the stop: an impact (`fullDetailFor` just set to its crash hold) on a car in it.
+      if (phase !== undefined && car.fullDetailFor === 5) laybyImpacts++;
       if (phase === undefined) {
         if (lastPhase.delete(car.id)) ended++;
         continue;
@@ -806,8 +813,8 @@ check(
   );
   check(
     'lay-by stops cost no collisions',
-    status.impacts === impactsBefore,
-    `${status.impacts - impactsBefore} impact(s)`,
+    laybyImpacts === 0,
+    `${laybyImpacts} impact(s) on a car stopping; ${status.impacts - impactsBefore} in the whole stream (accepted)`,
   );
   stops.dispose();
 }

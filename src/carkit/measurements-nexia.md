@@ -191,7 +191,7 @@ Triangles: **13 472** after review 1 (body + trim 6 072, cabin 4 909, of it fine
 - **Bumpers**: one height all round; on the car the strip and the plastic run a little lower along the flanks. The slot under the grille, the plate recesses and the badge are not modelled; the intakes are black on dark plastic.
 - **Wipers** 0.48 [E] (the car has 500 / 450 mm blades); `screenBottom`, `screenHeader`, `pillar`, `rearBottom`, `rearHeader` as the Samaras [E].
 - **Running gear**: front axle share, engine mass, gearbox mass, red line and idle [E]; no braking ceiling; the 0-100 is drom.ru's (an accepted catalogue-optimistic deviation, §5).
-- **Traffic**: `kit_nexia` is not in `DRIVER_ODDS` (world/traffic.ts), so its drivers draw the default odds (half hurried, half frantic).
+- **Traffic**: drivers from the stream's mix, a third each (`DRIVER_MIX`, world/traffic.ts), as every body.
 
 ## 8. Owner's review 1 (2026-10-18): the lamps' outlines
 

@@ -241,18 +241,10 @@ interface StreamCar {
 }
 interface TrafficPrivate {
   carList: StreamCar[];
-  densityFraction: number;
-  densityTimer: number;
   removeAt(index: number): void;
 }
 const inner = traffic as unknown as TrafficPrivate;
 const cars = inner.carList;
-/** Max traffic for the whole run: the density draw held at the cap. */
-function pinDensity(): void {
-  inner.densityFraction = 1;
-  inner.densityTimer = 1e9;
-}
-pinDensity();
 
 // Every removal, and which of them were the stuck recycle (a car standing > 18 s).
 let recycledStuck = 0;
@@ -519,7 +511,6 @@ function measure(): void {
 
 let ticks = 0;
 async function tick(): Promise<void> {
-  pinDensity();
   traffic.setPlayerVehicle(ego);
   traffic.fixedUpdate(FIXED_DT, egoS, egoLateral, 0, 0);
   ego.fixedUpdate(FIXED_DT, egoInput);

@@ -371,13 +371,16 @@ export type ComputeLevel = 'very_low' | 'low' | 'medium' | 'high';
  * The ceiling counts every car alive along the 800 m of solid road either side of the
  * player (world/ranges.ts `TRAFFIC_REACH_M`). With the kit cars down to a few draws each
  * (render/kitdraw.ts) and the drivers deciding 12 times a second (world/traffic.ts
- * `TRAFFIC_CONTROL_HZ`), a stream can be big: 40 on High, 20 on Medium (owner, 2026-10-18).
+ * `TRAFFIC_CONTROL_HZ`), a stream can be big: 20 on Medium (owner, 2026-10-18), 30 on
+ * High (owner, 2026-10-28, tuned with the dev sliders; it was 40, so the cost the 40 was
+ * judged by only shrank). The stream now holds its cap rather than floating under it,
+ * so 30 is what High carries all the time, where 40 averaged about 27.
  */
 export const TRAFFIC_CAPS: Record<ComputeLevel, number> = {
   very_low: 6,
   low: 12,
   medium: 20,
-  high: 40,
+  high: 30,
 };
 
 function computeLevel(value: unknown): ComputeLevel | null {

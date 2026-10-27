@@ -60,18 +60,11 @@ import type { RoadConditionBuffer } from './gradient';
  *
  * It once was a "traffic" slider, removed because it asked a number the player had no
  * way to judge. The CPU level asks something he can: how much his processor can give.
- */
-/**
- * The smallest target fraction of the cap, so a long drive keeps changing.
- * The target is a single draw in `[DENSITY_FLOOR * cap, cap]`, re-rolled every
- * 36-72 s, and the retained FRACTION is held between re-rolls, so a changed cap (the
- * menu, the console) keeps the stream's present mood.
  *
- * 0.35 (owner, 2026-10-15), after a fifth, 0.35, a half and 0.7. With the caps at
- * 40/20/12/6 the quiet end of 0.35 is still a road with cars on it (14 of 40 on
- * High), and the swing between quiet and busy is what makes a drive change.
+ * The stream holds its cap (owner, 2026-10-28). The count once floated, re-rolled every
+ * 36-72 s between 0.35 of the cap and the cap; the owner, having tuned it with the dev
+ * sliders, wants the road as busy as the setting says.
  */
-export const DENSITY_FLOOR = 0.35;
 /** Speed advantage over the player that makes a rear spawn worth its slot. */
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
@@ -142,7 +135,7 @@ const ONCOMING_PLATOON_CHANCE = 0.75;
  * 2026-10-27: 15 met a minute, 3.5 overtaken). A road to weave through wants
  * the cars on his side and the oncoming lane mostly open.
  */
-export const SAME_DIRECTION_SHARE = 0.75;
+export const SAME_DIRECTION_SHARE = 0.65;
 /**
  * TRAFFIC ON THE PLAYER'S SIDE KEEPS TO HIS PACE, AND BELOW IT (owner, 2026-10-27: a
  * road where he is mostly the fastest car). A car going his way, ahead of him and out of
@@ -158,54 +151,13 @@ const PLAYER_PACE_SPREAD = 0.1;
 /** The slowest sleeper's lowest cap (`drawDriver`, 58 km/h): no car is held under it. */
 const PLAYER_PACE_FLOOR_MPS = 58 / 3.6;
 /**
- * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
- * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
- *
- *  - the old and the slow are always sleepers: the first four Zhigulis and the Oka;
- *  - the later Zhigulis, the Samaras (the 2115 among them) and the Nivas: 25% sleeper,
- *    25% hurried and 50% frantic (20% frantic read as no frantic at all, owner
- *    2026-10-10; the pack Nivas had these odds too);
- *  - everything else (the 2110, 2111 and 2112: an official's or a taxi driver's car,
- *    owner 2026-10-12; the kit Volgas, 24 and 31029, the same) is a car somebody drives
- *    to get somewhere fast: half hurried, half frantic.
- *
- * The world's cars are the kit bodies (`CAR_MODELS`, 2026-10-13); the rows the pack
- * bodies had (UAZs and IZh) left with them. The Oka keeps the sleeper the carforge one
- * was.
- *
- * A frantic driver still gets the BMW engine and its gearbox (`franticEngine`).
+ * WHO DRIVES WHAT: not the car (owner, 2026-10-28; from 2026-10-10 each model had its
+ * own odds, the old Zhigulis and the Oka always sleepers). Every body draws its
+ * `[sleeper, hurried, frantic]` driver from this mix, a third each; the dev menu's
+ * `driverMix` overrides it. A frantic driver gets the BMW engine and its gearbox
+ * whatever it drew (`franticEngine`).
  */
-const SLOW_CAR: readonly [number, number, number] = [1, 0, 0];
-const CALM_CAR: readonly [number, number, number] = [0.25, 0.25, 0.5];
-const FAST_CAR: readonly [number, number, number] = [0, 0.5, 0.5];
-const DRIVER_ODDS: Readonly<Record<string, readonly [number, number, number]>> = {
-  kit_vaz2101: SLOW_CAR,
-  kit_vaz2102: SLOW_CAR,
-  kit_vaz2103: SLOW_CAR,
-  kit_vaz2104: SLOW_CAR,
-  kit_vaz2105: CALM_CAR,
-  kit_vaz2106: CALM_CAR,
-  kit_vaz2107: CALM_CAR,
-  kit_vaz2108: CALM_CAR,
-  kit_vaz2109: CALM_CAR,
-  kit_vaz21099: CALM_CAR,
-  kit_vaz2115: CALM_CAR,
-  kit_vaz2121: CALM_CAR,
-  kit_vaz2131: CALM_CAR,
-  kit_vaz1111: SLOW_CAR,
-};
-/**
- * The stream's expected `[sleeper, hurried, frantic]` mix under `DRIVER_ODDS`: bodies
- * are drawn uniformly from `CAR_MODELS`, so it is the plain mean of their odds.
- */
-export const PER_CAR_DRIVER_MIX: readonly [number, number, number] = (() => {
-  const sum = [0, 0, 0];
-  for (const model of CAR_MODELS) {
-    const odds = DRIVER_ODDS[model.id] ?? FAST_CAR;
-    for (let k = 0; k < 3; k++) sum[k]! += odds[k]!;
-  }
-  return [sum[0]! / CAR_MODELS.length, sum[1]! / CAR_MODELS.length, sum[2]! / CAR_MODELS.length];
-})();
+export const DRIVER_MIX: readonly [number, number, number] = [1 / 3, 1 / 3, 1 / 3];
 /**
  * WHAT A FRANTIC DRIVER DRIVES, AND WHAT IS UNDER ITS BONNET. Any car the stream can
  * spawn, exactly as it is drawn for every other driver — a man in a hurry is a man in
@@ -275,8 +227,6 @@ const DENSE_SPAWN_INTERVAL_S = 0.5;
  * `DENSE_SPAWN_ROAD_GAP_M`. 24 is the two-lane ceiling the dense mode was written above.
  */
 const DENSE_STREAM_CARS = 24;
-const DENSITY_CHANGE_MIN_S = 36;
-const DENSITY_CHANGE_MAX_S = 72;
 const DROP_SETTLE_S = 0.8;
 /**
  * A CAR JOINS THE STREAM ROLLING. It was driving before it came into range, so it is
@@ -848,10 +798,7 @@ export interface TrafficStatus {
    */
   readonly ahead: number;
   readonly count: number;
-  /**
-   * Cars the stream is currently trying to hold: one rotation of the density, between
-   * `floor` of `cap` and `cap` itself.
-   */
+  /** Cars the stream is currently trying to hold: the cap. */
   readonly target: number;
   /**
    * Replenishment ceiling: `TRAFFIC_CAPS[trafficDensity]`, or the console's override.
@@ -914,14 +861,14 @@ export class RoadTraffic {
   private get controlIntervalS(): number {
     return 1 / Math.max(1, this.controlHz);
   }
-  /** Current natural-looking density, at or below `trafficCap`. */
-  private desiredCount = 0;
   /**
-   * The present jitter draw as a fraction of the cap. Holding it between re-rolls keeps
-   * the stream's mood when the cap changes under it.
+   * The count the stream holds: its cap (owner, 2026-10-28). It once floated, re-rolled
+   * every 36-72 s between 0.35 of the cap and the cap; the owner wants the road as busy
+   * as he set it.
    */
-  private densityFraction = 0;
-  private densityTimer = 0;
+  private get desiredCount(): number {
+    return this.trafficCap;
+  }
   private generation = 0;
   private serial = 0;
   private spawnCooldown = 0;
@@ -1013,8 +960,6 @@ export class RoadTraffic {
     this.turnaround = new TurnaroundRoad(road);
     this.random = mulberry32(sourceWorld.seed ^ 0x74726166);
     this.syncSettings();
-    this.redrawDesiredCount();
-    this.densityTimer = this.drawDensityInterval();
   }
 
   get status(): TrafficStatus {
@@ -2042,13 +1987,7 @@ export class RoadTraffic {
       });
       this.clockSync = CLOCK_SYNC_S;
     }
-    this.densityTimer -= dt;
-    if (this.densityTimer <= 0) {
-      this.redrawDesiredCount();
-      this.densityTimer = this.drawDensityInterval();
-    } else {
-      this.desiredCount = this.scaleDesiredCount(this.trafficCap);
-    }
+    // The stream holds its cap (`desiredCount`): no rotating density (owner, 2026-10-28).
 
     // Refresh the shared road-frame snapshot before trimming or coordinating.
     // Support is checked every physics step, not on the slower stuck-car timer.
@@ -2786,9 +2725,8 @@ export class RoadTraffic {
     // behind him is a car he will never see: it only falls further back until the
     // rear despawn collects it. Oncoming traffic behind him is worse still — it
     // drives away from the moment it exists.
-    // The body comes first: the driver's character is drawn from it (`DRIVER_ODDS`).
     const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
-    const driver = this.drawDriver(direction, model.id);
+    const driver = this.drawDriver(direction);
     const fromBehind =
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
     // A stop coming into the band on this stream's side may have a car standing at it.
@@ -3298,7 +3236,7 @@ export class RoadTraffic {
   }
 
   /**
-   * Draws the driver from the body's odds (`DRIVER_ODDS`). The first car in a
+   * Draws the driver from `driverMix`, the same for every body. The first car in a
    * direction, if it drew a sleeper, is the cautious one, so an empty stream usually
    * opens with something slow enough to pass.
    *
@@ -3318,14 +3256,14 @@ export class RoadTraffic {
    * so it binds everywhere: on clean asphalt, on gravel, uphill. The cap stays as an
    * absolute ceiling for the few stretches good enough for one to matter.
    */
-  private drawDriver(direction: TrafficDirection, modelId: string): {
+  private drawDriver(direction: TrafficDirection): {
     style: TrafficDriverStyle;
     headwayS: number;
     mode: AutopilotMode;
     speedCap: number;
     pace: number;
   } {
-    const [sleeperOdds, hurriedOdds] = this.mixOverride ?? DRIVER_ODDS[modelId] ?? FAST_CAR;
+    const [sleeperOdds, hurriedOdds] = this.driverMix;
     const styleRoll = this.random();
     if (styleRoll < sleeperOdds) {
       const first = !this.carList.some((car) => car.direction === direction);
@@ -3418,8 +3356,7 @@ export class RoadTraffic {
 
   set cap(value: number | null) {
     this.capOverride = value === null ? null : Math.min(64, Math.max(0, Math.round(value)));
-    // Rescaled now, not on the next step, so a paused menu reads the new target.
-    this.desiredCount = this.scaleDesiredCount(this.trafficCap);
+    // The stream holds its cap; `desiredCount` reads it, so a paused menu sees the new target.
   }
 
   /**
@@ -3431,38 +3368,19 @@ export class RoadTraffic {
     return trafficProfile;
   }
 
-  private floorOverride: number | null = null;
-
-  /**
-   * The quiet end of the density draw as a fraction of the cap: `DENSITY_FLOOR`, or the
-   * dev menu's override (`null` hands it back). A change does not re-roll: the present
-   * target holds, raised to the new floor if it now lies under it, so dragging the knob
-   * moves the range and nothing random.
-   */
-  get floor(): number {
-    return this.floorOverride ?? DENSITY_FLOOR;
-  }
-
-  set floor(value: number | null) {
-    this.floorOverride = value === null ? null : Math.min(1, Math.max(0, value));
-    const cap = this.trafficCap;
-    this.desiredCount = this.scaleDesiredCount(cap);
-    this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
-  }
-
   private mixOverride: readonly [number, number, number] | null = null;
 
   /**
-   * The `[sleeper, hurried, frantic]` shares new spawns are drawn with: the per-car
-   * odds' mean (`PER_CAR_DRIVER_MIX`), or the dev menu's override, which then applies
-   * to every body alike. `null` hands it back to the per-car odds. Cars already on the
-   * road keep their drivers; the stream turns over to the new mix as it recycles.
+   * The `[sleeper, hurried, frantic]` shares new spawns are drawn with: a third each
+   * (`DRIVER_MIX`), for every body alike, or the dev menu's override. `null` hands it
+   * back. Cars already on the road keep their drivers; the stream turns over to the
+   * new mix as it recycles.
    */
   get driverMix(): readonly [number, number, number] {
-    return this.mixOverride ?? PER_CAR_DRIVER_MIX;
+    return this.mixOverride ?? DRIVER_MIX;
   }
 
-  /** True while the dev override, not the per-car odds, picks the drivers. */
+  /** True while the dev override, not the default mix, picks the drivers. */
   get driverMixOverridden(): boolean {
     return this.mixOverride !== null;
   }
@@ -3476,7 +3394,7 @@ export class RoadTraffic {
     const total = clean[0]! + clean[1]! + clean[2]!;
     this.mixOverride = total > 0
       ? [clean[0]! / total, clean[1]! / total, clean[2]! / total]
-      : PER_CAR_DRIVER_MIX;
+      : DRIVER_MIX;
   }
 
   private sameShareOverride: number | null = null;
@@ -3534,48 +3452,6 @@ export class RoadTraffic {
     return Math.min(car.speedCap, Math.max(PLAYER_PACE_FLOOR_MPS, share * this.playerSpeed));
   }
 
-  /** The fewest cars a density draw can ask for against the present cap. */
-  get floorCount(): number {
-    return this.minDesiredCount(this.trafficCap);
-  }
-
-  private minDesiredCount(cap: number): number {
-    if (cap <= 0) return 0;
-    return Math.min(cap, Math.max(1, Math.ceil(cap * this.floor)));
-  }
-
-  /** Re-roll at the established cadence against the present cap. */
-  private redrawDesiredCount(): void {
-    const cap = this.trafficCap;
-    this.desiredCount = this.drawDesiredCount(cap);
-    this.densityFraction = cap > 0 ? this.desiredCount / cap : 0;
-  }
-
-  private scaleDesiredCount(cap: number): number {
-    if (cap <= 0) return 0;
-    return Math.min(cap, Math.max(this.minDesiredCount(cap), Math.round(cap * this.densityFraction)));
-  }
-
-  /**
-   * One rotation of the density: a uniform draw in `[floor * cap, cap]` (see `floor`).
-   *
-   * The floor moves WITH the cap rather than being a fixed number of cars, so a
-   * widening that doubles the road doubles the quiet end of the range too, and the
-   * stream never has to choose between being busier and being legible.
-   */
-  private drawDesiredCount(cap: number): number {
-    if (cap <= 0) return 0;
-    const floor = this.minDesiredCount(cap);
-    return floor + Math.floor(this.random() * (cap - floor + 1));
-  }
-
-  private drawDensityInterval(): number {
-    return (
-      DENSITY_CHANGE_MIN_S +
-      this.random() * (DENSITY_CHANGE_MAX_S - DENSITY_CHANGE_MIN_S)
-    );
-  }
-
   /**
    * Thins the live stream down to `count`.
    *
@@ -3586,7 +3462,7 @@ export class RoadTraffic {
    * at the player and blink out in the middle of the windscreen. Nothing can hide
    * that: a traffic car is a full Vehicle and removal is instant, with no fade.
    *
-   * Both the rotating target and a natural road narrowing wait until a car falls
+   * Both a lowered cap and a natural road narrowing wait until a car falls
    * behind. Neither is permission to make visible traffic vanish.
    */
   private trimTo(count: number): void {

@@ -4,6 +4,23 @@
 
 ### Changed
 
+- TRAFFIC DEFAULTS FROM THE OWNER'S SLIDER TUNING (`game/settings.ts` `TRAFFIC_CAPS`,
+  `world/traffic.ts`). High traffic is 30 cars (was 40; the other levels unchanged), and
+  the stream holds its cap: the density no longer floats, re-rolled every 36-72 s
+  between 0.35 of the cap and the cap (`DENSITY_FLOOR`, `DENSITY_CHANGE_MIN/MAX_S`, the
+  `floor` console setter and the Pause › Low end slider are gone). 30 held is about what
+  40 floating averaged (~27), and below the 40 High's per-car cost (12 Hz decisions, a
+  few far draws a model) was judged by. 65 % of the stream drives the player's way (was
+  75 %). Drivers are no longer by model (`DRIVER_ODDS` removed): every body draws
+  sleeper, hurried or frantic at a third each (`DRIVER_MIX`; the dev mix sliders still
+  override it). A frantic car still gets the BMW M30 and its matched gearbox in any
+  body, the foreign kit cars with their own running gear included; the UAZ-2206 van (a
+  truck, which the M30 does not fit) gets the Chevrolet 350 V8 as before. Frantic cars
+  still come both from ahead and up from behind. Crashes between traffic cars are
+  accepted: `tools/traffic-bench.ts` reports the mixed stream's impacts instead of
+  failing on them, and its turnaround and lay-by checks count only impacts on a car
+  at the road's end or in a stop.
+
 - Physics crutches out (`vehicle/vehicletuning.ts`, `vehicle/vehicle.ts`). The driveline
   shaft's damping is 0.15 of the shuffle mode (was 0.4), the middle of a real
   driveline's 0.1-0.2: tip-in and lift-off now surge and ring for a cycle or two. The

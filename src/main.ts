@@ -3277,12 +3277,6 @@ async function boot(): Promise<void> {
           get cap() {
             return traffic.cap;
           },
-          get floor() {
-            return traffic.floor;
-          },
-          get floorCount() {
-            return traffic.floorCount;
-          },
           get target() {
             return traffic.status.target;
           },
@@ -3291,9 +3285,6 @@ async function boot(): Promise<void> {
           },
           setCap: (value: number | null) => {
             traffic.cap = value;
-          },
-          setFloor: (value: number | null) => {
-            traffic.floor = value;
           },
           get driverMix() {
             return traffic.driverMix;

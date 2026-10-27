@@ -902,8 +902,8 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   figure's source. Its engine and gearbox go in `parts/registry.ts`
   (`FOREIGN_ENGINE_VARIANTS`, `FOREIGN_GEARBOX_VARIANTS`), each with a case in
   `render/partmesh.ts` and the engine's maker figures in `tools/reality.ts`
-  `FACTORY_ENGINES`; add the car's factory targets to `TARGETS` there. `DRIVER_ODDS`
-  (world/traffic.ts) gives a model with no row the default odds.
+  `FACTORY_ENGINES`; add the car's factory targets to `TARGETS` there. Traffic drivers
+  are not per model: every body draws from `DRIVER_MIX` (world/traffic.ts).
 
 ### 5. Fit row
 
