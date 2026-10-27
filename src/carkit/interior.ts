@@ -210,6 +210,12 @@ interface Layout {
   /** Driver's hip behind the cowl; the rear bench's hip from the rear base or the driver's hip. */
   readonly hip: number;
   /**
+   * How far the driver's eye sits ahead of the backrest's lean, where it differs from
+   * `DRIVER_EYE_FORWARD` (the Nivas': their chrome head on a rod stands far forward and the
+   * vent wing's frame hides it from an eye 10 cm forward).
+   */
+  readonly eyeForward?: number;
+  /**
    * `clear`: the bench's base this far inside the rear wells (default 0.022, 2 mm off the
    * wheel-house covers' walls). A bench standing between the covers along its length (the
    * Niva's) keeps more, as 2 mm of air there fights at a distance.
@@ -508,6 +514,10 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
    */
   niva: {
     ...BASE_LAYOUTS.classic,
+    // The eye 5 cm forward, not 10: further the vent wing's frame hides the left mirror
+    // (kit-mirrors: 49 % seen at 0.10, 63 % at 0.06, 70 % at 0.04) and the right one
+    // passes 70° off the axis.
+    eyeForward: 0.05,
     // Front seat: drawn at 0.65 behind the cowl in both views (the backrest's foot at x
     // 1225 side, the headrest 50 px ahead of the B-pillar in plan), the cowl at x 1052;
     // that leaves 0.47 m from hip to pedal, so the drawing has it at its rails' front.
@@ -1805,6 +1815,12 @@ const BENCH_SEAT_X = 0.25;
 const SEATED_EYE = 0.74;
 /** The eye's run behind the hip: the torso leans back with the backrest. */
 const EYE_BEHIND_HIP = 0.1;
+/**
+ * The driver's eye this much ahead of where the backrest's lean puts it: sitting up
+ * closer to the wheel (owner, 2026-10-28: «сантиметров на 10 ближе к рулю»). The rear
+ * passengers' eyes keep `EYE_BEHIND_HIP`.
+ */
+const DRIVER_EYE_FORWARD = 0.1;
 /** Least room between the eye and the headliner over it. */
 const EYE_HEADROOM = 0.13;
 /**
@@ -1888,7 +1904,7 @@ function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
  */
 export function driverEyeAt(frame: BodyFrame): Vec3 {
   const lay = layoutOf(frame);
-  const s = frame.cowl + lay.hip + EYE_BEHIND_HIP;
+  const s = frame.cowl + lay.hip + EYE_BEHIND_HIP - (lay.eyeForward ?? DRIVER_EYE_FORWARD);
   const seated = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
   const [hs, hy] = screenHeaderEdge(frame, lay.seatX);
   const y = Math.max(seated - EYE_LOWER_MAX, Math.min(seated, hy - Math.tan(HEADER_OVER_EYE) * (s - hs)));

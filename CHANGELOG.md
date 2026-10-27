@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- The driver sits 10 cm closer to the wheel in every kit car (owner: «сантиметров на 10
+  ближе к рулю»; `DRIVER_EYE_FORWARD`, carkit/interior.ts); the Nivas 5 cm
+  (`Layout.eyeForward`), where 10 cm put the left door mirror behind the vent wing's frame
+  (49 % seen; 67 % at 5 cm). The door mirrors are aimed at the new eye.
+
 ### Added
 
 - Music from other cars' cabins (`src/audio/cabinmusic.ts`): about a third of the traffic
