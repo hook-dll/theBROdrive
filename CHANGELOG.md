@@ -4,6 +4,17 @@
 
 ### Added
 
+- KIT PIPELINE (owner, 2026-10-27: bodies take too long, and a change to one car must
+  never move another). `tools/kit-fingerprint.ts` and `src/carkit/fingerprints.json`:
+  every kit car's geometry and colours hashed per zone, recorded as the owner last saw
+  it; kit-check's new `frozen` column fails a recorded car that moved, and `--write` takes
+  named cars only. kit-check now fails a body the drawing check could not judge
+  (UNVERIFIED passed before, against README). `tools/kit-drawing.ts` measures where the
+  built silhouette leaves the drawing's (IoU above the wheel centres, the runs where the
+  top outline is off by over 25 mm, a fourth diff panel in its overlays): advice, not a
+  verdict. `tools/kit-sheet.ts <car>`: the review sheet in one command, six fixed angles,
+  the cabin and the refs' photos (`build/kitcheck/<car>/review.png`, no browser). README:
+  a feature inventory before the first draft; new behaviour only behind a new field.
 - ONE GOOD ROAD TYRE (owner, 2026-10-27): every road car runs the Michelin MXV
   (`ROAD_TYRE`, `ROAD_TYRE_GRIP` 0.62, profile 60) instead of the budget KAMA-217 (0.53,
   profile 70). The grip is the step Car and Driver measured from budget tyres to the MXV

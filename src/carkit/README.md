@@ -42,12 +42,23 @@ Soviet scale models: clean, plainly cut panels, never dented, creased or chewed.
   wedge between them, whatever a drawing's mirror line or a check suggests. Mirrors sit
   on the door at the glass's front foot.
 
-**Workflow: screenshots first, docs at acceptance.** As soon as a shape is visible in the
-lab, send the owner (through the main agent) draft screenshots from his angles, before
-hash proofs and docs. Iterate on his feedback. Only when he accepts the model: run the
-full checks (tsc, hashes, z-fighting `tools/kit-zfight.ts`, lamps at night, shader
-programs, fit rows), write the docs (this file, STATUS, HISTORY, CHANGELOG, measurements)
-and commit.
+**Workflow: features first, screenshots next, docs at acceptance.**
+1. *Feature inventory before geometry* (owner, 2026-10-27). Before the first draft, list
+   from the photos every visible feature of the body: lamps and their outlines, grille,
+   bumpers and their ends, mouldings, pillars, what is black and what is body colour,
+   mirrors, handles, flap, spoiler, plates. Against each, the spec field that draws it,
+   or "no field". Send the owner the list with the photos marked; build the missing
+   fields first, so the first draft shows them all. (Most review rounds on the cars so
+   far were a feature the generator could not draw yet, found only on the draft.)
+2. *Screenshots.* As soon as a shape is visible, send the owner (through the main agent)
+   the review sheet (`nice -n 15 bun tools/kit-sheet.ts <car>` → build/kitcheck/<car>/
+   review.png: six fixed angles, the cabin, the refs' photos) and the drawing overlays
+   (`kit-drawing.ts <car>`; read its silhouette advice first, it says where the outline
+   leaves the drawing). Iterate on his feedback.
+3. Only when he accepts the model: run the full checks (`npm run kit-check -- <car>`,
+   tsc, lamps at night, shader programs, fit rows), record the car's fingerprint
+   (`tools/kit-fingerprint.ts --write <car>`), write the docs (this file, STATUS,
+   HISTORY, CHANGELOG, measurements) and commit.
 
 **Machine and processes** (full text: `.omp/rules/process-hygiene.md`, untracked):
 - Run your own Vite: `npx vite --port 5199 --strictPort`. Port 5173 is the owner's own
@@ -73,8 +84,13 @@ and commit.
 - Visual rules: flat faces, the game's lighting and palette, no outlines. Real factory
   proportions measured from drawings or photos, **never from memory**; simplified shape,
   no caricature, never stacked boxes. Doors at their full real size.
-- A generator change that should not move existing cars must be proved on geometry
-  ([Proving a refactor](#proving-a-refactor)).
+- **A change to one car never moves another** (owner, 2026-10-27: the generator is a
+  tool to make a body, not a style every car follows). New behaviour goes behind a new
+  spec field whose absence keeps every other car as it was. `tools/kit-fingerprint.ts`
+  (also kit-check's `frozen` column) compares every car's geometry and colours with
+  `fingerprints.json`, recorded when the owner last saw the car; a frozen car that
+  moved fails. Re-record (`--write <car ...>`) only cars the owner asked to change or
+  accepted changed, never to make a run pass.
 
 **Git** (branch `funny`):
 - Commit and push only kit work, and only when your assignment says so. Messages follow
@@ -836,8 +852,9 @@ are all in place. Neither is optional and neither is judged by eye. `kit-check`
 | mirrors | `kit-mirrors.ts` | from the cabin camera's eye (`kit_driver_eye`, what `cabinEye` and vehicle/cabincamera.ts use; not the lab's `look()`), rays to 160 points on each door mirror's glass past every opaque face: under 60 % seen; the driver's mirror over 55° off the axis (outside the straight-ahead 85° view), the far one over 70°; either outside −30°..+10° of the eye's level. The mirror's support is generated from `skinX` at its mounting height and sunk into the body; a new car must not leave a floating foot. |
 | surface: dents | `kit-surface.ts` | the loft's rows turning much harder at one station than at its neighbours (`uneven`), in and out at two stations under 0.5 m apart (`s-bend`), the side's lean in and out (`lean`), the same on the deck's centre line; folds of over 5° inward on the up-facing skin of a lid or the roof. The rows themselves, shut lines, arch lips and the ends' turns are the intended lines and never flagged; a corner drawn on the real car is marked `corner: true` on its station with the source |
 | surface: complexity | `kit-surface.ts` | over 15 000 triangles; a mesh over 30 % slivers; a part of over 200 triangles at over 4 per cm² of its size. Listed (not failing): over 13 000, panels over 10 % slivers or tiny triangles, stations on the line through their neighbours, denser small parts, up-facing skin wound inward |
-| drawing | `kit-drawing.ts` | a body value measured on the BUILT car outside its tolerance of `refs/<car>.json`; no refs file is UNVERIFIED (reported) |
+| drawing | `kit-drawing.ts` | a body value measured on the BUILT car outside its tolerance of `refs/<car>.json`; no refs file, or no value judged, is UNVERIFIED and fails. Its silhouette advice (IoU and where the top outline is off) is printed, never judged |
 | dash | `kit-drawing.ts` | a new car MUST provide a photo of its real dashboard and a `dash` block (gauges and rows, cluster place, clock, vents, stack, console, glovebox, wheel spokes and size); existing cars already accepted by the owner are explicitly exempt and are listed in `tools/kit-drawing.ts` |
+| frozen | `kit-fingerprint.ts` | the car's geometry or colours differ from its record in `fingerprints.json` (in which zone: exterior, cabin, bay, boot, under, wheel); a car with no record is listed as not frozen |
 
 It prints one pass/fail row per car; every finding names where (owner, s, height) and
 what to simplify or fix. The dashboard exemption is intentionally narrow: it does not ask
@@ -944,18 +961,12 @@ instead of placing faces by hand.
 
 ## Proving a refactor
 
-When the generator changes but should not change a car, prove it on geometry, not by eye:
-
-1. `git worktree add /tmp/kitbase HEAD` (or the commit to compare against) and
-   `ln -s "$PWD/node_modules" /tmp/kitbase/node_modules`.
-2. A throwaway bun script imports `buildKitCar` and `KIT_SPECS` from both trees, builds
-   every car, and for each mesh takes every triangle's three vertices in the car frame
-   (`applyMatrix4(mesh.matrixWorld)` after `root.updateMatrixWorld(true)`), rounded to
-   1e-5 m. Each triangle becomes a string with its vertices sorted, the strings are
-   sorted (emission order must not matter), joined and hashed (e.g. `Bun.hash`). Print
-   hash, triangle count and bounds per car.
-3. Identical hashes for every car that should not move; report the cars that did.
-4. `git worktree remove /tmp/kitbase`.
+When the generator changes, every car it should not change must stay identical:
+`nice -n 15 bun tools/kit-fingerprint.ts` (seconds for all cars) hashes each car's
+triangles in the kit frame (vertices at 0.01 mm, sorted, with slot and colour) per zone
+and compares them with `fingerprints.json`. A car meant to change is re-recorded with
+`--write <car>` once the owner has seen it; every other car must read `identical`.
+Before the fingerprints (2026-10-27) the same proof was made by hand against a worktree:
 
 Done so far: the descriptions refactor (2108 identical; 2106 0.29 mm in its grille bars),
 the Samara generator pieces (2101–2108 identical), the 21099 rear-door rework (2101–2109
