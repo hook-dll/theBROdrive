@@ -49,6 +49,11 @@ export interface CameraTarget {
   velocityX: number;
   velocityZ: number;
   /**
+   * Vertical velocity in the float frame, m/s; 0 on foot. Read only by the driver's head
+   * (`HEAD_MOTION`): the seat's heave, whose every change the head on its neck answers.
+   */
+  velocityY: number;
+  /**
    * The car is being driven by the autopilot: the cabin view then never turns back to
    * the road on its own, since the player is a passenger looking about.
    */
@@ -290,6 +295,60 @@ const LEAN_ACCEL_CLAMP = 14;
 const STEER_LOOK_MAX_RAD = 0.2;
 const STEER_LOOK_FADE_KMH = 40;
 
+/* ---- the driver's head: `Settings.cameraShake`; nothing at all with it off ---- */
+
+/**
+ * THE DRIVER'S HEAD ON ITS NECK. The cabin eye used to be bolted to the chassis: every
+ * motion the view made was the rigid body's. A real head is a mass on a spring on top
+ * of a seat, and what it does is the car's ACCELERATION, not its pose: it leans out of
+ * a corner, nods forward under braking, sinks back into the seat when the car pulls
+ * away, and bobs once each time the springs or a wheel hand the body a jolt. Nothing
+ * here moves the car — only the eye, relative to its seat.
+ *
+ * All of it is read off the chassis velocity, as the dynamic camera's lean is (the
+ * difference between solver steps, over the time since the velocity last changed, in
+ * the car's own axes), so it is the same at any refresh rate. Lean, surge, nod and sink
+ * are critically damped springs toward a target proportional to the acceleration:
+ * they can never overshoot into a wobble. The vertical jolt is the one with a bounce in
+ * it — a lightly damped neck mode, kicked by each change of the seat's vertical speed —
+ * because a jolt that did not bob would read as a frame drop. Every term is clamped,
+ * and small: a few centimetres and a couple of degrees, under the 0.1 m and 3° where
+ * the view starts to feel like a ride. Kids ride in this seat.
+ *
+ * Mutable so it can be tuned live from the console as `__bro.headMotion`
+ * (app/devtools.ts); off with Settings → Camera shake.
+ *
+ *   leanPerMps2, leanMaxM      sideways eye travel per m/s² of lateral acceleration
+ *   surgePerMps2, surgeMaxM    fore-aft: forward under braking, back under power
+ *   nodRadPerMps2, nodMaxRad   view pitch per m/s² along: down braking, up accelerating
+ *   sinkPerMps2, sinkMaxM      the drop into the seat under power
+ *   omega                      the follow rate of the four above, rad/s
+ *   joltGain                   metres per second of head speed per m/s of seat heave change
+ *   joltHz, joltDamping        the neck's vertical mode and its damping ratio
+ *   joltMaxM                   clamp on the vertical bob
+ *   chaseShare                 the share of the jolt and nod the chase camera takes
+ */
+export const HEAD_MOTION = {
+  leanPerMps2: 0.006,
+  leanMaxM: 0.05,
+  surgePerMps2: 0.005,
+  surgeMaxM: 0.045,
+  nodRadPerMps2: 0.0035,
+  nodMaxRad: 0.035,
+  sinkPerMps2: 0.002,
+  sinkMaxM: 0.012,
+  omega: 6,
+  joltGain: 0.12,
+  joltHz: 2.2,
+  joltDamping: 0.5,
+  joltMaxM: 0.035,
+  chaseShare: 0.35,
+};
+/** Head accelerations past this are a crash or a teleport, not driving, m/s². */
+const HEAD_ACCEL_CLAMP = 14;
+/** A seat heave change past this in one solver step is a teleport or a wreck, m/s. */
+const HEAD_JOLT_CLAMP_MPS = 4;
+
 /** Death first turns the existing view down, then lifts it while the screen fades. */
 const DEATH_LOOK_DOWN_SECONDS = 2.5;
 const DEATH_RISE_SECONDS = 6.5;
@@ -433,6 +492,29 @@ export class CameraRig {
   private leanVelocity = 0;
   /** Look-into-corner yaw, radians; zero in steady. */
   private steerLook = 0;
+  /**
+   * THE HEAD (`HEAD_MOTION`): its own last solver velocity and the time since it
+   * changed (the head runs in either style, so it does not share the dynamic camera's),
+   * the low-passed acceleration along the car's side and forward axes, and the head's
+   * offsets from its seat with their rates — lateral (+ toward the car's left), along
+   * (+ forward), vertical (+ up) and the nod (+ looking up).
+   */
+  private headVelX = Number.NaN;
+  private headVelY = 0;
+  private headVelZ = 0;
+  private headVelAge = 0;
+  private headAccelSide = 0;
+  private headAccelAlong = 0;
+  private headSide = 0;
+  private headSideRate = 0;
+  private headAlong = 0;
+  private headAlongRate = 0;
+  private headSink = 0;
+  private headSinkRate = 0;
+  private headNod = 0;
+  private headNodRate = 0;
+  private headJolt = 0;
+  private headJoltRate = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -462,6 +544,7 @@ export class CameraRig {
   /** `Settings.cameraShake`: whether the driving view trembles at speed. */
   setShake(on: boolean): void {
     this.shake = on;
+    if (!on) this.resetHead();
   }
 
   /**
@@ -484,6 +567,25 @@ export class CameraRig {
     this.leanOffset = 0;
     this.leanVelocity = 0;
     this.steerLook = 0;
+    this.resetHead();
+  }
+
+  /** The head back on its seat, at rest; see `HEAD_MOTION`. */
+  private resetHead(): void {
+    this.headVelX = Number.NaN;
+    this.headVelAge = 0;
+    this.headAccelSide = 0;
+    this.headAccelAlong = 0;
+    this.headSide = 0;
+    this.headSideRate = 0;
+    this.headAlong = 0;
+    this.headAlongRate = 0;
+    this.headSink = 0;
+    this.headSinkRate = 0;
+    this.headNod = 0;
+    this.headNodRate = 0;
+    this.headJolt = 0;
+    this.headJoltRate = 0;
   }
 
   /**
@@ -709,6 +811,8 @@ export class CameraRig {
     // writes at zero, which is what keeps that camera exactly what it was.
     if (onFoot) this.resetDynamics();
     else if (this.style === 'dynamic') this.updateDynamics(d, input, target);
+    // The driver's head rides in either style, and only with the shake setting on.
+    if (!onFoot && this.shake) this.updateHead(d, target);
 
     // The cabin turns with the car, so its heading is stored as an OFFSET from the
     // chassis and rebuilt against the live heading every frame. Keeping the raw world
@@ -843,6 +947,10 @@ export class CameraRig {
         break;
       case 'chase':
         this.desiredArm(target);
+        // A share of the head's bob and nod, as a camera hung off the car would take
+        // them (`HEAD_MOTION.chaseShare`); the lean is the dynamic camera's own.
+        _vA.y += this.headJolt * HEAD_MOTION.chaseShare;
+        _vB.y += this.headNod * HEAD_MOTION.chaseShare * _vA.distanceTo(_vB);
         this.applyOcclusion(target);
         this.liftAboveGround(target);
         break;
@@ -900,13 +1008,89 @@ export class CameraRig {
    */
   private desiredCabin(target: CameraTarget): void {
     _qA.set(target.qx, target.qy, target.qz, target.qw);
-    _vC.set(target.cabinOffset[0], target.cabinOffset[1], target.cabinOffset[2]).applyQuaternion(_qA);
+    // The eye is the seat's, plus where the head has swayed on its neck (`HEAD_MOTION`).
+    _vC.set(
+      target.cabinOffset[0] + this.headSide,
+      target.cabinOffset[1] + this.headJolt - this.headSink,
+      target.cabinOffset[2] + this.headAlong,
+    ).applyQuaternion(_qA);
     _vA.set(target.x + _vC.x, target.y + _vC.y, target.z + _vC.z);
-    const cp = Math.cos(this.pitch);
-    _vD.set(Math.sin(this.cabinYawOffset) * cp, Math.sin(this.pitch), Math.cos(this.cabinYawOffset) * cp)
+    const pitch = this.pitch + this.headNod;
+    const cp = Math.cos(pitch);
+    _vD.set(Math.sin(this.cabinYawOffset) * cp, Math.sin(pitch), Math.cos(this.cabinYawOffset) * cp)
       .applyQuaternion(_qA);
     _vB.copy(_vA).addScaledVector(_vD, LOOK_AHEAD);
     _cabinUp.copy(_UP).applyQuaternion(_qA);
+  }
+
+  /**
+   * THE DRIVER'S HEAD (`HEAD_MOTION`), one frame: the car's acceleration in its own
+   * axes, measured between solver steps, moves the head on its neck. Lean, surge, nod
+   * and sink follow critically damped toward their targets; each change of the seat's
+   * vertical speed kicks the head's the other way, and the neck's lightly damped mode
+   * brings it back. A velocity that did not change since the last frame is no
+   * measurement, as in `updateDynamics`.
+   */
+  private updateHead(dt: number, target: CameraTarget): void {
+    const m = HEAD_MOTION;
+    const qx = target.qx;
+    const qy = target.qy;
+    const qz = target.qz;
+    const qw = target.qw;
+    const vx = target.velocityX;
+    const vy = target.velocityY;
+    const vz = target.velocityZ;
+    this.headVelAge += dt;
+    if (Number.isNaN(this.headVelX)) {
+      this.headVelX = vx;
+      this.headVelY = vy;
+      this.headVelZ = vz;
+      this.headVelAge = 0;
+    } else if (vx !== this.headVelX || vy !== this.headVelY || vz !== this.headVelZ) {
+      const dvx = vx - this.headVelX;
+      const dvy = vy - this.headVelY;
+      const dvz = vz - this.headVelZ;
+      const age = this.headVelAge;
+      // The car's own axes: +X its left, +Y its up, +Z its nose.
+      const side = dvx * (1 - 2 * (qy * qy + qz * qz)) + dvy * 2 * (qx * qy + qz * qw) + dvz * 2 * (qx * qz - qy * qw);
+      const up = dvx * 2 * (qx * qy - qz * qw) + dvy * (1 - 2 * (qx * qx + qz * qz)) + dvz * 2 * (qy * qz + qx * qw);
+      const along = dvx * 2 * (qx * qz + qy * qw) + dvy * 2 * (qy * qz - qx * qw) + dvz * (1 - 2 * (qx * qx + qy * qy));
+      const blend = 1 - Math.exp(-m.omega * age);
+      this.headAccelSide += (clamp(side / age, -HEAD_ACCEL_CLAMP, HEAD_ACCEL_CLAMP) - this.headAccelSide) * blend;
+      this.headAccelAlong += (clamp(along / age, -HEAD_ACCEL_CLAMP, HEAD_ACCEL_CLAMP) - this.headAccelAlong) * blend;
+      // The seat rose by `up`; the head, on its neck, is left behind by its share of it.
+      this.headJoltRate -= clamp(up, -HEAD_JOLT_CLAMP_MPS, HEAD_JOLT_CLAMP_MPS) * m.joltGain;
+      this.headVelX = vx;
+      this.headVelY = vy;
+      this.headVelZ = vz;
+      this.headVelAge = 0;
+    }
+
+    // Out of the corner, forward under braking and back under power, the view nodding
+    // down and up with it, and a little drop into the seat as the car pulls away.
+    springStep(this.headSide, this.headSideRate, clamp(-this.headAccelSide * m.leanPerMps2, -m.leanMaxM, m.leanMaxM), m.omega, dt);
+    this.headSide = _spring.position;
+    this.headSideRate = _spring.velocity;
+    springStep(this.headAlong, this.headAlongRate, clamp(-this.headAccelAlong * m.surgePerMps2, -m.surgeMaxM, m.surgeMaxM), m.omega, dt);
+    this.headAlong = _spring.position;
+    this.headAlongRate = _spring.velocity;
+    springStep(this.headNod, this.headNodRate, clamp(this.headAccelAlong * m.nodRadPerMps2, -m.nodMaxRad, m.nodMaxRad), m.omega, dt);
+    this.headNod = _spring.position;
+    this.headNodRate = _spring.velocity;
+    springStep(this.headSink, this.headSinkRate, clamp(this.headAccelAlong * m.sinkPerMps2, 0, m.sinkMaxM), m.omega, dt);
+    this.headSink = _spring.position;
+    this.headSinkRate = _spring.velocity;
+
+    // The neck's vertical mode, stepped implicitly so a long frame cannot ring it up,
+    // and held inside its clamp: a head at the end of its travel stops there.
+    const w = 2 * Math.PI * m.joltHz;
+    this.headJoltRate =
+      (this.headJoltRate - dt * w * w * this.headJolt) / (1 + 2 * m.joltDamping * w * dt + w * w * dt * dt);
+    this.headJolt += this.headJoltRate * dt;
+    if (Math.abs(this.headJolt) > m.joltMaxM) {
+      this.headJolt = Math.sign(this.headJolt) * m.joltMaxM;
+      this.headJoltRate = 0;
+    }
   }
 
 

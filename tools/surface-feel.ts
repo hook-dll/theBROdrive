@@ -26,6 +26,9 @@
  *   bump99/bumpmx  suspension compression speed, m/s (the audio bump channel).
  *   hit/km     compressions over 0.5 m/s: discrete things the wheels struck.
  *   contact    mean fraction of wheels touching the ground. Grip stability.
+ *   lift%      share of wheel-steps a grounded wheel's tyre was skipping clear of the
+ *              sub-collider profile (hub load under LIFT_SHARE of static; `tyreLoadN`).
+ *   solo%      share of steps exactly one tyre was skipping: wheels unloading in turn.
  *   speed      mean speed held, against the speed asked for.
  *
  * The road rows are the home stretch (chunks 120-126), then one six-chunk stretch of
@@ -120,6 +123,8 @@ function spanOf(label: string, fromChunk: number, toChunk: number): Span {
 
 /** Tightest corner a per-surface run may contain, 1/m: the bench measures ride, not cornering. */
 const SURFACE_RUN_MAX_CURVATURE = 1 / 400;
+/** A tyre pressing less than this share of its static load is skipping (`lift%`). */
+const LIFT_SHARE = 0.1;
 
 /**
  * The first stretch of this seed's road that is `surface` for SURFACE_RUN_CHUNKS whole
@@ -308,6 +313,10 @@ interface Result {
   /** Compression hits over BUMP_HIT_MPS, per km: discrete jolts the springs took. */
   hitsPerKm: number;
   contact: number;
+  /** Share of wheel-steps a grounded tyre skipped clear: hub load under LIFT_SHARE of static. */
+  liftShare: number;
+  /** Share of steps exactly one tyre was skipping: wheels unloading one at a time. */
+  soloShare: number;
   heldLateral: number;
   maxSpeed: number;
 }
@@ -353,6 +362,9 @@ function drive(rig: Rig, label: string): Result {
   let hits = 0;
   let lastHit = -BUMP_HIT_GAP_STEPS;
   let contactSum = 0;
+  let liftedWheelSteps = 0;
+  let wheelSteps = 0;
+  let soloSteps = 0;
 
   // A stall guard, because a car that spins out in the desert would otherwise sit at
   // full lock and full throttle until the step cap and report a meaningless mean.
@@ -401,10 +413,15 @@ function drive(rig: Rig, label: string): Result {
     accels.push(Math.abs(az));
     signedAccels.push(az);
     let load = 0;
+    let lifted = 0;
     for (const w of vehicle.wheelRide) {
       if (w.staticLoadN > 0) load = Math.max(load, w.loadN / w.staticLoadN);
+      if (w.inContact && w.tyreLoadN < LIFT_SHARE * w.staticLoadN) lifted++;
     }
     loads.push(load);
+    liftedWheelSteps += lifted;
+    wheelSteps += vehicle.wheelRide.length;
+    if (lifted === 1) soloSteps++;
     // The bench is the consumer of the audio bump channel: read it and zero it.
     const bump = vehicle.audio.bumpMps;
     vehicle.audio.bumpMps = 0;
@@ -477,6 +494,8 @@ function drive(rig: Rig, label: string): Result {
     bumpMax: pct(bumps, 1),
     hitsPerKm: hits / Math.max(0.001, metres / 1000),
     contact: contactSum / Math.max(1, steps),
+    liftShare: liftedWheelSteps / Math.max(1, wheelSteps),
+    soloShare: soloSteps / Math.max(1, steps),
     heldLateral,
     maxSpeed: maxSpeed * 3.6,
   };
@@ -530,6 +549,8 @@ function row(r: Result): string {
     `${r.bumpMax.toFixed(2)}`.padStart(6),
     `${r.hitsPerKm.toFixed(1)}`.padStart(6),
     `${(r.contact * 100).toFixed(1)}%`.padStart(7),
+    `${(r.liftShare * 100).toFixed(1)}%`.padStart(6),
+    `${(r.soloShare * 100).toFixed(1)}%`.padStart(6),
     `${r.heldLateral.toFixed(1)}m`.padStart(6),
     `${r.metres.toFixed(0)} m`.padStart(8),
   ].join(' ');
@@ -550,7 +571,7 @@ async function run(): Promise<void> {
     `surface feel @ ${speedKmh} km/h asked, ${MODEL_ID}, seed ${SEED}; road runs in the right lane (${LANE_LATERAL} m)`,
   );
   console.log(
-    'surface          speed   heave  floatg  sharpg  boatmm pitch°  jolt99   maxg  load99 loadmx bump99 bumpmx hit/km contact  line  distance  where',
+    'surface          speed   heave  floatg  sharpg  boatmm pitch°  jolt99   maxg  load99 loadmx bump99 bumpmx hit/km contact  lift%  solo%  line  distance  where',
   );
   const where = (span: Span): string =>
     `  s ${span.startS}..${span.endS}, decay ${span.decay.toFixed(2)}`;

@@ -193,6 +193,13 @@ import {
   REAR_AXLE_SIDE_GRIP,
   ROLL_CAMBER_LIMIT_RAD,
   rollCamberShare,
+  relaxationLoadScale,
+  COMPLIANCE_BRAKE_TOE_RAD_PER_N,
+  COMPLIANCE_STEER_FRONT_RAD_PER_N,
+  COMPLIANCE_STEER_MAX_RAD,
+  COMPLIANCE_STEER_REAR_RAD_PER_N,
+  COMPLIANCE_STEER_TAU_S,
+  STEERING_DEV,
   SCRATCH_IMPACT_THRESHOLD_MPS,
   SCRATCH_PER_IMPACT_CAP,
   SCRATCH_PER_SEVERITY_MPS,
@@ -505,9 +512,39 @@ interface WheelVisual {
    */
   profileHeight: number;
   profileRate: number;
-  /** Wheel-hop state: unsprung deflection (m) and its rate (m/s). See the tyre block. */
+  /**
+   * Wheel-hop state: the hub's displacement (m, up toward the body) and its rate (m/s)
+   * on the tyre's carcass rate, under the suspension. Stepped at the wheel SUBSTEP
+   * (`stepWheelHop`), not the body's step. See the tyre block.
+   */
   hopZ: number;
   hopV: number;
+  /**
+   * What the hub's motion does to THIS substep's tyre: its capacity over the one the
+   * setup pass sized from `loadN`, the carcass's load and μ(Fz) both read at the load
+   * the hopping hub is pressing on the road. 1 on a smooth road; 0 while the hub has
+   * lifted the tyre off the ground, which is a wheel skipping over a ripple.
+   */
+  hopGripScale: number;
+  /**
+   * Means over the step's substeps: the force the hub's suspension handed the body (N,
+   * positive up, applied once a step in the body pass), and the tyre's whole vertical
+   * load with the hub's share in it (N) — what a load cell in the hub would read.
+   */
+  hopBodyForceN: number;
+  tyreLoadMeanN: number;
+  /**
+   * This tyre's relaxation lengths at its load this step, metres (`relaxationAtLoad`):
+   * the side and the longitudinal one the carcass builds force over.
+   */
+  relaxationM: number;
+  longitudinalRelaxationM: number;
+  /**
+   * COMPLIANCE STEER, radians in the steer sign (`toeRad`): the toe the bushes and the
+   * steering's own elasticity give under last step's side and longitudinal force,
+   * low-passed over the rubber's own time (`COMPLIANCE_STEER_TAU_S`).
+   */
+  complianceSteerRad: number;
   mesh: THREE.Object3D;
   /**
    * How far into THE DIG this wheel is, 0..1 — see the block comment on `DIG_FIRM_MU`.
@@ -701,8 +738,30 @@ export interface VehicleAudioState {
   wheelContactFraction: number;
   /** Mean micro-bump amplitude of the surfaces under the loaded wheels, metres. */
   surfaceRoughness: number;
-  /** Body-frame sideways speed, m/s: the tyres' side slip. */
+  /** Body-frame sideways speed, m/s: the car's side slip (the benches' body slip angle). */
   lateralSlipMps: number;
+  /**
+   * THE TYRES' OWN SLIP, per axle, for the squeal (audio/vehicleaudio.ts `TYRE_VOICE`):
+   * the loudest wheel on each axle — the one whose patch is furthest past its grip —
+   * and what it is doing.
+   *
+   *   slip      the patch's combined slip σ (`WheelVisual.alignSlip`, sideways and
+   *             along together) over the σ the brush tyre peaks at on this ground
+   *             (`1 / (3 − 2r)`, r the sliding floor; 1 on loose ground): 1 is the
+   *             peak, past it the patch is sliding
+   *   slideMps  how fast that patch slides over the road, m/s: a big slip at a walk
+   *             is not a squeal
+   *   load      its load over its parked load: a loaded tyre squeals louder and higher
+   *   surface   what it is sliding on
+   */
+  tyreSlipFront: number;
+  tyreSlipRear: number;
+  tyreSlideMpsFront: number;
+  tyreSlideMpsRear: number;
+  tyreLoadFront: number;
+  tyreLoadRear: number;
+  tyreSurfaceFront: SurfaceType;
+  tyreSurfaceRear: SurfaceType;
   /** Downward speed killed by the ground this step, m/s. 0 when nothing landed. */
   landingImpactMps: number;
   /**
@@ -735,6 +794,12 @@ export interface VehicleAudioState {
    * rock: the chassis jolts through the springs. The audio layer zeroes it on read.
    */
   bumpMps: number;
+  /**
+   * Fastest closing speed of a suspension into its BUMP STOP since last consumed, m/s:
+   * the rubber is past its first third and the corner is still compressing. Zeroed on
+   * read; the audio's clunk.
+   */
+  bumpStopMps: number;
   /** Largest unexplained horizontal speed loss (a collision), m/s. Zeroed on read. */
   impactMps: number;
 }
@@ -840,6 +905,12 @@ export interface WheelRideState {
   bumpStopN: number;
   /** Tyre carcass deflection from the sub-collider profile, metres (see WheelHop). */
   tyreDeflectionM: number;
+  /**
+   * What the tyre pressed on the road this step with the hopping hub's share in it, N:
+   * the mean over the wheel substeps (`stepWheelHop`). Below `loadN` while the hub is
+   * rising off a ripple, 0 while the wheel is skipping clear of it.
+   */
+  tyreLoadN: number;
   /**
    * Tread temperature, degrees C, and the grip multiplier it currently implies.
    *
@@ -1143,8 +1214,15 @@ export class Vehicle implements Rebasable {
 
   // Steering state: the rack's angle, where the driver's hands have put it (rate limited
   // to the rack speed), or anywhere the tyres' aligning moment swings it when no hand is
-  // on the wheel. The road wheels hang off it with no play, so it is also the rim's.
+  // on the wheel. It is also the rim's.
   private steerAngle = 0;
+  /**
+   * The rack's angle as the ROAD WHEELS have it: `steerAngle` through the steering's free
+   * play (`HandlingTuning.steerLash`). Inside the play the wheels follow their own
+   * aligning moment; at its edge the rack drags them. Equal to `steerAngle` with the
+   * lash switched off (`STEERING_DEV.lash`).
+   */
+  private wheelRackRad = 0;
   /**
    * The load the tyres' load sensitivity and peak angle are referenced at, N: the car's
    * mean corner load (weight over the wheel count). One tyre all round, so the nose of
@@ -1432,6 +1510,14 @@ export class Vehicle implements Rebasable {
     wheelContactFraction: 0,
     surfaceRoughness: 0,
     lateralSlipMps: 0,
+    tyreSlipFront: 0,
+    tyreSlipRear: 0,
+    tyreSlideMpsFront: 0,
+    tyreSlideMpsRear: 0,
+    tyreLoadFront: 1,
+    tyreLoadRear: 1,
+    tyreSurfaceFront: SurfaceType.Asphalt,
+    tyreSurfaceRear: SurfaceType.Asphalt,
     landingImpactMps: 0,
     frontLockT: 0,
     rearLockT: 0,
@@ -1440,6 +1526,7 @@ export class Vehicle implements Rebasable {
     engineSeed: 0,
     surface: SurfaceType.Asphalt,
     bumpMps: 0,
+    bumpStopMps: 0,
     impactMps: 0,
   };
   /** Per-surface loaded-wheel count for the step, for `audioState.surface`. */
@@ -1993,6 +2080,7 @@ export class Vehicle implements Rebasable {
     this.wheels = [];
     this.beamAxles = [];
     this.steerAngle = 0;
+    this.wheelRackRad = 0;
     this.keysRimRad = 0;
     this.keysPressS = 0;
     this.keysPressKey = 0;
@@ -2228,6 +2316,12 @@ export class Vehicle implements Rebasable {
         profileRate: 0,
         hopZ: 0,
         hopV: 0,
+        hopGripScale: 1,
+        hopBodyForceN: 0,
+        tyreLoadMeanN: 0,
+        relaxationM: this.tyre.relaxationM,
+        longitudinalRelaxationM: this.tyre.longitudinalRelaxationM,
+        complianceSteerRad: 0,
         mesh,
         digWeight: 0,
         longitudinalCapacityN: 0,
@@ -2348,6 +2442,7 @@ export class Vehicle implements Rebasable {
         reserveM: w.maxTravelM - w.sagM,
         bumpStopN: 0,
         tyreDeflectionM: 0,
+        tyreLoadN: 0,
         tyreTempC: w.tyreTempC,
         tyreGrip: w.tyreGrip,
       });
@@ -2423,7 +2518,11 @@ export class Vehicle implements Rebasable {
     this.parkingHoldRequested = false;
     this.impactVelocityPrimed = false;
     this.steerAngle = 0;
-    for (const w of this.wheels) w.tyre.steerRad = 0;
+    this.wheelRackRad = 0;
+    for (const w of this.wheels) {
+      w.tyre.steerRad = 0;
+      w.complianceSteerRad = 0;
+    }
   }
 
   /** True between `enterRails` and `leaveRails`. */
@@ -2528,6 +2627,7 @@ export class Vehicle implements Rebasable {
     const lock = this.model.steerLock;
     const rack = speedMps > 1 ? clamp(Math.atan((this.wheelbaseM * yawRate) / speedMps), -lock, lock) : 0;
     this.steerAngle = rack;
+    this.wheelRackRad = rack;
     for (const w of this.wheels) w.tyre.steerRad = this.wheelSteerAngle(w);
     this.rollWheelsAt(speedMps);
   }
@@ -3050,6 +3150,7 @@ export class Vehicle implements Rebasable {
     this.updateBumpSteer(dt, speedKmh);
     this.updateAxleRoll();
     this.updateSteering(dt, input, fwd);
+    this.updateComplianceSteer(dt);
 
     // The drive at the hubs as the driveline's last substep left it (it is stepped with
     // the wheels, in `updateWheelDynamics`), with this step's pedal override applied as
@@ -3417,15 +3518,38 @@ export class Vehicle implements Rebasable {
     let frontSlideSum = 0;
     let rearSlideSum = 0;
     const speedAbs = Math.abs(fwd);
+    const audio0 = this.audioState;
+    audio0.tyreSlipFront = 0;
+    audio0.tyreSlipRear = 0;
+    audio0.tyreSlideMpsFront = 0;
+    audio0.tyreSlideMpsRear = 0;
     for (const w of this.wheels) {
       // A locked wheel is sliding by definition; no need to infer it from the cone.
       const reported = w.locked && speedAbs > SLIDE_MIN_MPS ? 1 : w.slideT;
       if (w.isFront) frontSlideSum += reported;
       else rearSlideSum += reported;
+      // The squeal's wheel on this axle: the one furthest past its own peak (see
+      // `VehicleAudioState.tyreSlipFront`).
+      if (!w.inContact || w.loadN <= 0) continue;
+      const peakSlip = w.slideLoose ? 1 : 1 / (3 - 2 * w.slideFloor);
+      const slip = w.alignSlip / peakSlip;
+      if (slip <= (w.isFront ? audio0.tyreSlipFront : audio0.tyreSlipRear)) continue;
+      const slideMps = Math.hypot(w.lateralSpeed, w.spinRadS * w.radius - w.contactSpeed);
+      const load = w.loadN / w.staticLoadN;
+      if (w.isFront) {
+        audio0.tyreSlipFront = slip;
+        audio0.tyreSlideMpsFront = slideMps;
+        audio0.tyreLoadFront = load;
+        audio0.tyreSurfaceFront = w.contactSurface;
+      } else {
+        audio0.tyreSlipRear = slip;
+        audio0.tyreSlideMpsRear = slideMps;
+        audio0.tyreLoadRear = load;
+        audio0.tyreSurfaceRear = w.contactSurface;
+      }
     }
-    this.audioState.frontLockT =
-      this.frontWheelCount > 0 ? frontSlideSum / this.frontWheelCount : 0;
-    this.audioState.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
+    audio0.frontLockT = this.frontWheelCount > 0 ? frontSlideSum / this.frontWheelCount : 0;
+    audio0.rearLockT = this.rearWheelCount > 0 ? rearSlideSum / this.rearWheelCount : 0;
 
     this.applyAntiRollBars(dt);
     this.applyRollDamping(dt);
@@ -4345,6 +4469,7 @@ export class Vehicle implements Rebasable {
     // The wheel loop's substep, here because the slip relaxation below is sized on it.
     const substeps = this.wheelSubsteps;
     const h = dt / substeps;
+    const crossplyTyre = this.model.tyre?.construction === 'crossply';
 
     // Each wheel's own parked load (`w.staticLoadN`, set in `rebuild`) is the reference
     // both the μ(Fz) factor and the traction-control load gate are measured against.
@@ -4449,7 +4574,6 @@ export class Vehicle implements Rebasable {
       const adverseLeanDeg = (lean * Math.sign(latSpeed) * 180) / Math.PI;
       w.lateralCapacityN *= 1 - CAMBER_GRIP_LOSS_PER_DEG * Math.max(0, adverseLeanDeg);
       w.geometricSlipRad = Math.atan2(Math.abs(latSpeed), Math.max(Math.abs(fwdSpeed), SLIP_ANGLE_REF_MPS));
-      w.slipRelaxBlend = 1 - Math.exp(-(Math.abs(fwdSpeed) * h) / this.tyre.relaxationM);
       w.lateralRightX = this.wheelRightScratch.x;
       w.lateralRightY = this.wheelRightScratch.y;
       w.lateralRightZ = this.wheelRightScratch.z;
@@ -4470,6 +4594,18 @@ export class Vehicle implements Rebasable {
       w.loadN = inContact
         ? Math.max(0, w.tyre.forceN + w.bumpStopN + w.bleedN + w.barN + w.linkN + w.pitchLinkN)
         : 0;
+
+      // THE CARCASS UNDER LOAD (`relaxationLoadScale`): the lengths the patch builds its
+      // forces over, at the load this corner carries now, and the share of the way to
+      // the geometric angle it winds in one substep.
+      const relaxScale = relaxationLoadScale(w.loadN / this.tyreReferenceLoadN, crossplyTyre);
+      w.relaxationM = this.tyre.relaxationM * relaxScale;
+      w.longitudinalRelaxationM = this.tyre.longitudinalRelaxationM * relaxScale;
+      w.slipRelaxBlend = 1 - Math.exp(-(Math.abs(fwdSpeed) * h) / w.relaxationM);
+      // The hub's substeps start from a tyre that carries `loadN` (`stepWheelHop`).
+      w.hopGripScale = 1;
+      w.hopBodyForceN = 0;
+      w.tyreLoadMeanN = 0;
 
       w.inContact = inContact;
       w.contactSurface = surfaceType;
@@ -4513,7 +4649,13 @@ export class Vehicle implements Rebasable {
     const carInertia = this.statsValue.mass * this.drivenRadius * this.drivenRadius;
     const shaftRate = DRIVELINE_SHAFT_RATE_NM_PER_RAD;
     let carDigWeight = 0;
+    // The hub's share of a step the airborne relaxation keeps per substep (see
+    // `stepWheelHop`): half a step's worth, as it always was, spread over the substeps.
+    const hopRelax = Math.pow(0.5, share);
     for (let step = 0; step < substeps; step++) {
+      // THE HUBS first: this substep's tyre load (`hopGripScale`) is what the wheels below
+      // read their capacity at.
+      this.stepWheelHop(h, (step + 1) * share, share, dt, hopRelax);
       // The crank turns with the gearbox end of the shaft while the clutch is locked, and
       // that end turns with the DRIVEN wheels (their mean, which is what an open
       // differential gives it) less the shaft's wind-up rate. So a tyre breaking loose
@@ -4771,58 +4913,12 @@ export class Vehicle implements Rebasable {
         }
       }
 
-      // THE ROAD, through the tyre. See the TYRE AS A SPRING block above for why this
-      // is not the suspension's job.
-      //
-      // `w.profileHeight` is the enveloped ground the collider does not carry, under
-      // this wheel, in metres. The wheel is a mass on the tyre's carcass rate with the
-      // suspension between it and the body:
-      //
-      //   m_u * z_u'' = k_t (h - z_u) + c_t (h' - z_u') - k_s z_u - c_s z_u'
-      //   F_body      = k_s z_u + c_s z_u'
-      //
-      // Both spring terms are relative to the body, which is treated as still over the
-      // 10-14 Hz the hop mode lives at — the body's own motion is Rapier's problem and
-      // it is already solving it against the smooth collider. Integrated semi-implicitly
-      // so the stiff tyre rate is stable at 60 Hz.
-      //
-      // A BEAM axle with both wheels down is one unsprung body, stepped after this loop
-      // (`stepBeamAxleHop`); with one end in the air, the end still down rides alone.
-      const beamHop = w.beamPartner !== null && beamAxleDown(w, w.beamPartner);
-      if (!beamHop && inContact && w.loadN > 0) {
-        const mUnsprung = unsprungMass(w.radius);
-        const kSusp = w.springRateNPerM;
-        const cSusp = w.hopV > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
-        const cTyre = 2 * TYRE_DAMPING_RATIO * Math.sqrt(w.tyreRateN * mUnsprung);
-
-        // Solved for the new velocity with BOTH springs and BOTH dampers evaluated at
-        // it. The tyre rate is 165 kN/m against 38 kg, i.e. a 10.5 Hz mode at 60 Hz
-        // steps: an explicit step would ring at that rate and a symplectic one would
-        // mistune it, so the whole pair goes in the denominator and the solve is
-        // unconditionally stable.
-        const kTotal = kSusp + w.tyreRateN;
-        const cTotal = cSusp + cTyre;
-        const drive = w.tyreRateN * w.profileHeight + cTyre * w.profileRate;
-        w.hopV =
-          (mUnsprung * w.hopV + dt * (drive - kTotal * w.hopZ)) /
-          (mUnsprung + dt * cTotal + dt * dt * kTotal);
-        w.hopZ += w.hopV * dt;
-
-        // The suspension force that moving wheel makes on the body. A road can take a
-        // wheel's load away and it can push, but it cannot PULL the car down: bounding
-        // the force at minus this wheel's own load is the tyre leaving the ground, and
-        // it is the physical bound the old 0.9-of-static force cap stood in for.
-        let bodyForce = kSusp * w.hopZ + cSusp * w.hopV;
-        if (bodyForce < -w.loadN) bodyForce = -w.loadN;
-        if (bodyForce !== 0) {
-          rotateVector(this.microUp, this.rotationScratch, 0, bodyForce * dt, 0);
-          this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
-        }
-      } else if (!beamHop) {
-        // Airborne: the carcass relaxes towards free length rather than storing the
-        // last bump until the landing.
-        w.hopZ *= 0.5;
-        w.hopV *= 0.5;
+      // THE ROAD, through the tyre: what the hub's suspension handed the body over the
+      // substeps (`stepWheelHop`), as one impulse at the patch. See the TYRE AS A SPRING
+      // block above for why this is not the suspension's job.
+      if (w.hopBodyForceN !== 0) {
+        rotateVector(this.microUp, this.rotationScratch, 0, w.hopBodyForceN * dt, 0);
+        this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
       }
 
       // The bump stop and the damper's bleed, sized off this step's travel in
@@ -4877,7 +4973,6 @@ export class Vehicle implements Rebasable {
       );
     }
 
-    this.stepBeamAxleHop(dt);
     this.resolveLinkTransfer();
 
     // One torque impulse for the whole axle set. Applied after the loop so the four
@@ -4958,7 +5053,8 @@ export class Vehicle implements Rebasable {
           LOW_RANGE_MU * lowRangeWeight * loadFactor,
         );
       }
-      capacityN = longitudinalMu * w.loadN;
+      // At the load the hopping hub presses on the road this substep (`hopGripScale`).
+      capacityN = longitudinalMu * w.loadN * w.hopGripScale;
     }
 
     // A DRIVEN wheel's engine is behind the driveline's shaft, a mass of its own (the
@@ -4988,7 +5084,7 @@ export class Vehicle implements Rebasable {
         -(
           Math.max(Math.abs(contactSpeed), Math.abs(spin * w.radius), LONGITUDINAL_RELAXATION_FLOOR_MPS) *
           h
-        ) / this.tyre.longitudinalRelaxationM,
+        ) / w.longitudinalRelaxationM,
       );
     const slipScale = w.slipScale;
     // Relaxation: the carcass follows the geometric angle over a rolling DISTANCE,
@@ -5133,7 +5229,9 @@ export class Vehicle implements Rebasable {
       Math.abs(longitudinalForce) * Math.abs(spin * w.radius - contactSpeed) * share;
     if (w.inContact && w.lateralCapacityN > 0) {
       // The side-force curve read at the carcass slip ratio this substep left (COMBINED
-      // SLIP), and the friction circle's remainder the static hold may spend.
+      // SLIP), and the friction circle's remainder the static hold may spend — both at
+      // the load the hub is pressing on the road this substep (`hopGripScale`), so a tyre
+      // skipping over a ripple holds the car sideways only while it is touching.
       w.sideCurveShare +=
         combinedLateral(
           w.sideSlip,
@@ -5144,8 +5242,10 @@ export class Vehicle implements Rebasable {
           w.sidePlateau,
           w.slideLoose,
           slide,
-        ) * share;
-      w.sideStaticShare += Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)) * share;
+        ) *
+        share *
+        w.hopGripScale;
+      w.sideStaticShare += Math.sqrt(Math.max(0, 1 - gripUsage * gripUsage)) * share * w.hopGripScale;
     }
     return w.digWeight;
   }
@@ -5188,6 +5288,7 @@ export class Vehicle implements Rebasable {
       r.reserveM = w.maxTravelM - w.compressionM;
       r.bumpStopN = w.bumpStopN;
       r.tyreDeflectionM = w.profileHeight - w.hopZ;
+      r.tyreLoadN = w.tyreLoadMeanN;
       r.tyreTempC = w.tyreTempC;
       r.tyreGrip = w.tyreGrip;
     }
@@ -5629,29 +5730,78 @@ export class Vehicle implements Rebasable {
       }
     }
 
+    // Where the road wheels would roll free, in the WHEELS' rack angle: the travel angle
+    // above is in the rack's, measured with the wheels where the lash left them.
+    const wheelsFree = centre + this.wheelRackRad - this.steerAngle;
+    const swingLimit =
+      referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
     if (handsOff) {
       // No hand on the wheel: the tyres swing toward the travel angle on their own
       // moment, never past it, over the column's damping (`STEER_FREE_TAU_S`).
       const gap = centre - this.steerAngle;
-      const swingLimit =
-        referenceMoment > 0 ? (Math.abs(moment) / (STEER_FREE_TAU_S * referenceMoment)) * dt : 0;
       this.steerAngle = clamp(this.steerAngle + clamp(gap, -swingLimit, swingLimit), -lock, lock);
-      return;
+    } else {
+      const maxDelta = this.handling.steerRackSpeed * dt;
+      this.steerAngle = clamp(this.steerAngle + clamp(target - this.steerAngle, -maxDelta, maxDelta), -lock, lock);
     }
-    const maxDelta = this.handling.steerRackSpeed * dt;
-    this.steerAngle = clamp(this.steerAngle + clamp(target - this.steerAngle, -maxDelta, maxDelta), -lock, lock);
+
+    // THE FREE PLAY (`STEER_LASH_CLASSIC_RAD`). Inside it the road wheels are as free as
+    // a rack with no hand on it, and swing on the same moment toward where they would
+    // roll; at either edge of it the rack drags them. The lock is set by the stops on
+    // the knuckles, not by the box, so the play closes up as the rack reaches it: at
+    // full lock the wheels are at full lock, and the turning circle is the factory's.
+    //
+    // THE PLAYER'S HANDS ONLY (`playerDriven`): the autopilot and the traffic steer
+    // through a linear controller, and a dead band inside its loop is a limit cycle.
+    // Measured (tools/autopilot-bench.ts), the classic profile's 1° made the GAZ-21
+    // sleeper cross its line 1.7 times a km with 0.082 m RMS off it, against 0.3 and
+    // 0.038 without; the driver's own correction is what the play is there to ask for.
+    const halfLash = STEERING_DEV.lash && this.playerDriven
+      ? Math.min(0.5 * this.handling.steerLash, Math.max(0, lock - Math.abs(this.steerAngle)))
+      : 0;
+    const swung = this.wheelRackRad + clamp(wheelsFree - this.wheelRackRad, -swingLimit, swingLimit);
+    this.wheelRackRad = clamp(swung, this.steerAngle - halfLash, this.steerAngle + halfLash);
   }
 
   /**
-   * The steering angle a wheel actually presents to the road: the rack's angle shared
-   * out by the Ackermann geometry, the worn front end's bump disturbance, the static toe
-   * and the roll steer. The rear wheels get the last two. `steerAngle` stays the rack's
-   * — the bicycle-model angle of the axle's centreline, which is what `steerLock`, the
-   * HUD and the autopilot's inverse are written in.
+   * COMPLIANCE STEER (`COMPLIANCE_STEER_FRONT_RAD_PER_N`): each wheel's toe as the bushes
+   * give under last step's tyre forces — the side force steering each axle toward
+   * understeer, a front wheel's brake force toeing it out — lagged over the rubber's own
+   * time. Zero, at once, with `STEERING_DEV.compliance` off.
+   */
+  private updateComplianceSteer(dt: number): void {
+    const on = STEERING_DEV.compliance;
+    const blend = 1 - Math.exp(-dt / COMPLIANCE_STEER_TAU_S);
+    for (const w of this.wheels) {
+      if (!on) {
+        w.complianceSteerRad = 0;
+        continue;
+      }
+      // A positive steer heads the wheel toward +X, the side force's own sign: the front
+      // turns away from the force it is making, the rear into it.
+      let target = w.isFront
+        ? -COMPLIANCE_STEER_FRONT_RAD_PER_N * w.sideForceBodyXN
+        : COMPLIANCE_STEER_REAR_RAD_PER_N * w.sideForceBodyXN;
+      // Toe-out is the static toe-in's opposite sign (`toeRad`).
+      if (w.isFront && w.beamPartner === null && w.brakeForceN > 0) {
+        target += w.sideSign * COMPLIANCE_BRAKE_TOE_RAD_PER_N * Math.abs(w.longitudinalForceN);
+      }
+      target = clamp(target, -COMPLIANCE_STEER_MAX_RAD, COMPLIANCE_STEER_MAX_RAD);
+      w.complianceSteerRad += (target - w.complianceSteerRad) * blend;
+    }
+  }
+
+  /**
+   * The steering angle a wheel actually presents to the road: the rack's angle as the
+   * wheels have it through the free play (`wheelRackRad`), shared out by the Ackermann
+   * geometry, the worn front end's bump disturbance, the static toe, the roll steer and
+   * the bushes' compliance steer. The rear wheels get the last three. `steerAngle`
+   * stays the rack's — the bicycle-model angle of the axle's centreline, which is what
+   * `steerLock`, the HUD and the autopilot's inverse are written in.
    */
   private wheelSteerAngle(w: WheelVisual): number {
     const roll = w.isFront ? this.frontRollRad : this.rearRollRad;
-    const geometry = w.toeRad + w.rollSteer * roll;
+    const geometry = w.toeRad + w.rollSteer * roll + w.complianceSteerRad;
     if (!w.isFront) return geometry;
     return this.ackermannAngle(w) + w.sideSign * this.bumpSteerAngle + geometry;
   }
@@ -5663,10 +5813,11 @@ export class Vehicle implements Rebasable {
    * The trapezoid delivers `ackermann` of that difference and the rest is parallel. The
    * two straddle δ, so the car's centreline turns on the same circle as before and the
    * factory turning circles `steerLock` was cut to stand; what goes is the inner tyre
-   * dragged sideways at full lock and the outer one under-steered beside it.
+   * dragged sideways at full lock and the outer one under-steered beside it. δ is the
+   * rack as the wheels have it (`wheelRackRad`).
    */
   private ackermannAngle(w: WheelVisual): number {
-    const delta = this.steerAngle;
+    const delta = this.wheelRackRad;
     if (this.ackermann === 0 || delta === 0) return delta;
     const L = this.wheelbaseM;
     const tanDelta = Math.tan(Math.abs(delta));
@@ -5960,9 +6111,107 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * THE BEAM AXLE'S UNSPRUNG BODY: the wheel-hop state of a beam's two wheels (see the
-   * road-through-the-tyre block in the wheel pass), stepped as the one rigid axle they
-   * are bolted to rather than as two quarter-cars.
+   * THE HUBS, one wheel substep: every wheel's unsprung mass on its tyre, under its
+   * suspension, against the enveloped ground the collider does not carry (see the TYRE
+   * AS A SPRING block in vehicletuning.ts). For an independent wheel, the quarter-car
+   *
+   *   m_u z'' = F_t − k_s z − c_s z'          F_body = k_s z + c_s z'
+   *   F_t     = k_t (h − z) + c_t (h' − z')   while the tyre touches
+   *
+   * `z` the hub's rise and `h` the profile under the patch, both from where the body's
+   * own contact put them: `F_t` is the CHANGE in the tyre's load, so the tyre carries
+   * `loadN + F_t`. Both spring terms are relative to the body, which is treated as still
+   * over the 10-14 Hz the hop mode lives at — the body's own motion is Rapier's problem
+   * and it is already solving it against the smooth collider.
+   *
+   * WHY AT THE SUBSTEP. This used to be stepped once per 60 Hz body step. The hop mode is
+   * 10-14 Hz, so `ω·dt` was over 1: the implicit step that kept it stable also damped it
+   * to nothing, and the hub could not ring once over a ripple. At the 480 Hz substep
+   * `ω·h` is 0.14 and the mode keeps the damping its tyre and damper give it. The profile
+   * is read where the patch is DURING the step, interpolated along the step's rise
+   * (`profileRate`), and the body still receives the force once a step, as the mean the
+   * substeps made (`hopBodyForceN`).
+   *
+   * THE TYRE CANNOT PULL. A tyre presses on the road and nothing else: when the hub is
+   * flung up off a ripple faster than the road falls away, `loadN + F_t` would go
+   * negative, and that is the wheel leaving the ground. The tyre then makes no force at
+   * all — `F_t = −loadN` exactly, the carcass's spring out of the equation — and the
+   * suspension throws the hub back down until the tread meets the road again. Before,
+   * the carcass pulled the hub back as a spring both ways, so no wheel ever left a
+   * corrugated road and none ever lost grip on one.
+   *
+   * THE GRIP FOLLOWS THE LOAD. The tyre's capacity this substep is read at the load the
+   * hub is pressing on the road (`hopGripScale`, μ(Fz) included), so on washboard each
+   * wheel unloads and skips in its own time, and a car crossing it drifts and steps
+   * where a smooth road holds it. With no profile the hub sits still, `F_t` is 0 and
+   * every tyre force is exactly what it was.
+   *
+   * A BEAM axle with both wheels down is one unsprung body (`stepBeamAxleHop`); with one
+   * end in the air, the end still down rides alone.
+   */
+  private stepWheelHop(h: number, t: number, share: number, dt: number, airRelax: number): void {
+    for (const w of this.wheels) {
+      if (w.beamPartner !== null && beamAxleDown(w, w.beamPartner)) continue;
+      if (!(w.inContact && w.loadN > 0)) {
+        // Airborne: the carcass relaxes towards free length rather than storing the
+        // last bump until the landing.
+        w.hopZ *= airRelax;
+        w.hopV *= airRelax;
+        w.hopGripScale = 1;
+        continue;
+      }
+      const mUnsprung = unsprungMass(w.radius);
+      const kSusp = w.springRateNPerM;
+      const cSusp = w.hopV > 0 ? w.compressionRateNsPerM : w.relaxationRateNsPerM;
+      const cTyre = 2 * TYRE_DAMPING_RATIO * Math.sqrt(w.tyreRateN * mUnsprung);
+      const ground = w.profileHeight - w.profileRate * dt * (1 - t);
+      const touching = this.tyreTouches(w, ground, cTyre);
+
+      // Solved for the new velocity with every spring and damper evaluated at it, so the
+      // stiff carcass is unconditionally stable; off the ground the carcass leaves the
+      // matrix and the tyre's share is the constant that unloads it exactly.
+      const kTyre = touching ? w.tyreRateN : 0;
+      const cTyreIn = touching ? cTyre : 0;
+      const drive = touching ? w.tyreRateN * ground + cTyre * w.profileRate : -w.loadN;
+      const kTotal = kSusp + kTyre;
+      const cTotal = cSusp + cTyreIn;
+      w.hopV = (mUnsprung * w.hopV + h * (drive - kTotal * w.hopZ)) / (mUnsprung + h * cTotal + h * h * kTotal);
+      w.hopZ += w.hopV * h;
+      this.settleHub(w, ground, cTyre, touching, kSusp * w.hopZ + cSusp * w.hopV, share);
+    }
+    this.stepBeamAxleHop(h, t, share, dt);
+  }
+
+  /** Whether this hub's tyre is pressing on the road at the start of the substep. */
+  private tyreTouches(w: WheelVisual, ground: number, cTyre: number): boolean {
+    return w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.profileRate - w.hopV) > 0;
+  }
+
+  /**
+   * After a hub's substep: the tyre's load and its grip (`hopGripScale`), and the
+   * substep's share of the force on the body, bounded as it always was — the road can
+   * take a wheel's load away and push, but it cannot PULL the car down.
+   */
+  private settleHub(
+    w: WheelVisual,
+    ground: number,
+    cTyre: number,
+    touching: boolean,
+    suspensionForceN: number,
+    share: number,
+  ): void {
+    const tyreN = touching
+      ? Math.max(0, w.loadN + w.tyreRateN * (ground - w.hopZ) + cTyre * (w.profileRate - w.hopV))
+      : 0;
+    w.hopGripScale = (tyreN * this.tyreLoadFactor(tyreN)) / (w.loadN * this.tyreLoadFactor(w.loadN));
+    w.tyreLoadMeanN += tyreN * share;
+    w.hopBodyForceN += Math.max(-w.loadN, suspensionForceN) * share;
+  }
+
+  /**
+   * THE BEAM AXLE'S UNSPRUNG BODY: the wheel-hop state of a beam's two wheels (see
+   * `stepWheelHop`), stepped as the one rigid axle they are bolted to rather than as two
+   * quarter-cars, at the same substep.
    *
    * The axle heaves and rolls. Written in the two wheels' own displacements `z_−, z_+`
    * (the hub heights `hopZ`, rigidly tied: the axle's heave is their mean and its roll
@@ -5985,15 +6234,17 @@ export class Vehicle implements Rebasable {
    * frequency and every flat-road figure are untouched. Only the DIFFERENCE between the
    * wheels sees the beam: a ripple under one wheel moves the other one, at once
    * through the axle's mass (a centre-heavy axle pivots inside the far wheel, pressing
-   * it down) and then through its roll mode, and the body is pushed at both seats.
+   * it down) and then through its roll mode, and the body is pushed at both seats. A
+   * tyre the axle lifts off the road leaves the matrix as the quarter-car's does, so a
+   * live axle tramping on washboard skips one end and then the other.
    *
    * The same semi-implicit step as the quarter-car, with the 2×2 system solved
-   * outright: `(M + dt C + dt² K) v' = M v + dt (f − K z)` is symmetric positive
-   * definite for any ρ², σ² > 0, so it is unconditionally stable. A pair with one wheel
-   * in the air is not stepped here (`beamAxleDown`): the grounded end rides alone and
-   * the airborne one relaxes, as on an independent axle.
+   * outright: `(M + h C + h² K) v' = M v + h (f − K z)` is symmetric positive definite
+   * for any ρ², σ² > 0, so it is unconditionally stable. A pair with one wheel in the
+   * air on the COLLIDER is not stepped here (`beamAxleDown`): the grounded end rides
+   * alone in `stepWheelHop` and the airborne one relaxes, as on an independent axle.
    */
-  private stepBeamAxleHop(dt: number): void {
+  private stepBeamAxleHop(h: number, t: number, share: number, dt: number): void {
     const gyrationSq = BEAM_AXLE_GYRATION_SQ;
     for (const [a, b] of this.beamAxles) {
       if (!beamAxleDown(a, b)) continue;
@@ -6010,40 +6261,33 @@ export class Vehicle implements Rebasable {
       const damperB = b.hopV > 0 ? b.compressionRateNsPerM : b.relaxationRateNsPerM;
       const tyreDampA = 2 * TYRE_DAMPING_RATIO * Math.sqrt(a.tyreRateN * massA);
       const tyreDampB = 2 * TYRE_DAMPING_RATIO * Math.sqrt(b.tyreRateN * massB);
-      const stiffA = springSelf + a.tyreRateN;
-      const stiffB = springSelf + b.tyreRateN;
+      const groundA = a.profileHeight - a.profileRate * dt * (1 - t);
+      const groundB = b.profileHeight - b.profileRate * dt * (1 - t);
+      const touchA = this.tyreTouches(a, groundA, tyreDampA);
+      const touchB = this.tyreTouches(b, groundB, tyreDampB);
+      const tyreKA = touchA ? a.tyreRateN : 0;
+      const tyreKB = touchB ? b.tyreRateN : 0;
+      const tyreCA = touchA ? tyreDampA : 0;
+      const tyreCB = touchB ? tyreDampB : 0;
+      const driveA = touchA ? a.tyreRateN * groundA + tyreDampA * a.profileRate : -a.loadN;
+      const driveB = touchB ? b.tyreRateN * groundB + tyreDampB * b.profileRate : -b.loadN;
+      const stiffA = springSelf + tyreKA;
+      const stiffB = springSelf + tyreKB;
 
-      const s11 = massSelf + dt * (damperA + tyreDampA) + dt * dt * stiffA;
-      const s22 = massSelf + dt * (damperB + tyreDampB) + dt * dt * stiffB;
-      const s12 = massCross + dt * dt * springCross;
-      const r1 =
-        massSelf * a.hopV +
-        massCross * b.hopV +
-        dt * (a.tyreRateN * a.profileHeight + tyreDampA * a.profileRate - stiffA * a.hopZ - springCross * b.hopZ);
-      const r2 =
-        massCross * a.hopV +
-        massSelf * b.hopV +
-        dt * (b.tyreRateN * b.profileHeight + tyreDampB * b.profileRate - springCross * a.hopZ - stiffB * b.hopZ);
+      const s11 = massSelf + h * (damperA + tyreCA) + h * h * stiffA;
+      const s22 = massSelf + h * (damperB + tyreCB) + h * h * stiffB;
+      const s12 = massCross + h * h * springCross;
+      const r1 = massSelf * a.hopV + massCross * b.hopV + h * (driveA - stiffA * a.hopZ - springCross * b.hopZ);
+      const r2 = massCross * a.hopV + massSelf * b.hopV + h * (driveB - springCross * a.hopZ - stiffB * b.hopZ);
       const det = s11 * s22 - s12 * s12;
       a.hopV = (r1 * s22 - s12 * r2) / det;
       b.hopV = (s11 * r2 - s12 * r1) / det;
-      a.hopZ += a.hopV * dt;
-      b.hopZ += b.hopV * dt;
+      a.hopZ += a.hopV * h;
+      b.hopZ += b.hopV * h;
 
-      // What each seat and damper hands the body, at that wheel's patch, bounded as the
-      // quarter-car's is: the road can unload a tyre but never pull the car down.
-      for (let end = 0; end < 2; end++) {
-        const w = end === 0 ? a : b;
-        let bodyForce =
-          end === 0
-            ? springSelf * a.hopZ + springCross * b.hopZ + damperA * a.hopV
-            : springCross * a.hopZ + springSelf * b.hopZ + damperB * b.hopV;
-        if (bodyForce < -w.loadN) bodyForce = -w.loadN;
-        if (bodyForce !== 0) {
-          rotateVector(this.microUp, this.rotationScratch, 0, bodyForce * dt, 0);
-          this.chassisBody.applyImpulseAtPoint(this.microUp, w.contactPoint, false);
-        }
-      }
+      // What each seat and damper hands the body, at that wheel's patch.
+      this.settleHub(a, groundA, tyreDampA, touchA, springSelf * a.hopZ + springCross * b.hopZ + damperA * a.hopV, share);
+      this.settleHub(b, groundB, tyreDampB, touchB, springCross * a.hopZ + springSelf * b.hopZ + damperB * b.hopV, share);
     }
   }
 
@@ -6117,6 +6361,12 @@ export class Vehicle implements Rebasable {
       if (inContact && w.compressionM > stopBegins) {
         const into = Math.min(1, (w.compressionM - stopBegins) / (w.maxTravelM - stopBegins));
         w.bumpStopN = w.bumpStopPeakN * into * into;
+        // The clunk the audio hears: the corner still closing once the rubber is a
+        // third crushed, which a parked or cornering car settled on its stop never is.
+        if (into > 1 / 3 && previousCompressionM > 0 && dt > 0) {
+          const closingMps = (w.compressionM - previousCompressionM) / dt;
+          if (closingMps > this.audioState.bumpStopMps) this.audioState.bumpStopMps = closingMps;
+        }
       }
 
       // THE DAMPER'S BLEED (see DAMPER_BLEED_GAIN): below the knee the damper is

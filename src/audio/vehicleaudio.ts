@@ -26,12 +26,16 @@
  *    blizzard), a little hiss, and surface texture: stones and grit as sparse
  *    grains on loose ground, slab joints thumping front-then-rear on concrete, cracks
  *    on broken asphalt, a hiss of spray on a wet road.
- *  - Skid: on a hard surface a pitched, chirping squeal; on loose ground no squeal at
- *    all — a scrabble of stones and a roar instead.
+ *  - Skid: one voice per axle, at that axle, from the tyre model's own slip
+ *    (`TYRE_VOICE`): on a hard surface a pitched, chirping squeal that starts just
+ *    under the tyre's peak and rises in level and pitch with the slide and the load; on
+ *    loose ground no squeal at all — a scrabble of stones, a crunch of the recorded
+ *    roll, or a hiss of sand, and a roar.
  *  - Brakes: a low-mid pad rub pulsed once per wheel revolution (see below).
  *
- * One-shots: gear change, the handbrake lever, suspension jolts, landings, collisions,
- * the starter.
+ * One-shots: gear change, the handbrake lever, suspension jolts (the thud of a fast
+ * compression), the bump stop's clunk when a corner closes onto its rubber, landings,
+ * collisions, the starter.
  *
  * RECORDED (2026-09-28): stones under the tyres on loose ground, the tyre squeal and
  * the crunch of a collision are CC0 recordings (samples.ts); their synthesised versions
@@ -81,9 +85,54 @@ const TYRE_TOP_MPS = AUDIO_CONFIG.tyreTopMps;
  */
 const TYRE_OVERDRIVE = 0.3;
 const TYRE_GAIN = AUDIO_CONFIG.tyreGain;
-const SKID_START_MPS = AUDIO_CONFIG.skidStartMps;
-const SKID_FULL_MPS = AUDIO_CONFIG.skidFullMps;
 const SKID_GAIN = AUDIO_CONFIG.skidGain;
+/**
+ * THE TYRES' VOICE, from the tyre model (`VehicleAudioState.tyreSlipFront`) rather than
+ * from how fast the body is going sideways. Mutable so it can be tuned live from the
+ * console as `__bro.tyreVoice` (app/devtools.ts); the starting values are these.
+ *
+ * A tyre sings when its patch slides, and the patch starts to slide just before the
+ * force peaks: the brush's sliding zone is already a third of the patch at its peak.
+ * So the squeal starts at `onsetPeak` of the peak slip and is full at `fullPeak`, where
+ * the whole patch is sliding — and only once the patch is actually moving over the road
+ * (`slideStartMps` to `slideFullMps`), because a tyre twisted on the spot at a walk
+ * scrubs, it does not squeal. The old voice read the BODY's sideways speed, which a car
+ * cornering hard on grip has plenty of and a car spinning its wheels in a straight line
+ * has none of; this one reads the rubber.
+ *
+ *   onsetPeak, fullPeak     slip as a share of the tyre's peak: silent below, full above
+ *   slideStartMps/FullMps   the patch's sliding speed gate, m/s
+ *   gain                    on the recorded squeal's own level (`skidGain`)
+ *   loadShare               how much of the level follows the tyre's load over its
+ *                           parked load: 0 none, 1 all of it
+ *   pitchBase, pitchSlip    playback rate at onset, and what a full slide adds
+ *   pitchLoad               rate per unit of load over parked: a loaded tyre sings higher
+ *   crunch                  how much a slide on loose stone lifts the recorded stones
+ *   clunkStartMps/FullMps   closing speed into the bump stop that starts the clunk, and
+ *                           the one at which it is full (`VehicleAudioState.bumpStopMps`)
+ *   clunkGain               the clunk's level against the bump thud's (`bumpGain`)
+ *
+ * One squeal voice per axle, at that axle, voiced by the axle's loudest wheel: a car
+ * understeering squeals at the nose, one oversteering at the tail, and a slide is both.
+ */
+export const TYRE_VOICE = {
+  onsetPeak: AUDIO_CONFIG.squealOnsetPeak,
+  fullPeak: AUDIO_CONFIG.squealFullPeak,
+  slideStartMps: 0.3,
+  slideFullMps: 1.6,
+  gain: 1,
+  loadShare: 0.5,
+  pitchBase: 0.86,
+  pitchSlip: 0.22,
+  pitchLoad: 0.1,
+  crunch: 1.5,
+  clunkStartMps: 0.25,
+  clunkFullMps: 1.2,
+  clunkGain: 1,
+};
+/** The axles' places along the car, metres from the root: where each squeal sits. */
+const FRONT_AXLE_M = 1.2;
+const REAR_AXLE_M = -1.25;
 const RUB_GAIN = AUDIO_CONFIG.rubGain;
 const ENGINE_GAIN = AUDIO_CONFIG.engineGain;
 const WHINE_GAIN = AUDIO_CONFIG.gearWhineGain;
@@ -289,7 +338,12 @@ export class VehicleAudio {
   private readonly sprayGain: GainNode;
 
   private readonly gravel: Bed;
-  private readonly skid: Bed;
+  /** One recorded squeal per axle, at that axle (`TYRE_VOICE`). */
+  private readonly squealFront: Bed;
+  private readonly squealRear: Bed;
+  private readonly frontAxle: PannerNode;
+  private readonly rearAxle: PannerNode;
+  private lastClunkAt = 0;
   private readonly scrabbleGain: GainNode;
   private readonly scrabbleSource: AudioBufferSourceNode;
   private readonly scrabbleFilter: BiquadFilterNode;
@@ -384,6 +438,8 @@ export class VehicleAudio {
     this.nose = panner();
     this.body = panner();
     this.tail = panner();
+    this.frontAxle = panner();
+    this.rearAxle = panner();
     this.impacts = ctx.createGain();
     this.impacts.connect(this.body);
     this.noseFx = ctx.createGain();
@@ -528,8 +584,10 @@ export class VehicleAudio {
     sprayHigh.connect(sprayLow).connect(this.sprayGain).connect(this.body);
 
     // --- skid -------------------------------------------------------------------
-    // A real tyre squealing on tarmac; its pitch follows how hard it slides.
-    this.skid = new Bed(mixer, mixer.samples, 'skid', this.body, 0.2);
+    // A real tyre squealing on tarmac, one per axle; its pitch follows how hard the
+    // rubber slides and how hard it is pressed (`TYRE_VOICE`).
+    this.squealFront = new Bed(mixer, mixer.samples, 'skid', this.frontAxle, 0.2);
+    this.squealRear = new Bed(mixer, mixer.samples, 'skid', this.rearAxle, 0.2);
     // Stones under the tyres: a recorded roll over gravel, faster as the car is. Only
     // its top half and nearly at one point: the low half of a trailer wheel on gravel,
     // spread wide, is a room, not a road (see GRAVEL_GAIN).
@@ -688,9 +746,11 @@ export class VehicleAudio {
   update(state: VehicleAudioState, pose: CarPose, dt: number): void {
     // Events are consumed whether or not they are voiced, so none is heard late.
     const bump = state.bumpMps;
+    const bumpStop = state.bumpStopMps;
     const landing = state.landingImpactMps;
     const impact = state.impactMps;
     state.bumpMps = 0;
+    state.bumpStopMps = 0;
     state.landingImpactMps = 0;
     state.impactMps = 0;
     if (!this.active) return;
@@ -770,26 +830,42 @@ export class VehicleAudio {
     this.gritSource.playbackRate.setTargetAtTime(0.3 + speed / 16, now, 0.1);
     this.gritFilter.frequency.setTargetAtTime(voice.gritHz * (0.85 + 0.25 * rollT), now, 0.1);
     ramp(this.gritGain.gain, TYRE_GAIN * 0.35 * voice.grit * clamp01(speed / 12) * contact, now, 0.08);
+    // --- skid -------------------------------------------------------------------
+    // Each axle's loudest tyre (`TYRE_VOICE`): its slip past its own peak, gated by how
+    // fast the patch actually slides, on the surface under it. A hard surface sings, a
+    // loose one throws what it is made of instead — stones mid-band, sand a fine hiss —
+    // and a slide on loose stone lifts the recorded stones into a crunch.
+    const front = this.axleSlide(state.tyreSlipFront, state.tyreSlideMpsFront, contact);
+    const rear = this.axleSlide(state.tyreSlipRear, state.tyreSlideMpsRear, contact);
+    const frontVoice = SURFACE_VOICES[state.tyreSurfaceFront] ?? voice;
+    const rearVoice = SURFACE_VOICES[state.tyreSurfaceRear] ?? voice;
+    // Wet rubber barely sings.
+    const singing = 1 - 0.75 * pose.wet;
+    this.squealAxle(this.squealFront, frontVoice.squeal ? front * singing : 0, state.tyreSlipFront, state.tyreLoadFront, now);
+    this.squealAxle(this.squealRear, rearVoice.squeal ? rear * singing : 0, state.tyreSlipRear, state.tyreLoadRear, now);
+    const frontLoose = frontVoice.squeal ? 0 : front * frontVoice.scrabble;
+    const rearLoose = rearVoice.squeal ? 0 : rear * rearVoice.scrabble;
+    const looseVoice = frontLoose >= rearLoose ? frontVoice : rearVoice;
+    const loose = Math.max(frontLoose, rearLoose);
+    this.scrabbleSource.playbackRate.setTargetAtTime(0.6 + speed / 6, now, 0.05);
+    this.scrabbleFilter.frequency.setTargetAtTime(looseVoice.scrabbleHz, now, 0.1);
+    ramp(this.scrabbleGain.gain, SCRABBLE_GAIN * loose, now, 0.05);
     // The recorded roll carries loose stone; the synthetic grains above only add bite.
-    this.gravel.setRate(Math.min(1.5, 0.6 + speed / 22), now);
-    this.gravel.set(GRAVEL_GAIN * voice.stones * clamp01(speed / 8) * contact * (cabin ? 1.2 : 1), now, 0.12);
+    // A sliding tyre turns it over faster and louder: the crunch.
+    const crunch = TYRE_VOICE.crunch * Math.max(frontLoose * frontVoice.stones, rearLoose * rearVoice.stones);
+    this.gravel.setRate(Math.min(1.5, 0.6 + speed / 22) * (1 + 0.25 * Math.min(1, crunch)), now);
+    this.gravel.set(
+      GRAVEL_GAIN * (voice.stones * clamp01(speed / 8) + crunch) * contact * (cabin ? 1.2 : 1),
+      now,
+      0.12,
+    );
     // Spray: a wet road is a hiss that swamps everything else the tyre does.
     const wetRoad = voice.squeal ? pose.wet : pose.wet * 0.4;
     ramp(this.sprayGain.gain, TYRE_GAIN * 1.1 * wetRoad * rollT ** 1.5 * contact, now, 0.15);
 
     this.joints(voice, speed, dt, contact);
 
-    // --- skid -------------------------------------------------------------------
-    const slipT = clamp01((state.lateralSlipMps - SKID_START_MPS) / (SKID_FULL_MPS - SKID_START_MPS));
     const lockT = Math.max(state.frontLockT, state.rearLockT);
-    const skidT = Math.max(slipT, lockT) * contact;
-    // Wet rubber barely sings.
-    const squeal = voice.squeal ? skidT * (1 - 0.75 * pose.wet) : 0;
-    this.skid.setRate(0.88 + 0.22 * slipT, now, 0.05);
-    this.skid.set(SKID_GAIN * squeal, now, 0.04);
-    this.scrabbleSource.playbackRate.setTargetAtTime(0.6 + speed / 6, now, 0.05);
-    this.scrabbleFilter.frequency.setTargetAtTime(voice.scrabbleHz, now, 0.1);
-    ramp(this.scrabbleGain.gain, voice.squeal ? 0 : SCRABBLE_GAIN * voice.scrabble * skidT, now, 0.05);
 
     // --- brakes -----------------------------------------------------------------
     const brake = clamp01(state.brake + (state.handbrake ? 0.7 : 0));
@@ -813,7 +889,33 @@ export class VehicleAudio {
       this.lastBumpAt = now;
       this.bump(bump, voice);
     }
+    if (bumpStop > TYRE_VOICE.clunkStartMps && now - this.lastClunkAt > 0.12) {
+      this.lastClunkAt = now;
+      this.bumpStopClunk(bumpStop);
+    }
     if (impact > 0.3) this.crash(impact);
+  }
+
+  /**
+   * How much one axle's loudest tyre is sliding, 0..1: its slip past `onsetPeak` of the
+   * peak, gated by the patch's sliding speed (`TYRE_VOICE`), and by the wheels on the
+   * ground.
+   */
+  private axleSlide(slip: number, slideMps: number, contact: number): number {
+    const v = TYRE_VOICE;
+    const past = clamp01((slip - v.onsetPeak) / Math.max(1e-3, v.fullPeak - v.onsetPeak));
+    const moving = clamp01((slideMps - v.slideStartMps) / Math.max(1e-3, v.slideFullMps - v.slideStartMps));
+    return past * moving * contact;
+  }
+
+  /** One axle's squeal: louder and higher as its tyre slides further and carries more. */
+  private squealAxle(bed: Bed, level: number, slip: number, loadRatio: number, now: number): void {
+    const v = TYRE_VOICE;
+    const loaded = clamp01(loadRatio / 2) * 2;
+    const pressed = 1 - v.loadShare + v.loadShare * loaded;
+    const over = clamp01((slip - 1) / Math.max(1e-3, v.fullPeak - 1));
+    bed.setRate(Math.max(0.5, v.pitchBase + v.pitchSlip * over + v.pitchLoad * (loaded - 1)), now, 0.05);
+    bed.set(SKID_GAIN * v.gain * level * pressed, now, 0.04);
   }
 
   private placeSources(pose: CarPose, now: number): void {
@@ -821,6 +923,8 @@ export class VehicleAudio {
     setPannerPosition(this.nose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
     setPannerPosition(this.body, x, y, z, now, 0.02);
     setPannerPosition(this.tail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
+    setPannerPosition(this.frontAxle, x + fx * FRONT_AXLE_M, y - 0.3, z + fz * FRONT_AXLE_M, now, 0.02);
+    setPannerPosition(this.rearAxle, x + fx * REAR_AXLE_M, y - 0.3, z + fz * REAR_AXLE_M, now, 0.02);
     setPannerPosition(this.engineNose, x + fx * NOSE_M, y, z + fz * NOSE_M, now, 0.02);
     setPannerPosition(this.engineTail, x + fx * TAIL_M, y - 0.2, z + fz * TAIL_M, now, 0.02);
   }
@@ -949,10 +1053,29 @@ export class VehicleAudio {
       decay: 0.05,
       delay: 0.015,
     });
-    if (s > 0.6) {
-      // Bump stop: rubber and a steel cup, a dull knock with a short ring.
-      this.mixer.blip(this.impacts, { gain: BUMP_GAIN * 0.1 * s, frequency: 310, endFrequency: 240, decay: 0.09, type: 'sine', delay: 0.02 });
-    }
+  }
+
+  /**
+   * A corner closing hard into its BUMP STOP (`VehicleAudioState.bumpStopMps`): the
+   * rubber's dull knock, the steel cup it is bolted into ringing short and low, and the
+   * body answering the blow through its mounts. It used to be faked as the top of every
+   * hard bump; now it is heard only when the physics actually reaches the stop — a
+   * loaded car over a crest, a pothole taken fast, a landing short of a full one.
+   */
+  private bumpStopClunk(closingMps: number): void {
+    const v = TYRE_VOICE;
+    const s = clamp01((closingMps - v.clunkStartMps) / Math.max(1e-3, v.clunkFullMps - v.clunkStartMps));
+    const level = BUMP_GAIN * v.clunkGain * (0.3 + 0.7 * s);
+    this.mixer.burst(this.impacts, {
+      gain: level * 0.8,
+      frequency: 110 + 50 * s,
+      q: 0.9,
+      decay: 0.06 + 0.05 * s,
+      type: 'lowpass',
+      colour: 'brown',
+    });
+    this.mixer.blip(this.impacts, { gain: level * 0.22, frequency: 310 - 30 * s, endFrequency: 240, decay: 0.09, type: 'sine', delay: 0.008 });
+    this.mixer.blip(this.impacts, { gain: level * 0.08, frequency: 760, endFrequency: 700, decay: 0.05, type: 'sine', delay: 0.01 });
   }
 
   /** Suspension bottoming out / wheels landing. Body thud plus a spring rattle. */
@@ -997,7 +1120,8 @@ export class VehicleAudio {
     this.diffOsc.stop();
     this.rotorLfo.stop();
     this.gravel.dispose();
-    this.skid.dispose();
+    this.squealFront.dispose();
+    this.squealRear.dispose();
     this.out.disconnect();
     this.engineOut.disconnect();
   }

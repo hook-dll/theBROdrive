@@ -206,6 +206,67 @@ export const BUMP_STEER_TAU = 0.09;
 export const BUMP_STEER_FULL_ROUGHNESS = 0.045;
 export const BUMP_STEER_SUSTAINED_TAU = 1;
 /**
+ * STEERING FREE PLAY: the rack's lash, as the dead band it leaves at the road wheels,
+ * radians, per handling profile (`HandlingTuning.steerLash`).
+ *
+ * Every link between the rim and the tyres has a little slack in it — the worm and
+ * roller of a recirculating-ball box, the idler arm, six ball joints on the Zhiguli's
+ * three-piece track rod — and a rack-and-pinion has some at the pinion. Turning the rim
+ * inside that band moves nothing; past it, the wheels follow. Within it the road wheels
+ * are free, and the tyres' own aligning moment takes them wherever it points (the same
+ * swing `STEER_FREE_TAU_S` gives a free rack), so an old car on a cambered road wanders
+ * a little and needs a constant small correction, and a reversal of the wheel has a
+ * moment of nothing before the car answers.
+ *
+ * The VAZ manuals allow 5° of free play at the rim of a new 2101 and reject a box past
+ * 10°; at its 16.4:1 ratio that is 0.3-0.6° at the wheels. A tired Zhiguli on the road
+ * today is past the limit, and the owner asked for "a degree or so": the classic
+ * profile carries 1°, the working 4x4s 1.2°, the later road cars' racks 0.5° and the
+ * rally box 0.3°. Toggled for A/B in the dev menu (`STEERING_DEV.lash`). Only the car
+ * the player steers with his own hands has it: under the autopilot and in the traffic a
+ * linear controller closes the loop, and the dead band made it weave (see
+ * `Vehicle.updateSteering`).
+ */
+export const STEER_LASH_CLASSIC_RAD = (1 * Math.PI) / 180;
+/**
+ * COMPLIANCE STEER: the toe the rubber gives under load, radians per newton of tyre
+ * force at that wheel.
+ *
+ * The wishbone, strut and trailing-link bushes, the subframe mounts and the steering
+ * linkage's own elasticity all deflect when the tyre pushes on them, and the wheel's
+ * toe moves with them. Cars are bushed so that the side force steers each axle toward
+ * understeer — the front wheel turned AWAY from the force, reducing its slip angle, the
+ * rear one turned INTO it — and it is a real share of a road car's understeer gradient:
+ * 0.1-0.3° per kN at the front axle, a quarter to a half of that at the rear
+ * (Milliken, Race Car Vehicle Dynamics, 17.3; Gillespie, Fundamentals of Vehicle
+ * Dynamics, 8, "lateral force compliance steer"). The figures here are per WHEEL and
+ * in the soft half of that range, for old rubber.
+ *
+ * Braking pulls each front patch back against the bushes, and with the positive scrub
+ * radius of every car in this catalogue that toes the wheel OUT
+ * (`COMPLIANCE_BRAKE_TOE_RAD_PER_N`): symmetric in a straight stop, so nothing happens,
+ * but a wheel braking harder than its partner steers the car toward its side, which is
+ * the old-car pull on a split road. A beam axle's wheels are tied to each other and
+ * take no brake toe.
+ *
+ * Read off last step's forces and lagged over the rubber's own time
+ * (`COMPLIANCE_STEER_TAU_S`), so the loop the steer makes with the force it changes
+ * cannot ring at the step: its gain is the compliance times the cornering stiffness,
+ * well under a tenth. Toggled for A/B in the dev menu (`STEERING_DEV.compliance`).
+ */
+export const COMPLIANCE_STEER_FRONT_RAD_PER_N = ((0.15 * Math.PI) / 180) / 1000;
+export const COMPLIANCE_STEER_REAR_RAD_PER_N = ((0.05 * Math.PI) / 180) / 1000;
+export const COMPLIANCE_BRAKE_TOE_RAD_PER_N = ((0.06 * Math.PI) / 180) / 1000;
+export const COMPLIANCE_STEER_TAU_S = 0.05;
+/** The most toe the bushes can give, radians: the rubber's own travel. */
+export const COMPLIANCE_STEER_MAX_RAD = (0.6 * Math.PI) / 180;
+/**
+ * The two steering-feel switches, for an A/B by the owner from the dev menu
+ * (ui/menu.ts) and `__bro.steering`. Both on by default; read every step by every car,
+ * so a flip takes effect at once.
+ */
+export const STEERING_DEV = { lash: true, compliance: true };
+/**
  * CAMBER THRUST, as a share of the tyre's cornering stiffness per radian of camber. A
  * leaning tyre pushes toward the side it leans to; the textbook ratio of camber to
  * cornering stiffness is 0.1-0.2 (Gillespie, Fundamentals of Vehicle Dynamics, ch. 10;
@@ -600,6 +661,8 @@ export interface HandlingTuning {
   readonly slipPeakFrontDeg: number;
   readonly slipPeakRearDeg: number;
   readonly tyreRelaxationLength: number;
+  /** The steering's free play at the road wheels, radians: see `STEER_LASH_CLASSIC_RAD`. */
+  readonly steerLash: number;
 }
 
 /**
@@ -659,6 +722,52 @@ export function tyreCurve(spec: { construction: 'crossply' | 'radial'; aspect: n
     relaxationM: relaxation,
     longitudinalRelaxationM: LONGITUDINAL_RELAXATION_RATIO * relaxation,
   };
+}
+
+/**
+ * THE CARCASS UNDER LOAD: the relaxation length as the tyre stands this step.
+ *
+ * A tyre's relaxation length is not a property of its rubber alone. In the stretched-
+ * string model it is the cornering stiffness over the carcass's own LATERAL stiffness,
+ * `σ = Cα / c_y` (Pacejka, Tyre and Vehicle Dynamics, 5.3): how far the patch must roll
+ * before the belt has been pulled sideways enough to carry the side force a slip angle
+ * asks for. Both halves move with load. Cα grows as `Fz^0.7` here already
+ * (`BRUSH_STIFFNESS_LOAD_EXPONENT`); the carcass's lateral stiffness grows too, but
+ * more slowly — pressed harder, the sidewall is pre-tensioned and the patch longer, so
+ * the belt resists being pulled aside a little more (`CARCASS_LATERAL_LOAD_EXPONENT_*`).
+ * The ratio is the length:
+ *
+ *   σ(Fz) = σ0 · (Fz / Fz0)^(0.7 − e),    e the carcass's exponent
+ *
+ * so a loaded outside tyre answers a new angle LATER and an unloaded inside one sooner,
+ * as measured: MF 6.1's `σα = PTy1 · sin(2 atan(Fz / (PTy2 Fz0)))` rises at about
+ * Fz^0.6 across a car's working loads for the passenger tyres it is fitted to.
+ *
+ * The carcass's compliance — 1 / c_y — is therefore load-dependent through the same
+ * figure; nothing else in the model reads it, because the relaxation length is the
+ * only place a lateral carcass deflection enters the force.
+ *
+ * A CROSS-PLY STAYS SOFTER THAN A RADIAL at every load: its σ0 is longer (`tyreCurve`),
+ * and its plies, laid on the bias, stiffen less under load than a radial's steel belt
+ * does, so its exponent is the larger one. Both lengths are bounded so a corner lifted
+ * to nothing does not build its force in zero distance, nor a slammed one never.
+ *
+ * INFLATION PRESSURE IS NOT MODELLED, and deliberately so: no model in the catalogue
+ * carries a pressure, every car is assumed at its book pressure, and a per-model
+ * nominal figure would only rescale σ0 — which `tyreCurve` already sets from the
+ * construction and sidewall — without anything else in the tyre reading it.
+ */
+export const CARCASS_LATERAL_LOAD_EXPONENT_RADIAL = 0.2;
+export const CARCASS_LATERAL_LOAD_EXPONENT_CROSSPLY = 0.1;
+/** The load ratio band σ(Fz) is read over: a quarter of the mean corner load to twice it. */
+export const RELAXATION_LOAD_RATIO_MIN = 0.25;
+export const RELAXATION_LOAD_RATIO_MAX = 2;
+
+/** σ(Fz) / σ0 for this construction at `loadRatio` = Fz over the car's mean corner load. */
+export function relaxationLoadScale(loadRatio: number, crossply: boolean): number {
+  const ratio = Math.min(RELAXATION_LOAD_RATIO_MAX, Math.max(RELAXATION_LOAD_RATIO_MIN, loadRatio));
+  const carcass = crossply ? CARCASS_LATERAL_LOAD_EXPONENT_CROSSPLY : CARCASS_LATERAL_LOAD_EXPONENT_RADIAL;
+  return ratio ** (BRUSH_STIFFNESS_LOAD_EXPONENT - carcass);
 }
 
 // ---------------------------------------------------------------------------
@@ -919,6 +1028,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     slipPeakFrontDeg: SLIP_PEAK_FRONT_DEG,
     slipPeakRearDeg: SLIP_PEAK_REAR_DEG,
     tyreRelaxationLength: 0.45,
+    steerLash: STEER_LASH_CLASSIC_RAD,
   },
   road: {
     // The old rate pair's own ratio to classic's (×1.25 parked, ×1.44 at speed).
@@ -930,6 +1040,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     slipPeakFrontDeg: 5.9,
     slipPeakRearDeg: 5.5,
     tyreRelaxationLength: 0.28,
+    steerLash: STEER_LASH_CLASSIC_RAD * 0.5,
   },
   sport: {
     steerRackSpeed: (150 * Math.PI) / 180,
@@ -940,6 +1051,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     slipPeakFrontDeg: 5.25,
     slipPeakRearDeg: 5,
     tyreRelaxationLength: 0.2,
+    steerLash: STEER_LASH_CLASSIC_RAD * 0.3,
   },
   utility: {
     steerRackSpeed: (105 * Math.PI) / 180,
@@ -950,6 +1062,7 @@ export const HANDLING_PROFILES: Readonly<Record<HandlingProfile, HandlingTuning>
     slipPeakFrontDeg: 7,
     slipPeakRearDeg: 6.5,
     tyreRelaxationLength: 0.38,
+    steerLash: STEER_LASH_CLASSIC_RAD * 1.2,
   },
 };
 

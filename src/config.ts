@@ -40,8 +40,9 @@ export interface AudioConfig {
   /** Above `tyreFullMps` the tyre voice keeps growing, gently, until this speed. */
   readonly tyreTopMps: number;
   readonly tyreGain: number;
-  readonly skidStartMps: number;
-  readonly skidFullMps: number;
+  /** The tyre squeal's onset and full, as shares of the tyre's peak slip (audio/vehicleaudio.ts `TYRE_VOICE`). */
+  readonly squealOnsetPeak: number;
+  readonly squealFullPeak: number;
   readonly skidGain: number;
   readonly rubGain: number;
   readonly landingFullMps: number;
@@ -115,8 +116,8 @@ const AUDIO_FIELDS: Fields<AudioConfig> = {
   tyreFullMps: true,
   tyreTopMps: true,
   tyreGain: true,
-  skidStartMps: true,
-  skidFullMps: true,
+  squealOnsetPeak: true,
+  squealFullPeak: true,
   skidGain: true,
   rubGain: true,
   landingFullMps: true,

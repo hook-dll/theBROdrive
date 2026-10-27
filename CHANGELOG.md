@@ -143,6 +143,44 @@
   SAVES: `SAVE_VERSION` 8 adds `clawMachines` (tries, tries since the last win, slots
   won); an envelope in an older save loads as the figurine of its sticker.
 
+- FEEL TOWARD BEAMNG, second pass (`vehicle/vehicle.ts`, `vehicle/vehicletuning.ts`,
+  `audio/vehicleaudio.ts`, `audio/trafficaudio.ts`, `render/cameras.ts`, `config.ts`,
+  `config/audio.json` `squealOnsetPeak`/`squealFullPeak` (replace `skidStartMps`/`skidFullMps`),
+  `main.ts`, `mirage-lab.ts`, `ui/menu.ts`, `app/devtools.ts`, `tools/surface-feel.ts`;
+  docs/physics-references.md).
+  - WHEEL HOP AT 480 Hz: the per-wheel hub DOF (and the beam axle's 2×2 body) is now stepped
+    at the wheel substep (`stepWheelHop`), not once a 60 Hz step, which damped the 10-14 Hz
+    hop mode to nothing. The tyre is unilateral: a hub flung off a ripple leaves the road and
+    the tyre makes no force. Each substep's grip is read at the load the hub presses down
+    (`hopGripScale`). `WheelRideState.tyreLoadN` publishes that load. surface-feel's new
+    `lift%`/`solo%` columns show 3.7%/12.7% on gravel and 11.7%/27.1% in the desert, 0 on
+    asphalt. The desert run holds 37.8 km/h where it held 41.9 (it slithers on the
+    corrugation); every other ride figure is within its noise.
+  - CARCASS UNDER LOAD: relaxation length `σ0 · (Fz/Fz0)^(0.7 − e)` per wheel per step
+    (`relaxationLoadScale`; e = 0.2 radial, 0.1 cross-ply), lateral and longitudinal. No
+    inflation pressure is added: nothing in the catalogue carries one.
+  - COMPLIANCE STEER (`COMPLIANCE_STEER_*`, dev toggle "Compliance steer", default on): the
+    bushes give toe under last step's side force (front 0.15°/kN, rear 0.05°/kN, both
+    understeer) and front brake force (0.06°/kN toe-out). The understeer gradient goes from
+    1.58 to 2.20°/g on the 2101, 1.33 to 1.94 on the 2108 and 2.00 to 2.87 on the GAZ-24.
+    Skidpad g is unchanged.
+  - STEERING FREE PLAY (`HandlingTuning.steerLash`, dev toggle "Steering free play", default
+    on): 1° at the wheels on classic, 1.2° utility, 0.5° road, 0.3° sport, closing at the
+    knuckle stops. It applies only to the car the player steers himself: under the autopilot
+    the GAZ-21 wove at 1.7 crossings/km and 0.082 m RMS, against 0.3 and 0.038 without it.
+  - TYRE SOUND FROM THE TYRE: one recorded squeal per axle, at the axle, driven by that
+    axle's worst tyre's combined slip over its brush peak (onset 0.85, full 1.5) and gated
+    by the patch's sliding speed. Level and pitch rise with slip and load. On loose ground
+    the slip drives the scrabble (stones mid-band, sand a hiss) and lifts the recorded
+    stones into a crunch. The body's sideways speed no longer drives it. A bump-stop clunk
+    plays from a new physics event (`bumpStopMps`), replacing the bump thud's faked top.
+    Live tuning via `__bro.tyreVoice`.
+  - THE DRIVER'S HEAD (`HEAD_MOTION`, `__bro.headMotion`, off with Camera shake): the cabin
+    eye leans out of corners (≤5 cm), surges and nods (≤4.5 cm, ≤2°) under braking and
+    power, sinks under acceleration, and bobs on a lightly damped 2.2 Hz neck mode kicked by
+    each change of the seat's vertical speed (≤3.5 cm). The chase view takes 35% of the bob
+    and nod. `CameraTarget.velocityY` is new.
+
 - CHASSIS AND DRIVELINE TOWARD BEAMNG FEEL (`vehicle/vehicle.ts`, `vehicle/vehicletuning.ts`,
   `vehicle/carmodels.ts`, `vehicle/drivetrain.ts`, `parts/registry.ts` `SuspensionTuning`
   `frontPitchCentre`/`rearPitchCentre`/`frontSwingArmM`/`rearSwingArmM`, `PitchCentre`;

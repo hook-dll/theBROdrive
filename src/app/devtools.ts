@@ -21,6 +21,7 @@ import { uprightStickerRoll } from '../render/stickers';
 import { stickerAtlas } from '../render/stickerart';
 import type { TumbleweedField } from '../agents/tumbleweed';
 import type { GameAudio } from '../audio/gameaudio';
+import { TYRE_VOICE } from '../audio/vehicleaudio';
 import type { InputReader } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import type { Renderer } from '../core/renderer';
@@ -35,7 +36,7 @@ import type { Player } from '../player/player';
 import type { PlayerVitals } from '../player/vitals';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { KIT_PICK_LAYER } from '../render/kitdraw';
-import type { CameraRig } from '../render/cameras';
+import { HEAD_MOTION, type CameraRig } from '../render/cameras';
 import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
@@ -47,6 +48,7 @@ import {
   type TrailerField,
 } from '../vehicle/trailer';
 import type { Vehicle } from '../vehicle/vehicle';
+import { STEERING_DEV } from '../vehicle/vehicletuning';
 import type { Hud } from '../ui/hud';
 import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
@@ -672,6 +674,13 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     traffic: ctx.traffic,
     vitals: ctx.vitals,
     autopilot: ctx.autopilot,
+    // Live tuning, read every frame or step: `tyreVoice.onsetPeak = 0.7` starts the squeal
+    // sooner (audio/vehicleaudio.ts `TYRE_VOICE`), `headMotion.leanPerMps2 = 0` stills the
+    // head's lean (render/cameras.ts `HEAD_MOTION`), `steering.lash = false` takes the
+    // free play out (vehicle/vehicletuning.ts `STEERING_DEV`, also in the dev menu).
+    tyreVoice: TYRE_VOICE,
+    headMotion: HEAD_MOTION,
+    steering: STEERING_DEV,
     // `weather.force('storm', 0.5)` freezes a storm at its peak; `force(null)` hands
     // the sky back to the schedule.
     weather: { force: forceWeather, now: weather },

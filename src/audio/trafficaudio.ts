@@ -106,6 +106,7 @@ export class TrafficAudio {
     if (this.disposed) return;
     // Events belong to whoever voices them; traffic does not, so they are dropped.
     state.bumpMps = 0;
+    state.bumpStopMps = 0;
     state.landingImpactMps = 0;
     state.impactMps = 0;
 

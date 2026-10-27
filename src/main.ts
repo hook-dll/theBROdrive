@@ -159,6 +159,7 @@ import {
   TRAILER_MODEL_FIT,
 } from './vehicle/trailer';
 import { Vehicle } from './vehicle/vehicle';
+import { STEERING_DEV } from './vehicle/vehicletuning';
 import type { TrunkViewState } from './vehicle/trunk';
 import { GameAudio, type AmbienceFrame, type CarPose, type RadioSpatialState } from './audio/gameaudio';
 import { cabinOpenness, type CabinOpenness } from './audio/cabinopenness';
@@ -1478,6 +1479,7 @@ async function boot(): Promise<void> {
     footSpeed: 0,
     velocityX: 0,
     velocityZ: 0,
+    velocityY: 0,
     autopilot: false,
   };
 
@@ -2561,6 +2563,7 @@ async function boot(): Promise<void> {
       const velocity = driving.chassis.linvel();
       target.velocityX = velocity.x;
       target.velocityZ = velocity.z;
+      target.velocityY = velocity.y;
       target.autopilot = autopilot.engaged;
     } else {
       const p = player.interpolatedPosition(alpha);
@@ -2582,6 +2585,7 @@ async function boot(): Promise<void> {
       target.wheelContact = 0;
       target.velocityX = 0;
       target.velocityZ = 0;
+      target.velocityY = 0;
       target.autopilot = false;
     }
 
@@ -3317,6 +3321,8 @@ async function boot(): Promise<void> {
           setEnabled: (on: boolean) => setPoiReceiveShadows(renderer.scene, on),
         }
       : undefined,
+    // The steering's free play and compliance steer (vehicle/vehicletuning.ts), for an A/B.
+    steeringFeel: import.meta.env.DEV ? STEERING_DEV : undefined,
     devLook: import.meta.env.DEV
       ? {
           stand: devLook.stand,
