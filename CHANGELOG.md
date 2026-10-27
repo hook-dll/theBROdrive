@@ -1275,6 +1275,17 @@
   `USE_REVERSED_DEPTH_BUFFER`, which three defines for the page: no new program, and the
   program budget's ids leave the flag out so one list holds on either kind of machine
   (`render/programbudget.ts`). The car mirrors' targets take float depth too.
+- CLOUDS ARE BEHIND THE LAND AGAIN UNDER REVERSED-Z (`render/depthconvention.ts`). The
+  reversed depth above drew clouds over the desert and in front of houses (owner's
+  screenshot, 2026-10-28). Three r185 swaps every depth function for reversed depth, the
+  directionless ones too: `AlwaysDepth` becomes `NeverDepth` (and `EqualDepth`
+  `NotEqualDepth`). The clouds' depth reset (`render/clouds.ts`, `AlwaysDepth`, writes the
+  far plane where the clouds wrote their own depth) then wrote nothing, so a cloud 3 km
+  off left 0.016 in the buffer, nearer than ground at 2 km (0.00004) or a house at 50 m
+  (0.0016), and both failed their test; the finishing pass also took cloud pixels for
+  land. Those four functions now reach three pre-swapped, so the reset is `ALWAYS` in
+  both conventions; worked through every pass for a cloud, a house, ground, a star and
+  open sky in both conventions with three's own matrices and remap table.
 - THE VISTA HOLDS STILL UNDER A MOVING CAMERA, AND A MESA'S FOOT CANNOT OPEN
   (`render/vista.ts` `DISC_STEP`, `MESA_CURTAIN_DEPTH`). The second half of the far mesas'
   shimmer: the polar disc slid with the camera and re-blended every vertex for its exact

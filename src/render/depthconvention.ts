@@ -12,9 +12,16 @@ import * as THREE from 'three';
  * 10-18 km on the far tiers). Coplanar-ish surfaces far away (a mesa's foot in the
  * vista's ground) stopped fighting.
  *
- * Three handles the projection, the clear value, the depth-function flip, the shadow
- * cameras and its own depth chunks. Four things it does not, at r185:
+ * Three handles the projection, the clear value, the shadow cameras and its own depth
+ * chunks. Five things it does not, at r185:
  *
+ *  - DEPTH FUNCTIONS THAT HAVE NO DIRECTION. Three swaps every depth function for
+ *    reversed depth, the symmetric ones included: `AlwaysDepth` becomes `NeverDepth`
+ *    and `EqualDepth` becomes `NotEqualDepth` (utils.js `ReversedDepthFuncs`). The
+ *    clouds' depth reset (render/clouds.ts, `AlwaysDepth`) then wrote nothing, the
+ *    clouds' own nearer depth stayed in the buffer, and the land behind them failed its
+ *    test: clouds over the desert and in front of houses (owner, 2026-10-28). Those four
+ *    are handed to three pre-swapped here, so its swap gives them back unchanged.
  *  - RENDER ORDER. With reversed depth three sorts every list as usual and then
  *    reverses it whole, `renderOrder` included (mrdoob/three.js#33944): the sky dome
  *    (-10), drawn without depth, would land last and cover the frame. The game's own
@@ -86,6 +93,17 @@ function transparentOrder(a: SortItem, b: SortItem): number {
 }
 
 /**
+ * The depth functions with no direction, each mapped to the one three r185 swaps it from
+ * (`installReversedDepth`).
+ */
+const SYMMETRIC_PRESWAP = new Map<THREE.DepthModes, THREE.DepthModes>([
+  [THREE.AlwaysDepth, THREE.NeverDepth],
+  [THREE.NeverDepth, THREE.AlwaysDepth],
+  [THREE.EqualDepth, THREE.NotEqualDepth],
+  [THREE.NotEqualDepth, THREE.EqualDepth],
+]);
+
+/**
  * Installs the game's side of reversed depth on `renderer`; see the file comment. Call
  * once, right after construction, and only when `renderer.capabilities.reversedDepthBuffer`.
  */
@@ -101,6 +119,11 @@ export function installReversedDepth(renderer: THREE.WebGLRenderer): void {
   renderer.setTransparentSort((a: SortItem, b: SortItem) => transparentOrder(b, a));
   const state = renderer.state;
   const gl = renderer.getContext();
+  // Always, Never, Equal and NotEqual mean the same in either direction; three r185 swaps
+  // them anyway (Always <-> Never, Equal <-> NotEqual), so they reach it pre-swapped.
+  const depth = state.buffers.depth;
+  const setFunc = depth.setFunc.bind(depth);
+  depth.setFunc = (func) => setFunc(SYMMETRIC_PRESWAP.get(func) ?? func);
   const setMaterial = state.setMaterial.bind(state);
   state.setMaterial = (material, frontFaceCW, hardwareClippingPlanes) => {
     setMaterial(material, frontFaceCW, hardwareClippingPlanes);
