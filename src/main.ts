@@ -44,6 +44,7 @@ import { itemProgramAnchor } from './render/partmesh';
 import { MarketField, marketProgramAnchor } from './world/market';
 import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
+import { JELLY_TUNING } from './render/jellybody';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
@@ -3162,6 +3163,8 @@ async function boot(): Promise<void> {
       machineFocus,
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
       mirrors: carMirrors,
+      // `jelly` is the body flex's live tuning (render/jellybody.ts): gains, rates, clamps.
+      jelly: JELLY_TUNING,
       // `farCars.enabled = false` draws every traffic car in full, for the A/B; `stats`
       // counts this frame's far cars, the models they drew as, and the draws they save.
       farCars: {

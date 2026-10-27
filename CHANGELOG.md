@@ -4,6 +4,31 @@
 
 ### Added
 
+- JELLY BODY (`render/jellybody.ts` new, `vehicle/vehicle.ts` `sampleJelly`/`syncJelly`/
+  `releaseJelly`, `game/settings.ts` `jellyBody`, `ui/menu.ts` Graphics → Jelly body,
+  `main.ts` `__bro.jelly`). Every car drawn near — the one driven and the traffic beside
+  it, never a mid or far car — flexes like early BeamNG: the roof lags the chassis's
+  acceleration sideways and fore/aft (0.05 and 0.035 m per metre of height per g), the
+  outside of a turn and the nose under braking dip (0.03 and 0.022 per metre per g),
+  all on 1.6 Hz springs at ζ 0.26 so they overshoot and settle; a flick of the wheel
+  throws nose and tail wide (yaw acceleration, 2.2 Hz, ≤ 0.03); the diagonal suspension
+  travel difference rocks the body onto the loaded rear diagonal (2.8 Hz, ≤ 0.035); a
+  bump squashes and free fall stretches it (3.2 Hz, ≤ 8% of height), a landing kicks a
+  squash by its fall speed (1.8% per m/s past 0.6 m/s), and impacts and landings set off
+  a 7.5 Hz shiver (0.8% per m/s, ≤ 5%). Lean targets follow at most 1.2 g and every
+  state and shape is clamped. Drawn as ONE affine matrix on the body subtree over its
+  rest transform (bounce squash included), about the body's floor at the chassis centre:
+  no shader, material or draw is added, so the program count is unchanged, and the
+  stickers, glass, lenses, kit doors and bones, steering wheel and cabin cargo — all
+  under the body node — flex with the paint while the wheels, children of the root, stay
+  round on their hubs. A true front-against-rear torsion is not affine and is not drawn;
+  the twist signal is the rock. Springs stepped in closed form (frame-rate independent:
+  a 0.8 g stop dips the nose 4.7 cm and rebounds 1.4 cm at 30, 60 and 144 fps alike, to
+  2 mm at the bumper), targets sampled per
+  fixed step from the interpolation snapshots the car already latches, and nothing in
+  the simulation reads any of it. With the eye inside the car's own box (cabin and bonnet
+  views) the flex fades to `cabinGain` 0 over 0.3 s, so the cabin does not swim round a
+  camera fixed to the rigid chassis. On by default; off is one boolean per car a frame.
 - THE CLAW MACHINE GIVES STICKERS (shells phase 6; `world/claw.ts` new, `render/figurine.ts`
   new, `render/stickerart.ts` `stickerDieCut`, `world/settlement.ts`, `world/poi.ts`,
   `world/fixturefield.ts` `frames`/`steer`, `player/machinefocus.ts`,

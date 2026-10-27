@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { StickerState } from '../game/state';
 import { GRAPHICS_CONFIG } from '../config';
-import type { PhysicsWorld, Vec3 } from '../core/physics';
+import { FIXED_DT, type PhysicsWorld, type Vec3 } from '../core/physics';
 import type { InputFrame } from '../core/input';
 import { MicroRelief, RoadTexture, SURFACES, SurfaceType, sinkageShare, subColliderShare } from '../core/surfaces';
 import { hash01 } from '../core/rng';
@@ -92,6 +92,7 @@ import { SPOT_REACH_ALL } from '../render/lightshader';
 import { SWING_REACH_M } from '../render/kitdraw';
 import { KitRig } from '../carkit/rig';
 import { KIT_DOME_LAMP_NODE } from '../carkit/interior';
+import { JellyBody } from '../render/jellybody';
 
 import {
   AIR_DENSITY,
@@ -1023,8 +1024,21 @@ export class Vehicle implements Rebasable {
   private readonly rootGroup = new HiddenStillGroup();
   /** Per-car phase offset (turns) so traffic does not hop in unison; see `BOUNCE_HOP_HZ`. */
   private readonly bouncePhase: number;
-  /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX`; wheels are siblings. */
+  /** The body-and-trim subtree alone, for `BOUNCE_SQUASH_MAX` and the jelly; wheels are siblings. */
   private bodyGroup: THREE.Object3D | null = null;
+  /**
+   * This car's visual body flex (`Settings.jellyBody`, render/jellybody.ts). Drawn only:
+   * it reads the latched step snapshots and writes `bodyGroup.matrix`, and nothing in
+   * the simulation reads it back.
+   */
+  private readonly jelly = new JellyBody();
+  /**
+   * Whether the jelly drew this car last frame: then `postStep` samples it, and it owns
+   * `bodyGroup.matrix` (auto-update off). False while drawn mid or far, or switched off.
+   */
+  private jellyLive = false;
+  private readonly jellyMatrix = new THREE.Matrix4();
+  private readonly jellyInverse = new THREE.Quaternion();
   /** This car's paint, created with its visuals; see render/carsurface.ts. */
   private surface: CarBodySurface | null = null;
   /**
@@ -3703,6 +3717,7 @@ export class Vehicle implements Rebasable {
     this.chassisBody.translation(this.stepPos);
     this.chassisBody.rotation(this.stepQuat);
     this.latchWheelPoses(false);
+    if (this.jellyLive) this.sampleJelly();
   }
 
   /** Shifts the wheels' drawn poses one step on (or primes both ends to now). */
@@ -3743,6 +3758,8 @@ export class Vehicle implements Rebasable {
     this.rootGroup.position.copy(this.stepPos);
     this.rootGroup.quaternion.copy(this.stepQuat);
     this.latchWheelPoses(true);
+    // A teleport is not a motion: the body must not fling itself at the new spot.
+    this.jelly.reset();
   }
 
   interpolatedTransform(alpha: number, outPos: THREE.Vector3, outQuat: THREE.Quaternion): void {
@@ -3920,6 +3937,7 @@ export class Vehicle implements Rebasable {
     // Mid, the wheels and the rig stand where they were: the mid parts are baked shut,
     // and a door that opens sends the car back near (`drawMid`) before it moves.
     if (drawnFar || drawnMid) {
+      this.releaseJelly();
       this.castNearShadows(true);
       this.castHull(shadow);
       return;
@@ -3933,6 +3951,8 @@ export class Vehicle implements Rebasable {
     const standIn = shadow !== null && !this.castsOwnShadow() && this.addStandIn(shadow);
     this.castNearShadows(!standIn);
     this.castHull(standIn ? shadow : null);
+    if (this.world.state.settings.jellyBody) this.syncJelly();
+    else this.releaseJelly();
 
     // Wheels are chassis-local, and interpolated between the last two steps exactly as
     // the chassis is (see `spinPrev`).
@@ -3959,6 +3979,67 @@ export class Vehicle implements Rebasable {
     }
     if (this.kitRig) this.driveKit(this.kitRig);
     this.cabinView?.sync(this.car.cabin);
+  }
+
+  /**
+   * Feeds the jelly one fixed step (render/jellybody.ts `sampleStep`): the latched pose
+   * pair, the share of wheels down, and the diagonal suspension travel difference —
+   * the compression of the wheels on one diagonal less the other's, per axle pair,
+   * which is zero for any load the car carries square (pitch, roll, weight) and
+   * non-zero only when the frame is being twisted.
+   */
+  private sampleJelly(): void {
+    let grounded = 0;
+    let diagonal = 0;
+    for (const w of this.wheels) {
+      const t = w.tyre;
+      if (t.inContact) grounded++;
+      diagonal += Math.sign(t.mountLocal.x) * Math.sign(t.mountLocal.z) * (t.restLengthM - t.lengthM);
+    }
+    const count = this.wheels.length;
+    this.jelly.sampleStep(
+      FIXED_DT,
+      this.prevPos,
+      this.stepPos,
+      this.prevQuat,
+      this.stepQuat,
+      count > 0 ? grounded / count : 0,
+      count > 0 ? diagonal / (count * 0.5) : 0,
+      this.lastImpact,
+    );
+  }
+
+  /**
+   * Draws the jelly's flex on the body: its rest transform (bounce squash included)
+   * under this frame's deformation, about the floor of the body. The eye inside the
+   * body's box, a little grown so the bonnet camera counts, is the cabin fade.
+   */
+  private syncJelly(): void {
+    const body = this.bodyGroup;
+    if (!body) return;
+    if (!this.jellyLive) {
+      this.jelly.reset();
+      this.jellyLive = true;
+      body.matrixAutoUpdate = false;
+    }
+    const half = this.measure.halfExtents;
+    let inside = false;
+    if (kitEyeKnown) {
+      // From this frame's pose: the root's world matrix is not updated yet.
+      const local = kitEyeLocal.copy(kitEye).sub(this.pos).applyQuaternion(this.jellyInverse.copy(this.quat).invert());
+      inside =
+        Math.abs(local.x) < half[0] + 0.1 && Math.abs(local.y) < half[1] + 0.2 && Math.abs(local.z) < half[2] + 0.1;
+    }
+    this.jelly.advance(kitFrameDt, inside, -half[1], this.jellyMatrix);
+    body.matrix.compose(body.position, body.quaternion, body.scale).premultiply(this.jellyMatrix);
+    body.matrixWorldNeedsUpdate = true;
+  }
+
+  /** Hands the body's matrix back to its own transform; free when the jelly was not drawing. */
+  private releaseJelly(): void {
+    if (!this.jellyLive) return;
+    this.jellyLive = false;
+    if (this.bodyGroup) this.bodyGroup.matrixAutoUpdate = true;
   }
 
   /**
@@ -6636,6 +6717,8 @@ export class Vehicle implements Rebasable {
     this.cabinView = null;
     for (const child of this.rootGroup.children.slice()) this.rootGroup.remove(child);
     this.bodyGroup = null;
+    // The next body starts on its own transform; the jelly takes it on its first frame.
+    this.jellyLive = false;
     // Its materials are the paint's and glass's, which the surface disposed; its geometry is the model's.
     this.midParts = null;
     this.midShown = false;
