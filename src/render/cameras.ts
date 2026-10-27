@@ -321,7 +321,24 @@ const STEER_LOOK_FADE_KMH = 40;
  *   joltGain                   metres per second of head speed per m/s of seat heave change
  *   joltHz, joltDamping        the neck's vertical mode and its damping ratio
  *   joltMaxM                   clamp on the vertical bob
+ *   pitchHz, pitchDamping      the neck's PITCH mode: the head is held to the body's pitch
+ *                              by its neck, so a body that pitches fast leaves the gaze
+ *                              behind for a moment and the head catches up
+ *   pitchPerHeave              rad/s of head pitch rate per m/s of seat heave change: the
+ *                              head's mass sits ahead of the neck, so a seat kicked up
+ *                              nods it down
+ *   pitchMaxRad                clamp on the head's pitch against the body
  *   chaseShare                 the share of the jolt and nod the chase camera takes
+ *   bodyShare                  the share of the body's own pitch and roll the CHASE
+ *                              camera takes, as one hung off the car would
+ *   bodyOmega                  how fast that share follows the body, rad/s: slow enough
+ *                              that a dive or a roll shows against the camera first
+ *   bodyMaxRad                 the body tilt read at most, so a wreck cannot turn the view
+ *
+ * The neck's modes sit at 2-3 Hz and near critical [E: a seated head on its neck, in
+ * the 2-3 Hz band the owner asked for; damped enough that it settles in one bob]. The
+ * chase share is a third with a ~1/3 s lag [E: enough to show the body move on its
+ * springs without the horizon swimming].
  */
 export const HEAD_MOTION = {
   leanPerMps2: 0.006,
@@ -335,9 +352,16 @@ export const HEAD_MOTION = {
   omega: 6,
   joltGain: 0.12,
   joltHz: 2.2,
-  joltDamping: 0.5,
+  joltDamping: 0.7,
   joltMaxM: 0.035,
+  pitchHz: 2.5,
+  pitchDamping: 0.7,
+  pitchPerHeave: 0.4,
+  pitchMaxRad: 0.03,
   chaseShare: 0.35,
+  bodyShare: 0.35,
+  bodyOmega: 3,
+  bodyMaxRad: 0.17,
 };
 /** Head accelerations past this are a crash or a teleport, not driving, m/s². */
 const HEAD_ACCEL_CLAMP = 14;
@@ -361,6 +385,8 @@ const _UP = new THREE.Vector3(0, 1, 0);
 const _FORWARD = new THREE.Vector3(0, 0, 1);
 /** The cabin view's up: the chassis's own, so the horizon rolls with the car around the driver. */
 const _cabinUp = new THREE.Vector3(0, 1, 0);
+/** The chase view's up: world up tilted by its share of the body's (`HEAD_MOTION.bodyShare`). */
+const _chaseUp = new THREE.Vector3(0, 1, 0);
 const _rayOrigin = { x: 0, y: 0, z: 0 };
 const _rayDir = { x: 0, y: 0, z: 0 };
 const _qB = new THREE.Quaternion();
@@ -506,6 +532,23 @@ export class CameraRig {
   private headNodRate = 0;
   private headJolt = 0;
   private headJoltRate = 0;
+  /**
+   * The head's own pitch, radians, and its rate: held to the body's by the neck
+   * (`HEAD_MOTION.pitchHz`), so `headPitch − body pitch` is how far the gaze is left
+   * behind. NaN until the first frame of a drive.
+   */
+  private headPitch = Number.NaN;
+  private headPitchRate = 0;
+  /** That lag, radians, + looking up against the car; clamped to `pitchMaxRad`. */
+  private headPitchLag = 0;
+  /**
+   * The chase camera's share of the body's tilt: the world-horizontal components of
+   * the chassis's up axis (`HEAD_MOTION.bodyShare`), each with its rate.
+   */
+  private bodyTiltX = 0;
+  private bodyTiltXRate = 0;
+  private bodyTiltZ = 0;
+  private bodyTiltZRate = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -561,6 +604,13 @@ export class CameraRig {
     this.headNodRate = 0;
     this.headJolt = 0;
     this.headJoltRate = 0;
+    this.headPitch = Number.NaN;
+    this.headPitchRate = 0;
+    this.headPitchLag = 0;
+    this.bodyTiltX = 0;
+    this.bodyTiltXRate = 0;
+    this.bodyTiltZ = 0;
+    this.bodyTiltZRate = 0;
   }
 
   /**
@@ -786,8 +836,12 @@ export class CameraRig {
     // writes at zero, which is what keeps that camera exactly what it was.
     if (onFoot) this.resetDynamics();
     else if (this.style === 'dynamic') this.updateDynamics(d, input, target);
-    // The driver's head rides in either style, and only with the shake setting on.
-    if (!onFoot && this.shake) this.updateHead(d, target);
+    // The driver's head, and the chase camera's share of the body's tilt, ride in
+    // either style, and only with the shake setting on.
+    if (!onFoot && this.shake) {
+      this.updateHead(d, target);
+      this.updateBodyTilt(d, target);
+    }
 
     // The cabin turns with the car, so its heading is stored as an OFFSET from the
     // chassis and rebuilt against the live heading every frame. Keeping the raw world
@@ -923,6 +977,12 @@ export class CameraRig {
         // them (`HEAD_MOTION.chaseShare`); the lean is the dynamic camera's own.
         _vA.y += this.headJolt * HEAD_MOTION.chaseShare;
         _vB.y += this.headNod * HEAD_MOTION.chaseShare * _vA.distanceTo(_vB);
+        // And its share of the body's own pitch and roll, late (`HEAD_MOTION.bodyShare`):
+        // the arm swung about the car's centre by the pitch along the view — a dive
+        // lifts an eye behind the car — and the roll across it tilting the view's up.
+        // Both zero with the shake setting off.
+        _vA.y += HEAD_MOTION.bodyShare * (this.bodyTiltX * (_vB.x - _vA.x) + this.bodyTiltZ * (_vB.z - _vA.z));
+        _chaseUp.set(HEAD_MOTION.bodyShare * this.bodyTiltX, 1, HEAD_MOTION.bodyShare * this.bodyTiltZ).normalize();
         this.applyOcclusion(target);
         this.liftAboveGround(target);
         break;
@@ -946,7 +1006,7 @@ export class CameraRig {
     }
     this.snapChaseEye = false;
 
-    _mA.lookAt(this.eye, this.lookAt, mode === 'cabin' ? _cabinUp : _UP);
+    _mA.lookAt(this.eye, this.lookAt, mode === 'cabin' ? _cabinUp : mode === 'chase' ? _chaseUp : _UP);
     this.camera.quaternion.setFromRotationMatrix(_mA);
     // The sway shakes a camera hung off the car; from the driver's seat the cabin
     // around the eye would visibly swim, so the cabin view does not take it.
@@ -987,7 +1047,7 @@ export class CameraRig {
       target.cabinOffset[2] + this.headAlong,
     ).applyQuaternion(_qA);
     _vA.set(target.x + _vC.x, target.y + _vC.y, target.z + _vC.z);
-    const pitch = this.pitch + this.headNod;
+    const pitch = this.pitch + this.headNod + this.headPitchLag;
     const cp = Math.cos(pitch);
     _vD.set(Math.sin(this.cabinYawOffset) * cp, Math.sin(pitch), Math.cos(this.cabinYawOffset) * cp)
       .applyQuaternion(_qA);
@@ -1030,8 +1090,11 @@ export class CameraRig {
       const blend = 1 - Math.exp(-m.omega * age);
       this.headAccelSide += (clamp(side / age, -HEAD_ACCEL_CLAMP, HEAD_ACCEL_CLAMP) - this.headAccelSide) * blend;
       this.headAccelAlong += (clamp(along / age, -HEAD_ACCEL_CLAMP, HEAD_ACCEL_CLAMP) - this.headAccelAlong) * blend;
-      // The seat rose by `up`; the head, on its neck, is left behind by its share of it.
-      this.headJoltRate -= clamp(up, -HEAD_JOLT_CLAMP_MPS, HEAD_JOLT_CLAMP_MPS) * m.joltGain;
+      // The seat rose by `up`; the head, on its neck, is left behind by its share of it,
+      // and its mass, ahead of the neck, nods it down.
+      const heave = clamp(up, -HEAD_JOLT_CLAMP_MPS, HEAD_JOLT_CLAMP_MPS);
+      this.headJoltRate -= heave * m.joltGain;
+      this.headPitchRate -= heave * m.pitchPerHeave;
       this.headVelX = vx;
       this.headVelY = vy;
       this.headVelZ = vz;
@@ -1063,6 +1126,55 @@ export class CameraRig {
       this.headJolt = Math.sign(this.headJolt) * m.joltMaxM;
       this.headJoltRate = 0;
     }
+
+    // The neck's PITCH mode: the head's own pitch held to the body's by a spring and a
+    // damper, stepped implicitly like the jolt. What the view shows is the difference —
+    // a body that pitches fast leaves the gaze behind for a moment, then the head
+    // catches up — clamped, and dragged along with the body once at the clamp.
+    const bodyPitch = Math.asin(clamp(2 * (qy * qz - qx * qw), -1, 1));
+    if (Number.isNaN(this.headPitch)) {
+      this.headPitch = bodyPitch;
+      this.headPitchRate = 0;
+    }
+    const wp = 2 * Math.PI * m.pitchHz;
+    this.headPitchRate =
+      (this.headPitchRate + dt * wp * wp * (bodyPitch - this.headPitch)) /
+      (1 + 2 * m.pitchDamping * wp * dt + wp * wp * dt * dt);
+    this.headPitch += this.headPitchRate * dt;
+    this.headPitchLag = clamp(this.headPitch - bodyPitch, -m.pitchMaxRad, m.pitchMaxRad);
+    this.headPitch = bodyPitch + this.headPitchLag;
+  }
+
+  /**
+   * The chase camera's share of the body's tilt (`HEAD_MOTION.bodyShare`), one frame:
+   * the chassis's up axis, its horizontal part read at most `bodyMaxRad` and followed
+   * by a critically damped spring at `bodyOmega`. A car on its side or roof is a wreck,
+   * not a lean, and the target there is level.
+   */
+  private updateBodyTilt(dt: number, target: CameraTarget): void {
+    const m = HEAD_MOTION;
+    const qx = target.qx;
+    const qy = target.qy;
+    const qz = target.qz;
+    const qw = target.qw;
+    let tiltX = 2 * (qx * qy - qw * qz);
+    let tiltZ = 2 * (qy * qz + qw * qx);
+    const upY = 1 - 2 * (qx * qx + qz * qz);
+    const tilt = Math.hypot(tiltX, tiltZ);
+    const maxTilt = Math.sin(m.bodyMaxRad);
+    if (upY < 0.5) {
+      tiltX = 0;
+      tiltZ = 0;
+    } else if (tilt > maxTilt) {
+      tiltX *= maxTilt / tilt;
+      tiltZ *= maxTilt / tilt;
+    }
+    springStep(this.bodyTiltX, this.bodyTiltXRate, tiltX, m.bodyOmega, dt);
+    this.bodyTiltX = _spring.position;
+    this.bodyTiltXRate = _spring.velocity;
+    springStep(this.bodyTiltZ, this.bodyTiltZRate, tiltZ, m.bodyOmega, dt);
+    this.bodyTiltZ = _spring.position;
+    this.bodyTiltZRate = _spring.velocity;
   }
 
 
@@ -1158,9 +1270,10 @@ export class CameraRig {
 
   private desiredArm(target: CameraTarget): void {
     // External cameras use a WORLD-space view heading. The chassis contributes
-    // position and speed only: yaw, pitch and roll can change arbitrarily during a
+    // position and speed here: yaw, pitch and roll can change arbitrarily during a
     // wreck without rotating the view. Mouse input is the sole continuous source
-    // of external-camera orientation.
+    // of external-camera heading; the body's pitch and roll reach the view only as
+    // the bounded, late share `update` adds after this (`HEAD_MOTION.bodyShare`).
     //
     // Look-into-corner adds a bounded offset to that heading at low speed only; it is
     // exactly zero in steady and at any real speed, so the heading above is unchanged

@@ -407,6 +407,16 @@
 
 ### Changed
 
+- THE CAMERAS SHOW THE BODY ON ITS SPRINGS (`render/cameras.ts`, `HEAD_MOTION`; with
+  Settings → Camera shake, either style). The chase camera takes a third of the body's
+  pitch and roll, a third of a second late (`bodyShare` 0.35, `bodyOmega` 3/s, read to
+  at most 10°, level for a car past 60° of tilt): a dive or a roll shows against the
+  camera first, then the view settles a little way into it. A 2.4° braking dive lifts
+  the eye behind the car 86 mm; a 2.9° roll tilts the view 1.0°, 0.35° of it 0.6 s in.
+  The driver's head gets a pitch mode on its neck (`pitchHz` 2.5, `pitchDamping` 0.7,
+  ±1.7°), nodded down by each upward kick of the seat (`pitchPerHeave`): in the same
+  dive the view lags the cabin by up to 0.9° and catches it in 0.4 s. The vertical
+  bob's damping went 0.5 → 0.7, so a bump bobs once instead of twice.
 - THE DAMPERS SOFT IN BUMP, FIRM IN REBOUND, AND DIGRESSIVE (`digressiveRate` in
   `vehicle/tyrecontact.ts`; `DAMPER_KNEE_MPS` 0.1, `DAMPER_HIGH_SPEED_SLOPE` 0.6,
   `DAMPER_REBOUND_LOW_SPEED_GAIN` 2 in vehicletuning.ts; the contact and the hubs share
