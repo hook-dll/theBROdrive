@@ -16,6 +16,7 @@
  */
 
 import * as THREE from 'three';
+import { adoptReversedDepth } from '../../render/depthconvention';
 import { aimMirrorCamera } from '../../render/mirrorview';
 
 /** Target pixels, about the glass's aspect (0.36 x 0.5 m). */
@@ -75,6 +76,9 @@ export class ToiletMirror {
     face.updateWorldMatrix(true, false);
     eye.updateWorldMatrix(true, false);
     _eye.setFromMatrixPosition(eye.matrixWorld);
+    // The renderer's depth convention before the off-axis projection is built
+    // (render/depthconvention.ts).
+    adoptReversedDepth(this.camera, renderer.capabilities.reversedDepthBuffer);
     if (!aimMirrorCamera(this.camera, face, _eye, MIRROR_FAR)) {
       face.visible = false;
       return false;

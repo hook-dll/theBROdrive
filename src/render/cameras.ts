@@ -87,9 +87,10 @@ const CABIN_RECENTER_IDLE_SECONDS = 2;
 /**
  * Cabin-view near plane, metres. The eye sits 5-10 cm from the roof lining, the pillar
  * and the head restraint as the head turns, and `CAMERA_NEAR` (0.08) cut through them
- * to the sky. 2 cm keeps trim in front of the eye. The cost is depth steps 4x coarser
- * across the scene (24-bit depth): a 1 mm gap now fights beyond ~13 m instead of ~26 m,
- * which from the seat is the world outside, not the cabin.
+ * to the sky. 2 cm keeps trim in front of the eye. On the reversed float depth buffer
+ * (render/depthconvention.ts) that costs nothing. On the ordinary 24-bit one the depth
+ * steps are 4x coarser across the scene: a 1 mm gap fights beyond ~13 m instead of
+ * ~26 m, which from the seat is the world outside, not the cabin.
  */
 const CABIN_NEAR = 0.02;
 /** Automatic horizontal return is gentler than the explicit V-key snap. */
@@ -1332,7 +1333,7 @@ export class CameraRig {
    * pillars and head restraints a hand's width from the eye are drawn, not sliced open.
    */
   private updateProjection(): void {
-    const targetNear = this._mode === 'cabin' ? CABIN_NEAR : nearPlaneForFarPlane(this.camera.far);
+    const targetNear = this._mode === 'cabin' ? CABIN_NEAR : nearPlaneForFarPlane(this.camera.far, this.camera.reversedDepth);
     let projectionChanged = false;
     if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
       this.camera.fov = this.fov;

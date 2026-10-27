@@ -21,7 +21,10 @@ import budget from '../../config/program-budget.json';
  *    variant first seen mid-drive is the freeze itself, whatever the list says.
  *
  * A program is named by a hash of three's own cache key, which holds its shader source
- * and every parameter that selects it, and nothing per material or per run.
+ * and every parameter that selects it, and nothing per material or per run. The one
+ * parameter that is the DEVICE's, not the game's, is left out: whether the context
+ * draws with the reversed depth buffer (render/depthconvention.ts), so one list holds on
+ * a machine with EXT_clip_control and on one without (`budgetKey`).
  */
 
 export interface ProgramEntry {
@@ -46,6 +49,31 @@ function hash(text: string): string {
     b = Math.imul(b ^ text.charCodeAt(text.length - 1 - i), 0x01000193);
   }
   return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Parameters three r185 writes into a cache key from the precision on
+ * (`getProgramCacheKeyParameters`); the two flag masks follow them.
+ */
+const KEY_PARAMETERS = 48;
+/** `reversedDepthBuffer`'s bit in the second mask (`getProgramCacheKeyBooleans`). */
+const REVERSED_DEPTH_BIT = 1 << 4;
+
+/**
+ * `cacheKey` with the reversed-depth flag cleared. The key is comma-joined: the shader
+ * ids, the defines, then (not for a raw shader) the precision, `KEY_PARAMETERS - 1` more
+ * parameters and the two masks; the defines' length varies, so the precision is found by
+ * its value.
+ */
+function budgetKey(cacheKey: string): string {
+  const parts = cacheKey.split(',');
+  const precision = parts.findIndex((part) => part === 'highp' || part === 'mediump' || part === 'lowp');
+  if (precision < 0) return cacheKey;
+  const at = precision + KEY_PARAMETERS + 1;
+  const mask = Number(parts[at]);
+  if (!Number.isInteger(mask) || (mask & REVERSED_DEPTH_BIT) === 0) return cacheKey;
+  parts[at] = String(mask & ~REVERSED_DEPTH_BIT);
+  return parts.join(',');
 }
 
 function describe(material: THREE.Material, object: THREE.Object3D): string {
@@ -81,7 +109,7 @@ export function programEntries(renderer: THREE.WebGLRenderer, scene: THREE.Objec
   return ((renderer.info.programs ?? []) as unknown as LiveProgram[]).map((program) => {
     const set = users.get(program);
     const first = set ? [...set].slice(0, 3).join(' | ') + (set.size > 3 ? ` (+${set.size - 3})` : '') : 'no material in the scene';
-    return { id: hash(program.cacheKey), label: `${program.name || 'unnamed'}: ${first}` };
+    return { id: hash(budgetKey(program.cacheKey)), label: `${program.name || 'unnamed'}: ${first}` };
   });
 }
 

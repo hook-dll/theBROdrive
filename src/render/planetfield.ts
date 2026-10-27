@@ -30,7 +30,12 @@ void main() {
   vFlux = pow(10.0, -0.4 * observedMagnitude) * smoothstep(radians(-0.6), radians(0.15), altitude);
   vColor = aColor;
   gl_Position = projectionMatrix * mvPosition;
+  // On the far plane, as the stars (render/starcatalog.ts).
+#ifdef USE_REVERSED_DEPTH_BUFFER
+  gl_Position.z = 0.0;
+#else
   gl_Position.z = gl_Position.w;
+#endif
   gl_PointSize = clamp(1.4 + max(0.0, 2.0 - observedMagnitude) * 0.55, 1.4, 5.0);
 }
 `;

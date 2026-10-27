@@ -919,7 +919,7 @@ async function boot(): Promise<void> {
   const inCameraView = (x: number, y: number, z: number, radius: number): boolean => {
     const cam = renderer.camera;
     cameraViewMatrix.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-    cameraFrustum.setFromProjectionMatrix(cameraViewMatrix);
+    cameraFrustum.setFromProjectionMatrix(cameraViewMatrix, cam.coordinateSystem, cam.reversedDepth);
     cameraSphere.center.set(x - origin.x, y, z - origin.z);
     cameraSphere.radius = radius;
     return cameraFrustum.intersectsSphere(cameraSphere);

@@ -76,7 +76,9 @@ const _basis = new THREE.Matrix4();
  * Places `camera` for the mirror `face` seen from `eye` (world space): at the eye
  * reflected through the glass, looking out of it, its frustum's window the glass
  * rectangle and its near plane on the glass, its far plane at `far`. The face's world
- * matrix must be current. False when the eye is not in front of the glass.
+ * matrix must be current. False when the eye is not in front of the glass. The
+ * projection follows the camera's depth convention, which a mirror on the reversed
+ * buffer must have adopted before (render/depthconvention.ts `adoptReversedDepth`).
  */
 export function aimMirrorCamera(camera: THREE.PerspectiveCamera, face: THREE.Mesh, eye: THREE.Vector3, far: number): boolean {
   const [a, b, c] = cornersOf(face.geometry);
@@ -100,7 +102,10 @@ export function aimMirrorCamera(camera: THREE.PerspectiveCamera, face: THREE.Mes
   _a.sub(_reflected);
   _b.sub(_reflected);
   _c.sub(_reflected);
-  camera.projectionMatrix.makePerspective(_right.dot(_a), _right.dot(_b), _up.dot(_c), _up.dot(_a), distance, far);
+  camera.projectionMatrix.makePerspective(
+    _right.dot(_a), _right.dot(_b), _up.dot(_c), _up.dot(_a), distance, far,
+    camera.coordinateSystem, camera.reversedDepth,
+  );
   camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
   return true;
 }

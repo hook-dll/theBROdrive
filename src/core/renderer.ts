@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { compileAsyncSafe } from '../render/compileasync';
+import { adoptReversedDepth, installReversedDepth } from '../render/depthconvention';
 import { SandColor } from '../render/desertdust';
 import '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
@@ -46,12 +47,18 @@ export const CAMERA_FAR = 4000;
 /**
  * Near-plane floor in metres. The cabin eye sits a hand's width from the headliner and
  * the pillars, so this must clear the trim round it without slicing into it.
- * `setViewDistance` only ever raises this, never lowers it.
+ * `setViewDistance` only ever raises this, never lowers it, and only on the ordinary
+ * depth buffer (`nearPlaneForFarPlane`).
  */
 export const CAMERA_NEAR = 0.08;
-/** Exterior-camera near plane for a configured far plane. */
-export function nearPlaneForFarPlane(far: number): number {
-  return Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
+/**
+ * Exterior-camera near plane for a configured far plane. On a reversed float depth
+ * buffer (render/depthconvention.ts) a depth step is about distance x 2^-23 whatever the
+ * near plane, so it stays at `CAMERA_NEAR` on every tier; on the ordinary 24-bit buffer
+ * it rises with the far plane (`MAX_DEPTH_RATIO`).
+ */
+export function nearPlaneForFarPlane(far: number, reversedDepth: boolean): number {
+  return reversedDepth ? CAMERA_NEAR : Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
 }
 /**
  * The fixed vertical fields of view, degrees: not a player setting. FOV sets the apparent
@@ -79,13 +86,14 @@ export function farPlaneForViewDistance(metres: number): number {
 }
 
 /**
- * Ceiling on the far/near ratio. A perspective camera spends its depth
- * precision on a 1/z budget and the near plane fixes how much of that budget
- * the near region (the car's own panels) receives, so when the far plane
- * stretches out for `vast` the near plane must rise with it or the panels lose
- * the depth resolution they had at the default 4 km far plane. 160000 is the
- * ratio, held well under the ~200000:1 point beyond which a 16-bit depth
- * buffer starts to z-fight on the panels, rather than sitting on that bound.
+ * Ceiling on the far/near ratio on the ORDINARY depth buffer (a context without
+ * EXT_clip_control; the reversed float buffer needs none). A perspective camera spends
+ * its depth precision on a 1/z budget and the near plane fixes how much of that budget
+ * the near region (the car's own panels) receives, so when the far plane stretches out
+ * for `vast` the near plane must rise with it or the panels lose the depth resolution
+ * they had at the default 4 km far plane. 160000 is the ratio, held well under the
+ * ~200000:1 point beyond which a 16-bit depth buffer starts to z-fight on the panels,
+ * rather than sitting on that bound.
  */
 const MAX_DEPTH_RATIO = 160000;
 
@@ -361,6 +369,11 @@ export class Renderer {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   readonly fog: THREE.FogExp2;
+  /**
+   * Whether the scene draws with the reversed float depth buffer (render/depthconvention.ts):
+   * true wherever the context has EXT_clip_control. Fixed for the page's life.
+   */
+  readonly reversedDepth: boolean;
   // --- Finishing post pass ---
   /** Scene-pass target sampled by the fullscreen haze/ink pass on every tier. */
   private readonly hazeTarget: THREE.WebGLRenderTarget;
@@ -465,7 +478,14 @@ export class Renderer {
       // governor for clocks the game does not need and the device cannot shed. The game
       // wants a phone that stays cool, and says so.
       powerPreference: this.mobilePresentation ? 'default' : 'high-performance',
+      // Near 1, far 0, into the float depth of `hazeTarget`: depth steps of about
+      // distance x 2^-23 instead of the 24-bit buffer's metres at a few kilometres, where
+      // the mesas' feet fought the vista's ground. Three falls back to the ordinary
+      // buffer without EXT_clip_control; render/depthconvention.ts has what it leaves to us.
+      reversedDepthBuffer: true,
     });
+    this.reversedDepth = this.renderer.capabilities.reversedDepthBuffer;
+    if (this.reversedDepth) installReversedDepth(this.renderer);
     primeMaxAnisotropy(this.renderer);
     const context = this.renderer.getContext();
     if (
@@ -524,6 +544,9 @@ export class Renderer {
       CAMERA_NEAR,
       CAMERA_FAR,
     );
+    // Before the first frame: the projection, the near plane (`nearPlaneForFarPlane`) and
+    // every frustum built from this camera's matrix agree from the start.
+    adoptReversedDepth(this.camera, this.reversedDepth);
 
     // Weather's share only, retuned per frame (render/airfog.ts has the clear air).
     this.fog = new THREE.FogExp2(0xd8c39a, 0);
@@ -542,7 +565,11 @@ export class Renderer {
     // AND depth from four samples, at up to 4800x2700 on Blessing on top of its
     // supersampling. FXAA (`Settings.fxaa`) works on the shaded picture in the pass that
     // already reads it.
-    const hazeDepth = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType);
+    //
+    // FLOAT DEPTH under reversed Z: the convention only pays on a float buffer (on 24-bit
+    // fixed point it spends its steps as the ordinary one does). The ordinary buffer keeps
+    // its 24 bits.
+    const hazeDepth = new THREE.DepthTexture(1, 1, this.reversedDepth ? THREE.FloatType : THREE.UnsignedIntType);
     hazeDepth.minFilter = THREE.NearestFilter;
     hazeDepth.magFilter = THREE.NearestFilter;
     const sceneType = sceneTargetType(this.renderer);
@@ -1561,14 +1588,15 @@ export class Renderer {
    * The far plane clears the draw distance by ORBIT_MARGIN (the far plane is
    * measured from the camera, which can stand that far past the car on the far
    * side of the desert it is looking at) and never drops below CAMERA_FAR, the
-   * floor the sky dome and the orbit camera both depend on. The near plane rises
-   * with it so the far/near ratio — and therefore the depth resolution spent on
-   * the car up close — stays bounded; see MAX_DEPTH_RATIO.
+   * floor the sky dome and the orbit camera both depend on. On the ordinary depth
+   * buffer the near plane rises with it so the far/near ratio — and therefore the depth
+   * resolution spent on the car up close — stays bounded (MAX_DEPTH_RATIO); on the
+   * reversed float buffer it stays put (`nearPlaneForFarPlane`).
    */
   setViewDistance(metres: number): void {
     const far = farPlaneForViewDistance(metres);
     this.camera.far = far;
-    this.camera.near = nearPlaneForFarPlane(far);
+    this.camera.near = nearPlaneForFarPlane(far, this.reversedDepth);
     this.camera.updateProjectionMatrix();
     // The vista's outer ring is this same far plane (render/vista.ts).
     setAirFogEdge(far);

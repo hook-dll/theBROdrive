@@ -1138,6 +1138,26 @@
 
 ### Fixed
 
+- FAR SURFACES NO LONGER FIGHT FOR DEPTH: REVERSED-Z (`core/renderer.ts`
+  `reversedDepthBuffer`, `render/depthconvention.ts`). Reported from play (owner's recording,
+  2026-10-27): the outlines of distant mesas shimmered. The 24-bit depth buffer stepped by
+  3 m at 2 km and 15-19 m at 5 km (30-96 m at 10-18 km on the far tiers; 75 m at 5 km from
+  the cabin's 2 cm near plane), more than the 3 m between a mesa's foot and the vista's
+  ground, so which one won flipped from pixel to pixel and frame to frame. Wherever the
+  context has EXT_clip_control the scene now draws near 1, far 0 into a 32-bit float depth
+  texture: steps of 0.09-0.18 mm at 2 km, 0.14-0.28 mm at 5 km, 0.9 mm at 18 km, whatever
+  the near plane, which therefore stays at 8 cm on every tier (`nearPlaneForFarPlane`; the
+  rise with the far plane is kept for the ordinary buffer). Without the extension three
+  keeps the old buffer and nothing else changes. What three r185 leaves undone is done by
+  the game: every list keeps its `renderOrder` (three reverses the lists whole), every
+  `polygonOffset` keeps its sign (three flips the factor but not the units), every camera
+  takes the convention before it is culled (the live mirrors' off-axis projection with it,
+  `render/mirrorview.ts`), the PCF shadow bias and the sun's slope offset turn round
+  (`render/lightshader.ts`), and the haze pass's depth read, the clouds' own depth row and
+  far-plane reset, and the stars and planets at the far plane read
+  `USE_REVERSED_DEPTH_BUFFER`, which three defines for the page: no new program, and the
+  program budget's ids leave the flag out so one list holds on either kind of machine
+  (`render/programbudget.ts`). The car mirrors' targets take float depth too.
 - A TRAILER STANDING UNCOUPLED NO LONGER SLIDES DOWN A GRADE (`vehicle/trailer.ts`
   `holdParked`). Reported from play (2026-10-26): a contract trailer waiting at a lay-by on
   a slight slope slid off downhill in front of the player, its wheels not turning. The

@@ -40,6 +40,7 @@ import type { Renderer } from '../core/renderer';
 import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
 import type { Vehicle } from '../vehicle/vehicle';
 import { FarCarField } from './farcars';
+import { adoptReversedDepth } from './depthconvention';
 import { aimMirrorCamera, mirrorFaceGeometry } from './mirrorview';
 
 /** Visits every car a mirror may show: traffic and the player's own. */
@@ -133,6 +134,9 @@ export class CarMirrors {
     private readonly cars: MirrorCarSource,
   ) {
     this.rate = rate;
+    // Its off-axis projection is built by `aim`, so the camera takes the scene's depth
+    // convention now, not at its first draw (render/depthconvention.ts).
+    adoptReversedDepth(this.camera, renderer.reversedDepth);
     this.standIns = new FarCarField(renderer.scene, 'mirror-cars');
     this.standIns.setVisible(false);
     this.setQuality(quality);
@@ -158,6 +162,11 @@ export class CarMirrors {
     for (const mirror of MIRRORS) {
       const [width, height] = PIXELS[mirror];
       const target = view(mirror).target;
+      // Float depth on the reversed buffer, like the scene target: the far desert and its
+      // mesas are in the mirrors too.
+      if (this.renderer.reversedDepth && !target.depthTexture) {
+        target.depthTexture = new THREE.DepthTexture(1, 1, THREE.FloatType);
+      }
       if (target.texture.type !== type) {
         target.dispose();
         target.texture.type = type;

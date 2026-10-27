@@ -174,7 +174,8 @@ vec3 blobPoint( vec3 unit ) {
  * pass then draws, at LessEqual, exactly the front-most surface the prepass left. The
  * depth is the clouds' own (`DEPTH_NEAR_M`..`DEPTH_FAR_M`), written as a projection row
  * so clipping stays linear: at 2 km a 24-bit step is about 5 mm, far below any crossing
- * of two lobes.
+ * of two lobes. On the reversed depth buffer (render/depthconvention.ts) the row is the
+ * reversed one, near 1 and far 0 in the 0..1 clip range, and finer still.
  */
 const CLIP_GLSL = /* glsl */ `
 invariant gl_Position;
@@ -185,8 +186,13 @@ vec4 cloudView( vec3 p ) {
 
 vec4 cloudClip( vec4 view ) {
 	vec4 clip = projectionMatrix * view;
+#ifdef USE_REVERSED_DEPTH_BUFFER
+	clip.z = ( ${DEPTH_NEAR_M.toFixed(1)} * view.z + ${(DEPTH_FAR_M * DEPTH_NEAR_M).toFixed(1)} )
+		/ ${(DEPTH_FAR_M - DEPTH_NEAR_M).toFixed(1)};
+#else
 	clip.z = ( -${(DEPTH_FAR_M + DEPTH_NEAR_M).toFixed(1)} * view.z - ${(2 * DEPTH_FAR_M * DEPTH_NEAR_M).toFixed(1)} )
 		/ ${(DEPTH_FAR_M - DEPTH_NEAR_M).toFixed(1)};
+#endif
 	return clip;
 }
 `;
@@ -375,7 +381,11 @@ ${taps}
 /** Depth only, at the far plane, everywhere: the land then draws over the clouds. */
 const RESET_VERTEX = /* glsl */ `
 void main() {
+#ifdef USE_REVERSED_DEPTH_BUFFER
+	gl_Position = vec4( position.xy, 0.0, 1.0 );
+#else
 	gl_Position = vec4( position.xy, 1.0, 1.0 );
+#endif
 }
 `;
 
@@ -836,7 +846,7 @@ export class CloudLayer {
   cullFor(camera: THREE.Camera): void {
     if (!this.root.visible) return;
     _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    _frustum.setFromProjectionMatrix(_viewProjection, camera.coordinateSystem);
+    _frustum.setFromProjectionMatrix(_viewProjection, camera.coordinateSystem, camera.reversedDepth);
     const origin = this.skyMeshes[0]!.position;
     cullList(this.smallSky, _frustum, origin.x, origin.z);
     cullList(this.bigSky, _frustum, origin.x, origin.z);

@@ -55,7 +55,13 @@ void main() {
   vFlux = pow(10.0, -0.4 * observedMagnitude) * smoothstep(radians(-0.6), radians(0.15), altitude);
   vColor = aColor;
   gl_Position = projectionMatrix * mvPosition;
+  // On the far plane: 1 on the ordinary depth buffer, 0 on the reversed one
+  // (render/depthconvention.ts).
+#ifdef USE_REVERSED_DEPTH_BUFFER
+  gl_Position.z = 0.0;
+#else
   gl_Position.z = gl_Position.w;
+#endif
   // At least three device pixels across. A 1.5 px point alternated between one and
   // four covered pixels as the celestial sphere moved, making faint stars jump from
   // black to full brightness. An integer-sized footprint keeps total energy stable.

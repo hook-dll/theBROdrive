@@ -220,10 +220,18 @@ export const HAZE_FRAGMENT = /* glsl */ `
     return sqrt(clamp(texture2D(tDiffuse, uv).rgb, 0.0, 1.0));
   }
 
-  /** Perspective depth-buffer value converted to negative view-space Z. */
+  /**
+   * Perspective depth-buffer value converted to negative view-space Z: near 1 and far 0
+   * on the reversed depth buffer (render/depthconvention.ts), near 0 and far 1 otherwise.
+   */
   float perspectiveDepthToViewZ(float depth) {
+  #ifdef USE_REVERSED_DEPTH_BUFFER
+    return (uCameraNear * uCameraFar) /
+      ((uCameraNear - uCameraFar) * depth - uCameraNear);
+  #else
     return (uCameraNear * uCameraFar) /
       ((uCameraFar - uCameraNear) * depth - uCameraFar);
+  #endif
   }
 
   /** Distance along a view ray to a surface at the given view-space Z. */

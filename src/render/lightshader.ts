@@ -106,8 +106,13 @@ function installSunShadowSlopeBias(): void {
     line,
     `{
 				mat4 shadowMatrix = directionalShadowMatrix[ i ];
-				// Depth grows away from the light: its gradient is the light's direction.
+				// Depth grows away from the light (toward it on the reversed buffer,
+				// render/depthconvention.ts): its gradient is the light's direction.
+				#ifdef USE_REVERSED_DEPTH_BUFFER
+				vec3 ${marker} = normalize( vec3( shadowMatrix[ 0 ][ 2 ], shadowMatrix[ 1 ][ 2 ], shadowMatrix[ 2 ][ 2 ] ) );
+				#else
 				vec3 ${marker} = -normalize( vec3( shadowMatrix[ 0 ][ 2 ], shadowMatrix[ 1 ][ 2 ], shadowMatrix[ 2 ][ 2 ] ) );
+				#endif
 				float shadowCos = dot( shadowWorldNormal, ${marker} );
 				float shadowSin = sqrt( max( 1.0 - shadowCos * shadowCos, 0.0 ) );
 				vec3 shadowFacing = shadowCos < 0.0 ? -shadowWorldNormal : shadowWorldNormal;
@@ -201,7 +206,11 @@ function installSunShadowCascade(): void {
 	float sunNearShadow() {
 		vec4 coord = vDirectionalShadowCoord[ 1 ];
 		vec3 uv = coord.xyz / coord.w;
+		#ifdef USE_REVERSED_DEPTH_BUFFER
+		uv.z -= directionalLightShadows[ 1 ].shadowBias;
+		#else
 		uv.z += directionalLightShadows[ 1 ].shadowBias;
+		#endif
 		vec2 texel = 1.5 * max( directionalLightShadows[ 1 ].shadowRadius, 1.0 ) / directionalLightShadows[ 1 ].shadowMapSize;
 		float shadow = 0.0;
 		for ( int y = -1; y <= 1; y ++ ) {
@@ -220,7 +229,11 @@ function installSunShadowCascade(): void {
 	float ${marker}() {
 		vec3 nearUv = vDirectionalShadowCoord[ 1 ].xyz / vDirectionalShadowCoord[ 1 ].w;
 		vec2 nearEdge = min( nearUv.xy, 1.0 - nearUv.xy );
+		#ifdef USE_REVERSED_DEPTH_BUFFER
+		float nearWeight = smoothstep( 0.0, 0.08, min( nearEdge.x, nearEdge.y ) ) * step( 0.0, nearUv.z );
+		#else
 		float nearWeight = smoothstep( 0.0, 0.08, min( nearEdge.x, nearEdge.y ) ) * step( nearUv.z, 1.0 );
+		#endif
 		float nearShadow = 1.0;
 		float wideShadow = 1.0;
 		if ( nearWeight > 0.0 ) nearShadow = sunNearShadow();
@@ -263,9 +276,41 @@ function installScreenAuthoredUnlit(): void {
   }
 }
 
+/**
+ * Three r185's PCF shadow on the reversed depth buffer (render/depthconvention.ts) still
+ * ADDS the bias and drops only fragments past z = 1, both written for the ordinary
+ * buffer (mrdoob/three.js#34891; its VSM and basic paths already flip). Reversed, a
+ * fragment is nearer the light as its z grows, the far plane is z = 0, and the bias
+ * (negative, toward the light) must be subtracted, or every receiver is pushed into its
+ * own shadow. Every program alike, behind the define three sets for the page: no variant.
+ */
+function installReversedPcfBias(): void {
+  const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+  const marker = 'reversedPcfBias';
+  if (chunk.includes(marker)) return;
+  const pcf = /shadowCoord\.xyz \/= shadowCoord\.w;\s*shadowCoord\.z \+= shadowBias;(\s*bool inFrustum = [^;]*;)\s*bool frustumTest = inFrustum && shadowCoord\.z <= 1\.0;/;
+  if (!pcf.test(chunk)) throw new Error('Three PCF shadow bias layout changed');
+  THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(
+    pcf,
+    `shadowCoord.xyz /= shadowCoord.w;
+			// ${marker}
+			#ifdef USE_REVERSED_DEPTH_BUFFER
+			shadowCoord.z -= shadowBias;
+			#else
+			shadowCoord.z += shadowBias;
+			#endif$1
+			#ifdef USE_REVERSED_DEPTH_BUFFER
+			bool frustumTest = inFrustum && shadowCoord.z >= 0.0;
+			#else
+			bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
+			#endif`,
+  );
+}
+
 installPointLightZeroGuard();
 installSpotLightDormantGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
+installReversedPcfBias();
 installSunShadowCascade();
 installScreenAuthoredUnlit();
