@@ -3280,7 +3280,9 @@ export class RoadTraffic {
         style: 'normal',
         headwayS: 1.5 + this.random() * 0.9,
         mode: 'sleeper',
-        speedCap: (72 + this.random() * 12) / 3.6,
+        // 80-92 km/h with the sleeper's 90 cruise (autopilot.ts), under the 94 km/h inner-lane
+        // threshold (`INNER_LANE_PACE_MPS`), so ordinary drivers keep the outer lane.
+        speedCap: (80 + this.random() * 12) / 3.6,
         pace: 0.9 + this.random() * 0.1,
       };
     }
