@@ -1,0 +1,287 @@
+{
+  "astraf": {
+    "triangles": 13989,
+    "zones": {
+      "bay": "38c3b2317a534bd4",
+      "boot": "e156bbddc489e7d7",
+      "cabin": "e23eec5645cc1008",
+      "exterior": "945fe9edcb4ee41b",
+      "under": "c09d37f23b783430",
+      "wheel": "6082a299a863e704"
+    }
+  },
+  "azlk2141": {
+    "triangles": 12480,
+    "zones": {
+      "bay": "35c0866de331d2e",
+      "boot": "eb0be27e3b537e7f",
+      "cabin": "31db623765c63b2",
+      "exterior": "7a9e5870734c8987",
+      "under": "9b74751040ca3eaf",
+      "wheel": "89506a99881e7546"
+    }
+  },
+  "espero": {
+    "triangles": 14537,
+    "zones": {
+      "bay": "d52127ec024fcff7",
+      "boot": "59b185b211e99110",
+      "cabin": "2aa8be9e5b0b0a5d",
+      "exterior": "3c09ac7db174e71d",
+      "under": "fa13f1afb6b926e9",
+      "wheel": "a0ebfa370740b823"
+    }
+  },
+  "gaz24": {
+    "triangles": 13466,
+    "zones": {
+      "bay": "f073301cf43ddfc6",
+      "boot": "b233c348b1be0f41",
+      "cabin": "81b6c0557c0e0f06",
+      "exterior": "f60bd96ddfccb928",
+      "under": "84d55f7923bb32c8",
+      "wheel": "7026bbcef0ee9b07"
+    }
+  },
+  "gaz31029": {
+    "triangles": 12129,
+    "zones": {
+      "bay": "b2aa9e974b127ead",
+      "boot": "f7a7c7fabcd619e2",
+      "cabin": "7510b591a80cac62",
+      "exterior": "dad7f2265f8cd22",
+      "under": "6afb8f81fe6c46f7",
+      "wheel": "4a8b12857992942b"
+    }
+  },
+  "nexia": {
+    "triangles": 13566,
+    "zones": {
+      "bay": "925b8035ee26f0ca",
+      "boot": "690a30776f4be6a1",
+      "cabin": "ab3b54302406aa50",
+      "exterior": "7ee16b4023f04347",
+      "under": "12481ccb31a61de",
+      "wheel": "e221fcb6e7213c89"
+    }
+  },
+  "uaz2206": {
+    "triangles": 11369,
+    "zones": {
+      "bay": "14c81cf3558c623e",
+      "cabin": "a8b3eab6d66cc98b",
+      "exterior": "b97012248cfa01f",
+      "under": "33a5044436fdc8e4",
+      "wheel": "af410dd80b59289b"
+    }
+  },
+  "uaz469": {
+    "triangles": 11248,
+    "zones": {
+      "bay": "8b4f0047ec80346a",
+      "boot": "b6100a2cadbbe3d3",
+      "cabin": "bde4898e50e9f28f",
+      "exterior": "340538bc5171eec9",
+      "under": "7a65158652f2adb",
+      "wheel": "26473fcd48b3e010"
+    }
+  },
+  "vaz1111": {
+    "triangles": 10635,
+    "zones": {
+      "bay": "661f504ebedd77b7",
+      "boot": "b7733389fd36c288",
+      "cabin": "e93c8d903385391c",
+      "exterior": "d853c774225937c7",
+      "under": "aee84b3276ab8bac",
+      "wheel": "4ca0f378c48abb62"
+    }
+  },
+  "vaz2101": {
+    "triangles": 11305,
+    "zones": {
+      "bay": "65312a20b42db07b",
+      "boot": "b62c7a3edb811c6c",
+      "cabin": "6587ef1ba069e6e4",
+      "exterior": "c47e2cb174d506f6",
+      "under": "943fb055e6f6300b",
+      "wheel": "be3fb082c3c2b8c2"
+    }
+  },
+  "vaz2102": {
+    "triangles": 11349,
+    "zones": {
+      "bay": "ee1a87b213a18f12",
+      "boot": "8f44ed64794b58d5",
+      "cabin": "d4d7363a53066750",
+      "exterior": "11ee0695d2f2de5b",
+      "under": "ee5a703f649d96b3",
+      "wheel": "ed914172be0e50fc"
+    }
+  },
+  "vaz2103": {
+    "triangles": 12159,
+    "zones": {
+      "bay": "cbe8373c3f426429",
+      "boot": "577ffb6dc0b8fced",
+      "cabin": "4c7b3b88458dab03",
+      "exterior": "d2ef0594ec846389",
+      "under": "ee63de9010c0fcd7",
+      "wheel": "75421c6643e543af"
+    }
+  },
+  "vaz2104": {
+    "triangles": 11817,
+    "zones": {
+      "bay": "e2838bbbda749345",
+      "boot": "75bb51a9cec51d6",
+      "cabin": "1e3872c898f1d709",
+      "exterior": "ea2b7535dacd2721",
+      "under": "6192a648a1a80611",
+      "wheel": "a0f9192bf6cad9e"
+    }
+  },
+  "vaz2105": {
+    "triangles": 11956,
+    "zones": {
+      "bay": "659d7ea0a89f9144",
+      "boot": "aad1a597b381b92e",
+      "cabin": "226c51c47db81029",
+      "exterior": "d3e371e7ff71e9c5",
+      "under": "985973a0ddf093d2",
+      "wheel": "9f934fbe5978fa49"
+    }
+  },
+  "vaz2106": {
+    "triangles": 12834,
+    "zones": {
+      "bay": "195a8faba902a87f",
+      "boot": "3beae6bf6ccd05a8",
+      "cabin": "f304e4b41bfb72b8",
+      "exterior": "7845c17e785a1b69",
+      "under": "4d8f18a19cda8cc7",
+      "wheel": "2d23125d50494a42"
+    }
+  },
+  "vaz2107": {
+    "triangles": 12549,
+    "zones": {
+      "bay": "5a1b84018080b1c2",
+      "boot": "47a86c1a8f3eb357",
+      "cabin": "33248fc48c562888",
+      "exterior": "727f73f5aa4a9698",
+      "under": "b73468dc5bc6026a",
+      "wheel": "abb91356bc218e04"
+    }
+  },
+  "vaz2108": {
+    "triangles": 10352,
+    "zones": {
+      "bay": "9a74e999eaceaf86",
+      "boot": "4185273e188625c6",
+      "cabin": "2a42e54aede4bcf4",
+      "exterior": "856326d3f2c9f666",
+      "under": "51f129699394b358",
+      "wheel": "84e19ff5399abb41"
+    }
+  },
+  "vaz2109": {
+    "triangles": 11552,
+    "zones": {
+      "bay": "9a74e999eaceaf86",
+      "boot": "4185273e188625c6",
+      "cabin": "f70fd1b2caad5969",
+      "exterior": "2489ed98b5168e5d",
+      "under": "51f129699394b358",
+      "wheel": "84e19ff5399abb41"
+    }
+  },
+  "vaz21099": {
+    "triangles": 11981,
+    "zones": {
+      "bay": "41e45cfe9908ec74",
+      "boot": "9dd0334d7a9412a8",
+      "cabin": "2eea71bbe8f9d4ba",
+      "exterior": "f9b3c822fc5b7f23",
+      "under": "b78d455a90c2bdfa",
+      "wheel": "eebe26cc35470c98"
+    }
+  },
+  "vaz2110": {
+    "triangles": 14713,
+    "zones": {
+      "bay": "7c4ed306de9bf600",
+      "boot": "3a8ae93b5557fe89",
+      "cabin": "d5f78f11e2cf94d4",
+      "exterior": "4cf25c01cf5e3def",
+      "under": "d07a4500826ade04",
+      "wheel": "eefa84f6979bb42c"
+    }
+  },
+  "vaz2111": {
+    "triangles": 14609,
+    "zones": {
+      "bay": "35357cc80772f5c1",
+      "boot": "a5dfd32a60e2a66a",
+      "cabin": "2fb15e1edc93d2ec",
+      "exterior": "495b7f170884904",
+      "under": "32972ab433936ff8",
+      "wheel": "9758c6ec1b09d7f2"
+    }
+  },
+  "vaz2112": {
+    "triangles": 14780,
+    "zones": {
+      "bay": "ea1f22ee358e0c7a",
+      "boot": "56f0cee6f426f151",
+      "cabin": "87bfcb59fa23de78",
+      "exterior": "2e9961283b4dcc18",
+      "under": "63580ccc58f0d969",
+      "wheel": "c332b23fa911ef26"
+    }
+  },
+  "vaz2115": {
+    "triangles": 12305,
+    "zones": {
+      "bay": "34c8dc81a8ae8517",
+      "boot": "10520eb429be0be1",
+      "cabin": "1dfee306d0295ccb",
+      "exterior": "217f1af4cb0ee987",
+      "under": "aedf27027ac12bd6",
+      "wheel": "d81a7847b7ce2fcd"
+    }
+  },
+  "vaz2121": {
+    "triangles": 11957,
+    "zones": {
+      "bay": "b7b16566133d9e09",
+      "boot": "1040af0dcb0140f7",
+      "cabin": "c00d5a1204674281",
+      "exterior": "55670342ffdac53b",
+      "under": "c349c182239e4f",
+      "wheel": "3e33c5e6ee6a0c7e"
+    }
+  },
+  "vaz2131": {
+    "triangles": 13184,
+    "zones": {
+      "bay": "5f1a476452320512",
+      "boot": "dabd5b9e44c481da",
+      "cabin": "e4832865915a8010",
+      "exterior": "4a69abc1c99c948",
+      "under": "d09ade1611040421",
+      "wheel": "b392f41e122d7980"
+    }
+  },
+  "vectraa": {
+    "triangles": 13940,
+    "zones": {
+      "bay": "b94dc7d3c6fa7814",
+      "boot": "2a566122f09e7776",
+      "cabin": "842819dc994e1f21",
+      "exterior": "8c764f55c405a851",
+      "under": "305547e859f6fd22",
+      "wheel": "a5b66395827bd9ca"
+    }
+  }
+}

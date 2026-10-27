@@ -12,9 +12,12 @@
  *   drawing      tools/kit-drawing.ts      the built car against src/carkit/refs/<car>.json
  *   dash         (kit-drawing)             future cars require a sourced dash photo and `dash` block;
  *                                         owner-accepted existing cars are explicitly exempt
+ *   frozen       tools/kit-fingerprint.ts  the car's geometry and colours as last recorded
+ *                                         (src/carkit/fingerprints.json); a car not recorded yet
+ *                                         is listed, not failed
  *
- * A car with no refs file is UNVERIFIED and a future car with no referenced dash is
- * DASH UNVERIFIED (both fail the acceptance gate). Existing cars named in
+ * A car whose drawing check judged nothing (no refs file, or no row read) is UNVERIFIED
+ * and a future car with no referenced dash is DASH UNVERIFIED: both fail. Existing cars named in
  * `tools/kit-drawing.ts` are accepted as-is for their dashboards. Evidence (renders, crops,
  * overlays, each tool's JSON) lands in build/kitcheck/ (gitignored); each tool's own log in
  * build/kitcheck/<tool>.log. Exits 1 if any car fails any check.
@@ -77,6 +80,13 @@ const re = run('reality', withTargets);
 const mi = run('kit-mirrors', [...(named ? ids : []), ...images, '--json', `${OUT}mirrors.json`]);
 const su = run('kit-surface', [...(named ? ids : []), ...images, '--json', `${OUT}surface.json`]);
 const dr = run('kit-drawing', [...(named ? ids : []), ...images, '--json', `${OUT}drawing.json`]);
+const fp = run('kit-fingerprint', named ? ids : []);
+/** Per car: 'identical', 'not frozen' or the zones it moved in. */
+const frozen = new Map<string, string>();
+for (const l of fp.out.split('\n')) {
+  const m = /^(\w+)\s+(identical|not frozen|MOVED in ([^(]+))/.exec(l);
+  if (m) frozen.set(m[1]!, m[3] ? `moved: ${m[3].trim()}` : m[2]!);
+}
 
 const readJson = (name: string): unknown => JSON.parse(readFileSync(`${OUT}${name}`, 'utf8'));
 const zfight = readJson('zfight.json') as { results: { id: string; clusters: { severity: number }[]; slits: unknown[] }[] };
@@ -107,8 +117,9 @@ for (const id of ids) {
     mBad === 0,
     dents === 0,
     cBad === 0,
-    !!d && d.body !== 'MISMATCH',
+    !!d && d.body === 'VERIFIED',
     !!d && (d.dash === 'OK' || d.dash === 'ACCEPTED EXISTING'),
+    !frozen.get(id)?.startsWith('moved'),
   ];
   if (checks.some((c) => !c)) failing++;
   rows.push([
@@ -121,15 +132,16 @@ for (const id of ids) {
     cell(checks[5]!, s ? `${s.complexity.total}${cBad > 0 ? ` (${cBad})` : ''}` : 'n/a'),
     cell(checks[6]!, d ? `${d.body === 'VERIFIED' ? 'ok' : d.body} ${judged.filter((r) => r.ok).length}/${judged.length}` : 'n/a'),
     cell(checks[7]!, d ? `${d.dash === 'OK' ? 'ok' : d.dash} ${d.dashRows.filter((r) => r.ok).length}/${d.dashRows.length}` : 'n/a'),
+    cell(checks[8]!, frozen.get(id) ?? 'n/a'),
   ]);
 }
-const head = ['car', 'zfight', 'proportions', 'reality', 'mirrors seen', 'dents', 'tris', 'drawing', 'dash'];
+const head = ['car', 'zfight', 'proportions', 'reality', 'mirrors seen', 'dents', 'tris', 'drawing', 'dash', 'frozen'];
 const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
 const fmt = (r: string[]): string => r.map((c, i) => c.padEnd(widths[i]!)).join('  ');
 console.log(`\n${fmt(head)}\n${widths.map((w) => '-'.repeat(w)).join('  ')}`);
 for (const r of rows) console.log(fmt(r));
 console.log(`\nlogs and evidence: build/kitcheck/ (<tool>.log, <tool>.json, <car>/*.png)`);
-const toolsFailed = [zf, pr, re, mi, su, dr].some((r) => r.code !== 0);
+const toolsFailed = [zf, pr, re, mi, su, dr, fp].some((r) => r.code !== 0);
 if (failing > 0 || toolsFailed) {
   console.log(`\nFAIL: ${failing} of ${ids.length} car(s) fail a check (✗); details in each tool's log`);
   process.exit(1);

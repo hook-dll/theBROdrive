@@ -43,9 +43,16 @@
  *
  * OVERLAYS in build/kitcheck/<car>/: `drawing-side.png` and `drawing-front.png` (the
  * reference drawing's view, the same view ray-traced orthographically at the drawing's own
- * scale and registration, and the drawing with the model's outline in red over it), and
- * `cabin-vs-photo.png` (the cabin from the driver's eye beside the reference interior
- * photo).
+ * scale and registration, the drawing with the model's outline in red over it, and the two
+ * silhouettes above the wheel centres: grey where they agree, red the model only, blue the
+ * drawing only), and `cabin-vs-photo.png` (the cabin from the driver's eye beside the
+ * reference interior photo).
+ *
+ * SILHOUETTE (advice, never a verdict): per view, the share of the two silhouettes that
+ * agree above the wheel centres (IoU) and the runs along the car (s) or across it (x)
+ * where the top outline is more than 25 mm off, with the model high or low. Read it for
+ * where to look before the owner does; a drawing can be wrong where the photos are right
+ * (HISTORY.md), and a watermark or dimension line touching the car's outline reads as car.
  *
  * Nothing here is part of the game bundle.
  */
@@ -428,8 +435,77 @@ const show = (v: Value | undefined): string => (v === undefined ? 'n/a' : JSON.s
 
 // ---------------------------------------------------------------- overlays
 
-/** The drawing's view, the model traced at its registration, and the drawing with the model's outline. */
-async function overlayView(car: KitCar, s: Soup, grid: RayGrid, reg: Registration, view: 'side' | 'front'): Promise<Image | undefined> {
+/**
+ * Where the built car's outline leaves the drawing's (ADVICE for the one building the
+ * car, never a verdict: a drawing can disagree with the car's photos, see HISTORY.md).
+ * The drawing's silhouette is everything its lines enclose: light pixels not reachable
+ * from the crop's edge through light pixels. Compared per column above the wheel
+ * centres, where a ground line cannot close a false region under the sill: the TOP
+ * outline (roof, glass, bonnet and boot lines in the side view; roof and shoulders in the
+ * front) and the share of pixels the two silhouettes agree on there (IoU).
+ */
+export interface Silhouette {
+  readonly view: 'side' | 'front';
+  /** Intersection over union above the wheel centres; undefined if the drawing's silhouette was unreadable. */
+  readonly iou?: number;
+  /** Runs of columns whose top outline is off by more than `SILHOUETTE_TOL_M`: along the car (s, side) or across it (x, front), and the mean offset (+ the model high). */
+  readonly off: readonly { readonly from: number; readonly to: number; readonly meanM: number; readonly maxM: number }[];
+}
+
+/** The top outline's tolerance and the shortest run reported, metres. */
+const SILHOUETTE_TOL_M = 0.025;
+const SILHOUETTE_MIN_RUN_M = 0.05;
+
+/**
+ * The car the drawing's lines enclose (1): light pixels not reachable from the crop's edge
+ * through light pixels, kept only in the largest enclosed region, so a watermark's letters
+ * or a closed dimension box beside the car do not count.
+ */
+function enclosed(ref: Image): Uint8Array {
+  const { w, h, px } = ref;
+  const light = (i: number): boolean => px[i * 4 + 3]! > 0 && 0.299 * px[i * 4]! + 0.587 * px[i * 4 + 1]! + 0.114 * px[i * 4 + 2]! > 200;
+  const outside = new Uint8Array(w * h);
+  const stack: number[] = [];
+  const seed = (i: number): void => { if (!outside[i] && light(i)) { outside[i] = 1; stack.push(i); } };
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    const x = i % w;
+    if (x > 0) seed(i - 1);
+    if (x < w - 1) seed(i + 1);
+    if (i >= w) seed(i - w);
+    if (i < w * (h - 1)) seed(i + w);
+  }
+  // Label what is left (lines and what they enclose), 4-connected; keep the largest.
+  const label = new Int32Array(w * h).fill(-1);
+  const sizes: number[] = [];
+  for (let start = 0; start < w * h; start++) {
+    if (outside[start] || label[start]! >= 0) continue;
+    const id = sizes.length;
+    let n = 0;
+    label[start] = id;
+    stack.push(start);
+    while (stack.length > 0) {
+      const i = stack.pop()!;
+      n++;
+      const x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+        if (j < 0 || j >= w * h || outside[j] || label[j]! >= 0) continue;
+        label[j] = id;
+        stack.push(j);
+      }
+    }
+    sizes.push(n);
+  }
+  const biggest = sizes.indexOf(Math.max(...sizes));
+  const inside = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) inside[i] = label[i] === biggest ? 1 : 0;
+  return inside;
+}
+
+/** The drawing's view, the model traced at its registration, the drawing with the model's outline, and where the two silhouettes differ. */
+async function overlayView(car: KitCar, s: Soup, grid: RayGrid, withGlass: RayGrid, reg: Registration, view: 'side' | 'front'): Promise<{ sheet: Image; silhouette: Silhouette } | undefined> {
   const path = `${ROOT}${reg.image}`;
   if (!existsSync(path)) return undefined;
   const [x0, y0, x1, y1] = reg.crop;
@@ -450,7 +526,60 @@ async function overlayView(car: KitCar, s: Soup, grid: RayGrid, reg: Registratio
   const fill = image(w, h);
   for (let i = 0; i < w * h; i++) if (tr.ids[i]! >= 0) fill.px.set([255, 60, 60, 50], i * 4);
   const lined = over(over(ref, fill), outline(s, tr, [220, 0, 0, 255]));
-  return sideBySide([ref, tr.img, lined]);
+
+  // Above the wheel centres only (crop rows). The model's silhouette is with its glass.
+  const hubY = nodeAt(car.root, 'kit_wheel_fl')?.[1] ?? 0.3;
+  const hubRow = Math.min(h, Math.max(0, Math.floor(reg.y[0] - hubY / reg.y[1] - y0)));
+  const drawn = enclosed(ref);
+  const solid = trace(s, withGlass, w, h, shifted, undefined, [0, 0, 0, 0]);
+  const model = (i: number): boolean => solid.img.px[i * 4 + 3]! > 0;
+  const diff = image(w, h, [255, 255, 255, 255]);
+  let both = 0, either = 0;
+  for (let py = 0; py < hubRow; py++) for (let px = 0; px < w; px++) {
+    const i = py * w + px;
+    const d = drawn[i] === 1, m = model(i);
+    if (d && m) { both++; diff.px.set([200, 200, 200, 255], i * 4); }
+    if (d || m) either++;
+    if (d && !m) diff.px.set([40, 90, 230, 255], i * 4);
+    if (m && !d) diff.px.set([230, 40, 40, 255], i * 4);
+  }
+  // A flood that found no enclosed car, or one that took the whole crop, cannot be read.
+  const share = either > 0 ? [...drawn.subarray(0, hubRow * w)].reduce((a, b) => a + b, 0) / (hubRow * w) : 0;
+  const readable = share > 0.05 && share < 0.95;
+
+  const metresPerPx = view === 'side' ? reg.s![1] : reg.x![1];
+  const along = (px: number): number => (view === 'side' ? (x0 + px + 0.5 - reg.s![0]) * reg.s![1] : (x0 + px + 0.5 - reg.x![0]) * reg.x![1]);
+  const off: { from: number; to: number; meanM: number; maxM: number }[] = [];
+  if (readable) {
+    let run: { start: number; sum: number; n: number; max: number } | undefined;
+    const close = (end: number): void => {
+      if (run && (end - run.start) * Math.abs(metresPerPx) >= SILHOUETTE_MIN_RUN_M) {
+        const a = along(run.start), b = along(end - 1);
+        off.push({ from: Math.min(a, b), to: Math.max(a, b), meanM: run.sum / run.n, maxM: run.max });
+      }
+      run = undefined;
+    };
+    for (let px = 0; px < w; px++) {
+      let dTop = -1, mTop = -1;
+      for (let py = 0; py < hubRow && (dTop < 0 || mTop < 0); py++) {
+        if (dTop < 0 && drawn[py * w + px]) dTop = py;
+        if (mTop < 0 && model(py * w + px)) mTop = py;
+      }
+      // Model high is positive: its top row is above the drawing's.
+      const dev = dTop >= 0 && mTop >= 0 ? (dTop - mTop) * reg.y[1] : 0;
+      if (Math.abs(dev) > SILHOUETTE_TOL_M) {
+        run ??= { start: px, sum: 0, n: 0, max: 0 };
+        run.sum += dev;
+        run.n++;
+        if (Math.abs(dev) > Math.abs(run.max)) run.max = dev;
+      } else close(px);
+    }
+    close(w);
+  }
+  return {
+    sheet: sideBySide([ref, tr.img, lined, diff]),
+    silhouette: { view, iou: readable && either > 0 ? both / either : undefined, off },
+  };
 }
 
 /** The cabin from the driver's eye (70°, a little down, as the photos are taken) beside the reference interior photo. */
@@ -477,6 +606,8 @@ export interface DrawingResult {
   measured: Measured;
   note?: string;
   images: string[];
+  /** Where the outline leaves the drawing's, per view (advice: never a verdict). */
+  silhouettes: Silhouette[];
 }
 
 export async function checkDrawing(id: string, images: boolean): Promise<DrawingResult> {
@@ -497,15 +628,17 @@ export async function checkDrawing(id: string, images: boolean): Promise<Drawing
   const body = judged.length === 0 ? 'UNVERIFIED' : judged.every((r) => r.ok) ? 'VERIFIED' : 'MISMATCH';
   const dash = acceptedExistingDash ? 'ACCEPTED EXISTING' : !hasPhoto || dashRows.length === 0 ? 'DASH UNVERIFIED' : dashRows.every((r) => r.ok) ? 'OK' : 'MISMATCH';
   const saved: string[] = [];
+  const silhouettes: Silhouette[] = [];
   if (images) {
     const dir = await outDir(id);
     const opaque = new RayGrid(s, (t) => !s.meshes[s.mesh[t]!]!.hidden && !s.meshes[s.mesh[t]!]!.glass);
     for (const view of ['side', 'front'] as const) {
       const reg = refs?.overlay?.[view];
       if (!reg) continue;
-      const sheet = await overlayView(car, s, opaque, reg, view);
-      if (!sheet) continue;
-      await savePng(sheet, `${dir}drawing-${view}.png`);
+      const done = await overlayView(car, s, opaque, grid, reg, view);
+      if (!done) continue;
+      silhouettes.push(done.silhouette);
+      await savePng(done.sheet, `${dir}drawing-${view}.png`);
       saved.push(`${dir}drawing-${view}.png`);
     }
     if (refs) {
@@ -513,7 +646,7 @@ export async function checkDrawing(id: string, images: boolean): Promise<Drawing
       if (sheet) { await savePng(sheet, `${dir}cabin-vs-photo.png`); saved.push(`${dir}cabin-vs-photo.png`); }
     }
   }
-  return { id, body, dash, rows, dashRows, measured, note: refs ? refs.dashNote : 'no src/carkit/refs file', images: saved };
+  return { id, body, dash, rows, dashRows, measured, note: refs ? refs.dashNote : 'no src/carkit/refs file', images: saved, silhouettes };
 }
 
 if (import.meta.main) {
@@ -531,6 +664,11 @@ if (import.meta.main) {
     for (const row of [...r.rows, ...r.dashRows]) {
       if (row.ok) continue;
       console.log(`  ${row.info ? '~ (kit-proportions)' : '✗'} ${row.key.padEnd(15)} real ${show(row.ref).padEnd(28)} built ${show(row.got).padEnd(28)} ±${row.tol}  [${row.src}]`);
+    }
+    for (const sil of r.silhouettes) {
+      const where = sil.view === 'side' ? 's' : 'x';
+      const runs = sil.off.map((o) => `${where} ${o.from.toFixed(2)}–${o.to.toFixed(2)} ${o.meanM > 0 ? 'high' : 'low'} ${Math.round(Math.abs(o.meanM) * 1000)} mm (max ${Math.round(Math.abs(o.maxM) * 1000)})`);
+      console.log(`  ~ silhouette ${sil.view}: ${sil.iou === undefined ? 'drawing unreadable' : `IoU ${sil.iou.toFixed(3)}`}${runs.length ? `; top outline off at ${runs.join('; ')}` : ''}`);
     }
   }
   console.log('\ncar             body         values   dash              values');
