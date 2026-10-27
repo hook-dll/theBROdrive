@@ -13,6 +13,14 @@
   it). `LATERAL_GRIP_FRACTION` was confirmed to size only the parked hold; its stale
   "lateral grip budget" comment is corrected. Not benched; judged in game.
 
+- Autopilot pace (`vehicle/autopilot.ts`). The sleeper cruises at 90 km/h on a
+  two-lane road (was 80; 101 on a wide one through the unchanged `WIDE_ROAD_PACE`
+  1.12), and `INNER_LANE_PACE_MPS` is 26 m/s (94 km/h, was 25) so the sleeper still
+  keeps the outer lane and the hurried driver the inner. The hurried driver corners at
+  5.4 m/s² (0.55 g, was 4.7) and brakes at 5.9 (0.6 g, was 5.4). The frantic driver
+  uses 0.70 of the tyres' estimate (was 0.68), about 6.5 m/s² on a road car. Ambient
+  sleepers are still capped at 72-84 km/h by their draw in `world/traffic.ts`.
+
 - The driver sits 10 cm closer to the wheel in every kit car (owner: «сантиметров на 10
   ближе к рулю»; `DRIVER_EYE_FORWARD`, carkit/interior.ts); the Nivas 5 cm
   (`Layout.eyeForward`), where 10 cm put the left door mirror behind the vent wing's frame

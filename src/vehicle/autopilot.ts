@@ -338,11 +338,12 @@ interface ModeConfig {
 /**
  * TWO DRIVERS, NOT ONE WITH A SPEED KNOB.
  *
- * `sleeper` is the character asleep at the wheel of his own life: 80 km/h, its own
+ * `sleeper` is the character asleep at the wheel of his own life: 90 km/h (the posted
+ * limit on a two-lane road; 101 on a wide one, `WIDE_ROAD_PACE`), its own
  * lane, a cornering budget under half of what the tyres have, gentle pedals, and it
  * `frantic` is somebody out of time who can drive: no cruising speed of its own — the
- * car's power and the road's bends are the only limits — the tyres used to within a
- * fifth of what they have, braking zones begun at the last useful metre, and a racing
+ * car's power and the road's bends are the only limits — the tyres used to 0.7 of the
+ * planner's estimate (about 0.65 g on a road car), braking zones begun at the last useful metre, and a racing
  * line through every bend: outside, apex, outside, across the whole road where it can
  * see that the other half is empty. It is a RACER (`ModeConfig.racer`): it takes the
  * oncoming lane the moment a pass measured on its own car fits before whatever is
@@ -355,7 +356,7 @@ interface ModeConfig {
  */
 const MODES: Record<AutopilotMode, ModeConfig> = {
   sleeper: {
-    cruiseMps: 80 / 3.6,
+    cruiseMps: 90 / 3.6,
     lateralAccel: 3.2,
     brakeAccel: 4.0,
     lookaheadBase: 11,
@@ -384,8 +385,8 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     racer: false,
   },
   /**
-   * The driver with somewhere to be and a licence to keep. 105 km/h, a cornering
-   * budget two thirds of the tyres', pedals used deliberately rather than as
+   * The driver with somewhere to be and a licence to keep. 105 km/h, 0.55 g in a bend
+   * and 0.6 g on the brakes (period road cars hold about 0.78 g), pedals used deliberately rather than as
    * switches — and it overtakes, but only into a window it would take itself. It is
    * what ambient traffic's hurried drivers use, and the middle setting of the
    * player's own autopilot: livelier than sleeper without frantic's appetite for a
@@ -393,8 +394,8 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
    */
   hurried: {
     cruiseMps: 105 / 3.6,
-    lateralAccel: 4.7,
-    brakeAccel: 5.4,
+    lateralAccel: 5.4,
+    brakeAccel: 5.9,
     lookaheadBase: 10,
     lookaheadSpeed: 1.2,
     brakeLead: 12,
@@ -472,11 +473,12 @@ const MODES: Record<AutopilotMode, ModeConfig> = {
     // for two laps, where the 25% downhill 320 m sweeper at 165-177 km/h is the fastest
     // corner the game has: 0.72 — the careful drivers' share — spun out of it, 14.3 m
     // off the road; 0.70 stayed on but ran 0.36 m wide of its lane; 0.68, 0.66, 0.64,
-    // 0.62 and 0.60 ran 0.19, 0.17, 0.15, 0.15 and 0.15 m wide. This is the largest
-    // share short of that doubling; each 0.02 under it costs about half a second of
-    // lap and 2 km/h of peak. Under the careful drivers' because only this one is ever
-    // that fast.
-    gripReserve: 0.68,
+    // 0.62 and 0.60 ran 0.19, 0.17, 0.15, 0.15 and 0.15 m wide (all measured with the
+    // mass-scaled grip since removed). 0.70 is the owner's choice (2026-10-28): about
+    // 6.5 m/s², 0.65 g, against a road car's estimate of about 9.3 on asphalt — the
+    // fastest sweeper's 0.36 m wide is accepted for a frantic driver that corners like
+    // one. Under the careful drivers' because only this one is ever that fast.
+    gripReserve: 0.7,
     brakeReserve: 0.9,
     brakingDistanceShare: 0.8,
     racingLine: true,
@@ -1347,15 +1349,15 @@ const MUST_STOP_GAP_M = 4;
  *
  * This is what sorts a four-lane road, and it sorts it ONCE: the home lane is a
  * property of the driver's own pace, so the arrangement maintains itself without
- * anybody weaving to keep it. 25 m/s is 90 km/h, which lands between the ambient
+ * anybody weaving to keep it. 26 m/s is 94 km/h, which lands between the ambient
  * stream's ordinary driver (72-84 km/h) and its hurried one (95-115), and between the
- * player's sleeper (80) and his hurried (105) — so the split is by character, not by
+ * player's sleeper (90) and his hurried (105) — so the split is by character, not by
  * a coin toss, and the same rule places the player's autopilot and the stream.
  *
  * Compared against the driver's own habit rather than its wide-road pace below, or
  * the boost would drag borderline drivers across the sort for a couple of km/h.
  */
-const INNER_LANE_PACE_MPS = 25;
+const INNER_LANE_PACE_MPS = 26;
 /**
  * WIDER ROAD, HIGHER PACE.
  *
