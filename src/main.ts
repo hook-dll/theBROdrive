@@ -2801,7 +2801,7 @@ async function boot(): Promise<void> {
     contactPatches.endFrame();
     frameProfiler?.end('effects');
     frameProfiler?.begin('vista');
-    vista.update(cam.x, cam.z, activeS, frameDt);
+    vista.update(cam.x, cam.z, activeS);
     frameProfiler?.end('vista');
     // The scene fog is the dust storm's alone: the wall's own law. Inside the storm the
     // short sight is the finishing pass's (`dustInside`), which also hides the sky and

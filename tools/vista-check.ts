@@ -3,7 +3,10 @@
  *
  * The vista must begin beneath the nearest guaranteed player-centred tile edge, so a
  * delayed outer visual tile cannot expose sky. Its road-near vertices must also stay
- * below the road ribbon so the coarse desert cannot erase distant road patches.
+ * below the road ribbon so the coarse desert cannot erase distant road patches. It is
+ * world-anchored between lattice steps (render/vista.ts `DISC_STEP`): the drawn ground
+ * at a fixed spot holds still while the camera moves inside a step, and a step changes
+ * it by a fraction of a pixel.
  */
 
 import * as THREE from 'three';
@@ -23,12 +26,13 @@ const SNAP = 250;
 const REPORTED_MESA_SEED = 2225416641;
 const SKY_BINS = 160;
 const MIN_MESA_CLEARANCE = (2 * Math.PI) / 180;
+/** The disc's lattice step, render/vista.ts `DISC_STEP`. */
+const DISC = SNAP / 16;
 /**
- * One rendered frame, seconds. The disc refreshes at most every `GROUND_REFRESH_S`
- * (render/vista.ts), so a step taken with zero frame time inside one sample cell is
- * deliberately not followed; every interpolation step below is one real frame.
+ * Largest change a lattice step may make to the drawn ground at a fixed spot, as seen
+ * from the disc's centre: 0.05 degrees is under a pixel at 1440 lines and 85 degrees.
  */
-const FRAME_S = 1 / 60;
+const MAX_STEP_ANGLE = (0.05 * Math.PI) / 180;
 
 function invariant(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -95,22 +99,32 @@ function mesaCandidateTops(vista: VistaMesh, mesa: THREE.Mesh): Map<string, numb
   return tops;
 }
 
-function maximumHeightDelta(
-  mesh: THREE.Mesh,
-  a: Float32Array,
-  b: Float32Array,
-  minimumRadius: number,
+const groundRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20_000);
+
+/** The drawn ground's height under each fixed world point, as the GPU would draw it. */
+function drawnHeights(mesh: THREE.Mesh, points: readonly { x: number; z: number }[]): number[] {
+  mesh.updateMatrixWorld(true);
+  return points.map((point) => {
+    groundRay.ray.origin.set(point.x, 10_000, point.z);
+    const hit = groundRay.intersectObject(mesh, false)[0];
+    invariant(hit !== undefined, `no drawn ground under ${point.x.toFixed(0)}, ${point.z.toFixed(0)}`);
+    return hit.point.y;
+  });
+}
+
+/** The largest change between two height sets, as an angle from the disc's centre. */
+function largestStepAngle(
+  points: readonly { x: number; z: number }[],
+  a: readonly number[],
+  b: readonly number[],
+  centreX: number,
+  centreZ: number,
 ): number {
-  invariant(a.length === b.length, 'height buffers changed length inside one interpolation cell');
-  const position = mesh.geometry.getAttribute('position');
-  invariant(position instanceof THREE.BufferAttribute, 'mesh has no position buffer');
-  let maximum = 0;
-  for (let i = 1; i < a.length; i += 3) {
-    const vertex = (i - 1) / 3;
-    if (Math.hypot(position.getX(vertex), position.getZ(vertex)) < minimumRadius) continue;
-    maximum = Math.max(maximum, Math.abs(a[i]! - b[i]!));
-  }
-  return maximum;
+  let largest = 0;
+  points.forEach((point, k) => {
+    largest = Math.max(largest, Math.abs(a[k]! - b[k]!) / Math.hypot(point.x - centreX, point.z - centreZ));
+  });
+  return largest;
 }
 
 const road = new Road(SEED);
@@ -120,7 +134,7 @@ const scene = new THREE.Scene();
 const vista = new VistaMesh(scene, terrain, road, origin);
 const camera = road.sampleAt(S);
 vista.setViewDistance(25_000);
-vista.update(camera.x, camera.z, S, 0);
+vista.update(camera.x, camera.z, S);
 
 const mesh = scene.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
 invariant(mesh !== undefined, 'vista mesh was not attached to the scene');
@@ -149,7 +163,12 @@ for (let s = S - ROAD_REACH; s <= S + ROAD_REACH; s += 40) {
   });
 }
 
-let minimumRadius = Infinity;
+// The inner ring as the camera sees it: the disc stands on its lattice point, up to
+// DISC / sqrt 2 off the camera, so its FARTHEST inner vertex is the one that must stay
+// under the nearest guaranteed tile edge.
+let innerLocal = Infinity;
+for (let i = 0; i < positions.length; i += 3) innerLocal = Math.min(innerLocal, Math.hypot(positions[i]!, positions[i + 2]!));
+let innerReach = 0;
 let coreVertices = 0;
 let worstRoadOverdraw = -Infinity;
 for (let i = 0; i < positions.length; i += 3) {
@@ -159,7 +178,7 @@ for (let i = 0; i < positions.length; i += 3) {
   invariant(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z), `non-finite vertex ${i / 3}`);
 
   const radius = Math.hypot(x - camera.x, z - camera.z);
-  minimumRadius = Math.min(minimumRadius, radius);
+  if (Math.hypot(positions[i]!, positions[i + 2]!) < innerLocal + 1) innerReach = Math.max(innerReach, radius);
   if (radius > ROAD_REACH) continue;
 
   const absoluteX = x + origin.x;
@@ -188,8 +207,8 @@ for (let i = 0; i < positions.length; i += 3) {
 }
 
 invariant(
-  DESERT_TILE_SIZE - minimumRadius >= MIN_TILE_OVERLAP - 0.1,
-  `vista leaves only ${(DESERT_TILE_SIZE - minimumRadius).toFixed(2)} m of guaranteed tile overlap`,
+  DESERT_TILE_SIZE - innerReach >= MIN_TILE_OVERLAP - 0.1,
+  `vista leaves only ${(DESERT_TILE_SIZE - innerReach).toFixed(2)} m of guaranteed tile overlap`,
 );
 invariant(coreVertices > 0, 'vista generated no vertices over the road underlay core');
 invariant(
@@ -200,27 +219,31 @@ invariant(
 const rebuilds = 8;
 const started = performance.now();
 for (let i = 1; i <= rebuilds; i++) {
-  vista.update(camera.x + i * SNAP, camera.z, S, 0);
+  vista.update(camera.x + i * SNAP, camera.z, S);
 }
 const meanRebuildMs = (performance.now() - started) / rebuilds;
-const steadyCellX = Math.floor((camera.x + rebuilds * SNAP) / SNAP) * SNAP + 10;
-vista.update(steadyCellX, camera.z, S, 0);
-const steadyFrames = 60;
+const steadyCellX = Math.floor((camera.x + rebuilds * SNAP) / SNAP) * SNAP + 1;
+vista.update(steadyCellX, camera.z, S);
+// Each update one lattice step on: the disc and mesa rewrite a step costs. Updates
+// inside a step cost nothing.
+const steadySteps = 12;
 const steadyStarted = performance.now();
-for (let frame = 0; frame < steadyFrames; frame++) {
-  vista.update(steadyCellX + frame * 2, camera.z, S, 0);
+for (let step = 1; step <= steadySteps; step++) {
+  vista.update(steadyCellX + step * DISC, camera.z, S);
 }
-const meanSteadyFrameMs = (performance.now() - steadyStarted) / steadyFrames;
+const meanStepMs = (performance.now() - steadyStarted) / steadySteps;
 
 console.log(
-  `vista: ${attribute.count} vertices, inner radius ${minimumRadius.toFixed(1)} m, ` +
+  `vista: ${attribute.count} vertices, inner ring reaches ${innerReach.toFixed(1)} m from the camera, ` +
     `${coreVertices} road-core vertices, worst overdraw ${worstRoadOverdraw.toFixed(2)} m, ` +
-    `${meanRebuildMs.toFixed(2)} ms/cell load, ${meanSteadyFrameMs.toFixed(2)} ms/steady frame`,
+    `${meanRebuildMs.toFixed(2)} ms/cell load, ${meanStepMs.toFixed(2)} ms/lattice step`,
 );
 vista.dispose();
 
-// Inside one sample cell, every metre must change the horizon immediately and moving
-// back must restore it exactly. Shared edge samples make a cell crossing continuous.
+// World-anchored between lattice steps: inside a step nothing moves, the drawn ground at
+// a fixed spot included; a step changes that by under a pixel and moving back restores
+// it exactly. Lattice points between a cell's corners are linear blends of the corner
+// samples, and a cell crossing is a step like any other.
 const continuityRoad = new Road(REPORTED_MESA_SEED);
 const continuityScene = new THREE.Scene();
 const continuityVista = new VistaMesh(
@@ -230,7 +253,8 @@ const continuityVista = new VistaMesh(
   new WorldOrigin(),
 );
 continuityVista.setViewDistance(25_000);
-continuityVista.update(50, 60, 0, FRAME_S);
+const LANE_Z = 60;
+continuityVista.update(3 * DISC, LANE_Z, 0);
 const continuityMeshes = continuityScene.children.filter(
   (child): child is THREE.Mesh => child instanceof THREE.Mesh,
 );
@@ -241,9 +265,9 @@ invariant(
 const continuityGround = continuityMeshes[0]!;
 const continuityMesas = continuityMeshes[1]!;
 const groundStart = worldPositionSnapshot(continuityGround);
-continuityVista.update(125, 60, 0, FRAME_S);
+continuityVista.update(8 * DISC, LANE_Z, 0);
 const groundMidpoint = worldPositionSnapshot(continuityGround);
-continuityVista.update(200, 60, 0, FRAME_S);
+continuityVista.update(13 * DISC, LANE_Z, 0);
 const groundEnd = worldPositionSnapshot(continuityGround);
 const continuityPositions = continuityGround.geometry.getAttribute('position');
 invariant(
@@ -269,33 +293,60 @@ invariant(
   `spatial vista interpolation deviates ${midpointError.toFixed(3)} m at midpoint`,
 );
 
-continuityVista.update(100, 60, 0, FRAME_S);
-const groundBeforeStep = worldPositionSnapshot(continuityGround);
-continuityVista.update(101, 60, 0, FRAME_S);
-const groundAfterStep = worldPositionSnapshot(continuityGround);
-const oneMetreHeightChange = maximumHeightDelta(
-  continuityGround,
-  groundBeforeStep,
-  groundAfterStep,
-  ROAD_REACH,
-);
-invariant(oneMetreHeightChange > 0.001, 'one metre of travel leaves the horizon stationary');
-continuityVista.update(100, 60, 0, FRAME_S);
-const reverseError = maximumPositionDelta(
-  groundBeforeStep,
-  worldPositionSnapshot(continuityGround),
-);
-invariant(reverseError < 0.001, `reversing one metre leaves ${reverseError.toFixed(4)} m of drift`);
+// Fixed spots at 2, 5 and 10 km in three directions.
+const spots: { x: number; z: number }[] = [];
+for (const distance of [2_000, 5_000, 10_000]) {
+  for (const angle of [0.3, 2.1, 4.0]) {
+    spots.push({ x: 125 + Math.sin(angle) * distance, z: LANE_Z + Math.cos(angle) * distance });
+  }
+}
 
-continuityVista.update(249.999, 60, 0, FRAME_S);
-const groundBeforeBoundary = worldPositionSnapshot(continuityGround);
-let previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
-continuityVista.update(250.001, 60, 0, FRAME_S);
-const boundaryJump = maximumPositionDelta(
-  groundBeforeBoundary,
-  worldPositionSnapshot(continuityGround),
+// Two camera positions on one lattice point (6): nothing moves.
+continuityVista.update(6 * DISC - 7, LANE_Z, 0);
+const groundBeforeStep = worldPositionSnapshot(continuityGround);
+const mesasBeforeStep = worldPositionSnapshot(continuityMesas);
+const heightsBeforeStep = drawnHeights(continuityGround, spots);
+continuityVista.update(6 * DISC + 7, LANE_Z, 0);
+const stillError = Math.max(
+  maximumPositionDelta(groundBeforeStep, worldPositionSnapshot(continuityGround)),
+  maximumPositionDelta(mesasBeforeStep, worldPositionSnapshot(continuityMesas)),
+  largestStepAngle(spots, heightsBeforeStep, drawnHeights(continuityGround, spots), 6 * DISC, LANE_Z),
 );
-invariant(boundaryJump < 0.01, `vista jumps ${boundaryJump.toFixed(3)} m at a cell boundary`);
+invariant(stillError === 0, `14 m inside one lattice step moved the vista by ${stillError}`);
+
+// One lattice step on: the ground follows, by under a pixel.
+continuityVista.update(7 * DISC, LANE_Z, 0);
+const heightsAfterStep = drawnHeights(continuityGround, spots);
+const stepAngle = largestStepAngle(spots, heightsBeforeStep, heightsAfterStep, 7 * DISC, LANE_Z);
+invariant(
+  heightsAfterStep.some((height, k) => Math.abs(height - heightsBeforeStep[k]!) > 1e-4),
+  'a lattice step leaves the drawn ground where it was',
+);
+invariant(
+  stepAngle < MAX_STEP_ANGLE,
+  `a lattice step moves the drawn ground by ${((stepAngle * 180) / Math.PI).toFixed(4)} degrees`,
+);
+continuityVista.update(6 * DISC, LANE_Z, 0);
+const reverseError = maximumPositionDelta(groundBeforeStep, worldPositionSnapshot(continuityGround));
+invariant(reverseError < 1e-6, `reversing one lattice step leaves ${reverseError.toFixed(6)} m of drift`);
+
+// Across a cell edge (lattice points 15 and 16): a step like any other.
+continuityVista.update(15 * DISC, LANE_Z, 0);
+const groundBeforeBoundary = worldPositionSnapshot(continuityGround);
+const heightsBeforeBoundary = drawnHeights(continuityGround, spots);
+let previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
+continuityVista.update(16 * DISC, LANE_Z, 0);
+const boundaryAngle = largestStepAngle(
+  spots,
+  heightsBeforeBoundary,
+  drawnHeights(continuityGround, spots),
+  16 * DISC,
+  LANE_Z,
+);
+invariant(
+  boundaryAngle < MAX_STEP_ANGLE,
+  `the vista jumps ${((boundaryAngle * 180) / Math.PI).toFixed(4)} degrees at a cell boundary`,
+);
 
 function checkResidentTransition(currentCandidates: Map<string, number>): number {
   let transitions = 0;
@@ -314,28 +365,51 @@ function checkResidentTransition(currentCandidates: Map<string, number>): number
 
 const afterBoundaryCandidates = mesaCandidateTops(continuityVista, continuityMesas);
 let residentTransitions = checkResidentTransition(afterBoundaryCandidates);
-continuityVista.update(249.999, 60, 0, FRAME_S);
+continuityVista.update(15 * DISC, LANE_Z, 0);
 const boundaryReverseError = maximumPositionDelta(
   groundBeforeBoundary,
   worldPositionSnapshot(continuityGround),
 );
 invariant(
-  boundaryReverseError < 0.001,
-  `reversing across a cell edge leaves ${boundaryReverseError.toFixed(4)} m of drift`,
+  boundaryReverseError < 1e-6,
+  `reversing across a cell edge leaves ${boundaryReverseError.toFixed(6)} m of drift`,
 );
-continuityVista.update(250.001, 60, 0, FRAME_S);
+continuityVista.update(16 * DISC, LANE_Z, 0);
 previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
 for (let crossing = 1; crossing <= 20; crossing++) {
-  continuityVista.update(250.001 + crossing * SNAP, 60, 0, FRAME_S);
+  continuityVista.update(16 * DISC + crossing * SNAP, LANE_Z, 0);
   const currentCandidates = mesaCandidateTops(continuityVista, continuityMesas);
   residentTransitions += checkResidentTransition(currentCandidates);
   previousCandidates = currentCandidates;
 }
 invariant(residentTransitions > 0, 'mesa residency check crossed no candidate boundary');
+
+// A metre at a time across a whole cell: the drawn ground changes only where the camera
+// crosses onto a new lattice point, sixteen times, each by under a pixel.
+const sweepX0 = 40 * SNAP;
+continuityVista.update(sweepX0, LANE_Z, 0);
+let sweepHeights = drawnHeights(continuityGround, spots);
+let sweepChanges = 0;
+let sweepAngle = 0;
+for (let x = sweepX0 + 1; x < sweepX0 + SNAP; x++) {
+  continuityVista.update(x, LANE_Z, 0);
+  const heights = drawnHeights(continuityGround, spots);
+  if (heights.some((height, k) => height !== sweepHeights[k])) {
+    sweepChanges++;
+    sweepAngle = Math.max(sweepAngle, largestStepAngle(spots, sweepHeights, heights, x, LANE_Z));
+  }
+  sweepHeights = heights;
+}
+invariant(sweepChanges <= 16, `the drawn ground changed ${sweepChanges} times across one 250 m cell`);
+invariant(
+  sweepAngle < MAX_STEP_ANGLE,
+  `a lattice step in the sweep moves the drawn ground by ${((sweepAngle * 180) / Math.PI).toFixed(4)} degrees`,
+);
 console.log(
-  `vista interpolation: ${oneMetreHeightChange.toFixed(3)} m response per metre, ` +
-    `${reverseError.toFixed(4)} m reverse error, ${boundaryJump.toFixed(3)} m boundary step, ` +
-    `${boundaryReverseError.toFixed(4)} m boundary reverse error, ` +
+  `vista anchoring: still inside a step, largest step ${((stepAngle * 180) / Math.PI).toFixed(4)} deg, ` +
+    `${((boundaryAngle * 180) / Math.PI).toFixed(4)} deg at a cell edge, ` +
+    `${sweepChanges} changes across a cell in 1 m steps (largest ${((sweepAngle * 180) / Math.PI).toFixed(4)} deg), ` +
+    `${reverseError.toFixed(6)} m reverse error, ${boundaryReverseError.toFixed(6)} m boundary reverse error, ` +
     `${residentTransitions} buried residency transitions`,
 );
 continuityVista.dispose();
@@ -352,7 +426,7 @@ const mesaVista = new VistaMesh(
   new WorldOrigin(),
 );
 mesaVista.setViewDistance(25_000);
-mesaVista.update(0, 0, 0, 0);
+mesaVista.update(0, 0, 0);
 const mesaMeshes = mesaScene.children.filter(
   (child): child is THREE.Mesh => child instanceof THREE.Mesh,
 );
@@ -514,7 +588,7 @@ const approachScene = new THREE.Scene();
 const approachTerrain = new Terrain(REPORTED_MESA_SEED, mesaRoad);
 const approachVista = new VistaMesh(approachScene, approachTerrain, mesaRoad, new WorldOrigin());
 approachVista.setViewDistance(25_000);
-approachVista.update(0, 0, 0, FRAME_S);
+approachVista.update(0, 0, 0);
 const approachState = approachVista as unknown as VistaAnimationState;
 const targetMesa = approachState.mesaCandidates.find((candidate) => {
   const distance = Math.hypot(candidate.centreX, candidate.centreZ);
@@ -560,7 +634,7 @@ const targetDistance = Math.hypot(targetMesa.centreX, targetMesa.centreZ);
 const nearDistance = targetMesa.radius + 50;
 const nearX = targetMesa.centreX - (targetMesa.centreX / targetDistance) * nearDistance;
 const nearZ = targetMesa.centreZ - (targetMesa.centreZ / targetDistance) * nearDistance;
-approachVista.update(nearX, nearZ, 0, FRAME_S);
+approachVista.update(nearX, nearZ, 0);
 const nearStanding = targetStanding();
 invariant(nearStanding !== null, 'mesa left the vista when the camera reached its foot');
 const plateauError = Math.abs(nearStanding.top - exactTop);
@@ -572,8 +646,8 @@ invariant(
   nearStanding.rise >= targetSite.height * MESA_TOP_HEIGHT,
   `mesa at its foot rises only ${nearStanding.rise.toFixed(0)} m of ${targetSite.height.toFixed(0)}`,
 );
-approachVista.update(0, 0, 0, FRAME_S);
-approachVista.update(nearX, nearZ, 0, FRAME_S);
+approachVista.update(0, 0, 0);
+approachVista.update(nearX, nearZ, 0);
 const revisit = targetStanding();
 invariant(
   revisit !== null && Math.abs(revisit.rise - nearStanding.rise) < 0.01,

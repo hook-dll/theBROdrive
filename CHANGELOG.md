@@ -1158,6 +1158,31 @@
   `USE_REVERSED_DEPTH_BUFFER`, which three defines for the page: no new program, and the
   program budget's ids leave the flag out so one list holds on either kind of machine
   (`render/programbudget.ts`). The car mirrors' targets take float depth too.
+- THE VISTA HOLDS STILL UNDER A MOVING CAMERA, AND A MESA'S FOOT CANNOT OPEN
+  (`render/vista.ts` `DISC_STEP`, `MESA_CURTAIN_DEPTH`). The second half of the far mesas'
+  shimmer: the polar disc slid with the camera and re-blended every vertex for its exact
+  position up to 75 times a second, so the triangle over any fixed spot changed with the
+  camera and the drawn ground there wandered (up to 9.7 m across one 250 m cell at 10 km,
+  1.4 m at 2 km, a few centimetres a frame; mesa vertices up to 0.65 m a metre of travel).
+  The disc now stands on a world lattice of 15.6 m (16 to a cell) and moves only when the
+  camera's nearest lattice point changes; the disc and the mesas, their spatial fades
+  included, are a function of that point alone. Measured across a cell a metre at a time:
+  the drawn height at fixed spots 2-10 km off takes 17 values, each held while the camera
+  crosses its step, and changes by 0.2-1.1 m at a step (0.006° at worst, a tenth of a
+  pixel); mesa vertices change only at steps too, worst 0.023° (7 m at 17 km, in the
+  burying band). The disc is rewritten a few times a second at speed (2.6/s at 40 m/s)
+  instead of every frame, 0.7 ms a step in `tools/vista-check.ts`; the worker's samples are
+  unchanged. The inner ring sits 11 m further in so the tiles still cover 40 m of it
+  wherever the camera stands about its lattice point. Under each mesa's skirt hangs a
+  vertical curtain of rock 60 m deep at the skirt's own outline, so no ground it stands
+  on can open a gap under its foot; the skirt, the talus and the footprint the colliders
+  share keep their shape. The mesas' polygon offset is gone (on the reversed depth buffer
+  the foot meets the ground at its true line). The lookup of a mesa's ground on the drawn
+  disc now tries the next ring when a point falls in the sliver a ring's chord leaves
+  inside its circle; it took a vertex's height there and stood a skirt 80 m above the
+  ground on a mountainside. `tools/vista-check.ts` checks the new contract (nothing moves
+  inside a step, a step and a cell crossing move the drawn ground by under 0.05°, 16
+  changes across a cell, exact reversal).
 - A TRAILER STANDING UNCOUPLED NO LONGER SLIDES DOWN A GRADE (`vehicle/trailer.ts`
   `holdParked`). Reported from play (2026-10-26): a contract trailer waiting at a lay-by on
   a slight slope slid off downhill in front of the player, its wheels not turning. The

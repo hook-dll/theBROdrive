@@ -5,12 +5,13 @@ import { DESERT_TILE_SIZE } from '../world/deserttiledata';
  * DISSOLVE WHAT STANDS BEYOND THE TRUE GROUND.
  *
  * The ground is drawn by two systems: the fine player-centred desert tiles, which are
- * the height field itself, and past them the vista, a camera-centred polar mesh whose
- * heights are interpolated from samples up to a cell away (render/vista.ts). Measured
- * against `Terrain.heightAt`, the vista is off by 3-5 m at the 90th percentile and by
- * 10 m and more over dunes. A prop placed on the true field past the tiles therefore
- * hovers over — or sinks into — the ground the eye actually sees there, and on the
- * skyline a hovering cactus is the most visible thing in the frame.
+ * the height field itself, and past them the vista, a polar mesh that follows the camera
+ * in 15.6 m steps and whose heights are interpolated from samples up to a cell away
+ * (render/vista.ts). Measured against `Terrain.heightAt`, the vista is off by 3-5 m at
+ * the 90th percentile and by 10 m and more over dunes. A prop placed on the true field
+ * past the tiles therefore hovers over — or sinks into — the ground the eye actually
+ * sees there, and on the skyline a hovering cactus is the most visible thing in the
+ * frame.
  *
  * So a prop dissolves as it nears the edge of the tile WINDOW — the 5x5 square of
  * tiles round the player's own (world/deserttiles.ts) — and is gone before it would
@@ -42,6 +43,8 @@ const patched = new WeakSet<THREE.Material>();
 const uGroundWindow = { value: new THREE.Vector4(-1e9, -1e9, 1e9, 1e9) };
 /** The same window in ABSOLUTE metres, for CPU callers. */
 const absWindow = { minX: -1e9, minZ: -1e9, maxX: 1e9, maxZ: 1e9 };
+/** Bumped whenever the window moves (`groundWindowRevision`). */
+let windowRevision = 0;
 
 /**
  * Metres by which an absolute point lies OUTSIDE the fine tile window (negative when
@@ -54,14 +57,25 @@ export function outsideGroundWindow(absX: number, absZ: number): number {
 }
 
 /**
+ * A number that changes whenever the window moves: the vista rewrites its road raise
+ * (render/vista.ts `roadRaiseAt`) only then, not every frame.
+ */
+export function groundWindowRevision(): number {
+  return windowRevision;
+}
+
+/**
  * Moves the window to the one around the absolute point the tiles are streamed for.
  * `originX/Z` is the rebase origin: props render in scene coordinates.
  */
 export function setGroundFadeWindow(absX: number, absZ: number, originX: number, originZ: number): void {
   const tx = Math.floor(absX / DESERT_TILE_SIZE);
   const tz = Math.floor(absZ / DESERT_TILE_SIZE);
-  absWindow.minX = (tx - WINDOW_TILES) * DESERT_TILE_SIZE;
-  absWindow.minZ = (tz - WINDOW_TILES) * DESERT_TILE_SIZE;
+  const minX = (tx - WINDOW_TILES) * DESERT_TILE_SIZE;
+  const minZ = (tz - WINDOW_TILES) * DESERT_TILE_SIZE;
+  if (minX !== absWindow.minX || minZ !== absWindow.minZ) windowRevision++;
+  absWindow.minX = minX;
+  absWindow.minZ = minZ;
   absWindow.maxX = (tx + WINDOW_TILES + 1) * DESERT_TILE_SIZE;
   absWindow.maxZ = (tz + WINDOW_TILES + 1) * DESERT_TILE_SIZE;
   uGroundWindow.value.set(

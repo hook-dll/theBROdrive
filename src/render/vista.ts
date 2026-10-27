@@ -18,7 +18,7 @@ import { applyComicShading } from './comic';
 import { applyGroundLight } from './groundlight';
 
 import { desertPaletteAt } from '../world/gradient';
-import { outsideGroundWindow } from './groundfade';
+import { groundWindowRevision, outsideGroundWindow } from './groundfade';
 import type { WorldOrigin } from '../world/origin';
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
@@ -41,10 +41,40 @@ import type {
  * as the player drives up to and past them; near the player they are solid
  * (`world/mesacolliders.ts`). The horizon is a spatial interpolation of fixed world
  * samples, never a timed animation.
+ *
+ * WORLD-ANCHORED BETWEEN STEPS. The disc does not slide with the camera: it stands on a
+ * world lattice of `DISC_STEP` and moves only when the camera's nearest lattice point
+ * changes, and its heights and the mesas' are a function of that point alone. Between
+ * steps nothing in it moves, so the drawn ground and a mesa's foot hold still under a
+ * moving camera. When it slid, every vertex was re-blended for the camera's exact
+ * position up to 75 times a second, the triangle over any fixed spot changed with it,
+ * and the drawn height there wandered by up to 10 m across a cell (at 10 km), a few
+ * centimetres a frame: enough to flip a mesa's outline against the ground from frame to
+ * frame (owner's recording, 2026-10-27).
  */
 
-/** Forty metres of hidden overlap beneath the nearest guaranteed tile edge. */
-const INNER_RADIUS = DESERT_TILE_SIZE - 40;
+/**
+ * Terrain samples at the corners of this world-space grid are bilinearly mixed for the
+ * disc's lattice point. Crossing a cell therefore reuses the same edge samples: movement
+ * stays spatial and immediately reversible instead of starting a timed morph.
+ */
+const SAMPLE_CELL_SIZE = 250;
+/**
+ * The disc's lattice: it stands on the lattice point nearest the camera, sixteen to a
+ * cell. Fine enough that the camera is never more than `DISC_STEP / sqrt 2` (11 m) off
+ * the disc's centre, which `INNER_RADIUS` absorbs, and that a step's change at a fixed
+ * spot is a fraction of a pixel (tens of centimetres at 2-10 km); coarse enough that the
+ * disc is rewritten a few times a second at speed (2.6/s at 40 m/s) rather than every
+ * frame.
+ */
+const DISC_STEPS_PER_CELL = 16;
+const DISC_STEP = SAMPLE_CELL_SIZE / DISC_STEPS_PER_CELL;
+
+/**
+ * Forty metres of hidden overlap beneath the nearest guaranteed tile edge, wherever the
+ * camera stands about the disc's lattice point.
+ */
+const INNER_RADIUS = DESERT_TILE_SIZE - 40 - DISC_STEP * Math.SQRT1_2;
 /** Only the overlap covered by the settled 5x5 desert-tile window is non-occluding. */
 const NON_OCCLUDING_RADIUS = DESERT_TILE_SIZE * 2;
 /**
@@ -93,18 +123,6 @@ const SECTORS = 160;
 const RELIEF_FADE_START = 2500;
 const RELIEF_FADE_END = 7000;
 
-/**
- * Terrain samples at the corners of this world-space grid are bilinearly mixed from
- * the camera's exact position. Crossing a cell therefore reuses the same edge samples:
- * movement is continuous and immediately reversible instead of starting a timed morph.
- */
-const SAMPLE_CELL_SIZE = 250;
-/**
- * Shortest time between two height refreshes of the disc, seconds; see `update`. Just
- * under a 72 Hz step, so a 144 Hz frame refreshes every other frame, not every third.
- */
-const GROUND_REFRESH_S = 1 / 75;
-
 /** Downward overlap bias, fading out over the first eighty metres of the vista. */
 const INNER_BIAS = 2;
 const BIAS_FADE = 480;
@@ -131,6 +149,17 @@ const MESA_RESIDENCY_MARGIN = SAMPLE_CELL_SIZE * 2;
 const MESA_BURY_DEPTH = 12;
 /** The vista's skirt sits this far under its own interpolated ground. */
 const MESA_SKIRT_DROP = 3;
+/**
+ * Below the skirt the vista hangs a vertical curtain of rock this deep, at the skirt's
+ * own outline, so no ground a mesa stands on can open a gap under its foot: the vista's
+ * ground at a spot and the ground a mesa vertex was stood on are interpolated from
+ * different triangles and disagree by metres over dunes (10 m and more,
+ * render/groundfade.ts), and on a slope the ground between two skirt vertices falls
+ * further. The skirt itself stays 3 m down, so the talus between it and the wall's foot,
+ * and the footprint the colliders and the placement share (`MESA_RINGS`), keep their
+ * shape. Nothing of the curtain shows unless the ground drops away beside it.
+ */
+const MESA_CURTAIN_DEPTH = 60;
 /**
  * Near the player a mesa stands on the EXACT ground (`MesaField.footing`,
  * `mesaFootingY`): the ground the fine tiles draw and the collider
@@ -190,8 +219,10 @@ const rockLinear = new THREE.Color();
 const mesaLinear = new THREE.Color();
 /**
  * Mesas need physical light and fog, but not the terrain shader's elevation contours:
- * on a sheer wall those screen-space lines read as printed cardboard. Polygon offset
- * resolves the last sub-pixel contact at the buried skirt without changing occlusion.
+ * on a sheer wall those screen-space lines read as printed cardboard. No polygon
+ * offset: it was there to settle the skirt's last sub-pixel contact with the ground,
+ * and on the reversed float depth buffer (render/depthconvention.ts) the foot meets the
+ * ground at its true line; the offset only pulled the outline a pixel's depth forward.
  */
 // The drifting cloud shade is shared with the streamed terrain and the road (see
 // `render/cloudshadow.ts`): a patch that stopped at the edge of the near tiles
@@ -203,9 +234,6 @@ const MESA_MATERIAL = applyGroundLight(applyCloudShadow(
       vertexColors: true,
       roughness: 0.98,
       metalness: 0,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
     }),
     {
       lightingStrength: 0.18,
@@ -280,6 +308,11 @@ function triangleHeightAt(
 /**
  * Height of the ACTUAL polar vista triangles. Sampling the analytic field here can
  * disagree with a 900 m rendered cell by tens of metres and leave a mesa in the air.
+ *
+ * A ring is drawn as chords, which sag inside its circle (3.5 m at 18 km), so a point
+ * just inside a ring's radius can lie beyond its chord, in the next pair of rings'
+ * triangles: that pair is tried before giving up. Taking a vertex's height there instead
+ * stood a mesa 80 m above the drawn ground on a mountainside (tools/vista-check.ts).
  */
 function renderedGroundHeightAt(
   x: number,
@@ -300,21 +333,23 @@ function renderedGroundHeightAt(
 
   let outerRing = 1;
   while (outerRing < radii.length - 1 && radii[outerRing]! < clampedRadius) outerRing++;
-  const innerRing = outerRing - 1;
   let theta = Math.atan2(sampleX - cx, sampleZ - cz);
   if (theta < 0) theta += Math.PI * 2;
   const sectorFloat = (theta / (Math.PI * 2)) * SECTORS;
   const a = Math.floor(sectorFloat) % SECTORS;
   const b = (a + 1) % SECTORS;
-  const innerA = innerRing * SECTORS + a;
-  const innerB = innerRing * SECTORS + b;
-  const outerA = outerRing * SECTORS + a;
-  const outerB = outerRing * SECTORS + b;
-  return (
-    triangleHeightAt(sampleX, sampleZ, innerA, outerA, innerB, positions, heights) ??
-    triangleHeightAt(sampleX, sampleZ, outerA, outerB, innerB, positions, heights) ??
-    heights[innerA]!
-  );
+  const lastRing = Math.min(outerRing + 1, radii.length - 1);
+  for (let ring = outerRing; ring <= lastRing; ring++) {
+    const innerA = (ring - 1) * SECTORS + a;
+    const innerB = (ring - 1) * SECTORS + b;
+    const outerA = ring * SECTORS + a;
+    const outerB = ring * SECTORS + b;
+    const height =
+      triangleHeightAt(sampleX, sampleZ, innerA, outerA, innerB, positions, heights) ??
+      triangleHeightAt(sampleX, sampleZ, outerA, outerB, innerB, positions, heights);
+    if (height !== null) return height;
+  }
+  return heights[(outerRing - 1) * SECTORS + a]!;
 }
 
 export class VistaMesh {
@@ -330,8 +365,10 @@ export class VistaMesh {
   private sampleCellZ = Number.NaN;
   private interpolationX = 0;
   private interpolationZ = 0;
-  /** Seconds since the disc's heights last followed the camera. */
-  private sinceGroundRefresh = Infinity;
+  /** The disc's lattice point (`DISC_STEP` units) and the tile window it was written for. */
+  private discStepX = Number.NaN;
+  private discStepZ = Number.NaN;
+  private discWindow = -1;
 
   /** CPU-only mesa animation data; none of these buffers are uploaded as attributes. */
   private mesaGroundY: GroundHeightSamples | null = null;
@@ -558,42 +595,43 @@ export class VistaMesh {
   }
 
   /**
-   * The polar disc follows the camera continuously. Its expensive terrain samples
-   * come from the four corners of the current cell; only the cheap interpolation runs
-   * every frame. Ground and mesa movement is spatial and reversible.
+   * Stands the disc on the lattice point nearest the camera (`DISC_STEP`). Its expensive
+   * terrain samples come from the four corners of that point's cell; the disc and the
+   * mesas are rewritten only when the point, the cell or the fine tiles' window changes,
+   * and are a function of the point alone, so between steps nothing moves. Ground and
+   * mesa movement is spatial and reversible.
    */
-  update(cameraX: number, cameraZ: number, s: number, frameDt: number): void {
+  update(cameraX: number, cameraZ: number, s: number): void {
     if (this.outerRadius <= 0) return;
     this.ensureGroundGeometry();
-    const cellX = Math.floor(cameraX / SAMPLE_CELL_SIZE);
-    const cellZ = Math.floor(cameraZ / SAMPLE_CELL_SIZE);
+    const stepX = Math.round(cameraX / DISC_STEP);
+    const stepZ = Math.round(cameraZ / DISC_STEP);
+    // The cell is the lattice point's, so the point's weights stay in [0, 1).
+    const cellX = Math.floor(stepX / DISC_STEPS_PER_CELL);
+    const cellZ = Math.floor(stepZ / DISC_STEPS_PER_CELL);
     const cellChanged =
       cellX !== this.sampleCellX || cellZ !== this.sampleCellZ || this.groundSamples === null;
     if (cellChanged) this.prepareRoadUnderlay(s);
     if (cellChanged) this.loadGroundCell(cellX, cellZ, s);
 
-    // The disc follows the camera at most 75 times a second (`GROUND_REFRESH_S`).
-    // Rewriting and uploading every vertex was the largest script cost in a frame after
-    // the draws (0.9 ms on the owner's 5950X at 132 FPS). A disc left in place for one
-    // frame is still right where it is: its heights belong to where it stands, and only
-    // its rim, 0.5 m at 40 m/s, lags the camera.
-    this.sinceGroundRefresh += frameDt;
-    if (!cellChanged && this.sinceGroundRefresh < GROUND_REFRESH_S) return;
-    this.sinceGroundRefresh = 0;
-    this.interpolationX = Math.max(
-      0,
-      Math.min(1, (cameraX - cellX * SAMPLE_CELL_SIZE) / SAMPLE_CELL_SIZE),
-    );
-    this.interpolationZ = Math.max(
-      0,
-      Math.min(1, (cameraZ - cellZ * SAMPLE_CELL_SIZE) / SAMPLE_CELL_SIZE),
-    );
-    this.updateGroundPositions(cameraX, cameraZ);
-    this.updateMesaPositions(cameraX, cameraZ);
+    // The road raise inside `ROAD_UNDERLAY_RADIUS` depends on the fine tiles' window
+    // (`roadRaiseAt`), which moves at tile crossings, not with the lattice.
+    const window = groundWindowRevision();
+    if (!cellChanged && stepX === this.discStepX && stepZ === this.discStepZ && window === this.discWindow) return;
+    this.discStepX = stepX;
+    this.discStepZ = stepZ;
+    this.discWindow = window;
+    this.interpolationX = (stepX - cellX * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
+    this.interpolationZ = (stepZ - cellZ * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
+    const anchorX = stepX * DISC_STEP;
+    const anchorZ = stepZ * DISC_STEP;
+    this.updateGroundPositions(anchorX, anchorZ);
+    this.updateMesaPositions(anchorX, anchorZ);
     if (cellChanged) this.refreshMesaNormals();
   }
 
-  private updateGroundPositions(cameraX: number, cameraZ: number): void {
+  /** Writes the disc for the lattice point (`anchorX`, `anchorZ`); see `update`. */
+  private updateGroundPositions(anchorX: number, anchorZ: number): void {
     if (!this.geometry || !this.groundSamples) return;
     const position = this.geometry.getAttribute('position') as THREE.BufferAttribute;
     const color = this.geometry.getAttribute('color') as THREE.BufferAttribute;
@@ -617,8 +655,8 @@ export class VistaMesh {
         const bias =
           INNER_BIAS *
           (1 - smoothstep01((radius - INNER_RADIUS) / (BIAS_FADE - INNER_RADIUS)));
-        const absX = cameraX + this.groundLocalPositions![vi]! + this.origin.x;
-        const absZ = cameraZ + this.groundLocalPositions![vi + 2]! + this.origin.z;
+        const absX = anchorX + this.groundLocalPositions![vi]! + this.origin.x;
+        const absZ = anchorZ + this.groundLocalPositions![vi + 2]! + this.origin.z;
         y = this.beneathRoad(absX, absZ, y, bias, roadRaiseAt(absX, absZ));
       }
       xyz[vi + 1] = y;
@@ -654,13 +692,19 @@ export class VistaMesh {
         sample01.colors[i]! + (sample11.colors[i]! - sample01.colors[i]!) * tx;
       rgb[i] = lower + (upper - lower) * tz;
     }
-    this.mesh.position.set(cameraX, 0, cameraZ);
+    this.mesh.position.set(anchorX, 0, anchorZ);
     position.needsUpdate = true;
     color.needsUpdate = true;
     normal.needsUpdate = true;
   }
 
-  private updateMesaPositions(cameraX: number, cameraZ: number): void {
+  /**
+   * Writes the mesas for the lattice point (`anchorX`, `anchorZ`): their ground, and
+   * their spatial fades (buried at the edge of the resident set, onto exact ground near
+   * the player), are measured from that point, not from the camera, so they too hold
+   * still between steps.
+   */
+  private updateMesaPositions(anchorX: number, anchorZ: number): void {
     if (!this.mesaGeometry || !this.mesaGroundY || !this.mesaHeightOffset || !this.mesaExactY) return;
     const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
     const xyz = position.array as Float32Array;
@@ -672,7 +716,7 @@ export class VistaMesh {
     const outerFadeStart = Math.max(1, this.mesaVisibleOuter - MESA_OUTER_FADE);
     let anyVisible = false;
     for (const candidate of this.mesaCandidates) {
-      const distance = Math.hypot(candidate.centreX - cameraX, candidate.centreZ - cameraZ);
+      const distance = Math.hypot(candidate.centreX - anchorX, candidate.centreZ - anchorZ);
       const farWeight =
         1 -
         smoothstep01(
@@ -694,8 +738,9 @@ export class VistaMesh {
         const base = lower + (upper - lower) * tz;
         let y = base + offsets[i]! * farWeight;
         if (footWeight > 0) {
-          // The skirt stays under BOTH grounds: whichever is lower is the one drawn.
-          const target = offsets[i] === -MESA_SKIRT_DROP ? Math.min(exact[i]!, y) : exact[i]!;
+          // The skirt and its curtain stay under BOTH grounds: whichever is lower is the
+          // one drawn.
+          const target = offsets[i]! <= -MESA_SKIRT_DROP ? Math.min(exact[i]!, y) : exact[i]!;
           y += (target - y) * footWeight;
         }
         xyz[i * 3 + 1] = y - (1 - farWeight) * MESA_BURY_DEPTH;
@@ -1293,7 +1338,8 @@ export class VistaMesh {
    * vista's own interpolated ground (the skirt and wall foot on the ground under them,
    * the upper rings on the ground at the centre), so a distant mesa meets the triangles
    * actually drawn around it. A `footed` mesa also carries every vertex's exact-ground
-   * height, which it stands on up close (`MESA_FOOTING_FULL`).
+   * height, which it stands on up close (`MESA_FOOTING_FULL`). Under the skirt hangs the
+   * curtain (`MESA_CURTAIN_DEPTH`): one more row of vertices, the skirt's own, lowered.
    */
   private appendMesa(
     positions: number[],
@@ -1335,16 +1381,28 @@ export class VistaMesh {
     const seed = this.road.seed;
     const segments = site.segments;
     const firstVertex = positions.length / 3;
-    for (let ring = 0; ring < MESA_RINGS.length; ring++) {
+    // Row 0 is the curtain under the skirt; row r > 0 is ring r - 1. The skirt row stands
+    // on the curtain's ground, sampled once.
+    const rows = MESA_RINGS.length + 1;
+    const skirtGrounds: [number, number, number, number][] = [];
+    for (let row = 0; row < rows; row++) {
+      const ring = Math.max(0, row - 1);
       const level = MESA_RINGS[ring]!;
       for (let segment = 0; segment < segments; segment++) {
         const px = x + site.outlineX[segment]! * level.radius;
         const pz = z + site.outlineZ[segment]! * level.radius;
-        const grounds: [number, number, number, number] =
-          ring <= 1
-            ? [groundAt(0, px, pz), groundAt(1, px, pz), groundAt(2, px, pz), groundAt(3, px, pz)]
-            : centreGround;
-        const heightOffset = ring === 0 ? -MESA_SKIRT_DROP : site.height * level.height;
+        let grounds = centreGround;
+        if (row === 0) {
+          grounds = [groundAt(0, px, pz), groundAt(1, px, pz), groundAt(2, px, pz), groundAt(3, px, pz)];
+          skirtGrounds.push(grounds);
+        } else if (ring === 0) {
+          grounds = skirtGrounds[segment]!;
+        } else if (ring === 1) {
+          grounds = [groundAt(0, px, pz), groundAt(1, px, pz), groundAt(2, px, pz), groundAt(3, px, pz)];
+        }
+        const heightOffset = row === 0
+          ? -MESA_SKIRT_DROP - MESA_CURTAIN_DEPTH
+          : ring === 0 ? -MESA_SKIRT_DROP : site.height * level.height;
         const shade = mesaFacetShade(seed, site, ring, segment);
         positions.push(px, grounds[0] + heightOffset, pz);
         colors.push(
@@ -1357,12 +1415,13 @@ export class VistaMesh {
         }
         heightOffsets.push(heightOffset);
         centres.push(x, z);
-        exacts.push(footing ? mesaFootingY(site, footing, ring, segment) : NaN);
+        const exact = footing ? mesaFootingY(site, footing, ring, segment) : NaN;
+        exacts.push(row === 0 ? exact - MESA_CURTAIN_DEPTH : exact);
       }
     }
 
-    for (let ring = 0; ring < MESA_RINGS.length - 1; ring++) {
-      const current = firstVertex + ring * segments;
+    for (let row = 0; row < rows - 1; row++) {
+      const current = firstVertex + row * segments;
       const next = current + segments;
       for (let segment = 0; segment < segments; segment++) {
         const b = (segment + 1) % segments;
@@ -1376,7 +1435,7 @@ export class VistaMesh {
         );
       }
     }
-    const top = firstVertex + (MESA_RINGS.length - 1) * segments;
+    const top = firstVertex + (rows - 1) * segments;
     const centre = positions.length / 3;
     const topOffset = site.height * MESA_TOP_HEIGHT;
     positions.push(x, centreGround[0] + topOffset, z);
