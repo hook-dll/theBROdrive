@@ -1327,10 +1327,13 @@ function buildDoorHardware(ctx: KitContext): void {
     const side = owner.endsWith('l') ? 1 : -1;
     const front = owner.startsWith('door_f');
     const b = new PartBuilder();
-    // The door's rear edge at the belt, from its pivot (front edge) and the cabin columns.
+    // The door's rear edge at the belt, from its pivot (front edge) and the cabin columns:
+    // the LAST column with the door below and the body above (the B pillar). The first
+    // such may be the A pillar's foot where the door reaches under it (the 2102's), which
+    // put its handle on the wing.
     const cols = spec.cabin.columns;
     const rearS = front
-      ? cols.find((c) => c.lower === 'door1' && c.upper === 'body')?.s ?? cols.filter((c) => c.upper === 'door1').at(-1)!.s
+      ? cols.findLast((c) => c.lower === 'door1' && c.upper === 'body')?.s ?? cols.filter((c) => c.upper === 'door1').at(-1)!.s
       : cols.filter((c) => c.upper === 'door2').at(-1)!.s;
     const at = spec.look.handles;
     const handleS = at ? (front ? at.front : at.rear) : rearS - 0.13;
