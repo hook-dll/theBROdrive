@@ -1,8 +1,9 @@
 # Mercedes-Benz W124 saloon: sources, figures, feature inventory
 
-Status: **step 1 only** (README "Workflow": feature inventory before geometry). No spec, no
-geometry yet. The owner reviews §4 and §5; the missing fields are built before the first
-draft.
+Status: **first draft 2026-10-27, awaiting the owner's review** (README "Workflow" step 2).
+The owner reviewed §4 and §5; the missing fields he asked for were built first (§7), then
+the car (`mercedes.ts`, §7). Review sheet `build/kitcheck/w124/review.png`, drawing overlays
+`build/kitcheck/w124/drawing-side.png`, `drawing-front.png`.
 
 Tags: **[D]** drawing, **[P]** photo, **[F]** factory/catalogue, **[E]** estimate.
 
@@ -217,3 +218,94 @@ simplest addition that would. Colour: body = paint.
    corner** (#47). Small; the Nexia was accepted with an upright cut. Simplest: none.
 10. **Plates and badges** (#29, #48, #49). Not modelled on any kit car; the owner did not want
     them on the Espero. Simplest: none.
+
+## 6. Cabin
+
+### Dash (CABIN_W124)
+
+On the classic's furniture (interior.ts `CABIN_W124`). Pixels on DASH's 1800 × 1200. Scale:
+the column (hub x 712) to the stack's centre line (between the heater knobs, x 1196),
+484 px, taken as the classic's 0.37 seat line [E], so 0.76 mm/px at the stack; heights from
+the fascia's top (the centre vents' top, y 327) at the classic's dy 0.008 [E]. [P] read off
+the photo, [E] estimated.
+
+| Value | Photo reading | Tag |
+|---|---|---|
+| Fascia face to dy −0.215 (dash section deepened) | glovebox lid's foot y 608 | P |
+| `wood` −0.095 … −0.062 | wood band y 419–460 at the stack | P |
+| `binnacle` face down to −0.012, `binnacleHalf` 0.2 | square hood x 270–918, face down to the telltale strip y 430 | P shape, E size |
+| `clusterFace` up 0.049, half 0.185 × 0.057 | black face behind the three dials | E |
+| Speedometer r 0.046, full 240, right 0, up 0.062 | pivot x 594 y 329, scale 98 px in radius, to 240 | P place and scale, E radius |
+| Fuel gauge r 0.03, right −0.088 | left dial x 425 y 344, 63 px: a combination dial (fuel, oil, coolant) drawn as one fuel gauge (owner) | P ratio 0.64, E; spacing 1.72 × 0.046 = 0.079 opened to 0.088 so the bezels clear [E] |
+| `clock` r 0.03, right 0.088 | right dial x 762: numerals 1, 2, 3 with minute marks between | P (a clock, not the tachometer) |
+| `lamps` 7 at 0.018, right −0.045, up 0.003 | telltale strip x 327–534, y 430 | P place, E which |
+| Centre vents x ±0.055, dy −0.024, half 0.05 × 0.028 | x 1050–1333 split at 1150, y 333–408 | P |
+| End vents x ±0.63, half 0.055 × 0.028 | driver's x 17–230 outboard of the hood; passenger's out of frame | P driver, E passenger (symmetry) |
+| `stack` half 0.125 | wood stack x 1010–1349 | P |
+| `hazard` [0.012, −0.147] | red button x 1180, y 530 | P |
+| `heater` knobs ±0.048, dy −0.22, r 0.025 | two big knobs x 1137, 1263, y 626, about 0.05 across | P; the blower wheel between not drawn |
+| `radio` dy −0.29, `ashtray` −0.355 | radio y 770 (−0.33), ashtray's wood lid y 872 (−0.41) | P order, E raised to stay above the tray |
+| `console` ds 0.34–0.72, height 0.2 | wood tray from the stack to the lever | P presence, E size |
+| `gear` height 0.22, lean 0.04 | short lever in a gaiter | P short, E figures |
+| `glovebox` x −0.38, dy −0.152, half 0.23 × 0.055 | lid seam x 1366, under the band to y 608 (its handle and lock over the band, at x 1355–1460, not drawn) | P near end and height, E far end |
+| `lights` knob right −0.24, dy −0.13 | rotary knob x 109, y 591, under the end vent | P place, E distance |
+| `wheel` spokes 30, 150, 210, 330, `hub: 'pad'`, size the classic's | four spokes in two pairs about 60° apart (gaps 59, 154, 61, 86° on the turned wheel, in perspective), big square pad | P pairs, E laid square |
+| `handbrake` the classic's lever | the car has a foot brake (release handle y 680 under the knob) | owner: keep the lever |
+
+## 7. The first draft (2026-10-27)
+
+### New spec fields (the owner's list from §5; every other car `identical` in `tools/kit-fingerprint.ts`)
+
+| §5 | Field | What it draws |
+|---|---|---|
+| 1 | `moulded.moulding.edge: { finish, height }` | a chrome strip along the bumper band's top, round the corners and along `wrapTo` |
+| 1, 6 | `KitLook.cladding: { top, finish, proud?, span?, edge? }` | the side cladding from the sill's bottom row to `top`, broken at the shut lines and arches as the waist; `edge` its chrome top |
+| 6 | `Finish 'tone'` + `KitLook.tone` | a new `tone` slot, paint share 1, its vertex colour the grey `tone`; the kit shader multiplies the paint by the vertex colour (render/materials.ts `KIT_BODY_COLOR`; the paint's is white) |
+| 3 | `CornerLamp.ribs` | darker horizontal lines at equal steps in the lens's own slot, flat; the ribbed unit's meshes marked `kitTinted` |
+| 4 | `CabinSpec.wipers: 1` | one wiper on the driver's spindle |
+| 5 | `KitLook.mirrorFinish` | mirrors apart from the handles |
+
+Not built (owner): the star (§5 #2), the foot brake (#7), the combination dial (#8), plates
+and badges (#10). Not built (small, §5 #9): the lid's leaning sides between the tail lamps
+(the lid cut upright at ±0.42, a body-colour wedge up to the lamps' leaning inner edges) and
+the tail lamps' housing frames.
+
+### What was built, with the readings
+
+Every number is in `mercedes.ts` with its source; the drawing's registration in
+`refs/w124.json` `overlay`. Main readings: tips x 24 / 843, hubs x 163.5 / 649 (wheels on
+2800 centred, s 0.82 / 3.62); cowl (1.341, 0.986); A pillar top (1.893, 1.37); roof 1.43
+from 2.47 to 3.17, its rear end over the back light (3.56, 1.354); back light foot (3.96,
+1.015); belt 0.922 → 0.946; side glass top 1.343; front door 1.42–2.53, rear 2.53–3.555 at
+the belt with its edge raked round the arch to 3.21; the rear door's drop glass to the bar
+at 3.11, the fixed quarter 3.15–3.53; tail face s 4.70, lamps 0.665–0.855 (D2 rear: ±0.43 →
+0.77 at the foot, ±0.60 → 0.74 at the top); head lamps 0.57–0.755, ±0.37 → corner, amber
+from ±0.68 (D2 front). Face rake `frontLean` 0.2 above 0.56 [D side: 0.05 back over 0.21].
+The chrome line at 0.47–0.48 nose to tail [P: front bumper 0.48 (F34: 21 % down the
+bumper), rear 0.50 (R: a quarter down), doors 0.44–0.46 (F34, R34: 37 % and 33 % up the
+door)]; black bands front 0.35–0.47, rear 0.335–0.47. Tone 0.78 [E: the red car's cladding
+~0.6 of the door's red, the white car's no darker in the photo]. Mirrors body colour, the
+head at s 1.66, 4 cm off the skin [D2: ±0.77–0.91]. Blade 0.5 [E: the photos' ≈ 0.6 does not
+sweep 90° without the real arm's lift]. Interior blue cloth and dash from DASH.
+
+### Deviations accepted for the draft (refs `accepted`)
+
+- **Sill and doors' bottom** 0.255 / 0.275 (built door bottom 0.291) over the drawn 0.19 /
+  0.21: the shell's floor is the sill, and the classic platform's exhaust (resonator top
+  0.245) stood through a floor at 0.19 (kit-zfight), as on the Vectra. The cladding runs
+  0.29–0.47.
+- **Front side glass** from 1.448 at the belt, not the drawing's frame line 1.533: the
+  glass right behind the thin A pillar (working rules).
+- **Silhouette advice** (kit-drawing, not judged): side IoU 0.705 (the drawing's door
+  interiors fail its fill); s 0.10–0.25 the drawn bonnet star (not wanted); s 1.52–1.61 the
+  drawing's thick A pillar; s 3.59–4.16 a faint second line from the roof to the boot at
+  s 4.1 (the glass's drawn line and the built one agree, backLightFoot passes). Front IoU
+  0.967: x ±0.5–0.72 3–4 cm low at the roof's edge.
+- **Triangles** 13 621, over the 13 000 warning (cladding, ribs, wrapped bumpers).
+- **0–100** 12.4 s against the catalogue's 11.1 (`CATALOGUE_OPTIMISTIC`, as the other
+  foreign cars), top 204 km/h, turn 4.11 m (W124Gear's bench, tools/reality.ts).
+
+### Checks (`npm run kit-check -- w124`, 2026-10-27)
+
+zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, drawing 18/18,
+dash 9/9, frozen: recorded with `tools/kit-fingerprint.ts --write w124` after the draft.

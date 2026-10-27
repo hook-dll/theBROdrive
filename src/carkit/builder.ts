@@ -14,6 +14,8 @@ export type Vec3 = readonly [number, number, number];
 /** Material slots a kit part draws with; see `kitMaterial` in kit.ts. */
 export type KitSlot =
   | 'paint'
+  /** A tone of the body colour (`Finish` `'tone'`): the paint darkened by `KitLook.tone`. */
+  | 'tone'
   | 'glass'
   | 'trim'
   | 'chrome'

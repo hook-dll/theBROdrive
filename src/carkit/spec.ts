@@ -184,6 +184,11 @@ export interface CabinSpec {
    * расположение"). Absent: under the screen's foot.
    */
   readonly wiperMount?: 'top';
+  /**
+   * `1`: a single wiper, on the driver's (left-hand) spindle of the pair (the W124's
+   * monowiper, its lifting sweep not drawn). Absent: the pair.
+   */
+  readonly wipers?: 1;
   /** Back light: base strip above the deck and header below the rail. */
   readonly rearBottom: number;
   readonly rearHeader: number;
@@ -342,8 +347,19 @@ export interface KitLook {
   readonly headrests: boolean;
   readonly front: FaceLook;
   readonly rear: FaceLook;
-  /** Door handles and mirrors. */
+  /** Door handles and mirrors (the mirrors in `mirrorFinish` when given). */
   readonly brightwork: Finish;
+  /**
+   * The door mirrors' finish when it differs from the handles' (the W124's body-colour
+   * mirrors with chrome handles). Absent: `brightwork`.
+   */
+  readonly mirrorFinish?: Finish;
+  /**
+   * The grey (0..1, in display terms) the paint is multiplied by on parts in the `'tone'`
+   * finish: a darker tone of the body colour that follows the car's paint (the W124's
+   * cladding and bumpers). Required when any part is in `'tone'`.
+   */
+  readonly tone?: number;
   /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
   readonly mirrors?: 'left';
   /**
@@ -396,6 +412,21 @@ export interface KitLook {
     /** Where it starts and ends along the car, when not nose to tail (the Opels' strips run along the doors only). */
     readonly span?: readonly [s0: number, s1: number];
   } | null;
+  /**
+   * Side cladding: a panel on each flank from the sill up to `top`, standing `proud` off
+   * the skin (default 6 mm), from `span[0]` to `span[1]` (default nose to tail), broken at
+   * the shut lines and stopping short of the wheel arches like the waist, each piece on
+   * the panel whose skin it lies on (the W124's "Sacco boards"). `edge`: a bright strip
+   * of that finish and `height` along its top (the W124's chrome line, in line with its
+   * bumpers' `moulding.edge`).
+   */
+  readonly cladding?: {
+    readonly top: number;
+    readonly finish: Finish;
+    readonly proud?: number;
+    readonly span?: readonly [s0: number, s1: number];
+    readonly edge?: { readonly finish: Finish; readonly height: number };
+  };
   /** The amber side repeater on each front wing (s and y ranges), or none. */
   readonly repeater: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number } | null;
   /** A body-colour wing on the boot lid or tailgate with the high brake lamp, or none. */
@@ -426,6 +457,11 @@ export interface KitLook {
 export interface CornerLamp {
   readonly end?: 'front' | 'rear';
   readonly points: readonly CornerLampPoint[];
+  /**
+   * Ribbed lens (the Mercedes' self-cleaning ribs): this many darker horizontal lines
+   * across it at equal steps, in the lens's own slot, flat (no relief). Absent: a plain lens.
+   */
+  readonly ribs?: number;
 }
 
 export interface CornerLampPoint {
@@ -464,9 +500,10 @@ export interface SpoilerLook {
 
 /**
  * Surface finishes trim is made in: bright metal, black plastic, bare aluminium, rubber,
- * unpainted grey plastic (the 2115's mouldings), or the body's paint.
+ * unpainted grey plastic (the 2115's mouldings), the body's paint, or a darker tone of it
+ * (`tone`: the paint times `KitLook.tone`, the W124's cladding and bumpers).
  */
-export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'grey' | 'paint';
+export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'grey' | 'paint' | 'tone';
 
 /** One end of the car: its bumper and what stands on its face. */
 export interface FaceLook {
@@ -518,9 +555,16 @@ export type BumperLook =
       readonly finish?: Finish;
       /**
        * A moulding band round it instead of the groove: centre height above the ground,
-       * height and finish (the 2115's grey band, in line with its door mouldings).
+       * height and finish (the 2115's grey band, in line with its door mouldings). `edge`: a
+       * bright strip of that finish and `height` along the band's top, following it round
+       * the corners and along `wrapTo` (the W124's chrome line over its black band).
        */
-      readonly moulding?: { readonly y: number; readonly height: number; readonly finish: Finish };
+      readonly moulding?: {
+        readonly y: number;
+        readonly height: number;
+        readonly finish: Finish;
+        readonly edge?: { readonly finish: Finish; readonly height: number };
+      };
       /**
        * Plan radius of its corners where they turn round to the flanks (the 2110's
        * rounded front bumper); absent, 0.09 as on the other cars.

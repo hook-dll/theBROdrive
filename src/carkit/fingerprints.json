@@ -283,5 +283,16 @@
       "under": "305547e859f6fd22",
       "wheel": "a5b66395827bd9ca"
     }
+  },
+  "w124": {
+    "triangles": 13621,
+    "zones": {
+      "bay": "9101a35bcc921cce",
+      "boot": "d02d4cdd665bf1bd",
+      "cabin": "3c28a081e87bbc0a",
+      "exterior": "e1a12f909d8fcb",
+      "under": "498ca327f7624506",
+      "wheel": "d5142b7efc85b878"
+    }
   }
 }

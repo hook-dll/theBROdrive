@@ -144,6 +144,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
+| `mercedes.ts` | The Mercedes-Benz W124 230 E saloon (1989–92 facelift): `BODY_W124` / `LOOK_W124` (platform `classic`, rear drive). Draft, awaiting the owner. |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `refs/<car>.json` | The real car's numbers, machine-readable, each with its source: body positions from the drawing and photos, the dash from interior photos, the drawing's pixel registration for the overlays ([Reference files](#reference-files-refscarjson)). `tools/kit-drawing.ts` holds the built car to them. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
@@ -323,6 +324,7 @@ author.
 | `screenFoot?` | How far ahead of the cowl the windscreen's foot stands on the centre line, fading to nothing at the corners (1 − frac²): a screen curved in plan, more raked in profile; the bonnet ends that far forward (`BodyFrame.bonnetRear`), the scuttle between. The Samaras 0.15, the tens 0.156 (drawings). |
 | `wiperBlade` | Windscreen wiper blade length (parts catalogues: the classics 0.33, the Samaras 0.51, the tens 0.50). The arms, their park and sweep are fitted to the glass (`buildWipers`): the longest arm that parks within 20°, else the one parking lowest within 45° (the tens' screen, curved in plan). |
 | `wiperMount?` | `'top'`: the spindles in the screen frame's header, the arms hanging down and parked to the right along it, sweeping down (the old UAZ-469). Absent: under the screen's foot. |
+| `wipers?` | `1`: a single wiper on the driver's (left) spindle of the pair, fitted to the glass as the pair's are (the W124's monowiper; its lifting sweep is not drawn, so `wiperBlade` is the longest that sweeps 90° upright). Absent: the pair. |
 | `rearBottom`, `rearHeader` | Same for the back light. |
 | `rearKnee?` | `{ s, y }` on the centre line where a hatch's tailgate folds: glass above, painted panel below. Absent: the back light runs straight to its base. |
 | `pillar` | Pillar strip width at the windscreen and back-light edges. |
@@ -408,6 +410,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_ESPERO` | the-blueprints.com dimensioned vector preview `daewoo_espero_1995.jpg` (`daewoo.ts`) | Daewoo Espero |
 | `BODY_ASTRA_F` | the-blueprints.com dimensioned vector preview `2001_opel_astra_f_5-door.jpg` (`opel.ts`) | Opel Astra F |
 | `BODY_VECTRA_A` | the-blueprints.com dimensioned vector preview `1990_opel_vectra_a.jpg` (`opel.ts`) | Opel Vectra A |
+| `BODY_W124` | the-blueprints.com vector preview `w124_tbp_3490.jpg` (side, plan) and raster `w124_tbp_6190.gif` (front, rear) (`mercedes.ts`) | Mercedes-Benz W124 |
 
 ### Look (`KitLook`)
 
@@ -419,14 +422,18 @@ cabin: … }`) share everything not overridden. Current families:
 | `headrests` | Head restraints on the front seats. |
 | `front`, `rear` | `FaceLook`: one end of the car. |
 | `brightwork` | `Finish` of door handles and mirrors. |
+| `mirrorFinish?` | The door mirrors' `Finish` when it differs from the handles' (the W124's body-colour mirrors, chrome handles). Absent: `brightwork`. |
+| `tone?` | The grey (0..1, display terms) the paint is multiplied by on parts in the `'tone'` finish: a darker tone of the car's own colour (the W124's cladding and bumpers, 0.78). Required when anything is in `'tone'` (`finishKitSurfaces` throws otherwise). |
 | `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
 | `mirrorStalk?` | Door mirrors on an upright stalk (the UAZ-469): the head this much higher than on the short arm at the door's top (centre belt + 0.08) and 3.5 cm further back, on a rod 2 cm off the skin from a bracket under the belt at the door's front edge, an arm out and back into the head's ball. Absent: the short arm. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
 | `waist` | `{ y, height, finish, span? }`: a moulding along the flank (from `span[0]` to `span[1]` when given, the Opels' strips arch to arch; else nose to tail), broken at every cabin column's shut line, a raked `foot` line followed at its slant, each piece owned by the panel whose skin it lies on (`BodyFrame.flankOwner`, the same owners `buildShell` cuts) and ending 5 mm short of that panel's seam, and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
+| `cladding?` | `{ top, finish, proud?, span?, edge? }`: side cladding, a band on each flank from the side's bottom row (sill + its bevel) up to `top`, `proud` off the skin (default 8 mm), from `span[0]` to `span[1]` (default nose to tail), broken at the shut lines and cut short of the arches exactly as the waist (`buildFlankStrip`), each piece on its panel. `edge: { finish, height }`: a bright strip on its top, one solid with it (the W124's chrome line, at the bumpers' `moulding.edge` height so the line runs nose to tail). |
 | `mirrorS?` | Centre `s` of the door mirrors' heads when measured: on the black sail at the side glass's front foot, so the driver's lines to both heads cross the side glass (the Espero 1.74, the Vectra 1.60, the Astra 1.53; checked from the in-game cabin view). Absent: 8 cm behind the front door frame's first column. |
 | `repeater` | `{ s0, s1, y0, y1 }`: the amber side repeater on each front wing, or `null`. |
 | `spoiler?` | `SpoilerLook`: a body-colour wing with the high brake lamp, hung on the boot lid (2115) or the tailgate (2112, standing on its glass between the knee and the roof) so it lifts with it (exterior.ts `buildSpoiler`). Fields: `half` (half span), `plate` (end-plate width), `s0`/`s1` (wing leading/trailing edge, car frame like `repeater`), `top0`/`top1` (its top at each), `thickness`, `foot` (`s` where the end plates meet the lid), `pedestal: { half, s0, s1 }` (under the wing's middle), `lamp: { half, y0, y1 }` (the brake lens on the pedestal's back). The lens is a `lamp_brake` mesh, so it lights with every other brake lamp. Given before `rearLean`, which carries it with the tailgate. |
 | `cornerLamps?` | `CornerLamp[]`: a lamp unit lying flush on the body (4 mm off it) from its inner end on an end face round the corner and along the flank (exterior.ts `buildCornerLamps`, laid on the skin as built, body.ts `skinX`). `end`: `'front'` (default) or `'rear'`. `points`: `{ x }` on the face (half width, or `[bottom, top]` for a leaning edge), `{ s }` on the flank (car frame), or neither for the corner itself; `y: [bottom, top]` there; the stretch after a point is a lens in its `role`'s slot. The lens is flat wherever the skin under it is: along the flank it bends only at the tub's columns (`tubColumns`), and across its height only where the crease or belt runs through it (the tens' front indicator); elsewhere each stretch is one flat piece. Stacked lamps (an indicator over a tail lamp) are separate units. Keep a unit below the end station's belt so it stays on the flat face and side (the shoulder above it is the corner's straight cut). The 2115's and 2110's head lamps and indicators (solid amber) and their tail lamps. |
+| `cornerLamps[].ribs?` | A ribbed unit (the Mercedes' tail lamps): that many darker horizontal lines across it at equal steps (each 0.3 of its step, the lens's colour times 0x8c8c8c), flat, in the lens's own slot, so they glow with it. A ribbed unit is built into meshes of its own marked `kitTinted` (materials.ts), the only lenses whose built shade is kept. Absent: a plain lens. |
 | `featureLine?` | `{ points: [s, y][], height }`: a pressed line along each flank, a 5 mm painted ridge through the points, broken at the shut lines and riding on the doors like the waist. The 2110's line under the windows. |
 
 **`FaceLook`** — `{ bumper, items, lid? }`. `items` are drawn in order (later ones stand on
@@ -461,7 +468,10 @@ meshes keep the lamp names, so lamps still work.
 the 2115's front fog lamps are chrome-finish `panel`s that never light. **`Finish`**:
 `chrome`, `black`, `alloy` (bare aluminium), `rubber`, `grey` (unpainted grey plastic: the
 trim slot with a vertex colour, no new material; the 2115's mouldings), `paint` (drawn in
-the paint slot, so it takes the car's colour, dust, scratches and stickers).
+the paint slot, so it takes the car's colour, dust, scratches and stickers), `tone` (the
+`tone` slot: paint share 1, so the car's colour, dust and scratches, times the grey
+`KitLook.tone` in its vertex colour, render/materials.ts `KIT_BODY_COLOR`; no stickers; no
+new material or program: the paint's vertex colour is white, so every other car is as it was).
 
 **`BumperLook`:**
 - `blade`: `finish`, `lift` (centre height over the sill's bevel), `height`, `depth` (reach
@@ -484,7 +494,10 @@ the paint slot, so it takes the car's colour, dust, scratches and stickers).
   (`{ x: [inner, outer], y: [bottom, top], finish }[]`: pieces laid on the bumper's own
   face as it curves round the corners, 6 mm proud with the face cut under them, like the
   band: the Astra F's intake (inner 0 = one piece across) and fog lamps. A flat face item
-  on a curved bumper sinks in at one end and stands out at the other).
+  on a curved bumper sinks in at one end and stands out at the other). `moulding.edge?:
+  { finish, height }`: a bright strip along the band's top, one solid with it, following it
+  round the corners and along `wrapTo` (the W124's chrome line over its black band, at
+  the cladding's `edge` height).
 
 ### Cabin override (`cabinLayout`)
 
@@ -519,7 +532,11 @@ hood over the tachometer, a big speedometer and two small dials, end vents, a ce
 pair with the hazard switch between, the radio over three heater knobs, a four-spoke wheel),
 `CABIN_VECTRA_A` (an angular hood over the tachometer, a big speedometer and two small dials,
 the driver's end vent over a rotary light switch, a centre vent pair with the hazard switch
-between, a three-spoke wheel), `CABIN_2141` (the Samara's dash with the tachometer left, two
+between, a three-spoke wheel), `CABIN_W124` (a square hood over a fuel dial, a big
+speedometer and the clock in one row with the telltales along its foot, a wood band, wide
+end vents, a centre vent pair over a wooden stack with the hazard button, two big heater knobs,
+the radio and the ashtray into a wood tray, a rotary light knob, a four-spoke wheel round a
+big pad), `CABIN_2141` (the Samara's dash with the tachometer left, two
 quarter dials stacked right of the speedometer, a two-spoke wheel, a centre vent pair over the
 heater sliders and a stack, the glovebox high); the Samaras use the `samara` platform's layout
 as is, the 2121 the `niva` platform's.

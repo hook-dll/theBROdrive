@@ -1414,9 +1414,51 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
       cylinders: 4,
     },
   },
+  {
+    // Mercedes-Benz M 102 E 23 (102.982), the W124 230 E's (95.5 x 80.2 mm, 2.298 l, SOHC
+    // eight valves, KE-Jetronic, catalyst, CR 9.0): 97 kW (132 hp) at 5100 and 198 Nm at
+    // 3500 (MB archive, mercedes-benz-publicarchive.com "230 E" 1989-1992). Red line [E]
+    // 5900 (rated + 15 %, as the C20NE's); mass [E] 145: a cast-iron four, 0.3 l bigger
+    // than the C20NE (135).
+    id: 'engine_mercedes_m102_e23',
+    kind: 'engine',
+    label: '2.3 Mercedes-Benz M102 four',
+    mass: 145,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 97,
+      powerPeakRpm: 5100,
+      peakTorqueNm: 198,
+      torquePeakRpm: 3500,
+      redlineRpm: 5900,
+      idleRpm: 850,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 4,
+    },
+  },
 ];
 
 const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // The W124 230 E's optional five-speed manual: 3.91 / 2.17 / 1.37 / 1.00 / 0.81, R 4.27,
+    // on the 3.46 final drive (MB archive "230 E" 1989-1992; the standard four-speed's
+    // 3.27 axle not modelled). Rear drive through a prop shaft and a hypoid axle: the 0.90
+    // band. Mass [E: the Opel boxes' 45].
+    id: 'gearbox_mercedes_5speed_346',
+    kind: 'gearbox',
+    label: 'Mercedes-Benz five-speed (3.46)',
+    mass: 45,
+    fits: ['car'],
+    gearbox: {
+      ratios: [3.91, 2.17, 1.37, 1.0, 0.81],
+      reverse: 4.27,
+      finalDrive: 3.46,
+      shiftTime: 0.36,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
   {
     // The Vectra A 2.0's five-speed, Opel F16 WR (wide ratios): the Nexia box's gears (3.545 /
     // 1.952 / 1.276 / 0.892 / 0.707, R 3.333; cavweb's table via MIG Web prints them rounded,

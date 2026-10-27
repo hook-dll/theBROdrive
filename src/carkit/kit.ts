@@ -123,7 +123,7 @@ export function buildKitCar(id: string): THREE.Group {
     if (x < 0) wheel.rotation.y = Math.PI;
     root.add(wheel);
   }
-  finishKitSurfaces(root);
+  finishKitSurfaces(root, spec.look.tone);
   return root;
 }
 

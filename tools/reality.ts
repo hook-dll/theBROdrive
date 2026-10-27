@@ -565,6 +565,17 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // this bench (Nexia +22 %, Espero +18 %, Astra +10.5 %).
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.16 },
   },
+  kit_w124: {
+    wheelbase: 2.8, track: 1.501, radius: 0.317, top: 200, to100: 11.1,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.6, lat: null, hz: 1.15,
+    brake80: null, grossKg: 1880,
+    source: 'Mercedes-Benz W124 230 E (M 102 E 23, five-speed manual), 1989-1992: MB archive mercedes-benz-publicarchive.com "230 E" (200 km/h, 11.1 s, gross 1880); 11.2 m circle encycarpedia, avtomarket.ru; no braking ceiling found; geometry kit_w124 row',
+    // 97 kW on 1510 kg on the bench, the point-mass run with the Cd·A that fits the 200
+    // km/h: 12.4 s against the catalogue's 11.1, as the Vectra's 85 kW on 1280 kg runs
+    // 12.1 against 10.5 (+15 %). Nothing in the driveline is left to tune: the gears and
+    // axle are the archive's, the 0.90 the rear-drive band.
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.13 },
+  },
 
 
 };
@@ -621,6 +632,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_daewoo_c20le: { power: { kw: 77 }, powerRpm: 5000, torque: { nm: 169 }, torqueRpm: 2800, source: 'Daewoo C20LE; drom.ru catalog/daewoo/espero/70454' },
   engine_opel_c16nz: { power: { kw: 55 }, powerRpm: 5200, torque: { nm: 125 }, torqueRpm: 2800, source: 'Opel C16NZ; auto-data.net Opel Astra F 1.6i (75 Hp), ultimatespecs' },
   engine_opel_c20ne: { power: { kw: 85 }, powerRpm: 5200, torque: { nm: 170 }, torqueRpm: 2600, source: 'Opel C20NE; auto-data.net Opel Vectra A (facelift 1992) 2.0i (115 Hp)' },
+  engine_mercedes_m102_e23: { power: { kw: 97 }, powerRpm: 5100, torque: { nm: 198 }, torqueRpm: 3500, source: 'Mercedes-Benz M 102 E 23; MB archive mercedes-benz-publicarchive.com "230 E" 1989-1992' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

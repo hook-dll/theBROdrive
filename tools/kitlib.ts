@@ -615,7 +615,9 @@ export function trace(s: Soup, grid: RayGrid, w: number, h: number, ray: PixelRa
       const n: V3 = [s.nrm[hit.tri * 3]!, s.nrm[hit.tri * 3 + 1]!, s.nrm[hit.tri * 3 + 2]!];
       const facing = n[0] * r.d[0] + n[1] * r.d[1] + n[2] * r.d[2] > 0 ? -1 : 1;
       const lambert = 0.35 + 0.65 * Math.max(0, facing * (n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]));
-      const base = tint?.(hit.tri) ?? (info.slot === 'paint' ? [0.55, 0.6, 0.68] : [s.rgb[hit.tri * 3]!, s.rgb[hit.tri * 3 + 1]!, s.rgb[hit.tri * 3 + 2]!]);
+      // Paint in a stand-in blue; its tone darker by the tone's grey (the vertex colour).
+      const paint = info.slot === 'paint' || info.slot === 'tone';
+      const base = tint?.(hit.tri) ?? (paint ? [0.55 * s.rgb[hit.tri * 3]!, 0.6 * s.rgb[hit.tri * 3 + 1]!, 0.68 * s.rgb[hit.tri * 3 + 2]!] : [s.rgb[hit.tri * 3]!, s.rgb[hit.tri * 3 + 1]!, s.rgb[hit.tri * 3 + 2]!]);
       colour = [base[0]! * lambert * 255, base[1]! * lambert * 255, base[2]! * lambert * 255];
       break;
     }

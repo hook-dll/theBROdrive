@@ -1,0 +1,58 @@
+{
+  "car": "w124",
+  "measurements": "measurements-w124.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com vector drawing 3490 'Mercedes-Benz E-Class (Model 124) (1992)' watermarked preview, 1280x905 (dimension lines 4755 / 2799 / 1430), side view and plan", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/1990_mercedes-benz_e-class_w124.jpg", "image": "build/carshape/_refs/bp/img/w124_tbp_3490.jpg" },
+    "D2": { "what": "the-blueprints.com raster blueprint 6190 'Mercedes-Benz E-Class W124', 711x347, four views (front and rear about 10.0 mm/px)", "url": "https://www.the-blueprints.com/blueprints-depot/cars/mercedes/mercedes-benz-e-class-w124.gif", "image": "build/carshape/_refs/bp/img/w124_tbp_6190.gif" },
+    "F": { "what": "Mercedes-Benz public archive (marsClassic '230 E', 1989-1992); W124 guide (sites.google.com/view/mercedesbenzw124); auto-data.net 'W124 (facelift 1989) 230 E (132 Hp)' (measurements-w124.md section 2)" },
+    "P": { "what": "Wikimedia Commons '1990-1993 Mercedes-Benz 230 E (W124) sedan 01.jpg' (public domain, OSX): white, front right 3/4 (F34)", "url": "https://commons.wikimedia.org/wiki/File:1990-1993_Mercedes-Benz_230_E_(W124)_sedan_01.jpg", "image": "build/carshape/_refs/photos/w124/front34.jpg" },
+    "P2": { "what": "Wikimedia Commons '1990-1993 Mercedes-Benz 230 E (W124) sedan 03.jpg' (public domain, OSX): white, rear right 3/4 (R34)", "url": "https://commons.wikimedia.org/wiki/File:1990-1993_Mercedes-Benz_230_E_(W124)_sedan_03.jpg", "image": "build/carshape/_refs/photos/w124/rear34.jpg" },
+    "P3": { "what": "Wikimedia Commons '1991 Mercedes-Benz 230E Automatic 2.3 Front.jpg' (CC BY-SA 4.0, Vauxford): red, front left 3/4 (F34r)", "url": "https://commons.wikimedia.org/wiki/File:1991_Mercedes-Benz_230E_Automatic_2.3_Front.jpg", "image": "build/carshape/_refs/photos/w124/front34_red.jpg" },
+    "P4": { "what": "Wikimedia Commons 'Mercedes Benz E 260 (rear).jpg' (CC BY-SA 4.0, Fiver, der Hellseher): near-straight rear (R), a pre-1989 car of the same tail", "url": "https://commons.wikimedia.org/wiki/File:Mercedes_Benz_E_260_(rear).jpg", "image": "build/carshape/_refs/photos/w124/rear.jpg" },
+    "DASH": { "what": "Wikimedia Commons 'Mercedes 200E (W124) cockpit.jpg' (CC BY-SA 3.0, Christian 'VisualBeo' Horvat), from behind the driver's seat, a manual car, 1800x1200", "url": "https://commons.wikimedia.org/wiki/File:Mercedes_200E_(W124)_cockpit.jpg", "image": "build/carshape/_refs/photos/w124/dash.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.74, "src": "F MB archive 4740; D dimension line 4755" },
+    "width": { "v": 1.74, "src": "F MB archive 1740" },
+    "height": { "v": 1.428, "src": "F MB archive 1428; D 1430" },
+    "wheelbase": { "v": 2.8, "src": "F MB archive 2800; D 2799" },
+    "overhangFront": { "v": 0.81, "src": "D side: front tip x 24 to the drawn front hub x 163.5 (5.806 mm/px)" },
+    "overhangRear": { "v": 1.125, "src": "D side: the drawn rear hub x 649 to the rear tip x 843" },
+    "screenFoot": { "v": [1.341, 0.986], "src": "D side: the cowl, where the screen's side meets the bonnet (255, 161)" },
+    "screenTop": { "v": [1.893, 1.37], "src": "D side: the screen's side meets the roof (350, 95)" },
+    "backLightTop": { "v": [3.56, 1.354], "src": "D side: the roof's rear end over the back light (635, 98); the glass's top under its lip at (640, 115)" },
+    "backLightFoot": { "v": [3.96, 1.015], "src": "D side: the back light's foot on the deck (706, 156)" },
+    "beltY": { "v": 0.922, "src": "D side: the side glass's foot y 172 along the front door" },
+    "railY": { "v": 1.343, "src": "D side: the front door glass's top y 100" },
+    "sideGlassBelt": { "v": [[1.533, 2.44], [2.616, 3.11], [3.15, 3.527]], "src": "D side at the belt: the front glass's frame line (288, 172) to the dark rear channel x 440-450; the rear drop glass x 474 to the bar x 560; the quarter glass x 566 to its slanted rear edge x 631", "accepted": { "v": [[1.448, 2.46], [2.616, 3.108], [3.152, 3.508]], "why": "the front glass starts right behind the thin A pillar (README working rules, the owner's: no sail or thick pillar whatever a drawing's line suggests); the drawing's frame line along the pillar is 9 cm behind it at the belt" } },
+    "doorFront": { "v": [1.43, 2.53], "src": "D side, 10 cm under the belt (y 189): the front door's front edge x 270, the shut line between the doors x 457-462" },
+    "doorRear": { "v": [2.53, 3.555], "src": "D side, 10 cm under the belt: the shut line between the doors, the rear door's rear edge x 636" },
+    "doorBottomY": { "v": 0.21, "src": "D side: the doors' bottom line y 292-295 (0.204-0.222)", "accepted": { "v": 0.291, "why": "the sill and the doors' bottom raised 6.5 cm over the drawn line: the shell's floor is the sill and the classic platform's exhaust under it (resonator top 0.245, pipe top 0.227) stood through a floor at 0.19 (kit-zfight); the Vectra's precedent (owner, 2026-10-19). Draft, awaiting the owner's word" } },
+    "mirror": { "v": [1.66, 0.98], "src": "D side: the head x 300-320 (s 1.60-1.72), y 172-188 (0.93-1.03)" },
+    "roofHalfWidth": { "v": 0.61, "src": "D2 front: the outline x 546-668 at the rail's height (1.33-1.37) about the centre x 607" },
+    "beltHalfWidth": { "v": 0.835, "src": "D2 front: the body's outline x 523 / 691 at 0.85-0.87 about the centre x 607" },
+    "bonnet": { "v": [0.093, 1.341], "src": "D side: the bonnet's lip over the grille (40, 196) to the cowl (255, 161)" },
+    "bootLid": { "v": [3.96, 4.68], "src": "D side: the back light's foot x 706 to the tail face x 830" }
+  },
+  "dash": {
+    "photo": { "src": "DASH", "view": "driver" },
+    "gauges": { "v": 2, "src": "DASH three round dials under the hood: the combination dial (drawn as one fuel gauge, owner) and the speedometer to 240; the third is the clock (§6)" },
+    "dialRows": { "v": [2], "src": "DASH the dials' centres at one height, y 329-344 (§6)" },
+    "clusterAt": { "v": "wheel", "src": "DASH the hood behind the wheel (§6)" },
+    "clock": { "v": true, "src": "DASH right dial x 762: numerals 1, 2, 3 with minute marks (§6)" },
+    "wheelSpokes": { "v": 4, "src": "DASH four spokes round a big pad (§6)" },
+    "glovebox": { "v": "passenger", "src": "DASH the lid's seam x 1366 under the wood band (§6)" },
+    "stack": { "v": true, "src": "DASH wood stack x 1010-1349: hazard, heater knobs, radio, ashtray (§6)" },
+    "console": { "v": true, "src": "DASH a wood tray from the stack to the gear lever (§6)" },
+    "vents": { "v": 4, "src": "DASH the driver's end vent and the centre pair; the passenger's end vent out of frame, by symmetry [E] (§6)" }
+  },
+  "gaps": [
+    "sideGlassRail: the panes' ends at the rail not read separately (the rear door's quarter rises to a point at the rail)",
+    "moulding: the W124 has no waist strip; its line is the cladding's chrome edge (0.47-0.48 from the photos, measurements-w124.md section 7), not measured by kit-drawing",
+    "dash wheelDiameter, the passenger's end vent and the glovebox's far end: estimated, out of the photo (§6)"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/w124_tbp_3490.jpg", "crop": [15, 75, 855, 335], "s": [24, 0.005806], "y": [330, 0.005837] },
+    "front": { "src": "D2", "image": "build/carshape/_refs/bp/img/w124_tbp_6190.gif", "crop": [505, 0, 711, 160], "x": [607, 0.01], "y": [149, 0.0101] }
+  }
+}

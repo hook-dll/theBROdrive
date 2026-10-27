@@ -748,11 +748,12 @@ float carPaintShare = vKitSurface.x;
 #include <map_fragment>`;
 
 /**
- * Paint takes the material's colour (the car's, `setCarBodyPaintColor`); every other part
- * its vertex colour, which is its slot's colour (carkit/materials.ts). A switched lens
+ * Paint takes the material's colour (the car's, `setCarBodyPaintColor`) times its vertex
+ * colour: white on the paint, a grey on its tone (carkit/materials.ts, `KitLook.tone`);
+ * every other part its vertex colour, which is its slot's colour. A switched lens
  * takes the lens film (materials.ts GRIME_COLOR) from the car's lens dust.
  */
-const KIT_BODY_COLOR = `diffuseColor.rgb = mix( vColor.rgb, diffuseColor.rgb, carPaintShare );
+const KIT_BODY_COLOR = `diffuseColor.rgb = mix( vColor.rgb, diffuseColor.rgb * vColor.rgb, carPaintShare );
 float kitLensFilm = saturate( 1.1 * uKitLensGrime ) * vKitRole.x;
 diffuseColor.rgb = mix( diffuseColor.rgb, mix( uDustLight, uDustCrust, 0.15 ), kitLensFilm * 0.85 );`;
 

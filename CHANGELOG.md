@@ -4,6 +4,28 @@
 
 ### Added
 
+- THE ENGINE IS STARTED AND STOPPED (owner, 2026-10-27: no key item, but every car can
+  be started and stopped). E (`engine`, bindable) from the driver's seat: stop drops the
+  engine into its stall and run-down; start turns the starter for 0.55-0.9 s, and the
+  engine catches at its end if it can run (fuel, engine and filter fitted, not
+  overheated), else the starter turns and nothing catches. A stall (fuel out, overheat)
+  leaves the engine stopped until it is started again. `CarState.engineStopped` is
+  saved; a car nobody switches off runs as before (traffic, race cars, the start car).
+  The starter is its own audio event (`vehicleaudio.ts`, `engine-worklet.ts` `catches`);
+  a stopped engine burns no fuel, its dash goes dark (`kitIgnition`), its tachometer
+  reads 0, and in gear it holds the car by its drag (`drivetrain.ts`: 0.12 m/s on a 6 %
+  slope in first, from 2.03). The autopilot starts a stopped engine; E stopping it turns
+  the autopilot off. HUD: `ENGINE OFF - E START`. CONTROLS.md "The engine".
+- MERCEDES-BENZ W124 kit car (230 E saloon, 1989-92 facelift; `src/carkit/mercedes.ts`,
+  `refs/w124.json`, `measurements-w124.md`; M102 and its five-speed in the registry; the
+  8-hole alloy and covers). The first car built after a feature inventory the owner
+  reviewed, with the fields it named: a chrome strip on the bumpers' band (`moulding.edge`)
+  and on the side cladding (`KitLook.cladding`), the cladding and bumper tops in a darker
+  tone of the body colour (`Finish 'tone'`, `KitLook.tone` 0.78 [E]; the kit shader
+  multiplies the paint by the vertex colour, white on every other car), ribbed tail
+  lenses (`CornerLamp.ribs`), one wiper (`CabinSpec.wipers`), mirrors in their own finish
+  (`KitLook.mirrorFinish`). Every other car identical (`kit-fingerprint`). Draft, awaiting
+  the owner: the sill 6.5 cm over the drawing for the classic exhaust (the Vectra's way).
 - KIT PIPELINE (owner, 2026-10-27: bodies take too long, and a change to one car must
   never move another). `tools/kit-fingerprint.ts` and `src/carkit/fingerprints.json`:
   every kit car's geometry and colours hashed per zone, recorded as the owner last saw

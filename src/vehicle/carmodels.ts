@@ -943,6 +943,13 @@ const AERO_OPEL_ASTRA_F: AeroSpec = { frontalArea: 1.98, liftFront: 0.08, liftRe
  * area, 1.706 m × (1.40 − 0.15) m × 0.92.
  */
 const AERO_OPEL_VECTRA_A: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/**
+ * Mercedes-Benz W124 saloon: Cd 0.29 [E for the 230 E: en.wikipedia gives 0.28 for the
+ * 200 / 200 D on 185/65 R15, the 230 E's wider 195/65 a little more]. The Nexia's lift and
+ * crosswind figures (a nose over a notched boot) on its own frontal area, 1.74 m × 1.428 m
+ * × 0.82 (the Vectra's fill factor).
+ */
+const AERO_MERCEDES_W124: AeroSpec = { frontalArea: 2.04, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
 
 
 
@@ -1264,6 +1271,9 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // (115 Hp)"; the-blueprints.com drawing's 4430 / 2600 / 1700 / 1400).
   // src/carkit/measurements-vectra.md.
   kit_vectraa:    { length: 4.432, width: 1.706, height: 1.4, clearance: 0.15, wheelbase: 2.6, frontTrack: 1.437, rearTrack: 1.432, wheelRadius: 0.295, tyreWidth: 0.195 },
+  // MB archive "230 E" 1989-1992 (L × W × H, wheelbase, tracks), drom.ru (clearance), 195/65
+  // R15 (free radius 190.5 + 126.75 mm): src/carkit/measurements-w124.md §2.
+  kit_w124:       { length: 4.74, width: 1.74, height: 1.428, clearance: 0.15, wheelbase: 2.8, frontTrack: 1.501, rearTrack: 1.491, wheelRadius: 0.317, tyreWidth: 0.195 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1955,6 +1965,11 @@ const KIT_SOVIET_WHEEL_SETS = [...DISTINCT_SOVIET_WHEEL_SETS, 'gw_vaz_steel16', 
 const KIT_OKA_WHEEL_SETS = ['gw_oka', 'gw_oka', 'gw_cover_vents', 'gw_cover_turbine'] as const;
 /** The foreign cars: plain steel, the covers and the period's alloys. */
 const KIT_FOREIGN_WHEEL_SETS = ['gw_vaz_steel16', 'gw_cover_vents', 'gw_cover_turbine', 'gw_alloy_8hole', 'gw_alloy_cross'] as const;
+/**
+ * The W124's own (carkit/STATUS.md "Wheels"): the 8-hole alloy, or its 15" steel under a
+ * full plastic cover (measurements-w124.md #38), the covers drawn.
+ */
+const KIT_W124_WHEEL_SETS = ['gw_alloy_8hole', 'gw_cover_vents', 'gw_cover_turbine'] as const;
 /** The Niva family: the Niva's own wheel, or an off-roader's alloy. */
 const KIT_OFFROAD_WHEEL_SETS = [...OFFROAD_WHEEL_SET_POOL, 'gw_alloy_fan'] as const;
 
@@ -2638,7 +2653,7 @@ const GEAR_UAZ_2206: KitRunningGear = {
  */
 type KitOwnGear = KitRunningGear &
   Required<Pick<Entry, 'bodyClass' | 'rearDriveBias' | 'suspension' | 'handlingProfile'>> &
-  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff'>;
+  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff' | 'wheelSetPool'>;
 
 /**
  * Daewoo Nexia 1.5 GL (G15MF, five-speed), per its repair manual's table (3ruk.ru/vehicles/
@@ -2748,6 +2763,41 @@ const GEAR_OPEL_VECTRA_A: KitOwnGear = {
   aero: AERO_OPEL_VECTRA_A,
 };
 
+/**
+ * Mercedes-Benz W124 230 E saloon, 1989-92 (M 102 E 23, the optional five-speed on 3.46),
+ * per the MB archive (mercedes-benz-publicarchive.com "230 E" 1989-1992): kerb 1360 kg,
+ * gross 1880, 200 km/h, 0-100 in 11.1 s, a 70 l tank, 195/65 R15, discs all round (front
+ * ventilated) with ABS, recirculating-ball power steering, rear drive through a divided
+ * prop shaft; an 11.2 m turning circle (encycarpedia, avtomarket.ru). Brakes the servo
+ * figure: ABS keeps the wheels turning, it does not raise the tyres' peak, and no
+ * regulator valve is modelled (ABS proportions the rear). Suspension `SUSP_CAR` [E]: the
+ * everyday saloon's rates for a big comfortable saloon; its rear beam stands in for the
+ * multilink (no independent-rear preset but the vans' `SUSP_SOFT`). No axle split is
+ * printed: 0.52 [E], a front-engine rear-drive saloon with the tank over the rear axle,
+ * the classics' 0.51 with a heavier iron four ahead. Lock set on the bench to the 11.2 m
+ * circle (4.11 against 4.10); Cd·A set on the bench to the 200 km/h: 0.66 runs 204 in
+ * fifth (Cd 0.29 [E] × 2.04 m² = 0.59 ran 212); from 0.67 the overdrive fifth no longer
+ * pulls past fourth and the top falls to 194. Shod from its own pool (`KIT_W124_WHEEL_SETS`).
+ */
+const GEAR_MERCEDES_W124: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1360,
+  tyre: ROAD_TYRE,
+  engineId: 'engine_mercedes_m102_e23',
+  gearboxId: 'gearbox_mercedes_5speed_346',
+  tankLitres: 70,
+  wheelGrip: ROAD_TYRE_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_CAR,
+  steerLock: 0.615,
+  rearDriveBias: 1,
+  handlingProfile: 'road',
+  frontWeightShare: 0.52,
+  dragArea: 0.66,
+  aero: AERO_MERCEDES_W124,
+  wheelSetPool: KIT_W124_WHEEL_SETS,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2801,6 +2851,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_espero', GEAR_DAEWOO_ESPERO, 'espero', 'Daewoo Espero'],
     ['kit_astraf', GEAR_OPEL_ASTRA_F, 'astraf', 'Opel Astra F'],
     ['kit_vectraa', GEAR_OPEL_VECTRA_A, 'vectraa', 'Opel Vectra A'],
+    ['kit_w124', GEAR_MERCEDES_W124, 'w124', 'Mercedes-Benz W124'],
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
@@ -2838,7 +2889,7 @@ function kitEntry([id, source, kit, label, gear]: KitCarRow): Entry {
       : id === 'kit_vaz1111'
         ? KIT_OKA_WHEEL_SETS
         : typeof source !== 'string'
-          ? KIT_FOREIGN_WHEEL_SETS
+          ? (source.wheelSetPool ?? KIT_FOREIGN_WHEEL_SETS)
           : KIT_SOVIET_WHEEL_SETS,
     lights: KIT_LIGHTS,
     scale: 1,
@@ -2897,6 +2948,7 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_gaz31029: { trunkGrid: G4x2, comfort: 4 },
   kit_astraf: { trunkGrid: G3x2, comfort: 4 },
   kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
+  kit_w124: { trunkGrid: G4x2, comfort: 5 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };

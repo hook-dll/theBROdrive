@@ -20,7 +20,7 @@ import { PartBuilder, clipPolygon, cutUnder, lerp, lerp3, newell, polygonArea, t
 import type { CabinColumn, CabinOwner, CabinSpec, KitCarSpec, TubStation } from './spec';
 
 /** Bevel under the sill: how far the side's bottom edge turns under. */
-const SILL_BEVEL = 0.035;
+export const SILL_BEVEL = 0.035;
 /** Painted lip of wing between a wheel arch and a panel cut above it. */
 const ARCH_LIP = 0.045;
 /** Shut gap between a moving panel and the body. */

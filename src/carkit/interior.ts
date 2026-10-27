@@ -1147,6 +1147,91 @@ export const CABIN_VECTRA_A: CabinLayoutOverride = {
   visor: { half: 0.16, depth: 0.092 },
 };
 
+// The Mercedes-Benz W124 (1989-92) on the classic's furniture, read off Wikimedia Commons
+// "Mercedes 200E (W124) cockpit.jpg" (CC BY-SA 3.0, Christian "VisualBeo" Horvat; 1800 x
+// 1200, from behind the driver's seat, a manual car; refs/w124.json DASH) and, for the
+// layout from the side, "Mercedes-benz-230E-Interieur.JPG" (CC BY-SA 4.0, VonNortheim).
+// Pixels below are on the cockpit photo's 1800 px. Scale: the column (hub x 712) to the
+// stack's centre line (between the heater knobs, x 1196), 484 px, is the classic's 0.37
+// seat line [E], so 0.76 mm/px at the stack; heights hang from the fascia's top (the
+// centre vents' top, y 327) at the classic's 0.008 [E]. The cluster stands nearer the
+// camera: its dials keep the speedometer's radius to the classic's face and their
+// spacings are ratios to it [P ratios, E absolutes]. measurements-w124.md §6.
+
+/**
+ * Mercedes-Benz W124: a broad padded top over a tall fascia with a wood band across it;
+ * a rectangular hood over three round dials in one row (a combination dial drawn as one
+ * fuel gauge, the big speedometer to 240, the clock) with the telltales along its foot;
+ * a wide vent at the driver's end, two side by side at the top of a wooden stack (the red
+ * hazard button, two big heater knobs, the radio, the ashtray) running into a wooden tray
+ * to a short lever; a rotary light knob left of the column; the glovebox under the band
+ * before the passenger; a four-spoke wheel round a big pad.
+ */
+export const CABIN_W124: CabinLayoutOverride = {
+  // The fascia runs on down to the glovebox lid's foot (y 608: -0.215) [P], under the
+  // classic's top.
+  dash: [
+    [0.16, 0.045], [0.29, 0.055], [0.325, 0.04], [0.338, 0.008], [0.338, -0.215],
+    [0.32, -0.245], [0.12, -0.255], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.338, 0.008], [0.338, -0.215]],
+  // The wood band under the vents, y 419-460 at the stack [P].
+  wood: [-0.095, -0.062],
+  // A square hood (x 270-918 over the dials) [P], its face carried down past the dials to
+  // the telltale strip (y 430) [P], 1.4 cm proud of the fascia as the classic's.
+  binnacle: [[0.235, 0.05], [0.26, 0.135], [0.4, 0.148], [0.44, 0.136], [0.44, 0.12], [0.352, 0.11], [0.352, -0.012], [0.3, -0.012]],
+  binnacleHalf: 0.2,
+  clusterFace: { right: 0, up: 0.049, half: [0.185, 0.057], colour: COLOURS.cluster, frame: 'black' },
+  // Speedometer pivot x 594, y 329, its scale 98 px in radius; the left dial x 425 and the
+  // right x 762 (its numerals 1, 2, 3 with minute marks: the clock), both about 63 px in
+  // radius, all at one height [P]. The speedometer at the face's 0.046 [E]; the others
+  // 0.64 of it and 1.72 of it to either side (0.079), opened to 0.088 so the bezels clear [E].
+  // The left one is a combination dial (fuel, oil pressure, coolant): drawn as the fuel
+  // gauge alone (owner: no three-needle dial).
+  gauges: [
+    { channel: 'fuel', right: -0.088, up: 0.062, radius: 0.03, ...SMALL },
+    { channel: 'speed', right: 0, up: 0.062, radius: 0.046, full: 240, ...BIG },
+  ],
+  clock: { right: 0.088, up: 0.062, radius: 0.03 },
+  // The telltale strip under the left dial and the speedometer (x 327-534, y 430) [P];
+  // which lamps are not legible [E].
+  lamps: { right: -0.045, up: 0.003, cols: 7, pitch: 0.018, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // The centre pair x 1050-1333 at the stack's top, y 333-408, split at x 1150 [P]; the
+  // driver's end vent outboard of the hood (x 17-230), the passenger's its mirror [E].
+  vents: [
+    { x: 0.055, dy: -0.024, half: [0.05, 0.028] },
+    { x: -0.055, dy: -0.024, half: [0.05, 0.028] },
+    { x: 0.63, dy: -0.024, half: [0.055, 0.028] },
+    { x: -0.63, dy: -0.024, half: [0.055, 0.028] },
+  ],
+  // The wood stack x 1010-1349 under the vents [P], into a wood tray to the lever [P].
+  stack: { half: 0.125 },
+  console: { ds0: 0.34, ds1: 0.72, height: 0.2 },
+  // The red hazard button (x 1180, y 530) at the stack's top [P].
+  hazard: [0.012, -0.147],
+  // Two big rotary knobs (x 1137, 1263; y 626), about 0.05 across [P]; the blower wheel
+  // between them not drawn.
+  heater: { dy: -0.22, half: [0.1, 0.04], knobs: [0.048, -0.048], radius: 0.025 },
+  // The radio (y 770) and the ashtray's wood lid (y 872) [P], set higher than the photo's
+  // 0.76 mm/px gives (-0.33, -0.41) so both stay above the tray [E].
+  radio: [0, -0.29],
+  ashtray: [0, -0.355],
+  // The lid's seam at x 1366, under the band to y 608 [P]; its far end is out of frame [E].
+  glovebox: { x: -0.38, dy: -0.152, half: [0.23, 0.055] },
+  // A rotary light knob under the end vent (x 109, y 591), left of the column [P]; the
+  // photo's foot brake release under it not modelled (owner: keep the lever).
+  lights: { right: -0.24, dy: -0.13, kind: 'knob' },
+  // A short lever in a gaiter on the tray [P], its height [E].
+  gear: { ds: 0.62, height: 0.22, lean: 0.04 },
+  // Four spokes in two pairs about 60 degrees apart (the wheel stands turned; gaps of 59,
+  // 154, 61 and 86 degrees seen in perspective) round a big square pad [P]: laid square
+  // to the column, 30 degrees either side of the level [E]. Size the classic's [E].
+  wheel: { ...LAYOUTS.classic.wheel, spokes: [30, 150, 210, 330], hub: 'pad' },
+  // The classic's bench place; it stands between the rear wheel-house covers, its base 4 cm
+  // off them (at the default 2.2 cm it fought them at a distance, kit-zfight).
+  bench: { from: 'rearBase', offset: -0.45, clear: 0.04 },
+};
+
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
 //  - Wikimedia Commons "Oka-Innenraum.jpg" (CC BY 4.0; an early car, 4288 x 2848): the
 //    dash from the driver's door, cluster, switches, heater sliders, wheel, lever.

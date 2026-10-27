@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { PartBuilder, clipPolygon, lerp, table, type Caps, type KitSlot, type Outline, type Vec3 } from './builder';
 import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
-import { skinX, tubColumns, type BodyFrame, type KitHole } from './body';
+import { SILL_BEVEL, skinX, tubColumns, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 import type { KitControl } from './rig';
@@ -237,6 +237,9 @@ function finishSlot(finish: Finish | 'dark'): { slot: KitSlot; color: number } {
     case 'paint':
       // Body colour: drawn in the paint slot, so it takes the car's colour, dust and scratches.
       return { slot: 'paint', color: 0xffffff };
+    case 'tone':
+      // A darker tone of the body colour (`KitLook.tone`), dust and scratches as the paint's.
+      return { slot: 'tone', color: 0xffffff };
     case 'dark':
       return { slot: 'trim', color: GRILLE_DARK };
   }
@@ -832,9 +835,19 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
         : { ...(bumper.finish ? shell : { slot: 'trim' as const, color: 0x34363a }), y: y0 + 0.11, h: 0.012 };
       const along = shortened(path, 0.01);
       const ridge = new PartBuilder().color(band.color);
-      sweep(ridge, band.slot, along, [[1, band.y - band.h, -0.007], [1, band.y - band.h, 0.006], [1, band.y + band.h, 0.006], [1, band.y + band.h, -0.007]], [3]);
+      // A bright edge along the band's top (`moulding.edge`): one solid with the band, so
+      // neither has a face where they meet.
+      const edge = bumper.moulding?.edge;
+      const bandY1 = band.y + band.h;
+      const edgeTop = bandY1 + (edge?.height ?? 0);
+      sweep(ridge, band.slot, along, [[1, band.y - band.h, -0.007], [1, band.y - band.h, 0.006], [1, bandY1, 0.006], [1, bandY1, -0.007]], edge ? [2, 3] : [3]);
+      if (edge) {
+        const bright = finishSlot(edge.finish);
+        ridge.color(bright.color);
+        sweep(ridge, bright.slot, along, [[1, bandY1, -0.007], [1, bandY1, 0.006], [1, edgeTop, 0.006], [1, edgeTop, -0.007]], [0, 3]);
+      }
       b.append(moulded);
-      const volume: Outline[] = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, band.y + band.h, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
+      const volume: Outline[] = sweptOutlines(along, [1, band.y - band.h, -0.0005], [1, edgeTop, -0.0005], 0.0065).map((o) => ({ ...o, solid: true }));
       // Inlays (`inlays`): fog lamps, an intake band, laid on the face itself as it curves
       // back to the corners, 6 mm proud and rooted 7 mm in it like the band.
       for (const inlay of bumper.inlays ?? []) {
@@ -849,7 +862,7 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
           volume.push(...sweptOutlines(run, [0, ya, -0.0005], [0, yb, -0.0005], 0.0065).map((o) => ({ ...o, solid: true })));
         }
       }
-      ridges.set(end, { part: ridge, volume, y0: band.y - band.h, y1: band.y + band.h, front: reach + 0.006 });
+      ridges.set(end, { part: ridge, volume, y0: band.y - band.h, y1: edgeTop, front: reach + 0.006 });
       bumperHoles(ctx, path, section, end, wrapTo === undefined ? 0 : flankPoints(path) - 1);
     }
   }
@@ -879,11 +892,16 @@ const MOULDING_RUN = 0.3;
 /** How far short of a wheel arch's edge a moulding low enough to meet it stops. */
 const MOULDING_ARCH_GAP = 0.03;
 
-/** A strip along each flank: the waist moulding, or a pressed feature line. */
+/** A strip along each flank: the waist moulding, a pressed feature line, or the cladding. */
 interface FlankStrip {
   /** Centre height at s. */
   readonly yAt: (s: number) => number;
   readonly height: number;
+  /**
+   * Its bottom (`e` −1), centre (0) and top (1) at s, when they are not `yAt` ∓ half the
+   * height (the cladding, from the sill up).
+   */
+  readonly yEdge?: (s: number, e: -1 | 0 | 1) => number;
   readonly slot: KitSlot;
   readonly color: number;
   /** How far it stands off the side. */
@@ -892,6 +910,8 @@ interface FlankStrip {
   readonly last: number;
   /** Node name suffix for the pieces riding on doors. */
   readonly name: string;
+  /** A strip of this height and finish on its top, ending with each piece (the cladding's bright line). */
+  readonly edge?: { readonly height: number; readonly slot: KitSlot; readonly color: number };
 }
 
 /**
@@ -904,12 +924,14 @@ interface FlankStrip {
 function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip): void {
   const { frame, nodes } = ctx;
   const spec = frame.spec;
-  const { slot, color, first, last, out } = strip;
+  const { slot, color, first, last, out, edge } = strip;
+  const h = strip.height / 2;
+  const yEdge = strip.yEdge ?? ((s: number, e: -1 | 0 | 1): number => strip.yAt(s) + e * h);
   const doors = [...nodes].filter(([owner]) => owner.startsWith('door_'));
   // The s ranges where an arch, grown by the gap, reaches up to the strip's bottom edge.
   const w = spec.wheels;
   const arches = [w.front, w.rear].flatMap((axle) => {
-    const lift = strip.yAt(axle) - strip.height / 2 - w.radius;
+    const lift = yEdge(axle, -1) - w.radius;
     const reach = w.radius * frame.archFactor(axle) + MOULDING_ARCH_GAP;
     if (lift >= reach) return [];
     const d = lift > 0 ? Math.sqrt(reach * reach - lift * lift) : reach;
@@ -921,9 +943,8 @@ function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip):
   const columns = spec.cabin.columns;
   const seams: Cut[] = columns.map((c) => (c.foot ? (y: number) => frame.shutS(c, y) : fixed(c.s)));
   const builders = new Map<string, PartBuilder>();
-  const h = strip.height / 2;
   for (const side of [1, -1]) {
-    const at = (cut: Cut, s: number): number => cut(strip.yAt(s));
+    const at = (cut: Cut, s: number): number => cut(yEdge(s, 0));
     const cuts = [fixed(first), fixed(last), ...seams, ...arches.flat().map(fixed)]
       .filter((cut) => {
         const s = at(cut, (first + last) / 2);
@@ -937,37 +958,48 @@ function buildFlankStrip(ctx: KitContext, body: PartBuilder, strip: FlankStrip):
       const s1 = at(cuts[i + 1]!, first);
       if (s1 - s0 < 1e-6) continue;
       const mid = (s0 + s1) / 2;
-      const key = arches.some(([a0, a1]) => mid > a0 && mid < a1) ? 'arch' : frame.flankOwner(mid, strip.yAt(mid), side);
+      const key = arches.some(([a0, a1]) => mid > a0 && mid < a1) ? 'arch' : frame.flankOwner(mid, yEdge(mid, 0), side);
       const prev = runs[runs.length - 1];
       if (prev && prev.key === key && key !== 'arch') prev.c = cuts[i + 1]!;
       else runs.push({ a: cuts[i]!, c: cuts[i + 1]!, key });
     }
     for (const { a: cutA, c: cutC, key } of runs) {
       if (key === 'arch') continue;
-      const yOf = (s: number, dy: number): number => strip.yAt(s) + dy;
-      const sA = (dy: number): number => cutA(yOf(at(cutA, first), dy)) + MOULDING_GAP;
-      const sC = (dy: number): number => cutC(yOf(at(cutC, first), dy)) - MOULDING_GAP;
-      if (Math.min(sC(-h), sC(h)) - Math.max(sA(-h), sA(h)) < 0.02) continue;
+      /** Height at s of the bottom (−1), centre (0), top (1) or, 2, the edge's top. */
+      type Row = -1 | 0 | 1 | 2;
+      const yOf = (s: number, e: Row): number => (e === 2 ? yEdge(s, 1) + edge!.height : yEdge(s, e));
+      const sA = (e: Row): number => cutA(yOf(at(cutA, first), e)) + MOULDING_GAP;
+      const sC = (e: Row): number => cutC(yOf(at(cutC, first), e)) - MOULDING_GAP;
+      if (Math.min(sC(-1), sC(1)) - Math.max(sA(-1), sA(1)) < 0.02) continue;
       let b = builders.get(key);
       if (!b) builders.set(key, (b = key === 'body' ? body : new PartBuilder()));
-      b.color(color);
-      const point = (s: number, dy: number, o: number): Vec3 => [side * (frame.sideX(s, yOf(s, dy)) + o), yOf(s, dy), frame.z(s)];
+      const point = (s: number, e: Row, o: number): Vec3 => [side * (frame.sideX(s, yOf(s, e)) + o), yOf(s, e), frame.z(s)];
       // Each edge runs from its own end to end (the ends slant with a raked seam).
-      const along = (dy: number, t: number): number => sA(dy) + (sC(dy) - sA(dy)) * t;
+      const along = (e: Row, t: number): number => sA(e) + (sC(e) - sA(e)) * t;
       const pieces = Math.max(1, Math.ceil((sC(0) - sA(0)) / MOULDING_RUN));
-      for (let k = 0; k < pieces; k++) {
-        const t0 = k / pieces;
-        const t1 = (k + 1) / pieces;
-        const lo0 = along(-h, t0);
-        const lo1 = along(-h, t1);
-        const hi0 = along(h, t0);
-        const hi1 = along(h, t1);
-        b.quad(slot, point(lo0, -h, out), point(lo1, -h, out), point(hi1, h, out), point(hi0, h, out));
-        b.quad(slot, point(hi0, h, out), point(hi1, h, out), point(hi1, h, 0), point(hi0, h, 0));
-        b.quad(slot, point(lo0, -h, 0), point(lo1, -h, 0), point(lo1, -h, out), point(lo0, -h, out));
+      /** One band between two rows: its face, its top unless `shut`, its bottom unless `open`, its ends. */
+      const band = (lo: Row, hi: Row, bandSlot: KitSlot, open: boolean, shut: boolean): void => {
+        for (let k = 0; k < pieces; k++) {
+          const t0 = k / pieces;
+          const t1 = (k + 1) / pieces;
+          const lo0 = along(lo, t0);
+          const lo1 = along(lo, t1);
+          const hi0 = along(hi, t0);
+          const hi1 = along(hi, t1);
+          b.quad(bandSlot, point(lo0, lo, out), point(lo1, lo, out), point(hi1, hi, out), point(hi0, hi, out));
+          if (!shut) b.quad(bandSlot, point(hi0, hi, out), point(hi1, hi, out), point(hi1, hi, 0), point(hi0, hi, 0));
+          if (!open) b.quad(bandSlot, point(lo0, lo, 0), point(lo1, lo, 0), point(lo1, lo, out), point(lo0, lo, out));
+        }
+        b.quad(bandSlot, point(sA(lo), lo, 0), point(sA(lo), lo, out), point(sA(hi), hi, out), point(sA(hi), hi, 0));
+        b.quad(bandSlot, point(sC(lo), lo, out), point(sC(lo), lo, 0), point(sC(hi), hi, 0), point(sC(hi), hi, out));
+      };
+      b.color(color);
+      band(-1, 1, slot, false, !!edge);
+      // The edge on its top: one solid with it, so no faces where they meet.
+      if (edge) {
+        b.color(edge.color);
+        band(1, 2, edge.slot, true, false);
       }
-      b.quad(slot, point(sA(-h), -h, 0), point(sA(-h), -h, out), point(sA(h), h, out), point(sA(h), h, 0));
-      b.quad(slot, point(sC(-h), -h, out), point(sC(-h), -h, 0), point(sC(h), h, 0), point(sC(h), h, out));
     }
   }
   for (const [owner, door] of doors) {
@@ -984,6 +1016,32 @@ function buildWaist(ctx: KitContext, body: PartBuilder): void {
   const st = spec.stations;
   const [first, last] = waist.span ?? [st[0]!.s + 0.02, st[st.length - 1]!.s - 0.02];
   buildFlankStrip(ctx, body, { yAt: () => waist.y, height: waist.height, ...finishSlot(waist.finish), out: 0.008, first, last, name: 'waist' });
+}
+
+/**
+ * The side cladding (`KitLook.cladding`): a band on each flank from the sill up to its top,
+ * broken and cut short of the arches as the waist is, its bright edge on top.
+ */
+function buildCladding(ctx: KitContext, body: PartBuilder): void {
+  const { frame } = ctx;
+  const spec = frame.spec;
+  const c = spec.look.cladding;
+  if (!c) return;
+  const st = spec.stations;
+  const [first, last] = c.span ?? [st[0]!.s + 0.02, st[st.length - 1]!.s - 0.02];
+  // From the side's bottom row, over the sill's bevel (the bevel turns under, out of sight).
+  const bottom = (s: number): number => frame.station(s).sill + SILL_BEVEL;
+  buildFlankStrip(ctx, body, {
+    yAt: (s) => (bottom(s) + c.top) / 2,
+    height: 0,
+    yEdge: (s, e) => (e < 0 ? bottom(s) : e > 0 ? c.top : (bottom(s) + c.top) / 2),
+    ...finishSlot(c.finish),
+    out: c.proud ?? 0.008,
+    first,
+    last,
+    name: 'cladding',
+    edge: c.edge && { height: c.edge.height, ...finishSlot(c.edge.finish) },
+  });
 }
 
 /** How far a feature line's ridge stands off the side. */
@@ -1035,6 +1093,9 @@ function buildRepeaters(ctx: KitContext, body: PartBuilder): void {
 const CORNER_LAMP_OUT = 0.004;
 /** A side row (crease or belt) inside a corner lamp by more than this bends the lens along it. */
 const CORNER_LAMP_KINK = 0.005;
+/** A ribbed lens's dark lines (`CornerLamp.ribs`): each this share of its step, the lens's colour times this grey. */
+const RIB_SHARE = 0.3;
+const RIB_SHADE = 0x8c8c8c;
 
 /**
  * Lamp units wrapping round the corners of an end face (`KitLook.cornerLamps`): a thin
@@ -1052,7 +1113,11 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
   const stations = frame.spec.stations;
   const cols = tubColumns(frame);
   const diag = Math.SQRT1_2;
+  // Ribbed lenses go in meshes of their own, marked to take their built shades
+  // (materials.ts `kitTinted`); every other lens keeps its slot's one colour.
+  const ribbed = new PartBuilder();
   for (const lamp of lamps) {
+    const into = lamp.ribs ? ribbed : body;
     // The face it starts on, and which way that face looks along the car.
     const facing = lamp.end === 'rear' ? -1 : 1;
     const sFace = (facing > 0 ? stations[0]! : stations[stations.length - 1]!).s;
@@ -1081,11 +1146,26 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
         const y = frame.station(flankS(p))[row];
         return y > p.y[0] + CORNER_LAMP_KINK && y < p.y[1] - CORNER_LAMP_KINK;
       }));
-    const rowsAt = (p: CornerLampPoint): number[] => [
-      p.y[0],
-      ...kinks.map((row) => Math.min(p.y[1] - CORNER_LAMP_KINK, Math.max(p.y[0] + CORNER_LAMP_KINK, frame.station(flankS(p))[row]))).sort((u, v) => u - v),
-      p.y[1],
-    ];
+    // A ribbed lens: its dark lines' [bottom, top] as shares of its height, at equal steps.
+    const ribs = Array.from({ length: lamp.ribs ?? 0 }, (_, k): [number, number] => {
+      const step = 1 / (lamp.ribs! + 1);
+      return [(k + 1) * step - (RIB_SHARE * step) / 2, (k + 1) * step + (RIB_SHARE * step) / 2];
+    });
+    const rowsAt = (p: CornerLampPoint): number[] => {
+      const rows = [
+        p.y[0],
+        ...kinks.map((row) => Math.min(p.y[1] - CORNER_LAMP_KINK, Math.max(p.y[0] + CORNER_LAMP_KINK, frame.station(flankS(p))[row]))).sort((u, v) => u - v),
+        p.y[1],
+      ];
+      if (ribs.length === 0) return rows;
+      return [...rows, ...ribs.flat().map((f) => lerp(p.y[0], p.y[1], f))].sort((u, v) => u - v);
+    };
+    /** Whether the band between rows r and r + 1 of the lens at point p is one of its dark lines. */
+    const ribAt = (p: CornerLampPoint, r: number): boolean => {
+      const rows = rowsAt(p);
+      const mid = ((rows[r]! + rows[r + 1]!) / 2 - p.y[0]) / (p.y[1] - p.y[0]);
+      return ribs.some(([a, b]) => mid > a && mid < b);
+    };
     for (const side of [1, -1]) {
       // A column across the lamp at a point, one entry per row: [on the body, on the
       // lens, rooted in the body], `d` metres out along the body's normal there.
@@ -1112,22 +1192,34 @@ function buildCornerLamps(ctx: KitContext, body: PartBuilder): void {
         const slot = lampSlot(role, side);
         const columns = stretch.map(column);
         const top = columns[0]!.length - 1;
-        body.color(0xffffff);
+        into.color(0xffffff);
         for (let k = 0; k + 1 < columns.length; k++) {
           const p = columns[k]!;
           const q = columns[k + 1]!;
-          body.bridge(slot, p.map(([, o]) => o), q.map(([, o]) => o));
+          if (ribs.length === 0) {
+            into.bridge(slot, p.map(([, o]) => o), q.map(([, o]) => o));
+          } else {
+            // Ribbed: each band in its own shade, the lines darker.
+            for (let r = 0; r < top; r++) into.color(ribAt(stretch[k]!, r) ? RIB_SHADE : 0xffffff).quad(slot, p[r]![1], p[r + 1]![1], q[r + 1]![1], q[r]![1]);
+            into.color(0xffffff);
+          }
           // Its rim from inside the body along the bottom and top edges.
-          for (const r of [0, top]) body.quad(slot, p[r]![2], q[r]![2], q[r]![1], p[r]![1]);
+          for (const r of [0, top]) into.quad(slot, p[r]![2], q[r]![2], q[r]![1], p[r]![1]);
           for (let r = 0; r < top; r++) ctx.holes.push({ owner: 'body', outline: { poly: [p[r]![0], q[r]![0], q[r + 1]![0], p[r + 1]![0]] } });
         }
         // And across its two ends.
         const last = columns[columns.length - 1]!;
-        if (i === 0) body.bridge(slot, columns[0]!.map(([, , s]) => s), columns[0]!.map(([, o]) => o));
-        if (i + 1 === stretches.length) body.bridge(slot, last.map(([, , s]) => s), last.map(([, o]) => o));
+        if (i === 0) into.bridge(slot, columns[0]!.map(([, , s]) => s), columns[0]!.map(([, o]) => o));
+        if (i + 1 === stretches.length) into.bridge(slot, last.map(([, , s]) => s), last.map(([, o]) => o));
       }
     }
   }
+  if (!lamps.some((lamp) => lamp.ribs)) return;
+  const group = new THREE.Group();
+  group.name = 'ribbed_lamps';
+  addBuilt(group, ribbed, [0, 0, 0], 'ribbed_lamps');
+  for (const mesh of group.children) mesh.userData.kitTinted = true;
+  ctx.root.add(group);
 }
 
 /**
@@ -1143,12 +1235,16 @@ function sideMirrorControl(channel: string, side: number): KitControl {
   };
 }
 
-/** Door hardware outside: handle, and a mirror on each front door, in `KitLook.brightwork`. */
+/**
+ * Door hardware outside: handle, and a mirror on each front door, in `KitLook.brightwork`
+ * (the mirrors in `mirrorFinish` when given).
+ */
 function buildDoorHardware(ctx: KitContext): void {
   const { frame, nodes } = ctx;
   const spec = frame.spec;
   const chrome = spec.look.brightwork === 'chrome';
   const finish = finishSlot(spec.look.brightwork);
+  const mirrorFinish = finishSlot(spec.look.mirrorFinish ?? spec.look.brightwork);
   const eye = driverEyeAt(frame);
   for (const [owner, door] of nodes) {
     if (!owner.startsWith('door_')) continue;
@@ -1183,7 +1279,7 @@ function buildDoorHardware(ctx: KitContext): void {
     const hx = side * (mx + (spec.look.mirrorReach ?? 0.1));
     const hy = my + 0.02 + (stalk ?? 0);
     const hz = frame.z(stalk === undefined ? ms : ms + 0.035);
-    const m = new PartBuilder().color(finish.color);
+    const m = new PartBuilder().color(mirrorFinish.color);
     if (stalk === undefined) {
       // The short arm must start on the actual body surface. `frame.sideX(ms, belt)` is
       // the belt edge, but the shoulder turns in above it; using that point left some
@@ -1193,7 +1289,7 @@ function buildDoorHardware(ctx: KitContext): void {
       // centre so the head never hangs apart from its foot (owner, 2026-10-19).
       const mountY = belt - 0.02;
       const mountX = skinX(frame, ms, mountY);
-      m.box(finish.slot, [side * (mountX + 0.0125), mountY, hz], [0.025, 0.014, 0.018]);
+      m.box(mirrorFinish.slot, [side * (mountX + 0.0125), mountY, hz], [0.025, 0.014, 0.018]);
       const foot = new THREE.Vector3(side * (mountX + 0.02), mountY, hz);
       const arm = new THREE.Vector3(hx, hy, hz).sub(foot);
       const length = arm.length();
@@ -1201,7 +1297,7 @@ function buildDoorHardware(ctx: KitContext): void {
       const across = new THREE.Vector3(0, 0, 1);
       const normal = across.clone().cross(along).normalize();
       m.push(new THREE.Matrix4().makeBasis(along, normal, across).setPosition(foot.x + arm.x / 2, foot.y + arm.y / 2, foot.z));
-      m.box(finish.slot, [0, 0, 0], [length / 2, 0.009, 0.012]);
+      m.box(mirrorFinish.slot, [0, 0, 0], [length / 2, 0.009, 0.012]);
       m.pop();
     } else {
       // The upright bracket likewise begins on the side skin, not on the belt's
@@ -1210,14 +1306,14 @@ function buildDoorHardware(ctx: KitContext): void {
       const mountX = skinX(frame, ms, mountY);
       const rx = side * (mountX + 0.023);
       const rz = frame.z(ms - 0.03);
-      m.box(finish.slot, [side * (mountX + 0.015), mountY, rz], [0.025, 0.025, 0.015]);
-      m.box(finish.slot, [rx, (mountY + hy) / 2, rz], [0.007, (hy - mountY) / 2, 0.007]);
+      m.box(mirrorFinish.slot, [side * (mountX + 0.015), mountY, rz], [0.025, 0.025, 0.015]);
+      m.box(mirrorFinish.slot, [rx, (mountY + hy) / 2, rz], [0.007, (hy - mountY) / 2, 0.007]);
       const run = new THREE.Vector3(hx - rx, 0, hz - rz);
       const length = run.length();
       const up = new THREE.Vector3(0, 1, 0);
       run.normalize();
       m.push(new THREE.Matrix4().makeBasis(run, up, run.clone().cross(up)).setPosition((rx + hx) / 2, hy, (rz + hz) / 2));
-      m.box(finish.slot, [0, 0, 0], [length / 2, 0.006, 0.006]);
+      m.box(mirrorFinish.slot, [0, 0, 0], [length / 2, 0.006, 0.006]);
       m.pop();
     }
     const holder = new THREE.Group();
@@ -1226,7 +1322,7 @@ function buildDoorHardware(ctx: KitContext): void {
     // The head turns on a ball at its centre, by hand from a front seat (rig.ts `aim`), as
     // the inside mirror does: side to side about its own up, then up and down about its
     // own across, from the built aim.
-    const h = new PartBuilder().color(finish.color);
+    const h = new PartBuilder().color(mirrorFinish.color);
     const head = h.push(mirrorFrame([hx, hy, hz], eye, [0, 0, -1])).matrix.clone();
     const e = head.elements;
     const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
@@ -1238,7 +1334,7 @@ function buildDoorHardware(ctx: KitContext): void {
     holder.add(ball);
     ball.position.set(centre[0] - door.pivot[0], centre[1] - door.pivot[1], centre[2] - door.pivot[2]);
     pane.position.set(0, 0, 0);
-    h.bevelBox(finish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
+    h.bevelBox(mirrorFinish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
     // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
     h.cut([{ poly: ([[-0.05, -0.035], [0.05, -0.035], [0.05, 0.035], [-0.05, 0.035]] as const).map(([gx, gy]): Vec3 => {
       const p = new THREE.Vector3(gx, gy, -0.025).applyMatrix4(h.matrix);
@@ -1392,7 +1488,8 @@ function buildWipers(ctx: KitContext): void {
     && !!under(pane, m.copy(point).addScaledVector(across, WIPER_EDGE), n)
     && !!under(pane, m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
 
-  for (const [i, pivotX] of WIPER_PIVOTS.entries()) {
+  // A single wiper (`CabinSpec.wipers`) on the driver's spindle.
+  for (const [i, pivotX] of (cabin.wipers === 1 ? WIPER_PIVOTS.slice(0, 1) : WIPER_PIVOTS).entries()) {
     const px = fromHeader ? -pivotX : pivotX;
     // The glass's edge over (under) the spindle, searched from outside the pane inward.
     const from = fromHeader ? new THREE.Vector3(px, head.y, head.z) : new THREE.Vector3(px, base.y, base.z);
@@ -1704,6 +1801,7 @@ export function buildExterior(ctx: KitContext): void {
   buildFace(new EndFace(ctx.frame, -1, 'body', ctx.holes), ctx.frame.spec.look.rear.items, body, ridges.get(-1));
   buildSill(ctx, body);
   buildWaist(ctx, body);
+  buildCladding(ctx, body);
   buildRepeaters(ctx, body);
   buildCornerLamps(ctx, body);
   buildFeatureLine(ctx, body);

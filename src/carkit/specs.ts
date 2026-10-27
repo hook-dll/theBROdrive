@@ -21,7 +21,8 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124 } from './interior';
+import { BODY_W124, LOOK_W124 } from './mercedes';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_ASTRA_F, BODY_VECTRA_A, LOOK_ASTRA_F, LOOK_VECTRA_A } from './opel';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
@@ -560,4 +561,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   espero: { id: 'espero', ...BODY_ESPERO, look: LOOK_ESPERO, cabinLayout: CABIN_ESPERO },
   astraf: { id: 'astraf', ...BODY_ASTRA_F, look: LOOK_ASTRA_F, cabinLayout: CABIN_ASTRA_F },
   vectraa: { id: 'vectraa', ...BODY_VECTRA_A, look: LOOK_VECTRA_A, cabinLayout: CABIN_VECTRA_A },
+  w124: { id: 'w124', ...BODY_W124, look: LOOK_W124, cabinLayout: CABIN_W124 },
 };
