@@ -55,7 +55,7 @@ import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import { prefersMobilePresentation, sceneFrameSize, type CanvasPixels } from '../core/renderer';
 import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
-import { CAR_MODELS, PROTOTYPE_MODELS, carModel, hasCarModel, modelEngine, modelGearbox, type CarModelDef } from '../vehicle/carmodels';
+import { CAR_MODELS, modelEngine, modelGearbox, type CarModelDef } from '../vehicle/carmodels';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
 import { CAMERA_FRAME_LIMIT, type FluidKind, type ShadeTint } from '../items/items';
@@ -3066,11 +3066,14 @@ export class MainMenu {
         const modelList = el('div', 'menu-body-list');
         const paintModels = (): void => {
           modelList.textContent = '';
-          const group = (label: string, models: readonly CarModelDef[]): void => {
-            if (models.length === 0) return;
+          for (const layout of DRIVE_LAYOUTS) {
+            const models = CAR_MODELS.filter(
+              (def) => driveLayout(def.rearDriveBias) === layout.id,
+            );
+            if (models.length === 0) continue;
 
             const heading = el('div', 'menu-body-group');
-            heading.textContent = label;
+            heading.textContent = layout.label;
             modelList.appendChild(heading);
 
             for (const def of models) {
@@ -3090,12 +3093,7 @@ export class MainMenu {
               });
               modelList.appendChild(row);
             }
-          };
-          for (const layout of DRIVE_LAYOUTS) {
-            group(layout.label, CAR_MODELS.filter((def) => driveLayout(def.rearDriveBias) === layout.id));
           }
-          // Real running gear under a borrowed body, to try a car before it is built.
-          group('Prototypes', PROTOTYPE_MODELS);
         };
         paintModels();
         modelField.append(modelLabel, modelList);
@@ -3103,7 +3101,7 @@ export class MainMenu {
 
         const spawnNote = el('div', 'menu-note');
         const paintNote = (): void => {
-          const def = hasCarModel(spawnModelId) ? carModel(spawnModelId) : undefined;
+          const def = CAR_MODELS.find((m) => m.id === spawnModelId);
           if (!def) {
             spawnNote.textContent = spawnModelId;
             return;

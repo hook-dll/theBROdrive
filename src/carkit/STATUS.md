@@ -281,13 +281,13 @@ First choice (owner and assistant, 2026-10-27): the owner's six, then Alfa 75, F
 Matra Murena, Tatra 613, LuAZ-969M, Reliant Robin, Daihatsu Charade GTti, Golf Country,
 Lancia Thema 8.32.
 
-Prototypes first (`PROTOTYPE_MODELS` in vehicle/carmodels.ts): a car's real running gear
-under a borrowed kit body stretched to its factory box, driven from the dev spawn menu's
-"Prototypes" group before its body is built. Done 2026-10-27: Caterham 7 (Oka body),
-Matra Murena (2108), Tatra 613 (GAZ-24). A mid or rear engine stands where it is in the
-masses (`CarModelDef.rearEngine`). Still missing: a car has exactly four wheels
-(`render/carmodel.ts` `WHEEL_IDS`), so the Reliant Robin cannot be built; open cars
-(Caterham, Spider, MX-5) need an open cabin from the generator.
+Prototypes tried and dropped (2026-10-27): a car's real running gear under a borrowed,
+stretched kit body (Caterham 7, Matra Murena, Tatra 613) did not make driving one
+interesting to the owner, so the code went (commit ee3d186e has it). The list stays on
+hold: the 1990s street list above comes first. Still true for it: a car has exactly four
+wheels (`render/carmodel.ts` `WHEEL_IDS`), so no Reliant Robin; open cars need an open
+cabin from the generator; a mid or rear engine is placed at the front in
+`Vehicle.applyChassisMass` (ee3d186e had a `rearEngine` field for it).
 
 ## Wheels: designs and the roster
 

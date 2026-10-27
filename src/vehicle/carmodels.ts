@@ -943,16 +943,6 @@ const AERO_OPEL_ASTRA_F: AeroSpec = { frontalArea: 1.98, liftFront: 0.08, liftRe
  * area, 1.706 m × (1.40 − 0.15) m × 0.92.
  */
 const AERO_OPEL_VECTRA_A: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
-/**
- * Caterham Seven: open, cycle wings, the wheels in the air. Its drag area is set on the
- * bench to the 180 km/h (0.89): automobile-catalog's estimated Cd 0.65 on [E] 1.37 m².
- * No lift figure: [E] the Zhiguli's shape figures, the open cockpit lifting the rear more.
- */
-const AERO_CATERHAM_7: AeroSpec = { frontalArea: 1.37, liftFront: 0.13, liftRear: 0.26, sideSlope: 1.4, yawSlope: 0.47 };
-/** Matra Murena: a mid-engined wedge, Cd 0.328; the Samara hatches' shape on [E] 1.70 m². */
-const AERO_MATRA_MURENA: AeroSpec = { frontalArea: 1.7, liftFront: 0.08, liftRear: 0.26, sideSlope: 1.25, yawSlope: 0.5 };
-/** Tatra 613: a long notchback; the Volga 24's shape figures on [E] 2.05 m². */
-const AERO_TATRA_613: AeroSpec = { frontalArea: 2.05, liftFront: 0.14, liftRear: 0.2, sideSlope: 1.5, yawSlope: 0.45 };
 
 
 
@@ -1094,13 +1084,6 @@ export interface CarModelDef {
   readonly handlingProfile: HandlingProfile;
   /** Static share of kerb weight carried by the front axle, when layout needs an override. */
   readonly frontWeightShare?: number;
-  /**
-   * Where a mid or rear engine sits: its centre's distance AHEAD of the rear axle line,
-   * metres (negative behind it), and whether it lies across the car. Absent: a front
-   * engine, placed by the drive layout. Only the masses use it (`Vehicle.applyChassisMass`):
-   * the axle split stays `frontWeightShare`, but the yaw inertia is the layout's own.
-   */
-  readonly rearEngine?: { readonly aheadOfRearAxleM: number; readonly transverse: boolean };
   /**
    * Anti-roll bars, each as a fraction of its own axle's wheel rate (0 = no bar), when
    * the car's are not its suspension preset's (`SuspensionTuning.frontBar`/`rearBar`).
@@ -1281,18 +1264,6 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // (115 Hp)"; the-blueprints.com drawing's 4430 / 2600 / 1700 / 1400).
   // src/carkit/measurements-vectra.md.
   kit_vectraa:    { length: 4.432, width: 1.706, height: 1.4, clearance: 0.15, wheelbase: 2.6, frontTrack: 1.437, rearTrack: 1.432, wheelRadius: 0.295, tyreWidth: 0.195 },
-  // The prototypes (`PROTOTYPE_MODELS`): the factory figures; the borrowed body is stretched
-  // to them. Caterham Super Seven 1.6 K-series (1996-2000): 3380 × 1575 × 1115 (hood up),
-  // 2225 wheelbase, 1270/1336 tracks, 185/60 HR14 (Caterham's year-2000 range sheet), the
-  // clearance [E] 100 (the Superlight's 80 on the same sheet), the nose [E] 0.48.
-  kit_caterham7:  { length: 3.380, width: 1.575, height: 1.115, clearance: 0.100, wheelbase: 2.225, frontTrack: 1.270, rearTrack: 1.336, wheelRadius: 0.289, tyreWidth: 0.185, frontOverhang: 0.48 },
-  // Matra Murena 2.2 (1981-83): 4070 × 1752 × 1220, 2435 wheelbase, 1410/1506 tracks (carfolio
-  // prints 1530 rear), 158 clearance (motorsdb, ultimatespecs), 185/60 R14 front and 195/60
-  // rear, kept as the front's radius with the rear's width; the nose [E] 0.80.
-  kit_murena:     { length: 4.070, width: 1.752, height: 1.220, clearance: 0.158, wheelbase: 2.435, frontTrack: 1.410, rearTrack: 1.506, wheelRadius: 0.289, tyreWidth: 0.195, frontOverhang: 0.80 },
-  // Tatra 613 first series (1975-80): 5025 × 1800 × 1505, 2980 wheelbase, 1520 tracks, 160
-  // clearance, 215/70 HR14 (the factory description, t613.wz.cz/popis.html); the nose [E] 0.95.
-  kit_tatra613:   { length: 5.025, width: 1.800, height: 1.505, clearance: 0.160, wheelbase: 2.980, frontTrack: 1.520, rearTrack: 1.520, wheelRadius: 0.328, tyreWidth: 0.215, frontOverhang: 0.95 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -2667,7 +2638,7 @@ const GEAR_UAZ_2206: KitRunningGear = {
  */
 type KitOwnGear = KitRunningGear &
   Required<Pick<Entry, 'bodyClass' | 'rearDriveBias' | 'suspension' | 'handlingProfile'>> &
-  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff' | 'rearEngine'>;
+  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff'>;
 
 /**
  * Daewoo Nexia 1.5 GL (G15MF, five-speed), per its repair manual's table (3ruk.ru/vehicles/
@@ -2775,123 +2746,6 @@ const GEAR_OPEL_VECTRA_A: KitOwnGear = {
   frontWeightShare: 0.62,
   dragArea: 0.62,
   aero: AERO_OPEL_VECTRA_A,
-};
-
-/*
- * ---- the prototypes' running gear (`PROTOTYPE_MODELS`) ----
- *
- * Sourced as the kit cars' (the sheets in each comment); the road tyre is ROAD_TYRE at the
- * car's own size, as on every road car. Their suspensions are the nearest preset with the
- * layout's own axles, springs [E] where no rate is published.
- */
-/**
- * Caterham Seven: double wishbones and a bar in front; a de Dion rear on a lower A-frame
- * (its apex the roll centre, [E] 0.25 m) without a bar (the Superlight adds one). Springs
- * [E] a firm road car's, 1.7 / 1.9 Hz.
- */
-const SUSP_CATERHAM_7: SuspensionTuning = { ...SUSP_SPORT, frontHz: 1.7, rearHz: 1.9, rearBar: 0 };
-/**
- * Matra Murena: double wishbones on torsion bars in front, semi-trailing arms on coils at
- * the rear, a bar at each end. The sport preset with an independent trailing-arm rear.
- */
-const SUSP_MATRA_MURENA: SuspensionTuning = {
-  ...SUSP_SPORT,
-  rearAxle: 'independent',
-  rearRollCentreM: 0.12,
-  rearSwingArmM: 2.5,
-  rearPitchCentre: TRAILING_ARM_PITCH,
-  rearBar: 0.6,
-};
-/**
- * Tatra 613: MacPherson struts and a bar in front, semi-trailing arms on coils at the rear
- * with no bar (none is mentioned anywhere [E]). The everyday saloon's springs and dampers.
- */
-const SUSP_TATRA_613: SuspensionTuning = {
-  ...SUSP_CAR,
-  rearAxle: 'independent',
-  rearRollCentreM: 0.12,
-  rearSwingArmM: 2.5,
-  frontPitchCentre: STRUT_PITCH,
-  rearPitchCentre: TRAILING_ARM_PITCH,
-  rearBar: 0,
-};
-
-/**
- * Caterham Super Seven 1.6 K-series (1996-2000), Caterham's year-2000 range sheet
- * (stevecarter.com/catvideo.htm, "1.6"), carfolio, automobile-catalog: kerb 550 kg, 180
- * km/h, 0-100 in 6.4 s, a 36 l tank, unassisted 2.1-turn rack, 228 mm discs all round and
- * no servo, an open differential (the LSD was an option). Axle split [E] 0.47: no figure
- * is published; the engine behind the front axle, driver, fuel and spare at the back. The
- * lock on [E] a 10 m kerb circle (the owner's handbook's for this width). No maker's Cd
- * (automobile-catalog estimates 0.65): Cd·A set on the bench to the 180 km/h.
- */
-const GEAR_CATERHAM_7: KitOwnGear = {
-  bodyClass: 'car',
-  mass: 550,
-  tyre: ROAD_TYRE,
-  engineId: 'engine_rover_k16',
-  gearboxId: 'gearbox_ford_type9_caterham',
-  tankLitres: 36,
-  wheelGrip: ROAD_TYRE_GRIP,
-  brakeDecelG: BRAKES_UNASSISTED_G,
-  suspension: SUSP_CATERHAM_7,
-  steerLock: 0.535,
-  rearDriveBias: 1,
-  handlingProfile: 'road',
-  frontWeightShare: 0.47,
-  dragArea: 0.89,
-  aero: AERO_CATERHAM_7,
-};
-/**
- * Matra Murena 2.2 (1981-83): kerb 1050 kg (motorsdb; others 1020-1033), 197 km/h, 0-100
- * in 9.3 s, a 56 l tank, an unassisted rack, discs and servo [E], an open differential
- * [E]. The engine across the car [E] 0.28 m ahead of the rear axle, the transaxle's
- * differential on it. Axle split [E] 0.42. An 11.3 m circle. Cd 0.328 on [E] 1.70 m².
- */
-const GEAR_MATRA_MURENA: KitOwnGear = {
-  bodyClass: 'car',
-  mass: 1050,
-  tyre: ROAD_TYRE,
-  engineId: 'engine_simca_180_22',
-  gearboxId: 'gearbox_matra_murena',
-  tankLitres: 56,
-  wheelGrip: ROAD_TYRE_GRIP,
-  brakeDecelG: BRAKES_SERVO_G,
-  suspension: SUSP_MATRA_MURENA,
-  steerLock: 0.515,
-  rearDriveBias: 1,
-  handlingProfile: 'road',
-  frontWeightShare: 0.42,
-  rearEngine: { aheadOfRearAxleM: 0.28, transverse: true },
-  dragArea: 0.56,
-  aero: AERO_MATRA_MURENA,
-};
-/**
- * Tatra 613 first series (1975-80), the factory description (t613.wz.cz/popis.html) and
- * tatraportal.sk: kerb 1670 kg with 59.3 % on the rear axle, 190 km/h, 0-100 in 12.7 s
- * (the factory's claim), a 72 l tank in two, an unassisted rack, ventilated discs all
- * round with a servo, an open differential. The V8 lies along the car over the rear axle,
- * its differential in the crankcase and its crank's middle on the axle line: its centre
- * [E] 0.075 m behind the axle, the gearbox ahead. An 11.5 m kerb circle. No maker's Cd:
- * Cd·A set on the bench to the 190 km/h.
- */
-const GEAR_TATRA_613: KitOwnGear = {
-  bodyClass: 'car',
-  mass: 1670,
-  tyre: ROAD_TYRE,
-  engineId: 'engine_tatra_t613',
-  gearboxId: 'gearbox_tatra_613',
-  tankLitres: 72,
-  wheelGrip: ROAD_TYRE_GRIP,
-  brakeDecelG: BRAKES_SERVO_G,
-  suspension: SUSP_TATRA_613,
-  steerLock: 0.64,
-  rearDriveBias: 1,
-  handlingProfile: 'road',
-  frontWeightShare: 1 - 0.593,
-  rearEngine: { aheadOfRearAxleM: -0.075, transverse: false },
-  dragArea: 1.0,
-  aero: AERO_TATRA_613,
 };
 
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
@@ -3044,10 +2898,6 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_astraf: { trunkGrid: G3x2, comfort: 4 },
   kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
-  // The prototypes: a Seven's shelf behind the seats, the Murena's rear boot, the Tatra's front one.
-  kit_caterham7: { trunkGrid: G2x2, comfort: 1 },
-  kit_murena: { trunkGrid: G3x2, comfort: 2 },
-  kit_tatra613: { trunkGrid: G4x2, comfort: 4 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };
 
@@ -3085,7 +2935,6 @@ function catalogueDef(e: Entry): CarModelDef {
     rearDriveBias: e.rearDriveBias,
     handlingProfile: e.handlingProfile ?? 'classic',
     frontWeightShare: e.frontWeightShare,
-    rearEngine: e.rearEngine,
     antiRoll: e.antiRoll,
     rollCentre: e.rollCentre,
     tyre: e.tyre,
@@ -3105,34 +2954,13 @@ function catalogueDef(e: Entry): CarModelDef {
  */
 export const CAR_MODELS: readonly CarModelDef[] = KIT_CARS.map(catalogueDef);
 /**
- * PROTOTYPES: a car's real running gear (its factory geometry, mass, axle split, engine,
- * gearbox, tyres, brakes, suspension and aero) under a kit body borrowed from a car of
- * about its shape, which the loader stretches to the factory box and whose wheels it
- * sets on the factory wheelbase and tracks. Physics sees only the box and the running
- * gear, so a prototype drives as the finished car will, before its body is built. In
- * no list the world draws from (traffic, contracts, the shelf, the car lab): the dev
- * spawn menu offers them. When its own body is built, a car's row moves to `KIT_CARS`.
- */
-export const PROTOTYPE_MODELS: readonly CarModelDef[] = (
-  [
-    // The Oka's body: the smallest, so the least stretched to a Seven.
-    ['kit_caterham7', GEAR_CATERHAM_7, 'vaz1111', 'Caterham 7 (prototype)'],
-    // The 2108's: a low three-door wedge.
-    ['kit_murena', GEAR_MATRA_MURENA, 'vaz2108', 'Matra Murena (prototype)'],
-    // The GAZ-24's: the longest saloon in the kit.
-    ['kit_tatra613', GEAR_TATRA_613, 'gaz24', 'Tatra 613 (prototype)'],
-  ] satisfies readonly KitCarRow[]
-)
-  .map(kitEntry)
-  .map(catalogueDef);
-/**
  * The vendored packs and the carforge cars: resolvable by id (a kit car wears the Soviet
  * pack's wheel sets and runs on its sibling's gear) but in no list the game or the car
  * lab draws from, and a save naming one loads as its kit twin (save.ts).
  */
 const PACK_CAR_MODELS: readonly CarModelDef[] = ENTRIES.map(catalogueDef);
 
-const BY_ID = new Map([...CAR_MODELS, ...PROTOTYPE_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
+const BY_ID = new Map([...CAR_MODELS, ...PACK_CAR_MODELS].map((m) => [m.id, m]));
 
 /**
  * The model a new game starts in and every unknown saved id resolves to. The
