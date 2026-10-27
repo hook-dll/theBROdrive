@@ -26,6 +26,7 @@ import { contractKindOf, contractThing, type ContractCargoItem } from '../items/
 import type { Road } from '../world/road';
 import type { Terrain } from '../world/terrain';
 import { postParkingSlot, type ParkingSlot } from '../world/haulbay';
+import { isRaceId, RACE_LOCK_TEXT } from '../race/ids';
 
 /** 'CTC1': the car model. */
 const CAR_MODEL_DOMAIN = 0x43544331;
@@ -90,11 +91,13 @@ export function boundHaul(state: WorldState, loadId: string): HaulState | null {
 
 /**
  * Why the player may not hitch, tow, open or sit in `id`, or null when he may: a haul's
- * load handed in stays with its post. A waiting load is free (taking it is
- * contracts/hauls.ts `takeHaulLoads`), and anything that is not a haul's load is never
- * locked here.
+ * load handed in stays with its post, and a race's rival and trailers are the race's
+ * (race/ids.ts) — the player's own race trailer as well, which only the race unhitches.
+ * A waiting load is free (taking it is contracts/hauls.ts `takeHaulLoads`), and anything
+ * else is never locked here.
  */
 export function haulLoadLock(state: WorldState, id: string): string | null {
+  if (isRaceId(id)) return RACE_LOCK_TEXT;
   return isHaulLoadId(id) && state.handedInLoads[id] !== undefined ? HANDED_IN_TEXT : null;
 }
 

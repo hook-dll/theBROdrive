@@ -77,6 +77,33 @@ const EDGE_LINE_INSET_M = 0.35;
 const CURB_RADIUS_M = 120;
 const CURB_WIDTH_M = 1.0;
 const CURB_BLOCK_M = 2;
+/**
+ * THE START LIGHTS: `GANTRY_LAMPS` housings in a row on top of the gantry's beam, their
+ * faces toward the grid. `gantryLampPoint` is where lamp `k`'s face is, so the race
+ * (race/visuals.ts) puts its lenses on the housings the chunk draws.
+ */
+export const GANTRY_LAMPS = 3;
+const GANTRY_BEAM_Y = 5.6;
+const GANTRY_HOUSING_M = 0.8;
+const GANTRY_LAMP_PITCH_M = 1.1;
+/** The housing's middle stands this far behind the line (toward the grid), metres. */
+const GANTRY_HOUSING_BACK_M = 0.1;
+/** The lens's face: the housing's front, a hair proud of it. */
+export const GANTRY_LENS_BACK_M = GANTRY_HOUSING_BACK_M + 0.18;
+/** A lens's radius, metres. */
+export const GANTRY_LENS_RADIUS_M = 0.3;
+
+/**
+ * Lamp `k`'s place on the gantry, ABSOLUTE, into `out`: `back` metres behind the line
+ * along the lap, above the beam's top. The faces look back down the lap at the grid.
+ */
+export function gantryLampPoint(track: RaceTrack, k: number, out: { x: number; y: number; z: number }, back = GANTRY_LENS_BACK_M): { x: number; y: number; z: number } {
+  const lateral = (k - (GANTRY_LAMPS - 1) / 2) * GANTRY_LAMP_PITCH_M;
+  track.offsetPoint(-back, lateral, out);
+  out.y = track.surfaceY(0, 0) + GANTRY_BEAM_Y + 0.25 + GANTRY_HOUSING_M / 2;
+  return out;
+}
+
 /** Tyre walls: outside of corners tighter than this, past the run-off. */
 const TYRE_RADIUS_M = 45;
 const TYRE_STACK_RADIUS_M = 0.38;
@@ -380,7 +407,7 @@ function buildProps(track: RaceTrack, ox: number, oz: number): Props {
   const line = track.sampleAt(0);
   const yaw = line.heading;
   const postLateral = hw + LIP_M + 0.6;
-  const beamY = 5.6;
+  const beamY = GANTRY_BEAM_Y;
   for (const sign of [-1, 1]) {
     track.offsetPoint(0, sign * postLateral, point);
     const ground = track.surfaceY(0, sign * postLateral);
@@ -388,6 +415,12 @@ function buildProps(track: RaceTrack, ox: number, oz: number): Props {
   }
   const centreY = track.surfaceY(0, 0) + beamY;
   propBox(parts, [2 * postLateral + 0.4, 0.5, 0.4], new THREE.Vector3(line.x - ox, centreY, line.z - oz), yaw, 0x8c8f93);
+  // The start lights' housings on the beam, facing the grid; their lenses are the race's
+  // (race/visuals.ts), lit by the countdown.
+  for (let k = 0; k < GANTRY_LAMPS; k++) {
+    gantryLampPoint(track, k, point, GANTRY_HOUSING_BACK_M);
+    propBox(parts, [GANTRY_HOUSING_M, GANTRY_HOUSING_M, 0.35], new THREE.Vector3(point.x - ox, point.y, point.z - oz), yaw, 0x1c1c1c);
+  }
   const checks = 12;
   const board = (2 * postLateral - 1) / checks;
   for (let k = 0; k < checks; k++) {

@@ -4,6 +4,48 @@
 
 ### Added
 
+- RACES AT THE TRACKS, part B: the race itself (`race/director.ts`, `session.ts`,
+  `laps.ts`, `rival.ts`, `stake.ts`, `visuals.ts`, `ids.ts`, `ui/hudrace.ts`,
+  `tools/race-bench.ts`, `tools/racelapworld.ts` new; `world/racetrack/track.ts`
+  `project(…, out)`, `TrackProjection`; `world/racetrack/mesh.ts` start-light housings,
+  `gantryLampPoint`; `world/haulsign.ts` `drawPictogram` exported; `contracts/world.ts`
+  `haulLoadLock` locks a race's cars and trailers; `game/state.ts` `raceRounds`,
+  `raceStake`, deltas `race_stake` `race_round`, `SAVE_VERSION` 9; `save/save.ts`;
+  `ui/hud.ts` `setRace`, `ui/hud.css`; `main.ts`; `app/devtools.ts` `__bro.race`,
+  `jumpToTrack` to grid slot 2; `tools/racetrack-gen.ts` shares the lap ground;
+  `game-design2.md` §19.7). At the track the player is at, a rival car waits in grid
+  slot 1 with a "RACE ME!" board beside it — three shells → six, one to three chevrons
+  for its level, a car-and-trailer picture for a trailer race — locked like a handed-in
+  haul, and only while the track's colliders exist. Its model is one of the three
+  catalogue cars nearest the player's by |ln power-to-weight ratio| + 0.35·|ln mass
+  ratio| (the fitted engine counts), drawn per track and round; its level is a whole
+  autopilot character, EASY `sleeper`, FAST `hurried`, WILD `frantic` (45/35/20% of
+  rounds), never rubber-banded. Stopped in slot 2, F races it: refused with fewer than
+  three shells ("need 3 shells") or anything on the car's ball or bar ("unhitch
+  first"); F there never also gets him out. Three random shells go as the stake with the
+  fine animation. One round in three both cars get identical 150-350 kg trailers,
+  hitched in state. Three new lenses on gantry housings go red, red, red, green (the
+  flat-material program, emissive only); the player's car is held (no throttle, full
+  brake) and the rival parked until the green. Three laps, each counted only past the six
+  checkpoints in order on the track area; backing over the line undoes a lap; standings
+  by lap and arclength; HUD countdown, "LAP n/3 · 1st", and the banner. A win pays six
+  shells and "YOU WIN!", a loss nothing more; the track's round moves on, the player's
+  trailer goes, and the rival drives a cool-down lap to its slot and is swapped unseen
+  for the next round's. Forfeit: 10 s off the track area, 150 m away, out of the car,
+  3 s on the roof, 10 s with the engine dead. A race is never saved: its cars are dropped
+  on load and a `raceStake` found there is paid back, the same shells, on the first
+  step; every stake operation checks the field and writes in the order that cannot pay
+  twice. Measured (`tools/race-bench.ts`, seed 1337): lap counting, forfeits, stake,
+  prize, mid-race save and refund all checked; the levels alone in the VAZ-2101 fly a
+  lap in 149.5 / 121.6 / 114.5 s mean over three tracks (a pace-capped `frantic` was
+  within 0.2 s of the full one, so levels are characters, not caps); three races of a
+  `frantic` stand-in at 0.85 pace — track:6 1911 m against a FAST VAZ-2105, won
+  (119.6 / 107.0 / 106.9 s vs 122.7 / 117.1), jar 10 → 7 → 13; track:8 2452 m with
+  250 kg trailers against a FAST VAZ-2101, lost (167.2 / 154.0 vs 152.1 / 146.6 /
+  145.1 s), jar 10 → 7; track:12 1850 m against a WILD VAZ-2105, lost (111.9 / 101.6 vs
+  107.9 / 101.5 / 101.5 s). Not yet: the rival knows nothing of the player but what its
+  autopilot's physical obstacle checks see; the autopilot still reads banking as an
+  absolute value; the frantic driver loses a lot of pace towing.
 - RACE TRACKS BESIDE THE POSTS, part A: the track (`world/racetrack/layout.ts`,
   `site.ts`, `track.ts`, `mesh.ts` new; `world/terrain.ts` `raceTracks`, `openBase`,
   `detailAt`, `explorationDetailAt`, `horizonHeight`; `world/roadmesh.ts`

@@ -8,6 +8,8 @@ import { installShellStyle, setGameText } from './shellsprites';
 import { MapScreen, type MapSource, type MapView } from './hudmap';
 import { ShellJar } from './hudjar';
 import { GyroOrb, type PedalReadout, type RideReadout } from './hudgyro';
+import { RaceHud } from './hudrace';
+import type { RaceReadout } from '../race/director';
 
 export type { MapPost, MapSource, MapView } from './hudmap';
 export { newMapView } from './hudmap';
@@ -167,6 +169,8 @@ export class Hud {
   private readonly lcdEl: SVGSVGElement;
   /** The shell jar (`setShells`, ui/hudjar.ts). */
   private readonly jar: ShellJar;
+  /** The race's countdown, lap chip and result banner (`setRace`, ui/hudrace.ts). */
+  private readonly race: RaceHud;
   private readonly lcdDigits: readonly SVGGElement[];
   private readonly gumBubbleEl: HTMLElement;
   private readonly damageVignetteEl: HTMLElement;
@@ -229,6 +233,7 @@ export class Hud {
     this.inventoryEl.append(this.invSlotsEl);
 
     this.toastEl = el('div', 'hud-toasts');
+    this.race = new RaceHud();
     this.gumBubbleEl = el('div', 'hud-gum-bubble is-hidden');
     this.damageVignetteEl = el('div', 'hud-damage-vignette');
     this.deathFadeEl = el('div', 'hud-death-fade');
@@ -241,6 +246,7 @@ export class Hud {
       this.inventoryEl,
       this.toastEl,
       this.gumBubbleEl,
+      this.race.el,
     ];
     // No full-screen blur element: see the note in hud.css for why it was removed
     // rather than tuned.
@@ -367,6 +373,11 @@ export class Hud {
   /** The player's shells in the jar: poured in as they come, lifted out as they go, the jar flashing into sight to show it. */
   setShells(purse: Readonly<ShellPurse>): void {
     this.jar.set(purse);
+  }
+
+  /** The race at a track (race/director.ts): countdown, lap and place, result. */
+  setRace(readout: RaceReadout): void {
+    this.race.set(readout);
   }
 
   /** Shells of these kinds pushed out of the full jar by new ones: called just before the `setShells` that brings them in. */

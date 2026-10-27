@@ -65,6 +65,13 @@ export interface TrackPose {
   readonly lateral: number;
 }
 
+/** A projection's answer in caller storage: `RaceTrack.project`'s `out`. */
+export interface TrackProjection {
+  s: number;
+  lateral: number;
+  height: number;
+}
+
 /**
  * The paved apron beside the start straight, in the lap's own frame: from `s0` to `s1`
  * along the lap, and from `inner` to `outer` metres out on side `side` (signed lateral
@@ -305,28 +312,30 @@ export class RaceTrack {
    * Closest centreline point to a world XZ, lateral positive LEFT, as the road's. With a
    * hint it searches `PROJECT_WINDOW_M` either side of it, which keeps the answer on the
    * right leg of a hairpin; without one it scans the whole table (a few thousand rows).
+   * Written into `out` when given, so a per-step caller (race/laps.ts) allocates nothing.
    */
-  project(x: number, z: number, hintS?: number): RoadProjection {
+  project(x: number, z: number, hintS?: number, out?: TrackProjection): RoadProjection {
     let best = 0;
     let bestDist = Infinity;
-    const consider = (i: number): void => {
+    let from = 0;
+    let rows = this.count;
+    if (hintS !== undefined) {
+      const window = Math.ceil(PROJECT_WINDOW_M / this.step);
+      from = Math.round(this.wrap(hintS) / this.step) - window;
+      rows = 2 * window + 1;
+    }
+    for (let k = 0; k < rows; k++) {
+      const i = (((from + k) % this.count) + this.count) % this.count;
       const d = (this.xs[i]! - x) ** 2 + (this.zs[i]! - z) ** 2;
       if (d < bestDist) {
         bestDist = d;
         best = i;
       }
-    };
-    if (hintS === undefined) {
-      for (let i = 0; i < this.count; i++) consider(i);
-    } else {
-      const centre = Math.round(this.wrap(hintS) / this.step);
-      const window = Math.ceil(PROJECT_WINDOW_M / this.step);
-      for (let k = -window; k <= window; k++) consider((((centre + k) % this.count) + this.count) % this.count);
     }
     let bestS = best * this.step;
     let bestLateral = 0;
     let refined = Infinity;
-    for (const offset of [-1, 0]) {
+    for (let offset = -1; offset <= 0; offset++) {
       const i = (((best + offset) % this.count) + this.count) % this.count;
       const j = (i + 1) % this.count;
       const ax = this.xs[i]!;
@@ -345,7 +354,11 @@ export class RaceTrack {
       const heading = this.headings[i]!;
       bestLateral = (x - px) * Math.cos(heading) - (z - pz) * Math.sin(heading);
     }
-    return { s: bestS, lateral: bestLateral, height: this.centreY(bestS) };
+    if (!out) return { s: bestS, lateral: bestLateral, height: this.centreY(bestS) };
+    out.s = bestS;
+    out.lateral = bestLateral;
+    out.height = this.centreY(bestS);
+    return out;
   }
 
   private measure(): TrackStats {

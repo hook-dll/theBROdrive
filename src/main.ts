@@ -121,6 +121,7 @@ import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
 import { PLAYER_FIELD_ID, RoadTraffic } from './world/traffic';
 import { Autopilot } from './vehicle/autopilot';
+import { RaceDirector } from './race/director';
 import { advanceCloudShadows } from './render/cloudshadow';
 import { advanceDesertGlitter, setDesertGroundArclength } from './world/terrainmesh';
 import { WeatherParticles } from './render/weatherparticles';
@@ -910,6 +911,37 @@ async function boot(): Promise<void> {
       STATE_GROUND_PROBE_UP_M + STATE_GROUND_PROBE_DOWN_M,
     );
   /**
+   * "Out of view": out of the camera's frustum as last rendered. Things that appear or go
+   * by themselves (a haul's load, a race's rival) wait for a look away.
+   */
+  const cameraFrustum = new THREE.Frustum();
+  const cameraViewMatrix = new THREE.Matrix4();
+  const cameraSphere = new THREE.Sphere();
+  const inCameraView = (x: number, y: number, z: number, radius: number): boolean => {
+    const cam = renderer.camera;
+    cameraViewMatrix.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    cameraFrustum.setFromProjectionMatrix(cameraViewMatrix);
+    cameraSphere.center.set(x - origin.x, y, z - origin.z);
+    cameraSphere.radius = radius;
+    return cameraFrustum.intersectsSphere(cameraSphere);
+  };
+  /**
+   * THE RACES AT THE TRACKS (race/director.ts): the rival at a track's grid, the offer, the
+   * lights, the laps and the stake. Built before the first reconcile, which asks it which
+   * cars it keeps live, and before the boot warm-up, which links its lights' and board's
+   * programs.
+   */
+  const race = new RaceDirector(world, physics, renderer.scene, origin, terrain, {
+    vehicle: (id) => vehicles.get(id) ?? null,
+    inView: inCameraView,
+    groundUnder,
+    toast: (text) => hud.setToast(text),
+  });
+  /** The racing rival's engine, heard as a traffic car's; one visitor for every frame. */
+  const hearRaceCar = (id: string, vehicle: Vehicle): void => {
+    audio.updateTrafficVehicle(id, vehicle.audio, vehicle.root.position.x, vehicle.root.position.y, vehicle.root.position.z);
+  };
+  /**
    * A COUPLED RIG LIVES AND SLEEPS WHOLE. The cars on one tow bar, and a car with a
    * trailer on its ball, are a rig keyed by its front car (`rigRoot`, rebuilt each
    * reconcile from the couplings in state). A rig is held live while the player drives
@@ -996,7 +1028,8 @@ async function boot(): Promise<void> {
       const root = rigRoot.get(id);
       const held = root !== undefined && heldRigs.has(root);
       if (vehicle) {
-        if (id === drivingId || held) continue;
+        // A race's rival is held live round the whole lap (race/director.ts `keepsLive`).
+        if (id === drivingId || held || race.keepsLive(id)) continue;
         // Out of range, or the ground under it has been taken away (a desert tile
         // demoted behind the player): back into state where it stands, rather than
         // falling out of the world with nobody watching. A rig that is not held goes
@@ -1565,6 +1598,7 @@ async function boot(): Promise<void> {
         traffic,
         vitals,
         autopilot,
+        race,
         hud,
         beginDeathSequence,
       })
@@ -1645,9 +1679,6 @@ async function boot(): Promise<void> {
    * behind. "Out of view" is out of the camera's frustum as last rendered.
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain };
-  const haulFrustum = new THREE.Frustum();
-  const haulViewMatrix = new THREE.Matrix4();
-  const haulSphere = new THREE.Sphere();
   const haulBays = new HaulBays(contractWorldDeps, {
     livePose: (id, out) => {
       const body = vehicles.get(id)?.chassis ?? trailerField.get(id)?.rigidBody;
@@ -1675,14 +1706,7 @@ async function boot(): Promise<void> {
         if (car.towedBy === id) carTowField.unhitch(car.id);
       }
     },
-    inView: (x, y, z, radius) => {
-      const cam = renderer.camera;
-      haulViewMatrix.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-      haulFrustum.setFromProjectionMatrix(haulViewMatrix);
-      haulSphere.center.set(x - origin.x, y, z - origin.z);
-      haulSphere.radius = radius;
-      return haulFrustum.intersectsSphere(haulSphere);
-    },
+    inView: inCameraView,
     toast: (text) => hud.setToast(text),
   });
 
@@ -1791,6 +1815,12 @@ async function boot(): Promise<void> {
     );
     input.setBrakeKnee(playerDriven?.thresholdBrakePedal ?? null);
 
+    // The races (race/director.ts): the offer and its F, before anything else reads the
+    // key, and the racing rival's own controls, before the step.
+    {
+      const anchor = activeWorldAnchor();
+      race.beforeStep(dt, f, anchor.x, anchor.z, activeS);
+    }
     // Refresh the stream's road-frame snapshot before the player's autopilot reads it.
     // Every controller still writes its intent before the shared physics step.
     if (driving === null) {
@@ -1846,6 +1876,7 @@ async function boot(): Promise<void> {
         Object.assign(passengerDrive, blankDrive);
         autopilot.setOncomingGap(traffic.nearestOncomingDistance(activeS, 1));
         autopilot.drive(dt, driving, passengerDrive, origin.x, origin.z);
+        race.holdPlayer(passengerDrive);
         driving.fixedUpdate(dt, passengerDrive);
       }
     } else if (driving) {
@@ -1875,6 +1906,8 @@ async function boot(): Promise<void> {
       if (autopilot.engaged) {
         autopilot.drive(dt, driving, f, origin.x, origin.z);
       }
+      // Held on the grid until the green (race/director.ts), whatever drove the pedals.
+      race.holdPlayer(f);
       driving.fixedUpdate(dt, f);
       if (f.toggleLights) {
         driving.cycleHeadlights();
@@ -1911,7 +1944,7 @@ async function boot(): Promise<void> {
     // well pinned it to the spot under an autopilot that kept pressing the throttle.
     const stepped = controlled ?? (driving !== null && autopilot.engaged ? driving : null);
     for (const [id, vehicle] of vehicles) {
-      if (vehicle === stepped || carTowField.stepping(id)) continue;
+      if (vehicle === stepped || carTowField.stepping(id) || race.drives(id)) continue;
       vehicle.settle(dt);
     }
 
@@ -1978,6 +2011,7 @@ async function boot(): Promise<void> {
     {
       const anchor = activeWorldAnchor();
       haulBays.tick(dt, anchor.x, anchor.z, activeS);
+      race.afterStep(dt);
     }
 
     // Recover only after Rapier has produced the escaped pose, before the
@@ -2174,7 +2208,8 @@ async function boot(): Promise<void> {
     // goes back to the chase.
     if (interacted.boarded) camera.setMode('cabin');
     // Working a machine up close nothing is written on the screen: the machine is the text.
-    prompt = machineFocus.working ? null : interacted.prompt;
+    // Stopped beside a race's rival, the offer is the prompt (race/director.ts).
+    prompt = machineFocus.working ? null : (race.prompt ?? interacted.prompt);
     actionable = !machineFocus.working && interacted.actionable;
     boot = interacted.boot;
     machineFocus.updateCursor();
@@ -2489,6 +2524,7 @@ async function boot(): Promise<void> {
     // Without this call the rigid body and hitch moved while the GLB stayed forever
     // at its constructor pose, leaving an invisible trailer attached to the car.
     trailerField.syncVisuals(alpha);
+    race.syncVisuals();
     // The bar is drawn from the two chassis' corrected poses, not from a snapshot of
     // its own, so it needs no interpolation and is placed after the cars moved.
     carTowField.syncVisuals();
@@ -2992,10 +3028,12 @@ async function boot(): Promise<void> {
         vehicle.root.position.z,
       );
     });
+    race.forEachDriven(hearRaceCar);
     audio.endTrafficFrame(frameDt);
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt, actionable);
+    hud.setRace(race.readout);
     trunkView.update(
       boot,
       boot ? (vehicles.get(boot.id) ?? null) : null,

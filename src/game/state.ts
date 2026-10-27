@@ -326,8 +326,20 @@ export interface HaulState {
  *  - 8: claw machines (`clawMachines`), and the sticker envelope is the sticker figurine
  *    (`StickerFigurineItem`): an envelope an older save holds loads as the figurine of
  *    its sticker.
+ *  - 9: races at the tracks (race/): each track's round (`raceRounds`) and the stake of
+ *    a race under way (`raceStake`), refunded when a save holding one is loaded.
  */
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
+
+/**
+ * The stake of a race under way (race/stake.ts): the shells taken out of the jar for it,
+ * by kind, in the order they were taken, and the track and round it was taken for.
+ */
+export interface RaceStake {
+  readonly postIndex: number;
+  readonly round: number;
+  readonly shells: readonly ShellKind[];
+}
 
 /**
  * A claw machine's own record (world/claw.ts), by its fixture id (`claw:<poi>`). Its heap
@@ -447,6 +459,18 @@ export interface WorldState {
   machineGrids: Record<string, (Item | null)[]>;
   /** What the player did to each claw machine (world/claw.ts), by its id. Absent: never tried. */
   clawMachines: Record<string, ClawMachineState>;
+  /**
+   * The round each post's race track is at (race/director.ts), by post index; absent,
+   * round 0. It moves on when a race of that round is decided, won, lost or forfeited:
+   * the next rival is drawn for the next round.
+   */
+  raceRounds: Record<string, number>;
+  /**
+   * The stake of the race under way, or null. A race is never saved: one found here on
+   * load was cut off mid-race, and its shells go back into the jar (race/stake.ts
+   * `refundStake`). Set and cleared only by `race_stake`, so it is paid back, or won, once.
+   */
+  raceStake: RaceStake | null;
 }
 
 export type WorldDelta =
@@ -578,7 +602,14 @@ export type WorldDelta =
       driveM?: number;
       spilled?: readonly ShellKind[];
       fined?: readonly ShellKind[];
-    };
+    }
+  /**
+   * The stake of a race taken (`stake` set, after the `shells` fine that took it) or
+   * settled (null: won, lost, forfeited or refunded; race/stake.ts).
+   */
+  | { t: 'race_stake'; stake: RaceStake | null }
+  /** Post `index`'s race track moves past round `round` (race/stake.ts `advanceRound`); idempotent. */
+  | { t: 'race_round'; index: number; round: number };
 
 /** Seconds in an in-game day. A 24-minute day makes night frequent but not tedious. */
 export const DAY_LENGTH = 24 * 60;
@@ -635,6 +666,8 @@ export function newWorldState(seed: number): WorldState {
     vendingSold: {},
     machineGrids: {},
     clawMachines: {},
+    raceRounds: {},
+    raceStake: null,
   };
 }
 
@@ -1165,6 +1198,14 @@ export class GameWorld {
         // Once: the schedule's origin is fixed for the rest of the game.
         if (s.weatherFromS === null) s.weatherFromS = delta.playedSeconds;
         break;
+      case 'race_stake':
+        s.raceStake = delta.stake;
+        break;
+      case 'race_round': {
+        const key = String(delta.index);
+        if ((s.raceRounds[key] ?? 0) === delta.round) s.raceRounds[key] = delta.round + 1;
+        break;
+      }
     }
 
     for (const listener of this.listeners) listener(delta);

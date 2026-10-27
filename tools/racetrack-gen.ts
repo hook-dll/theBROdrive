@@ -53,6 +53,7 @@ import { CHUNK_SPREAD_M, LANE_HALF_WIDTH_M, postHasTrack, RUNOFF_M, SKIRT_M } fr
 import type { RaceTrack } from '../src/world/racetrack/track';
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
+import { buildLapGround } from './racelapworld';
 
 class BunProgressEvent extends Event implements ProgressEvent {
   readonly lengthComputable: boolean;
@@ -366,35 +367,7 @@ for (const { seed, track } of rows.slice(0, LAP_TRACKS)) {
   const origin = new WorldOrigin();
   const grid = track.startGrid[0];
   origin.reset(grid.x, grid.z);
-  const ribbon = buildTrackRibbon(track, origin.x, origin.z);
-  addTrackRibbonColliders(lapPhysics, ribbon, true, [], []);
-  // The levelled desert either side, as the game's tiles draw it: the plane carried
-  // across the run-off, then flat sand.
-  for (const side of [-1, 1]) {
-    const columns = [track.halfWidth + 1.1, track.halfWidth + RUNOFF_M, track.halfWidth + RUNOFF_M + 20];
-    const rowsCount = Math.round(track.lengthM / 2);
-    const vertices = new Float32Array(rowsCount * columns.length * 3);
-    const point = { x: 0, y: 0, z: 0 };
-    for (let r = 0; r < rowsCount; r++) {
-      const s = (r * track.lengthM) / rowsCount;
-      columns.forEach((u, c) => {
-        const lateral = side * u;
-        const clamped = side * Math.min(u, track.halfWidth + RUNOFF_M);
-        track.offsetPoint(s, lateral, point);
-        vertices.set([point.x - origin.x, track.surfaceY(s, clamped) - 0.02, point.z - origin.z], (r * columns.length + c) * 3);
-      });
-    }
-    const indices: number[] = [];
-    for (let r = 0; r < rowsCount; r++) {
-      const next = (r + 1) % rowsCount;
-      for (let c = 0; c < columns.length - 1; c++) {
-        const a = r * columns.length + c;
-        const b = next * columns.length + c;
-        indices.push(a, b, a + 1, a + 1, b, b + 1);
-      }
-    }
-    lapPhysics.addStaticTrimesh(vertices, Uint32Array.from(indices), SurfaceType.Sand);
-  }
+  buildLapGround(lapPhysics, origin, track);
   const world = new GameWorld(newWorldState(seed));
   const state = createServiceableCarState('racer', MODEL_ID, grid.x, grid.y + 1.2, grid.z, grid.heading);
   world.state.cars[state.id] = state;

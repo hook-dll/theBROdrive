@@ -174,9 +174,10 @@ function drawCar(g: CanvasRenderingContext2D, x: number, ground: number, s: numb
 
 /**
  * The kind's pictogram, centred on (`cx`, `cy`), `size` tall: a car pulling a loaded
- * trailer, a car pulling a car on a bar, or one car with its key.
+ * trailer, a car pulling a car on a bar, or one car with its key. The race sign
+ * (race/visuals.ts) draws the trailer one for a trailer race.
  */
-function drawPictogram(g: CanvasRenderingContext2D, kind: ContractKind, cx: number, cy: number, size: number): void {
+export function drawPictogram(g: CanvasRenderingContext2D, kind: ContractKind, cx: number, cy: number, size: number): void {
   const ground = cy + size / 2;
   const car = size * 1.25;
   g.strokeStyle = BOARD_FG;

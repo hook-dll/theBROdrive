@@ -4,6 +4,7 @@ import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, ty
 import type {
   CarState,
   ClawMachineState,
+  RaceStake,
   HaulState,
   HeadlightMode,
   PlayerState,
@@ -17,7 +18,7 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
 import { carShells } from '../economy/economy';
-import { emptyPurse, JAR_CAPACITY, SHELL_KINDS, type ShellPurse } from '../economy/shells';
+import { emptyPurse, isShellKind, JAR_CAPACITY, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
 import {
   CAMERA_FRAME_LIMIT,
   isHaul,
@@ -30,6 +31,7 @@ import { isHaulThing, isThingId, thingDef } from '../items/things';
 import { isStickerKind, STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { isContractKind } from '../contracts/registry';
 import { isHaulLoadId } from '../contracts/world';
+import { isRaceId } from '../race/ids';
 import type { ContractKind, ContractProgress } from '../contracts/types';
 import {
   AIR_FILTER_CELL,
@@ -551,6 +553,8 @@ export function migrateState(raw: unknown): WorldState {
 
   const cars: Record<string, CarState> = {};
   for (const [id, value] of Object.entries(carsRaw)) {
+    // A race is never saved (race/director.ts): its rival comes back at its grid by itself.
+    if (isRaceId(id)) continue;
     cars[id] = migrateCar(asRecord(value, `car "${id}"`), version);
   }
   // The last driven car must still be out in the world: gone or boxed, it is forgotten.
@@ -588,6 +592,8 @@ export function migrateState(raw: unknown): WorldState {
 
   const trailers: Record<string, TrailerState> = {};
   for (const [id, value] of Object.entries(trailersRaw)) {
+    // A race's trailers go with it (the coupling on the player's car is the trailer's own field).
+    if (isRaceId(id)) continue;
     trailers[id] = migrateTrailer(asRecord(value, `trailer "${id}"`));
   }
 
@@ -666,6 +672,8 @@ export function migrateState(raw: unknown): WorldState {
     vendingSold: migrateVendingSold(obj.vendingSold),
     machineGrids,
     clawMachines: migrateClawMachines(obj.clawMachines),
+    raceRounds: migrateRounds(obj.raceRounds, 'raceRounds'),
+    raceStake: migrateRaceStake(obj.raceStake),
   };
 }
 
@@ -735,6 +743,22 @@ function migrateRounds(raw: unknown, field: string): Record<string, number> {
     if (/^\d+$/.test(index) && typeof round === 'number' && Number.isInteger(round) && round >= 0) out[index] = round;
   }
   return out;
+}
+
+/**
+ * The stake of a race cut off by the save (race/stake.ts), kept so the runtime can pay it
+ * back; anything malformed is dropped (its shells are not invented).
+ */
+function migrateRaceStake(raw: unknown): RaceStake | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  const { postIndex, round, shells } = obj;
+  if (typeof postIndex !== 'number' || !Number.isInteger(postIndex) || postIndex < 0) return null;
+  if (typeof round !== 'number' || !Number.isInteger(round) || round < 0) return null;
+  if (!Array.isArray(shells) || shells.length > JAR_CAPACITY) return null;
+  const kinds: ShellKind[] = [];
+  for (const kind of shells) if (isShellKind(kind)) kinds.push(kind);
+  return { postIndex, round, shells: kinds };
 }
 
 /**

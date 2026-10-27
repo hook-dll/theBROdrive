@@ -803,6 +803,75 @@ body.is-machine-focus .hud-crosshair {
   opacity: 0;
 }
 
+/* THE RACE (ui/hudrace.ts): a big countdown, a lap-and-place chip under the toasts, the
+   result across the middle. Pictures and numbers a small boy reads at a glance. */
+.hud-race {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud-race-count {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  font-size: min(22vmin, 180px);
+  font-weight: 900;
+  color: #ff3a2a;
+  text-shadow: 0 0 0.12em rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.02em;
+}
+
+.hud-race-count.is-go {
+  color: #3aff5a;
+}
+
+.hud-race-chip {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  background: var(--hud-panel);
+  color: var(--hud-fg);
+  border: 1px solid var(--hud-border);
+  padding: 6px 16px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.hud-race-place {
+  color: #c9c9c9;
+}
+
+.hud-race-place.is-first {
+  color: #ffd23a;
+}
+
+.hud-race-banner {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  transform: translate(-50%, -50%);
+  padding: 0.2em 0.7em;
+  background: var(--hud-panel);
+  border: 2px solid var(--hud-border);
+  color: var(--hud-fg);
+  font-size: min(11vmin, 88px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.hud-race-banner.is-won {
+  color: #ffd23a;
+  border-color: #ffd23a;
+}
+
 /* A touch screen: the panel hangs from the top (above), so the toasts stand under its
    pod and the carried slots go back down to the bottom edge. */
 @media (pointer: coarse) {

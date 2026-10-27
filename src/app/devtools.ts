@@ -50,6 +50,8 @@ import type { Vehicle } from '../vehicle/vehicle';
 import type { Hud } from '../ui/hud';
 import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
+import type { RaceDirector } from '../race/director';
+import type { Racer } from '../race/session';
 import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
 import { poisBetween } from '../world/poi';
@@ -128,6 +130,8 @@ export interface DevToolsContext {
   readonly traffic: RoadTraffic;
   readonly vitals: PlayerVitals;
   readonly autopilot: Autopilot;
+  /** The races at the tracks (race/director.ts), for `__bro.race`. */
+  readonly race: RaceDirector;
   readonly hud: Hud;
   /** The console kill shortcut drives the real death sequence through this. */
   beginDeathSequence(): void;
@@ -690,11 +694,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   /**
    * `jumpToTrack(n = 0)`: to the `n`th race track (world/racetrack/) from the post nearest
-   * the player on (0 is the nearest one at or past it), set down on the first grid slot
-   * facing the lap — in the driven car when there is one, on foot otherwise — and held
-   * there until the world under it has streamed, as `jumpTo` holds (poll `settled()`).
-   * Returns the track (its `id`, `lengthM`, `startGrid`, `road`…), or null when none lies
-   * within the next `DEV_TRACK_SEARCH_POSTS` posts.
+   * the player on (0 is the nearest one at or past it), set down in grid slot 2 facing the
+   * lap, beside the rival's slot — in the driven car when there is one, on foot otherwise —
+   * and held there until the world under it has streamed, as `jumpTo` holds (poll
+   * `settled()`). The rival is let stand in view this once. Returns the track (its `id`,
+   * `lengthM`, `startGrid`, `road`…), or null when none lies within the next
+   * `DEV_TRACK_SEARCH_POSTS` posts.
    */
   dev['jumpToTrack'] = (n = 0): RaceTrack | null => {
     const seed = ctx.world.seed;
@@ -704,7 +709,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       if (!postHasTrack(seed, post)) continue;
       const track = ctx.terrain.raceTracks.track(post);
       if (!track || skip-- > 0) continue;
-      const slot = track.startGrid[0];
+      const slot = track.startGrid[1];
+      ctx.race.devAllowSeenSpawn();
       const s = ctx.road.project(slot.x, slot.z, track.postS).s;
       const grid = { x: slot.x, y: slot.y, z: slot.z, heading: slot.heading };
       jumpHold = { s, frames: 0, stand: null, grid };
@@ -714,6 +720,17 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     }
     ctx.hud.setToast(`no race track in the next ${DEV_TRACK_SEARCH_POSTS} posts`);
     return null;
+  };
+  /**
+   * `race`: the races at the tracks (race/director.ts). `start()` races the waiting rival
+   * from wherever the driven car stands, with no stake; `finish('player' | 'rival')`
+   * decides the race on now (a win pays the prize only when a stake was taken); `state()`
+   * is the track, the rival, the stake and the race's laps and checkpoints.
+   */
+  dev['race'] = {
+    start: (): string => ctx.race.devStart(),
+    finish: (winner: Racer = 'player'): string => ctx.race.devFinish(winner),
+    state: (): Record<string, unknown> => ctx.race.devState(),
   };
   /** Drops `items` on the ground in a row in front of the player. */
   const dropInFront = (items: readonly Item[]): void => {
