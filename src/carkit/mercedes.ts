@@ -28,9 +28,10 @@ import type { KitBody } from './specs';
  * drawn hubs]. The face at s 0.06 behind the bumper (reach 0.06 [D x 21 / 31]); the
  * bonnet rising from its lip 0.78 to 0.986 at the cowl (s 1.341); the A pillar to the rail
  * at 1.893; the roof 1.43 from 2.47 to 3.17, falling into the back light from 3.48 to its
- * foot at 3.96 (1.035); the boot deck one plane from there to a crisp edge over the tail
- * (1.015), the lid down the tail face between the corner lamps. Sill 0.19, door
- * bottoms 0.22, belt 0.922 along the doors rising to 0.95 at the C pillar.
+ * foot at 3.96 (1.035); the boot deck one plane from there to its rear edge chamfered down
+ * to an upright face from 0.92, the lid down the tail face between the corner lamps, the
+ * wings' tops rounding over into it. Sill 0.19, door bottoms 0.22, belt 0.922 along the
+ * doors rising to 0.95 at the C pillar.
  */
 export const BODY_W124: KitBody = {
   length: 4.74, // [F MB archive 4740; the drawing's 4755]
@@ -60,27 +61,39 @@ export const BODY_W124: KitBody = {
     { s: 3.555, sill: 0.19, crease: 0.6, belt: 0.946, deck: 0.971, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     // rearBase: the back light's foot [D side (706, 156): 1.015; built 1.035, so the deck runs
     // straight from it without a ridge]; the sill behind the rear arch up to the bumper's foot.
-    { s: 3.96, sill: 0.26, crease: 0.6, belt: 0.985, deck: 1.035, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
-    // The boot deck: one plane from the back light's foot to a crisp edge over the tail,
-    // falling 2 cm [D side: 1.056 at 4.10 to 1.004 at 4.68; P S: 1.066 at 4.10 to 1.038 at
-    // 4.67; D2 side: level]: no station between, so no ridge across at the lid's front edge
-    // and no hump (owner, 2026-10-27: «что это за конструкция?»). The wing's top edge (the
-    // belt row) runs straight under it, the crown across easing from 3 cm at the glass to
-    // 1.5 at the tail (3 cm there folds the tail's top at the lid's cut), so the deck's
-    // sides run into the wings with no step. In plan the tail narrows straight from the
-    // back light's foot to the tail [D plan, 5.806 mm/px: ±0.868 at s 3.93, ±0.851 at 4.04,
-    // ±0.813 at 4.27, ±0.793 at 4.45, ±0.769 at 4.62, ±0.752 at 4.68, ±0.717 at 4.71]: the
-    // line from ±0.87 here to ±0.755 passes within 1 cm of every one, so no station between.
-    // Owner, 2026-10-27: the tail from above was a box with square corners («вряд ли корма
-    // мерседеса должна иметь такие углы»; it held ±0.82 to the tail).
-    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.015, wSill: 0.74, wCrease: 0.755, wBelt: 0.72 },
-    // The tail face [D side x 828–835: upright from the deck's edge 0.99 at s 4.70]: the
-    // lid's rear panel above the lamps (0.858 [D side y 183]) across, and down between them
-    // to their foot (0.655 [P R: the lid's foot just under the lamps']), its sides along the
-    // lamps' leaning inner edges [P carsized rear, 340 px/m across: the lamps ±0.472 at their
-    // foot to ±0.582 at their top, the lid's foot ±0.456]: cut at ±0.572 at the top, in by
-    // 0.112 to ±0.46 at the foot (`notchWall`).
-    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.86, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.7, wCrease: 0.715, wBelt: 0.68 },
+    // From here back the wing's top rounds over into the boot lid instead of a sharp belt
+    // under a flat ledge: the belt lower and further in, the shoulder (`shoulder`) a steep
+    // turn up to the deck's edge, which stays where the cabin's was (the C pillar's foot,
+    // ±0.755 at 1.005). The rear view's outline [P carsized rear, 340 px/m across, heights on
+    // the lamps (D): ±0.82 at 0.874, ±0.815 at 0.906, ±0.809 at 0.937, ±0.80 at 0.968, ±0.785
+    // at 1.0, ±0.765 at 1.031]; it was ±0.83–0.84 up to 0.985, then in by 7.5 cm in 2 cm: a
+    // square shoulder (owner, 2026-10-28: «слишком угловатый очень тяжелый зад»).
+    { s: 3.96, sill: 0.26, crease: 0.6, belt: 0.93, deck: 1.035, wSill: 0.85, wCrease: 0.87, wBelt: 0.835, shoulder: { inset: 0.08, rise: 0.075 } },
+    // The boot deck: one plane from the back light's foot to the lid's rear edge, falling 2
+    // cm [D side: 1.056 at 4.10 to 1.004 at 4.68; P S: 1.066 at 4.10 to 1.038 at 4.67; D2
+    // side: level]: the stations between lie on it, so no ridge across at the lid's front
+    // edge and no hump (owner, 2026-10-27: «что это за конструкция?»). In plan the tail
+    // narrows straight from the back light's foot [D plan, 5.806 mm/px: ±0.868 at s 3.93,
+    // ±0.851 at 4.04, ±0.813 at 4.27, ±0.793 at 4.45, ±0.769 at 4.62, ±0.752 at 4.68, ±0.717
+    // at 4.71]: the sill and crease rows on the line from ±0.87 here to ±0.755 at 4.68 (owner,
+    // 2026-10-27: «вряд ли корма мерседеса должна иметь такие углы»).
+    // The wing's rounded top falls 6 cm to the tail and comes in over the lamps: from behind
+    // the tail's top corners a quarter round from the lamps' outer top to the lid, not a
+    // square ear [P owner_rear, at the tail, 260 px/m on the lamps' height: the outline ±0.75
+    // at 0.885, ±0.73 at 0.925, ±0.69 at 0.965, ±0.645 at 0.995; P carsized side: the wing's
+    // top down round the corner to the lamp]. The lid's rear edge in one chamfer, 4.64 → 4.70
+    // [D side: rounded from s 4.656 at 1.012 to the upright face at 4.697, 0.922].
+    { s: 4.45, sill: 0.314, crease: 0.6, belt: 0.905, deck: 1.0214, wSill: 0.775, wCrease: 0.792, wBelt: 0.76, shoulder: { inset: 0.06, rise: 0.08 } },
+    { s: 4.64, sill: 0.336, crease: 0.6, belt: 0.9, deck: 1.0162, wSill: 0.746, wCrease: 0.761, wBelt: 0.73, shoulder: { inset: 0.07, rise: 0.075 } },
+    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.9, deck: 0.99, wSill: 0.74, wCrease: 0.755, wBelt: 0.725, shoulder: { inset: 0.085, rise: 0.06 } },
+    // The tail face [D side x 828–835: upright from 0.922 at s 4.697]: the lid's rear panel
+    // from there (the corners' top: belt + the shoulder's rise) down past the lamps' top
+    // (0.846 [D side y 185]) across, and down between them to their foot (0.655 [P R: the
+    // lid's foot just under the lamps']), its sides along the lamps' leaning inner edges [P
+    // carsized rear, 340 px/m across: the lamps ±0.472 at their foot to ±0.582 at their top,
+    // the lid's foot ±0.456]: cut at ±0.572 at the top, in by 0.112 to ±0.46 at the foot
+    // (`notchWall`).
+    { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.9, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.7, wCrease: 0.715, wBelt: 0.68 },
   ],
   // The side glass's foot ±0.765 over the skin's ±0.835 [D2 front: the glass ±0.735 at 1.05,
   // ±0.61 at the rail].
@@ -302,11 +315,20 @@ export const LOOK_W124: KitLook = {
     ],
   },
   rear: {
-    // Tone of body colour 0.25–0.584 [D side x 790–843], the black band 0.335–0.47 under the
-    // chrome line [P R: the line a quarter down the bumper, the band below to its foot];
-    // under the band drawn back to the tail face [P carsized side: 0.05 back at 0.40, 0.09
-    // at 0.35]; forward along the wings to the rear arch [D side x 715].
-    bumper: { kind: 'moulded', drop: 0.135, height: 0.334, finish: 'tone', moulding: { y: 0.4025, height: 0.135, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.15, wrapTo: 4.02, foot: { y: 0.335, back: 0.04 } },
+    // Tone of body colour, its top 0.584 [D side x 790–843: 0.578–0.584, the face upright to
+    // 0.339]; the chrome line 3 cm under its top and the black band from there to the face's
+    // foot, 0.35–0.54 [P R: the line 10 % down the bumper's face, the band's top 25 %; P
+    // owner_rear: the dark band as tall as the lamps; R34, R34r]; under the band turned
+    // back to the tail face (as far as the generator draws it back, 4.6 cm) and up to 0.29,
+    // so from behind no tone shows under the band [D side: the bottom line 0.25 runs forward
+    // under the face; P owner_rear, R: the band is the bumper's foot]; forward along the
+    // wings to the rear arch [D side x 715]. Owner, 2026-10-28: the chrome at 0.47 under 10
+    // cm of tone, and 8 cm of tone under the band, read as one tall slab («тяжелый зад»).
+    bumper: { kind: 'moulded', drop: 0.095, height: 0.294, finish: 'tone', moulding: { y: 0.445, height: 0.19, finish: 'black', edge: { finish: 'chrome', height: 0.01 } }, corner: 0.15, wrapTo: 4.02, foot: { y: 0.34, back: 0.08 } },
     items: [],
+    // The boot lid's lip: the upper lid stands over the plate panel, a dark line across the
+    // lid at the lamps' top from one lamp's inner corner to the other [P owner_rear, R,
+    // carsized rear: the shadow line over the plate from lamp to lamp, at their top].
+    lid: [{ kind: 'panel', x: { centre: 0.565 }, y: { from: ['belt', -0.051], to: ['belt', -0.043] }, finish: 'black', proud: 0.003 }],
   },
 };

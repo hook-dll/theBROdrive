@@ -21,12 +21,13 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124 } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_E34, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124 } from './interior';
 import { BODY_W124, LOOK_W124 } from './mercedes';
+import { BODY_E34, LOOK_E34 } from './bmw';
 import { BODY_1111, LOOK_1111 } from './oka';
 import { BODY_ASTRA_F, BODY_VECTRA_A, LOOK_ASTRA_F, LOOK_VECTRA_A } from './opel';
 import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK_21099, LOOK_2115 } from './samaras';
-import type { KitCarSpec, KitLook } from './spec';
+import type { EndLean, KitCarSpec, KitLook } from './spec';
 import { BODY_2110, BODY_2111, BODY_2112, LOOK_2110, LOOK_2111, LOOK_2112 } from './tens';
 import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
 import { BODY_GAZ24, BODY_GAZ31029, LOOK_GAZ24, LOOK_GAZ31029 } from './volgas';
@@ -134,8 +135,26 @@ const BODY_124: KitBody = {
   doorBottom: 0.29,
   bonnetFront: 0.17,
   bootEnd: 4.03,
+  // The tail panel leans out above the bumper (owner, 2026-10-27; measurements-classics.md
+  // "Nose and tail in profile"): the 2106 drawing's outline 4.055 at 0.505 → 4.105 at 0.79, the 2101's 3.983 at
+  // 0.51 → 4.016 at 0.73, the 2103's 4.013 at 0.51 → 4.05 at 0.75 [D: −0.14 to −0.17 m
+  // per m]; the 2101 and 2103 side photos −0.14 / −0.28 [P]. Above the rear fangs' top
+  // (0.51 on the 2106, the highest), the deck row 0.785 out 0.043.
+  rearLean: { base: 0.52, lean: -0.16, blend: 0.1 },
   flap: { s0: 3.2, s1: 3.31, y0: 0.66, y1: 0.76 },
 };
+
+// The 124 noses lean forward from the bumper's top (owner, 2026-10-27; measurements-
+// classics.md "Nose and tail in profile"), each face its own: the bonnet's lip ahead of the face's
+// foot. `base` between the front fangs' top and the grille's foot, in full to 0.067 behind
+// the face (the car's own frame), so the lamps, grille and indicators rooted in it lean
+// whole with it; faded out over 0.12 behind that, short of the front arch.
+/** 2101 (and 2102): the face 0.132 at 0.52 → 0.094 at 0.75 [D], −0.2 low down [P]: 4.5 cm at the deck row. */
+const NOSE_2101: EndLean = { base: 0.48, lean: -0.16, blend: 0.12, full: 0.17 };
+/** 2103: 0.071 at 0.52 → 0.005 at 0.71, the lip 0.016–0.022 [D]; −0.37 [P]: 6.5 cm at the deck row. */
+const NOSE_2103: EndLean = { base: 0.516, lean: -0.26, blend: 0.12, full: 0.195 };
+/** 2106: 0.086 at 0.505 → 0.018 at 0.72–0.75 [D]; −0.25 [P]: 6.9 cm at the deck row. */
+const NOSE_2106: EndLean = { base: 0.49, lean: -0.25, blend: 0.12, full: 0.215 };
 
 /**
  * The squared "05" shell of the 2105 and 2107, read off the dimensioned
@@ -279,7 +298,9 @@ const LOOK_2101: KitLook = {
         y: { from: ['mid', -0.1], to: ['mid', 0.125] },
         frame: { finish: 'chrome', margin: 0.012 },
         back: true,
-        bars: { dir: 'horizontal', count: 7, finish: 'chrome', margin: 0.015, width: 0.01, depth: 0.01, proud: 0.028 },
+        // Proud 0.031, 7 mm ahead of the dark back's front: at 0.028 the 4 mm step, tilted
+        // with the leaning face (`NOSE_2101`), fought the back's front far off (kit-zfight).
+        bars: { dir: 'horizontal', count: 7, finish: 'chrome', margin: 0.015, width: 0.01, depth: 0.01, proud: 0.031 },
       },
       { kind: 'round', role: 'head', x: { centre: 0.575 }, y: ['mid', 0.04], radius: 0.095 },
       // Half depth 0.0135 at proud 0.0065: the front stands 20 mm out as drawn and the back
@@ -535,15 +556,16 @@ const LOOK_2107: KitLook = {
 const VISOR_SAMARA = { half: 0.16, depth: 0.134 } as const;
 
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
-  vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), look: LOOK_2101, cabinLayout: CABIN_2101 },
+  vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), frontLean: NOSE_2101, look: LOOK_2101, cabinLayout: CABIN_2101 },
   // The estates' rear bench stands where the saloons' does, not off their longer tail.
   vaz2102: {
     id: 'vaz2102',
     ...onBody(BODY_2102, -0.045, 4.059),
+    frontLean: NOSE_2101,
     look: { ...LOOK_2101, label: 'VAZ-2102', rear: REAR_2102 },
     cabinLayout: { ...CABIN_2101, bench: { from: 'rearBase', offset: -1.155 } },
   },
-  vaz2103: { id: 'vaz2103', ...onBody(BODY_124, -0.02, 4.116), look: LOOK_2103, cabinLayout: CABIN_2103 },
+  vaz2103: { id: 'vaz2103', ...onBody(BODY_124, -0.02, 4.116), frontLean: NOSE_2103, look: LOOK_2103, cabinLayout: CABIN_2103 },
   vaz2104: {
     id: 'vaz2104',
     ...BODY_2104,
@@ -551,7 +573,7 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
     cabinLayout: { ...CABIN_2105, bench: { from: 'rearBase', offset: -1.115 } },
   },
   vaz2105: { id: 'vaz2105', ...BODY_05, look: LOOK_2105, cabinLayout: CABIN_2105 },
-  vaz2106: { id: 'vaz2106', ...BODY_124, look: LOOK_2106, cabinLayout: CABIN_2106 },
+  vaz2106: { id: 'vaz2106', ...BODY_124, frontLean: NOSE_2106, look: LOOK_2106, cabinLayout: CABIN_2106 },
   vaz2107: { id: 'vaz2107', ...onBody(BODY_05, 0.012, 4.145), look: LOOK_2107, cabinLayout: CABIN_2107 },
   vaz2108: { id: 'vaz2108', ...BODY_2108, look: LOOK_2108, cabinLayout: { visor: VISOR_SAMARA } },
   vaz2109: { id: 'vaz2109', ...BODY_2109, look: LOOK_2109, cabinLayout: { visor: VISOR_SAMARA } },
@@ -574,4 +596,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   astraf: { id: 'astraf', ...BODY_ASTRA_F, look: LOOK_ASTRA_F, cabinLayout: CABIN_ASTRA_F },
   vectraa: { id: 'vectraa', ...BODY_VECTRA_A, look: LOOK_VECTRA_A, cabinLayout: CABIN_VECTRA_A },
   w124: { id: 'w124', ...BODY_W124, look: LOOK_W124, cabinLayout: CABIN_W124 },
+  e34: { id: 'e34', ...BODY_E34, look: LOOK_E34, cabinLayout: CABIN_E34 },
 };

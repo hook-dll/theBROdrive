@@ -121,6 +121,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     case 'engine_opel_c20ne': return buildInline(b, spec, 1.05);
     // The W124's 2.3: a longitudinal four, a size up from the Family II.
     case 'engine_mercedes_m102_e23': return buildInline(b, spec, 1.1);
+    // The E34's 2.0 M50: a longitudinal six, a size longer than the W124's four.
+    case 'engine_bmw_m50b20': return buildInline(b, spec, 1.12);
     // The Volga 2.4: a tall, long-stroke four, so a taller block than the 1.6. The UAZ's
     // UMZ-4178 and the GAZ-31029's ZMZ-402 are the same block.
     case 'engine_zmz_21':
@@ -250,6 +252,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_opel_f16_wr_355': scale = 1.05; manual = true; fins = true; break;
     // The W124's longitudinal five-speed, the Volga's layout (no final drive in the case).
     case 'gearbox_mercedes_5speed_346': scale = 1.1; manual = true; fins = false; break;
+    // The E34's longitudinal ZF five-speed, the W124's layout.
+    case 'gearbox_zf_s5d310z_346': scale = 1.1; manual = true; fins = false; break;
     case 'gearbox_niva_4': scale = 1.2; manual = true; fins = false; break;
     case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;

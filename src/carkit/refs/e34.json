@@ -1,0 +1,59 @@
+{
+  "car": "e34",
+  "measurements": "measurements-e34.md",
+  "sources": {
+    "D": { "what": "the-blueprints.com vector drawing 620 'BMW 5-series sedan E34 (1993)' watermarked preview, 1280x906 (dimension lines 4720 / 2760 / 1750 / 1420), side, front, rear and plan; side 5.80 mm/px along from the drawn tips (x 28 / 842), 5.91 up from the ground (y 331)", "url": "https://www.the-blueprints.com/modules/vectordrawings/preview-wm/1990_bmw_5-series_e34.jpg", "image": "build/carshape/_refs/bp/img/e34_tbp_620.jpg" },
+    "F": { "what": "auto-data.net 'BMW 5 Series (E34) 520i 24V (150 Hp)'; ultimatespecs 'BMW E34 5 Series 520i'; s14.de/en/models/e34 (measurements-e34.md section 2)" },
+    "P": { "what": "Wikimedia Commons 'Bmw-e34-520i-20141208-bb-ur-mk-a-crop.jpg' (CC BY-SA 4.0, Abrim): white 520i, front right 3/4 (F34)", "url": "https://commons.wikimedia.org/wiki/File:Bmw-e34-520i-20141208-bb-ur-mk-a-crop.jpg", "image": "build/carshape/_refs/photos/e34/front34.jpg" },
+    "P2": { "what": "Wikimedia Commons 'Bmw-e34-520i-20141208-da-ur-mk-a-crop.jpg' (CC BY-SA 4.0, Abrim): the same car, rear left 3/4 (R34)", "url": "https://commons.wikimedia.org/wiki/File:Bmw-e34-520i-20141208-da-ur-mk-a-crop.jpg", "image": "build/carshape/_refs/photos/e34/rear34.jpg" },
+    "S": { "what": "Wikimedia Commons '1988-1989 BMW 520i (E34) Sedan (13-06-2018) 05.jpg' (CC0, Jirapat Chroenkeskij): near-orthographic right side, 1920x1440, registered on its hubs (476, 1547), 2.58 mm/px", "url": "https://commons.wikimedia.org/wiki/File:1988-1989_BMW_520i_(E34)_Sedan_(13-06-2018)_05.jpg", "image": "build/carshape/_refs/photos/e34/side.jpg" },
+    "DASH": { "what": "Wikimedia Commons '5-er e34 BMW PL.JPG' (CC BY 3.0, Beemwej), from the driver's door, a manual car, 1920x1275", "url": "https://commons.wikimedia.org/wiki/File:5-er_e34_BMW_PL.JPG", "image": "build/carshape/_refs/photos/e34/dash.jpg" }
+  },
+  "body": {
+    "length": { "v": 4.72, "src": "F 4720; D dimension line 4720" },
+    "width": { "v": 1.751, "src": "F 1751; D dimension line 1750" },
+    "height": { "v": 1.412, "src": "F 1412; D dimension line 1420" },
+    "wheelbase": { "v": 2.761, "src": "F 2761; D dimension line 2760" },
+    "overhangFront": { "v": 0.838, "src": "D side: the front tip x 28 to the drawn front hub x 172.5" },
+    "overhangRear": { "v": 1.1, "src": "D side: the drawn rear hub x 652 to the rear tip x 842" },
+    "archFront": { "v": [0.363, 0.34, 0.35], "src": "D side: the opening's top 0.68 over the ground (0.363 over the hub); its edges at the hub's height s 0.51 and 1.20 about the hub 0.848" },
+    "archRear": { "v": [0.323, 0.315, 0.385], "src": "D side: the opening's top 0.64 over the ground; its edges at the hub's height s 3.30 and 4.0 about the drawn hub 3.615" },
+    "screenFoot": { "v": [1.33, 0.925], "src": "D side: the cowl, where the screen's side meets the bonnet (258, 175)" },
+    "screenTop": { "v": [1.95, 1.34], "src": "D side: the screen's side meets the roof (364, 104)" },
+    "backLightTop": { "v": [3.45, 1.355], "src": "D side: the roof's rear end over the back light (622, 103)" },
+    "backLightFoot": { "v": [4.05, 1.0], "src": "D side: the back light's foot on the deck (726, 162)" },
+    "beltY": { "v": 0.98, "src": "D side: the side glass's foot y 165 along the front door" },
+    "railY": { "v": 1.317, "src": "D side: the front door glass's top y 108" },
+    "doorFront": { "v": [1.51, 2.5], "src": "D side, 10 cm under the belt: the front door's front edge x 288, the shut line between the doors x 459" },
+    "sideGlassBelt": { "v": [[1.47, 2.5], [2.645, 3.165], [3.2, 3.47]], "src": "D side at the belt: the front glass from the A pillar to the black B pillar x 459; the rear drop glass x 484 to the bar x 574; the quarter glass x 580 to its hooked rear edge x 626", "accepted": { "v": [[1.54, 2.496], [2.648, 3.164], [3.196, 3.424]], "why": "the front glass starts right behind the thin A pillar, read at the belt where the pillar's foot rises from the wing to the door (README working rules: no sail); the quarter's rear edge at the belt is its Hofmeister hook, which turns forward 4.5 cm over the belt" } },
+    "doorRear": { "v": [2.5, 3.48], "src": "D side, 10 cm under the belt: the shut line between the doors, the rear door's rear edge x 628" },
+    "doorBottomY": { "v": 0.245, "src": "D side: the doors' bottom line y 290 (0.243), the black sill strip under it" },
+    "mirror": { "v": [1.79, 1.0], "src": "D side: the head x 324-348 (s 1.72-1.86), y 162-186 (0.93-1.07)" },
+    "roofHalfWidth": { "v": 0.62, "src": "D rear: the outline at the rail's height (1.31-1.35) about the centre x 1055.5" },
+    "beltHalfWidth": { "v": 0.86, "src": "D front: the body's outline at 0.85-0.9 about the centre x 1055.5" },
+    "moulding": { "v": [0.475, 0.505], "src": "D side: the black rubbing strip along the doors" },
+    "bonnet": { "v": [0.07, 1.33], "src": "D side: the bonnet's lip over the lamps' band (x 40, y 203) to the cowl (258, 175)" },
+    "bootLid": { "v": [4.05, 4.665], "src": "D side: the back light's foot x 726 to the tail face x 832" }
+  },
+  "dash": {
+    "photo": { "src": "DASH", "view": "driver" },
+    "gauges": { "v": 4, "src": "DASH under the hood: the small fuel dial, the speedometer, the tachometer and the small temperature dial (measurements-e34.md section 4.5)" },
+    "dialRows": { "v": [4], "src": "DASH the four dials side by side, the small ones a little lower" },
+    "clusterAt": { "v": "wheel", "src": "DASH the hood behind the wheel" },
+    "clock": { "v": false, "src": "DASH no clock dial in the cluster" },
+    "wheelSpokes": { "v": 4, "src": "DASH four spokes round the airbag pad" },
+    "glovebox": { "v": "passenger", "src": "INT/DASH the lid on the passenger's side" },
+    "stack": { "v": true, "src": "DASH the centre stack turned towards the driver: vents, radio, heater knobs" },
+    "console": { "v": true, "src": "DASH the console to the gear lever" },
+    "vents": { "v": 4, "src": "DASH the driver's end vent, the centre pair and the passenger's end vent" }
+  },
+  "gaps": [
+    "sideGlassRail: the panes' ends at the rail not read separately",
+    "planHalfWidth: the plan view not read for this draft",
+    "dash wheelDiameter and the glovebox's far end: estimated, out of the photo"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/e34_tbp_620.jpg", "crop": [20, 85, 850, 335], "s": [28, 0.0058], "y": [331, 0.00591] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/e34_tbp_620.jpg", "crop": [890, 85, 1222, 335], "x": [1055.5, 0.00591], "y": [331, 0.00591] }
+  }
+}

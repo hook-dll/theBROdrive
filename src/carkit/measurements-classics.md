@@ -477,3 +477,52 @@ Arch openings `[top, ahead, behind]` over the hub (m), refs → built before →
 - **vaz2105**: front 0.345 / 0.3 / 0.355: 0.332 / open / 0.332 → 0.332 / 0.33 / 0.332; rear 0.285 / 0.36 / 0.37: 0.332 / 0.332 / 0.332 → 0.286 / 0.364 / 0.362. BODY_05: `rearArch` 1.265, `rearArchRise` 0.99.
 - **vaz2106**: front 0.36 / 0.32 / 0.35: 0.326 / 0.326 / 0.326 → 0.35 / 0.326 / 0.326; rear 0.29 / 0.32 / 0.385: 0.326 / 0.326 / 0.326 → 0.268 / 0.316 / 0.36. BODY_124 (as the 2101).
 - **vaz2107**: front 0.345 / 0.3 / 0.355: 0.332 / open / 0.332 → 0.332 / 0.33 / 0.332; rear 0.285 / 0.36 / 0.37: 0.332 / 0.332 / 0.332 → 0.286 / 0.364 / 0.362. BODY_05 (as the 2105).
+
+## Nose and tail in profile (owner, 2026-10-27)
+
+The owner: the classics' nose and tail faces stood upright in the kit; on the 2106 drawing
+the face leans forward about 6 cm over the 0.3 m above the bumper and the tail leans out
+about 3 cm at the top. Read on each side view's outline (the darkest pixel nearest the end,
+per row; scales and ground rows in §0) and on near-orthographic Commons side photos
+(heights from the ground under the tyres, the wheelbase as scale; the photos' heights read
+3–7 % high, so their leans are the check, the drawings' the numbers). `s` in each drawing's
+own frame (from its front bumper's tip), heights as drawn. Lean in m per m, negative =
+outwards (`EndLean`).
+
+| Car | Nose: the face's foot over the bumper | Foremost point | Lip | Tail: foot over the bumper | Rearmost | Deck edge |
+|---|---|---|---|---|---|---|
+| 2101 [D `vaz_2101.jpg`, x 516 = s 0] | s 0.132 at 0.522 (0.146 at 0.508, the bracket) | 0.094–0.099 at 0.62–0.75 (the lamp's rim 0.113 at 0.69) | rounds back from 0.76 (0.132 at 0.776) | 3.983 at 0.49–0.52 | 4.016–4.021 at 0.55–0.73 | 4.016 at 0.734, 3.97 at 0.762 |
+| 2101 [P `photos/vaz2101/side.jpg`, 261 px/m] | 3.4 cm behind the tip at 0.48, 2.3 at 0.50 | the tip at 0.64 | 1.5 cm back at 0.69, 4.2 at 0.71 | 3.1 cm in at 0.48, 2.7 at 0.50 | out at 0.64–0.69 (the lamp 2.7 further) | rounds in from 0.73 |
+| 2103 [D `vaz_2103.jpg`, x 779.5] | 0.071 at 0.521 | 0.005 at 0.714 | 0.016–0.022 at 0.74–0.77, 0.06 at 0.84 | 4.006–4.013 at 0.51–0.535 | the lamp's side 4.061 at 0.62–0.68 | 4.047–4.054 at 0.73–0.75 |
+| 2103 [P Commons "VAZ-2103 on a parking lot in Kraków (2).jpg", 464 px/m] | 6.0 cm behind the tip at 0.53 | the tip at 0.65–0.72 | 1.9 cm back at 0.74, 4.9 at 0.77 | 6.9 cm in at 0.55 | the tip at 0.81 | rounds in above 0.84 |
+| 2106 [D `vaz_2106.jpg`, x 557] | 0.086 at 0.505–0.52, 0.077 at 0.55, 0.064 at 0.63 | 0.018 at 0.72–0.75 | 0.023 at 0.80, 0.05 at 0.85, 0.164 at 0.90 | 4.055–4.06 at 0.505–0.53 | the lamp's side 4.119 at 0.67–0.71 | 4.105 at 0.79–0.82 |
+| 2106 [P Commons "Lada 2106 1500 1990 (15324610756).jpg", front 3/4 nearly side-on] | the wing's front corner x 90 at the bumper | x 63 under the lip, 110 px higher (≈ 515 px/m both ways at the nose: −0.25) | | | | |
+| 2105 [D `vaz_2105.jpg`, x 545] | 0.128 at 0.526, 0.08 at 0.57–0.63 | 0.047–0.057 at 0.64–0.80 | 0.047 at 0.80 | 4.035–4.054 at 0.50–0.51 | 4.092–4.102 at 0.60–0.80 | 4.092 at 0.80 |
+| 2105 [P `h_2105_03` = Commons "1980 Lada 2105 - 03.jpg", 832 px/m] | 4.2 cm behind the face at 0.50 | upright 0.64–0.74 | | 2.5 cm in at 0.52 | upright 0.62–0.72 | 0.9 cm in at 0.74 |
+| 2107 [D `vaz_2107_1982.jpg`, x 1383] | 0.122 at 0.539 (the lamp unit's chin), 0.093 at 0.58 | 0.040–0.048 at 0.70–0.81 | 0.045 at 0.81, 0.088 at 0.85 | 4.028 at 0.496, 4.044 at 0.52 | 4.084–4.094 at 0.60–0.78 | 4.089 at 0.776, 4.053 at 0.80 |
+| 2107 [P Commons "Lada 2107 on Józefa Ignacego Kraszewskiego street in Kraków (4).jpg", 472 px/m] | (the lamp band is dark against the wall) | the wing's corner upright 0.70–0.73 | rounds back above 0.76 | 1.3 cm in at 0.61 | upright 0.64–0.76 | rounds in above 0.79 |
+
+Leans above the bumper's top: **2101** −0.16 [D] / −0.2 low down [P]; **2103** −0.35 to the
+foremost point, −0.26 to the lip [D] / −0.37 [P]; **2106** −0.30 to the foremost point [D] /
+−0.25 [P] (the owner's ~6 cm over 0.3 m: −0.2); the **124 tail** −0.14 (2101) / −0.16 (2103)
+/ −0.17 (2106) [D], −0.14 (2101) / −0.28 (2103) [P]. The **05 shell** (2105, 2107 and the
+2104's nose) stands upright above 0.60–0.65 at both ends; only a chin 4–7 cm deep over the
+0.1–0.15 m above each bumper runs in to it [D, P]. Not a lean: kept upright (the chin would
+need the face stations moved, not `EndLean`).
+
+Spec (specs.ts):
+- `BODY_124.rearLean` { base 0.52 (over the 2106's rear fangs, 0.51, the highest of the
+  three), lean −0.16, blend 0.1 }: the 2106's deck row 4.075 → 4.113 at 0.76 (drawn 4.105).
+- `frontLean` per car (each face its own; `full` 0.067 behind the face so the lamps, grille
+  and indicators rooted in it lean whole; blend 0.12, short of the arch):
+  `NOSE_2101` (2101, 2102) { base 0.48 (over the fangs' 0.475, under the grille frame's
+  foot 0.483), lean −0.16, full 0.17 }: 0.103 → 0.060 at the deck row (drawn 0.132 → 0.094);
+  `NOSE_2103` { base 0.516 (over the fangs' 0.515), lean −0.26, full 0.195 }: 0.128 → 0.066;
+  `NOSE_2106` { base 0.49 (over the fangs' 0.486), lean −0.25, full 0.215 }: 0.148 → 0.081.
+- The 2101's grille bars proud 0.028 → 0.031: the 4 mm step to the dark back, tilted with
+  the face, was a far-band z-fight.
+- Kept: the 2103 and 2106 faces' feet stand 5–6 cm behind their drawings' (the shell's face
+  station is the 2101's), so their tops stay that far behind too; the 2103/2106 drawings'
+  bonnet lip also stands 6–8 cm higher than the 124 shell's. Not part of this complaint.
+- The estates' tails were measured with their tailgates (`measurements-estates.md`,
+  `rearLean` 0.25 on the 2102, 0.31 on the 2104) and are kept.

@@ -68,6 +68,12 @@ interface SweepPoint {
   readonly nz: number;
   /** How far the section reaches outward here, metres. */
   readonly depth: number;
+  /**
+   * The point's plan position at each height, where it is not upright: a flank bumper's
+   * points stopping on the wheel arch's edge (`wrapTo: 'arch'`). Absent: `x`, `z` at every
+   * height.
+   */
+  readonly at?: (y: number) => { readonly x: number; readonly z: number };
 }
 
 /**
@@ -77,7 +83,29 @@ interface SweepPoint {
 type SectionPoint = readonly [number, number, number?];
 
 function sweepPoint(p: SweepPoint, [o, y, a = 0]: SectionPoint): Vec3 {
-  return [p.x + p.nx * (o * p.depth + a), y, p.z + p.nz * (o * p.depth + a)];
+  const { x, z } = p.at ? p.at(y) : p;
+  return [x + p.nx * (o * p.depth + a), y, z + p.nz * (o * p.depth + a)];
+}
+
+/**
+ * Where the wheel arch at the `end` of the car (+1 the nose) meets height `y` on its side
+ * facing that end (`wrapTo: 'arch'`): upright at the arch's end below the hub, its centre
+ * over its top.
+ */
+function archEdgeS(frame: BodyFrame, end: 1 | -1, y: number): number {
+  const w = frame.spec.wheels;
+  const axle = end > 0 ? w.front : w.rear;
+  const centre = frame.archCentre(axle);
+  let near = centre - end * w.radius * frame.archFactor(axle) * (1 - 1e-9);
+  let far = centre;
+  if (y <= frame.archY(near)) return near;
+  if (y >= frame.archY(far)) return far;
+  for (let i = 0; i < 40; i++) {
+    const mid = (near + far) / 2;
+    if (frame.archY(mid) < y) near = mid;
+    else far = mid;
+  }
+  return (near + far) / 2;
 }
 
 /**
@@ -188,9 +216,22 @@ const BUMPER_HOLE_END = 0.015;
  * the wing and runs on to the wheel arch. `grow` and `depth` as in `bumperPath`. A small
  * corner is one chamfer from the flank, level with the end face, to the face: a mid
  * point there only bent it into facets, and a chamfer starting further along the flank
- * would let the body's corner poke through it.
+ * would let the body's corner poke through it. `arch` (`wrapTo: 'arch'`): the side's end
+ * at each height and the nearest to the corner it comes (at the bumper's foot); `wrapTo`
+ * is then the farthest, and every flank point beyond `near` stops on the end at heights
+ * where the end is short of it, so the side keeps the flank's bends to the arch.
  */
-function flankBumperPath(frame: BodyFrame, sEnd: number, end: 1 | -1, top: number, depth: number, grow: number, wrapTo: number, r: number): SweepPoint[] {
+function flankBumperPath(
+  frame: BodyFrame,
+  sEnd: number,
+  end: 1 | -1,
+  top: number,
+  depth: number,
+  grow: number,
+  wrapTo: number,
+  r: number,
+  arch?: { readonly endAt: (y: number) => number; readonly near: number },
+): SweepPoint[] {
   const z = frame.z(sEnd) - end * 0.01;
   const sideDepth = depth * 0.3;
   const round = r > BUMPER_CHAMFER;
@@ -203,7 +244,17 @@ function flankBumperPath(frame: BodyFrame, sEnd: number, end: 1 | -1, top: numbe
   const inner = frame.spec.stations.map((st) => st.s).filter((s) => s > Math.min(wrapTo, sCorner) + 0.01 && s < Math.max(wrapTo, sCorner) - 0.01);
   const along = [wrapTo, ...(wrapTo < sCorner ? inner : inner.reverse()), sCorner];
   const side = (sx: number): SweepPoint[] => [
-    ...along.map((s): SweepPoint => ({ x: sx * base(s), z: frame.z(s), nx: sx, nz: 0, depth: sideDepth })),
+    ...along.map((s): SweepPoint => {
+      const p = { x: sx * base(s), z: frame.z(s), nx: sx, nz: 0, depth: sideDepth };
+      if (!arch || end * (s - arch.near) <= 0) return p;
+      // Toward the corner of `s` and the end, whichever is nearer the corner, at each height.
+      const at = (y: number): { x: number; z: number } => {
+        const e = arch.endAt(y);
+        const sy = end > 0 ? Math.min(s, e) : Math.max(s, e);
+        return { x: sx * base(sy), z: frame.z(sy) };
+      };
+      return { ...p, at };
+    }),
     ...(round ? [{ x: sx * (halfCorner - r * 0.3), z: z - end * r * 0.1, nx: sx * 0.7071, nz: end * 0.7071, depth: depth * 0.75 }] : []),
     { x: sx * (halfCorner - r), z, nx: 0, nz: end, depth: depth * 0.95 },
   ];
@@ -419,9 +470,11 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
       const y = face.y(item.y);
       const r = item.radius * 1.18;
       return [1, -1].map((side) => {
-        // A chrome ring rooted in the face, 26 mm out of it (clear of a grille's front 24 mm
-        // out: the 2103's lamps stand on its grille), and the lens standing in it.
-        b.color(CHROME_TRIM).cylinderZ('chrome', [side * x, y, face.out((0.026 - FACE_ROOT) / 2)], r, (0.026 + FACE_ROOT) / 2, 12, face.frontCap);
+        // A ring rooted in the face, 26 mm out of it (clear of a grille's front 24 mm out:
+        // the 2103's lamps stand on its grille), and the lens standing in it. Chrome unless
+        // `ring` says otherwise (the E34's black rings in its black lamp band).
+        const rim = item.ring ? finishSlot(item.ring) : { slot: 'chrome' as const, color: CHROME_TRIM };
+        b.color(rim.color).cylinderZ(rim.slot, [side * x, y, face.out((0.026 - FACE_ROOT) / 2)], r, (0.026 + FACE_ROOT) / 2, 12, face.frontCap);
         b.cylinderZ(lampSlot(item.role, side), [side * x, y, face.out(0.024)], item.radius, 0.01, 12);
         const ring = Array.from({ length: 12 }, (_, i): P2 => [side * x + Math.cos((i / 12) * Math.PI * 2) * r, y + Math.sin((i / 12) * Math.PI * 2) * r]);
         return { poly: ring, z0: -FACE_ROOT, z1: 0.034 };
@@ -705,10 +758,12 @@ function bumperHoles(ctx: KitContext, path: readonly SweepPoint[], section: read
   const onFace = (p: SweepPoint): [number, number] | undefined => covered(p, () => end * (zFace - p.z));
   for (let i = 0; i + 1 < face.length; i++) along(face[i]!, face[i + 1]!, onFace, (p, y) => [p.x, y, zFace]);
   if (flankSteps === 0) return;
-  // Along the flanks: the skin at the path point's s, out from the path along x.
+  // Along the flanks: the skin at the path point's s, out from the path along x. Points that
+  // stop on an arch's edge low down (`at`) are left out: the side covers the skin there at
+  // some heights only, and the skin it lies on stays inside it.
   const skin = (p: SweepPoint, y: number): number => frame.sideX(frame.zNose - p.z, y);
   const onFlank = (p: SweepPoint): [number, number] | undefined => covered(p, (y) => skin(p, y) - Math.abs(p.x));
-  for (const run of [path.slice(0, flankSteps + 1), path.slice(-flankSteps - 1)]) {
+  for (const run of [path.slice(0, flankSteps + 1), path.slice(-flankSteps - 1)].map((r) => r.filter((p) => !p.at))) {
     for (let i = 0; i + 1 < run.length; i++) along(run[i]!, run[i + 1]!, onFlank, (p, y) => [Math.sign(p.x) * skin(p, y), y, p.z]);
   }
 }
@@ -820,11 +875,15 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       const depth = reach + 0.01;
       // As wide as the face at its widest, which on a leaning nose is low down.
       const half = Math.min(Math.max(sec.r1[0], sec.r2[0]) + 0.03, widest - depth * 0.35);
-      const wrapTo = bumper.wrapTo;
+      // `wrapTo: 'arch'`: the sides' ends on the arch's edge at every height, nearest the
+      // corner at the bumper's foot and farthest at its top (the edge turns in to the arch's
+      // top as it climbs).
+      const arch = bumper.wrapTo === 'arch' ? { endAt: (y: number): number => archEdgeS(frame, end, y), near: archEdgeS(frame, end, y0) } : undefined;
+      const wrapTo = bumper.wrapTo === 'arch' ? archEdgeS(frame, end, y1) : bumper.wrapTo;
       const corner = bumper.corner ?? 0.09;
       const path = wrapTo === undefined
         ? bumperPath(half, zFace - end * 0.01, end, depth, 0, 0.2, bumper.corner)
-        : flankBumperPath(frame, sEnd, end, y1, depth, 0, wrapTo, corner);
+        : flankBumperPath(frame, sEnd, end, y1, depth, 0, wrapTo, corner, arch);
       const shell = bumper.finish ? finishSlot(bumper.finish) : { slot: 'trim' as const, color: 0x232427 };
       // A flush bumper's top starts inside the body's skin and rounds out to its face in
       // its top 60 mm, so it grows out of the end face and the flanks with no ledge.
@@ -845,7 +904,12 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
       const band = bumper.moulding
         ? { ...finishSlot(bumper.moulding.finish), y: bumper.moulding.y, h: bumper.moulding.height / 2 }
         : { ...(bumper.finish ? shell : { slot: 'trim' as const, color: 0x34363a }), y: y0 + 0.11, h: 0.012 };
-      const along = shortened(path, 0.01);
+      // Upright where the side's points stop on the arch (`at`): the band ends on the edge at
+      // its own height, points that meet there merged.
+      const atBand = path
+        .map((p): SweepPoint => (p.at ? { ...p.at(band.y), nx: p.nx, nz: p.nz, depth: p.depth } : p))
+        .filter((p, i, all) => i === 0 || Math.hypot(p.x - all[i - 1]!.x, p.z - all[i - 1]!.z) > 1e-6);
+      const along = shortened(atBand, 0.01);
       const ridge = new PartBuilder().color(band.color);
       // A bright edge along the band's top (`moulding.edge`): one solid with the band, so
       // neither has a face where they meet.
@@ -1299,14 +1363,26 @@ function buildDoorHardware(ctx: KitContext): void {
     // up to the head's centre, an arm out and back from its top into the head's ball.
     const ms = spec.look.mirrorS ?? spec.cabin.columns[1]!.s + 0.08;
     const belt = frame.station(ms).belt;
-    const my = belt + 0.06 + (spec.look.mirrorHeightOffset ?? 0);
+    const base = spec.look.mirrorMount === 'base';
+    const my = belt + (base ? 0.07 : 0.06) + (spec.look.mirrorHeightOffset ?? 0);
     const mx = frame.sideX(ms, belt);
     const stalk = spec.look.mirrorStalk;
+    const [headX, headY] = spec.look.mirrorHead ?? [0.06, 0.045];
     const hx = side * (mx + (spec.look.mirrorReach ?? 0.1));
-    const hy = my + 0.02 + (stalk ?? 0);
+    const hy = my + (base ? 0 : 0.02) + (stalk ?? 0);
     const hz = frame.z(stalk === undefined ? ms : ms + 0.035);
     const m = new PartBuilder().color(mirrorFinish.color);
-    if (stalk === undefined) {
+    if (base) {
+      // A black base on the door's skin at the glass's front foot, straddling the belt,
+      // sunk 12 mm into the panel, and a short thick neck from it straight out into the
+      // head beside the glass: no arm (the E34's, owner 2026-10-27).
+      const mountX = skinX(frame, ms, belt - 0.02);
+      const black = finishSlot('black');
+      m.color(black.color).box(black.slot, [side * (mountX + 0.008), belt + 0.015, hz], [0.02, 0.05, 0.05]);
+      const nx0 = mountX + 0.02;
+      const nx1 = Math.abs(hx);
+      m.color(mirrorFinish.color).box(mirrorFinish.slot, [side * (nx0 + nx1) / 2, hy - 0.01, hz], [(nx1 - nx0) / 2 + 0.01, 0.022, 0.03]);
+    } else if (stalk === undefined) {
       // The short arm must start on the actual body surface. `frame.sideX(ms, belt)` is
       // the belt edge, but the shoulder turns in above it; using that point left some
       // mirrors visibly floating on tapered doors. Probe the side skin 2 cm under the belt
@@ -1360,15 +1436,16 @@ function buildDoorHardware(ctx: KitContext): void {
     holder.add(ball);
     ball.position.set(centre[0] - door.pivot[0], centre[1] - door.pivot[1], centre[2] - door.pivot[2]);
     pane.position.set(0, 0, 0);
-    h.bevelBox(mirrorFinish.slot, [0, 0, 0], [0.06, 0.045, 0.025], 0.015);
+    h.bevelBox(mirrorFinish.slot, [0, 0, 0], [headX, headY, 0.025], 0.015);
     // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
-    h.cut([{ poly: ([[-0.05, -0.035], [0.05, -0.035], [0.05, 0.035], [-0.05, 0.035]] as const).map(([gx, gy]): Vec3 => {
-      const p = new THREE.Vector3(gx, gy, -0.025).applyMatrix4(h.matrix);
+    const [gx, gy] = [headX - 0.01, headY - 0.01];
+    h.cut([{ poly: ([[-gx, -gy], [gx, -gy], [gx, gy], [-gx, gy]] as const).map(([px, py]): Vec3 => {
+      const p = new THREE.Vector3(px, py, -0.025).applyMatrix4(h.matrix);
       return [p.x, p.y, p.z];
     }), reach: 0.0005 }]);
-    h.color(0x7a8a96).box('chrome', [0, 0, -0.026], [0.05, 0.035, 0.002], 0b101111);
+    h.color(0x7a8a96).box('chrome', [0, 0, -0.026], [gx, gy, 0.002], 0b101111);
     // The live face 1.5 mm proud of the glass.
-    addMirrorFace(pane, h.matrix, centre, [0.05, 0.035], -0.0295, mirror);
+    addMirrorFace(pane, h.matrix, centre, [gx, gy], -0.0295, mirror);
     h.pop();
     addBuilt(pane, h, centre, 'mirrors');
     holder.traverse((node) => {

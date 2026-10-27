@@ -156,6 +156,15 @@ export const BODY_GAZ24: KitBody = {
   doorBottom: 0.31,
   bonnetFront: 0.09,
   bootEnd: 4.55,
+  // Both ends a shallow chevron in profile (owner, 2026-10-27; measurements-volga.md §5):
+  // the wings' tips at the crease row are the foremost and rearmost points, the face under
+  // them runs in to the bumper's top and the lip over them rounds in. Nose [D: tip x 512.5
+  // at 0.785, the face's foot x 521 at 0.60, the lip x 527 at 0.945]: out 0.043 at the
+  // crease, the lip back to s 0.096. Tail [D: tip x 1424 at 0.773, foot x 1415 at 0.556,
+  // the deck's edge x 1412.5 at 0.862]: out 0.031 at the crease, the top in to s 4.606,
+  // in full at the tail face and faded out by the lid's trailing edge (4.55).
+  frontLean: { base: 0.56, lean: -0.19, blend: 0.16, peak: { y: 0.78, lean: 0.45 } },
+  rearLean: { base: 0.55, lean: -0.14, blend: 0.087, full: 4.637, peak: { y: 0.77, lean: 0.65 } },
   // An oval flap high on the left rear wing [D: x 1345–1390, y 190–217; P "GAZ-24 (1st
   // generation) Volga (side view)": s 4.45, 0.63].
   flap: { s0: 4.264, s1: 4.494, y0: 0.597, y1: 0.734, side: 'left' },
@@ -237,7 +246,9 @@ export const LOOK_GAZ24: KitLook = {
         y: { from: ['deck', -0.125], to: ['deck', -0.055] },
         frame: { finish: 'chrome', margin: 0.008 },
         back: false,
-        bars: { dir: 'horizontal', count: 3, finish: 'chrome', margin: 0.01, width: 0.008, depth: 0.006, proud: 0.012 },
+        // 15 mm proud: the ribs' backs 9 mm off the face, 7.5 mm square to it under the
+        // tail's lean over the crease (at 12 mm they stood 5 mm off: kit-zfight).
+        bars: { dir: 'horizontal', count: 3, finish: 'chrome', margin: 0.01, width: 0.008, depth: 0.006, proud: 0.015 },
       },
       // The tall lamps on the corners [D rear view: ±0.72..0.82, 0.607–0.837; P tail
       // light: red over amber over the white reversing cell, the red half its height: here
@@ -268,6 +279,9 @@ const MIDDLE_24_IN_31029: TubStation[] = shift(BODY_GAZ24.stations.slice(2, 4), 
 export const BODY_GAZ31029: KitBody = {
   ...BODY_GAZ24,
   length: 4.885,
+  // Its own square nose and tail stand upright: none of the 24's chevrons.
+  frontLean: undefined,
+  rearLean: undefined,
   stations: [
     // The face [D side view: x 15–25; front view: lamps 0.577–0.77, the lip 0.86].
     // The bonnet's centre line is the drawing's (lip 0.86, 0.947 at s 0.54, 1.07 at the

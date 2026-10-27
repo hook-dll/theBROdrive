@@ -60,6 +60,12 @@ export interface TubStation {
    * Changes no geometry: tools/kit-surface.ts does not flag the turn here as a dent.
    */
   readonly corner?: true;
+  /**
+   * This station's shoulder instead of the car's `shoulder` (moving linearly to the
+   * neighbours' own or the car's): a steeper turn from the belt to the deck's edge where a
+   * wing's top rounds over into the boot lid (the W124's tail corners). Absent: the car's.
+   */
+  readonly shoulder?: { readonly inset: number; readonly rise: number };
 }
 
 /** Who owns one strip of the greenhouse side, between a column and the next. */
@@ -261,6 +267,11 @@ export interface WheelSpec {
    */
   readonly archSquare?: number;
   /**
+   * The rear arch's superellipse power where it differs from `archSquare` (the Oka's rear
+   * arch, flat-topped over a round front one). Absent: `archSquare`.
+   */
+  readonly rearArchSquare?: number;
+  /**
    * Where each arch is centred off its hub, front and rear (negative ahead): an arch
    * reaching further ahead of the wheel than behind it. Absent: on the hubs.
    */
@@ -277,6 +288,24 @@ export interface WheelSpec {
    * edge as `archY` gives it, the well's wall fanned down to the sill or the hub.
    */
   readonly archToSill?: boolean;
+}
+
+/**
+ * One end of the car leaning (`rearLean`, `frontLean`): above `base` every point moves
+ * towards the car's middle by `lean` m per m of height (negative: outwards). `peak` bends
+ * the end once more: above `peak.y` the offset goes on from the value reached there at
+ * `peak.lean` per metre — a nose or tail whose foremost (rearmost) point is a crease, the
+ * face below it and the lip above both running in (GAZ-24: `lean` < 0, `peak.lean` > 0),
+ * or a shark nose. Every part is cut at `peak.y`, so nothing spans the bend. `full`: the
+ * s from which outwards the lean is in full (front default `bonnetFront`, rear default
+ * the rear base, the cabin's last column).
+ */
+export interface EndLean {
+  readonly base: number;
+  readonly lean: number;
+  readonly blend: number;
+  readonly full?: number;
+  readonly peak?: { readonly y: number; readonly lean: number };
 }
 
 /** Everything the builder needs for one car. */
@@ -313,6 +342,11 @@ export interface KitCarSpec {
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
   /**
+   * `false`: no fuel tank standing on the boot's right shelf (a classic-platform saloon
+   * whose tank lies under the floor, the E34's). Absent: the classic's tank in the boot.
+   */
+  readonly bootTank?: false;
+  /**
    * A tailgate hinged upright at its left or right edge (a rear door, the UAZ-469's on its
    * right), opening sideways; `'split'`: two leaves cut on the centre line, each hinged at
    * its outer edge (`tailgate_l`, `tailgate_r`: the UAZ-2206's rear doors). Absent: hinged
@@ -322,16 +356,18 @@ export interface KitCarSpec {
   /**
    * The back leaning forward as one plane above `base` (m per m of height), blended in
    * over `blend` metres ahead of the rear base: an estate whose lamps lie on the slope.
+   * `peak` bends it once more (see `EndLean`).
    */
-  readonly rearLean?: { readonly base: number; readonly lean: number; readonly blend: number };
+  readonly rearLean?: EndLean;
   /**
    * The front face leaning back as one plane above `base` (m per m of height), in full
    * ahead of `full` (default the bonnet's front edge) and blended out over `blend` metres
    * behind it: a nose whose lamps and face rake back from the bumper to the bonnet's lip
    * (the Samaras', the tens'). Corner lamps must lie where it is in full, so they lean
    * with the body's faces exactly; `base` on a row of the face (its crease) for the same.
+   * `peak` bends it once more (see `EndLean`).
    */
-  readonly frontLean?: { readonly base: number; readonly lean: number; readonly blend: number; readonly full?: number };
+  readonly frontLean?: EndLean;
   /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
   readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
   readonly look: KitLook;
@@ -379,6 +415,14 @@ export interface KitLook {
    * door's skin under the belt at its front edge (the UAZ-469). Absent: the short arm.
    */
   readonly mirrorStalk?: number;
+  /**
+   * `'base'`: the head on a short thick neck straight out of a black base on the door's
+   * skin at the glass's front foot, straddling the belt, the head's centre 7 cm over the
+   * belt (the E34's). Absent: the short arm (or `mirrorStalk`).
+   */
+  readonly mirrorMount?: 'base';
+  /** The head's half width and half height, when measured. Absent: 0.06 × 0.045. */
+  readonly mirrorHead?: readonly [number, number];
   /**
    * Centre s of the door mirrors' heads, when measured: on a black sail at the side
    * glass's front foot (the Espero, the Opels), so the driver sees them through the glass.
@@ -593,9 +637,11 @@ export type BumperLook =
       /**
        * Its sides follow the flanks back to this `s` (car frame), flush with the body, its
        * bottom in one line with the sill behind (the 2110's front bumper, running back to
-       * the wheel arch). Absent: a short wrap standing off the corner.
+       * the wheel arch). `'arch'`: back to the wheel arch's edge at every height, so its
+       * end is the arch's front (rear) edge (the Oka's plastic bumpers). Absent: a short
+       * wrap standing off the corner.
        */
-      readonly wrapTo?: number;
+      readonly wrapTo?: number | 'arch';
       /**
        * Its face upright down to height `y`, then straight back by `back` m to its bottom
        * edge (the W124's apron under its band), at most to the end face. Absent: the
@@ -648,8 +694,8 @@ export type FaceItem =
    * line, or a pair of blocks (one each side) when `x` is a span.
    */
   | { readonly kind: 'panel'; readonly x: FaceX | Span<FaceX>; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
-  /** A round lamp in a chrome ring. */
-  | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number }
+  /** A round lamp in a ring: chrome, or `ring` (the E34's black rings). */
+  | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number; readonly ring?: Finish }
   /**
    * A lens, rectangular unless `slant`: how far its top edge's outer and inner ends stand
    * inboard of the bottom's (a trapezoid, or a parallelogram when both move; negative

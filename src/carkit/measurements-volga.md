@@ -275,3 +275,36 @@ Arch openings `[top, ahead, behind]` over the hub (m), refs → built before →
 
 - **gaz24**: front 0.38 / 0.35 / 0.47: 0.416 / 0.414 / 0.408 → 0.38 / 0.37 / 0.47; rear 0.33 / 0.39 / 0.45: 0.338 / 0.348 / 0.35 → 0.33 / 0.39 / 0.45. `arch` 1.17 → 1.186, `frontArchRise` 1.073, `rearArch` 1.0 → 1.186, `rearArchRise` 0.95 → 0.932, `archShift` [0.05, 0.03] (front ahead held 0.37, clear of the 0.354 tyre).
 - **gaz31029**: front 0.39 / 0.38 / 0.43: 0.392 / 0.392 / 0.392 → 0.39 / 0.376 / 0.426; rear 0.28 / 0.41 / 0.43: 0.3 / 0.342 / 0.346 → 0.28 / 0.404 / 0.43. `arch` 1.22 → 1.262, `frontArchRise` 1.215, `rearArch` 1.08 → 1.308, `rearArchRise` 0.93 → 0.872, `archShift` [0.025, 0.01]; the rear bench's base 3 cm inside the wells (`CABIN_GAZ31029.bench.clear` 0.03: the longer rear covers now stand beside it, kit-zfight).
+
+## 5. Nose and tail in profile (owner, 2026-10-27)
+
+The owner: both ends are a shallow chevron in side view ("сразу два излома"), not upright
+faces. Sources: the drawing's side view [D] (s = 0.016 + (x − 512) × 0.0051, heights from
+ground y 334 at 5.10 mm/px) and the owner's photo [P `build/carshape/_refs/photos/gaz24/drom_586963.jpg`,
+960 × 540, near-orthographic left side]: hubs (313.75, 310.75) / (725.5, 318.75), 411.8 px
+for the 2800 wheelbase → 6.80 mm/px; heights from each end's own hub at 0.354 (the photo's
+tyres read ~0.32, so its heights stand ~3–4 cm high: the drawing's heights are used, the
+photo's offsets confirm the leans).
+
+| Point | [D] x, y → s, height | [P] x, y → offset, height |
+|---|---|---|
+| Nose: the wings' tip (foremost) | 512.5, 180 → 0.019, 0.785 | 824.4, 250 → 0, 0.822 |
+| Nose: the face's foot over the bumper | 521, 214 → 0.062, 0.61 | 818.75, 272.5 → 0.038 back, 0.669 |
+| Nose: the bonnet's lip | 527, 150 → 0.093, 0.94 | 815, 235 → 0.064 back, 0.924 |
+| Tail: the lamp fin's tip (rearmost) | 1424, 182.5 → 4.668, 0.773 | 142.5, 242.5 → 0, 0.818 |
+| Tail: the face's foot over the bumper | 1415, 225 → 4.622, 0.556 | 149.4, 265 → 0.047 in, 0.664 |
+| Tail: the deck's edge | 1412.5, 165 → 4.609, 0.862 | 155, 223.75 → 0.085 in, 0.946 |
+
+Leans (m per m of height, + towards the middle): nose under the tip −0.23 [D] / −0.25 [P],
+over it +0.43 [D] / +0.64 [P, the lip's rounding]; tail under the tip −0.14 [D] / −0.30 [P],
+over it +0.65 [D] / +0.66 [P].
+
+Spec (`BODY_GAZ24`, `EndLean.peak`): `frontLean` { base 0.56 (over the bumper's 0.545 and
+under the indicators' 0.563), lean −0.19, blend 0.16, peak { y 0.78 (the crease row), lean
+0.45 } }: the face station (0.067) out to 0.024 at the crease, its top back to 0.096 [D
+0.019 / 0.093]. `rearLean` { base 0.55, lean −0.14, blend 0.087, full 4.637 (the tail face),
+peak { y 0.77 (the crease row), lean 0.65 } }: out to 4.668 at the crease, the top in to
+4.606, nothing moved at the lid's trailing edge (4.55) [D 4.668 / 4.609]. The head lamps,
+grille, tail lamps and ribbed band lie on the faces and bend with them at the crease. The
+ribbed band's ribs 15 mm proud (12 → 15): under the tail's 0.65 lean their backs stood
+5 mm off the face (kit-zfight, far). The GAZ-31029 keeps its upright ends.

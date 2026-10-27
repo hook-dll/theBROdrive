@@ -789,7 +789,9 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   b.color(COLOURS.black);
   b.quad('trim', at(frame, matIn, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s0 + 0.03), at(frame, inner - 0.03, floor + 0.004, s1 - 0.03), at(frame, matIn, floor + 0.004, s1 - 0.03));
 
-  // Fuel tank on the right wing's shelf over the arch, its neck out to the filler.
+  // Fuel tank on the right wing's shelf over the arch, its neck out to the filler; none on
+  // a car whose tank lies under the floor (`bootTank: false`, the E34's).
+  if (spec.bootTank === false) return;
   const t0 = s0 + 0.03;
   const t1 = Math.min(s1 - 0.05, s0 + 0.45);
   let edge = Infinity;

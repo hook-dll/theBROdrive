@@ -191,6 +191,7 @@ const CAR_RANK: Readonly<Record<string, number>> = {
   kit_astraf: 1250,
   kit_vectraa: 1310,
   kit_espero: 1380,
+  kit_e34: 1420,
   kit_w124: 1450,
   kit_uaz2206: 1500,
 };

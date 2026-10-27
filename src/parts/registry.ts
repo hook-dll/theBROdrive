@@ -1437,9 +1437,56 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
       cylinders: 4,
     },
   },
+  {
+    // BMW M50B20, the E34 520i 24V's (1990-92; 80 x 66 mm, 1.991 l, DOHC 24 valves, cast-iron
+    // block, CR 10.5): 110 kW (150 PS) at 5900 and 190 Nm at 4700 (ultimatespecs "BMW E34 5
+    // Series 520i"; auto-data.net "520i 24V (150 Hp)" prints the torque at 4200; en.wikipedia
+    // "BMW M50" the bore, stroke and CR). Red line [E] 6500: rated + 10 %, a short-stroke
+    // 24-valve six (no factory figure found). Idle [E] 750. Mass [E] 175: an iron six, the
+    // M30B30 (186) a litre smaller and with an alloy 24-valve head.
+    id: 'engine_bmw_m50b20',
+    kind: 'engine',
+    label: '2.0 BMW M50 straight six',
+    mass: 175,
+    fits: ['car'],
+    engine: {
+      peakPowerKw: 110,
+      powerPeakRpm: 5900,
+      peakTorqueNm: 190,
+      torquePeakRpm: 4700,
+      redlineRpm: 6500,
+      idleRpm: 750,
+      bsfc: 0.3,
+      brakingCoeff: 0.0203,
+      cylinders: 6,
+    },
+  },
 ];
 
 const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
+  {
+    // The E34 520i 24V's five-speed: ZF S5D 310Z, the European M50 cars' box (en.wikipedia
+    // "BMW 5 Series (E34)", realoem "E34 525i Manual gearbox S5D...Z"; s14.de/en/models/e34
+    // names it for the M50 520i and 525i): 4.21 / 2.49 / 1.67 / 1.24 / 1.00, R 3.85 (en.
+    // wikipedia "ZF S5-31 transmission", BMW's S5D 310Z), on the 3.46 final drive (carfolio
+    // "1990 BMW 520i 24v" 55913; forum.bmw5.co.uk "Gear and diff ratios for a 520(M50)").
+    // Carfolio's other 520i 24v page (31141) prints an overdrive 0.81 on 4.27: the same
+    // overall top gear (3.46), the 211 km/h at 6100 rpm on 195/65 R15 either way. Rear drive
+    // through a prop shaft and a hypoid axle: the 0.90 band. Mass 39 kg (en.wikipedia).
+    id: 'gearbox_zf_s5d310z_346',
+    kind: 'gearbox',
+    label: 'ZF S5D 310Z five-speed (3.46)',
+    mass: 39,
+    fits: ['car'],
+    gearbox: {
+      ratios: [4.21, 2.49, 1.67, 1.24, 1.0],
+      reverse: 3.85,
+      finalDrive: 3.46,
+      shiftTime: 0.36,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
   {
     // The W124 230 E's optional five-speed manual: 3.91 / 2.17 / 1.37 / 1.00 / 0.81, R 4.27,
     // on the 3.46 final drive (MB archive "230 E" 1989-1992; the standard four-speed's

@@ -145,6 +145,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
 | `mercedes.ts` | The Mercedes-Benz W124 230 E saloon (1989–92 facelift): `BODY_W124` / `LOOK_W124` (platform `classic`, rear drive). Draft, awaiting the owner. |
+| `bmw.ts` | The BMW 520i (E34) saloon, 1990–95: `BODY_E34` / `LOOK_E34` (platform `classic`, rear drive). Draft, awaiting the owner. |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `refs/<car>.json` | The real car's numbers, machine-readable, each with its source: body positions from the drawing and photos, the dash from interior photos, the drawing's pixel registration for the overlays ([Reference files](#reference-files-refscarjson)). `tools/kit-drawing.ts` holds the built car to them. |
 | `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
@@ -291,8 +292,9 @@ author.
 | `bonnetFront` | `s` where the bonnet starts; it runs to the cowl. |
 | `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
 | `bootEnd` | `s` where a boot lid ends (it runs from the back light's foot). **Absent = a tailgate** hinged at the roof. Equal to the last station's `s` with a `notch` there, the lid comes down the tail face (2115, 2110): its top turns down to a line across at the corners' top and its rear panel lies in the tail face between the corner lamps (`BodyFrame.lidFace`). A tailgate does the same when the last station carries a `notch` (the Oka's, down between its corner lamps; `BodyFrame.lidOwner`). |
-| `rearLean` | `{ base, lean, blend }`: above height `base`, every point behind the rear base moves forward `lean` m per m of height, faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. |
-| `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15, full 0.17; the 2115 without `full`) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). |
+| `bootTank?` | `false`: no fuel tank on the boot's right shelf (a `classic` saloon whose tank lies under the floor: the E34's). Absent: the classic's tank in the boot. |
+| `rearLean` | `EndLean` `{ base, lean, blend, full?, peak? }`: above height `base`, every point behind `full` (default the rear base) moves forward `lean` m per m of height (negative: back, outwards), faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. `peak: { y, lean }`: above `y` the offset goes on from the value reached there at `peak.lean` m per m, so the end bends twice (the GAZ-24's tail: base 0.55, lean −0.14, full 4.637, peak 0.77 / 0.65, its lamp fins the rearmost point); every mesh and the end face are cut at `peak.y`. |
+| `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15, full 0.17; the 2115 without `full`) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). `peak` as on `rearLean`: the GAZ-24's chevron nose (base 0.56, lean −0.19, peak 0.78 / 0.45: the wings' tip foremost at the crease, the face below and the lip above running back). Negative leans lean out. |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`). |
 
 **`TubStation`** — one half-section; values interpolate linearly between stations.
@@ -308,6 +310,7 @@ author.
 | `flat?` | `1`: the deck lies level out to the pillar row and rises straight to the edge (an estate's tailgate sill). Default `0`: parabolic crown. |
 | `notch?` | Half width of a lid that comes down between two lamp corners: the deck lies level at `deck` out to `notch − NOTCH_WALL`, rises in a 25 mm wall to the corners' top and stays level to the side; the lid is cut along this line (`BodyFrame.lidX`). |
 | `notchWall?` | With `notch`: the wall's width instead of 25 mm, so the lid's side edge on the tail face leans from the notch at the corners' top in to its foot (the W124's 0.112, along its trapezoid lamps). |
+| `shoulder?` | `{ inset, rise }`: this station's shoulder instead of the car's, moving linearly to the neighbours' own or the car's. A steeper turn from the belt up to the deck's edge where a wing's top rounds over into the boot lid (the W124's tail corners: rise 0.06–0.08 behind the back light). |
 
 **`CabinSpec`** — the greenhouse.
 
@@ -382,7 +385,10 @@ front edge at the belt, and the A pillar looks far too wide (HISTORY.md).
 arch's top over the hub, over the tyre radius, where it is lower than a circle: its skin
 and liner become a half ellipse; the 2110's 0.81 covers the tyre's top), `frontArchRise?`
 (the same for the front arch: a half ellipse `arch` wide and this high; the W124's 1.10 over
-1.04 stands close round the tyre's sides and 3 cm over its top), `archSegments?` (segments
+1.04 stands close round the tyre's sides and 3 cm over its top), `archSquare?` (both
+arches as superellipses of this power: flat tops, steep sides; the 2206's 4),
+`rearArchSquare?` (the rear's own power where it differs: the Oka's 2.7, a flat-topped
+rear over a round front; absent, `archSquare`), `archSegments?` (segments
 round each arch, tub columns at even angles; absent 12; the W124's 8 for its triangle
 budget), `archToSill?`
 (the arch's edge in the skin and the well's inner wall never run below the sill there
@@ -416,6 +422,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `BODY_ASTRA_F` | the-blueprints.com dimensioned vector preview `2001_opel_astra_f_5-door.jpg` (`opel.ts`) | Opel Astra F |
 | `BODY_VECTRA_A` | the-blueprints.com dimensioned vector preview `1990_opel_vectra_a.jpg` (`opel.ts`) | Opel Vectra A |
 | `BODY_W124` | the-blueprints.com vector preview `w124_tbp_3490.jpg` (side, plan) and raster `w124_tbp_6190.gif` (front, rear) (`mercedes.ts`) | Mercedes-Benz W124 |
+| `BODY_E34` | the-blueprints.com vector preview `e34_tbp_620.jpg` (side, front, rear, plan) (`bmw.ts`) | BMW 520i (E34) |
 
 ### Look (`KitLook`)
 
@@ -431,6 +438,8 @@ cabin: … }`) share everything not overridden. Current families:
 | `tone?` | The grey (0..1, display terms) the paint is multiplied by on parts in the `'tone'` finish: a darker tone of the car's own colour (the W124's cladding and bumpers, 0.78). Required when anything is in `'tone'` (`finishKitSurfaces` throws otherwise). |
 | `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
 | `mirrorStalk?` | Door mirrors on an upright stalk (the UAZ-469): the head this much higher than on the short arm at the door's top (centre belt + 0.08) and 3.5 cm further back, on a rod 2 cm off the skin from a bracket under the belt at the door's front edge, an arm out and back into the head's ball. Absent: the short arm. |
+| `mirrorMount?` | `'base'`: the head on a short thick neck straight out of a black base on the door's skin at the glass's front foot, straddling the belt, its centre 7 cm over the belt (the E34's; no arm). Absent: the short arm (or `mirrorStalk`). |
+| `mirrorHead?` | `[half width, half height]` of the head, when measured (the E34's 0.085 × 0.052). Absent: 0.06 × 0.045. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
 | `waist` | `{ y, height, finish, span? }`: a moulding along the flank (from `span[0]` to `span[1]` when given, the Opels' strips arch to arch; else nose to tail), broken at every cabin column's shut line, a raked `foot` line followed at its slant, each piece owned by the panel whose skin it lies on (`BodyFrame.flankOwner`, the same owners `buildShell` cuts) and ending 5 mm short of that panel's seam, and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
 | `cladding?` | `{ top, finish, proud?, span?, edge? }`: side cladding, a band on each flank from the side's bottom row (sill + its bevel) up to `top`, `proud` off the skin (default 8 mm), from `span[0]` to `span[1]` (default nose to tail), broken at the shut lines and cut short of the arches exactly as the waist (`buildFlankStrip`), each piece on its panel. `edge: { finish, height }`: a bright strip on its top, one solid with it (the W124's chrome line, at the bumpers' `moulding.edge` height so the line runs nose to tail). |
@@ -462,7 +471,7 @@ meshes keep the lamp names, so lamps still work.
 | Kind | Fields | Use |
 |---|---|---|
 | `panel` | `x: FaceX \| Span<FaceX>`, `y: Span<FaceY>`, `finish`, `proud` | A flat surround: from side to side when `x` is a `FaceX` (black lamp band, the 2108's slotted body-colour panel with `finish: 'paint'`), or one block on each side when `x` is a span (the 2115's fog-lamp housings). |
-| `round` | `role`, `x`, `y: FaceY`, `radius` | A round lamp in a chrome ring (classics). |
+| `round` | `role`, `x`, `y: FaceY`, `radius`, `ring?` | A round lamp in a ring: chrome (the classics), or the `ring` finish (the E34's black rings in its black lamp band). |
 | `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?` | A lamp lens; one centred on the centre line (`x: { at: { centre: 0 }, half }`) is built once across it (the 2110's lid reflector). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. A lamp that wraps round the body's corner is a `cornerLamps` unit, not a face lens. |
 | `grille` | `x: FaceX` (half width), `y`, `standOut?`, `slant?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). `slant` (a number) moves the top edge's ends that far inboard of the bottom's, negative to lean out: a trapezoid grille (the Nexia's, narrowing to its foot, `slant` −0.055), its bars standing on the dark back 5 mm proud of it up to just under the frame's front, `proud`/`depth` aside; `dir: 'diamond'` (two crossed sets) is for a slanted grille only and needs a `frame` over the bar ends. |
 | `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster straight on the body, its cells tiling the span (no housing; add a `frame` for a chrome surround): columns from the outer edge in, each column's roles top to bottom. |
@@ -493,7 +502,9 @@ new material or program: the paint's vertex colour is white, so every other car 
   `wrapTo` a corner up to 0.15 is one flat chamfer from the flank, level with the end
   face, to the face, a larger one turns in two), `wrapTo?` (`s` its sides follow the
   flanks back to, lying on them with its foot in line with the sill, a path point at each
-  station between; the tens' and the 2115's bumpers run to their wheel arches),
+  station between; the tens' and the 2115's bumpers run to their wheel arches; `'arch'`:
+  back to the arch's edge at every height, so the bumper's end is the arch's edge, its
+  points beyond the edge's nearest stopping on it low down; the Oka's),
   `foot?` (`{ y, back }`: the face upright down to `y`, then straight back by `back` to its
   bottom edge, the W124's aprons under their black band),
   `flush?` (its top grows out of the body's surface in its top 60 mm instead of a flat
@@ -521,7 +532,7 @@ ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear
 handle and crank), `lights` switch, `vents` (each with
 an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales: a grid
 `cols` wide of the functions in `show`, each lit on its `tell_*` channel), `rockers`,
-`stack`, `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `clock?` (on the
+`stack` (`yaw?`: its face turned that many radians towards the driver, its passenger's edge standing out and every fitting on it below the fascia's foot turned with it: the E34's), `heater?` (a heater panel with knobs: `{ dy, half, knobs, radius }`), `clock?` (on the
 cluster face, or `on: 'fascia'` on the fascia's line and the stack below it: the 2110's), `carpet`,
 `headliner`, `bench.clear` (the bench base's air to the rear wheel-house covers, default
 0.022: a bench standing between them, the Nivas' and the Oka's, takes 0.04, since 2 mm
@@ -545,7 +556,10 @@ between, a three-spoke wheel), `CABIN_W124` (a square hood over a fuel dial, a b
 speedometer and the clock in one row with the telltales along its foot, a wood band, wide
 end vents, a centre vent pair over a wooden stack with the hazard button, two big heater knobs,
 the radio and the ashtray into a wood tray, a rotary light knob, a four-spoke wheel round a
-big pad), `CABIN_2141` (the Samara's dash with the tachometer left, two
+big pad), `CABIN_E34` (the W124's dash with a hood over a small fuel dial, the speedometer,
+the tachometer and a small temperature dial, a wood strip under the cluster, the centre
+stack turned 9° towards the driver with two vents, the radio and two heater knobs, a
+four-spoke wheel round an airbag pad), `CABIN_2141` (the Samara's dash with the tachometer left, two
 quarter dials stacked right of the speedometer, a two-spoke wheel, a centre vent pair over the
 heater sliders and a stack, the glovebox high); the Samaras use the `samara` platform's layout
 as is, the 2121 the `niva` platform's.
@@ -822,7 +836,9 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `featureLine`, moulded `corner` and `wrapTo`, the centre-line lens, the dash's `heater`
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
   `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`,
-  `notchWall`, moulded `foot`, `handles.grip`, column `finish: 'chrome'`.
+  `notchWall`, moulded `foot`, `handles.grip`, column `finish: 'chrome'`, `wrapTo: 'arch'`,
+  `rearArchSquare`, the lean's `peak`, `round` `ring`, `mirrorMount` and `mirrorHead`,
+  `bootTank`, stack `yaw`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -1079,7 +1095,9 @@ lowest is 2 mm over it (bay.ts `exhaustLow`), and wherever the floor leaves room
 The silhouette barely separates the 2101, 2103 and 2106: they share one body and differ by
 about 50 mm in length (bumpers). They are recognised by the face, the tail, the trim and the
 dashboard. The 2105 and 2107 share their own, squarer body. Numbers and sources in
-`measurements-classics.md`.
+`measurements-classics.md`. In profile the 124 faces lean forward from the bumper's top,
+each car its own (`frontLean`: `NOSE_2101`, also the 2102's, `NOSE_2103`, `NOSE_2106` in
+`KIT_SPECS`), and the 124 tail leans out (`BODY_124.rearLean`); the 05 ends stand upright.
 
 | | 2101 | 2103 | 2106 | 2105 | 2107 |
 |---|---|---|---|---|---|
@@ -1163,8 +1181,10 @@ nose to tail with the handles on it, front doors with quarter lights, rear doors
 glass ends upright ahead of a blind sail raked along the C pillar, a front arch clear of
 the tyre and a rear one covering its top; its face is a full-width grille of upright
 chrome bars between round lamps, with a chrome blade and fangs; at the back tall corner
-lamps in chrome rims and a ribbed chrome band; the filler under an oval flap on the left
-rear wing. The GAZ-31029 takes the 24's columns and middle stations 0.14 further back
+lamps in chrome rims and a ribbed chrome band; both ends a shallow chevron in profile, the
+wings' tips at the crease foremost and rearmost (`frontLean`, `rearLean` with `peak`); the
+filler under an oval flap on the left rear wing. The GAZ-31029 takes the 24's columns and
+middle stations 0.14 further back
 (its longer nose) and adds its own ends from the-blueprints.com drawing: a square face
 with rectangular head lamps whose indicators wrap round the corners (`cornerLamps`), a
 black grille, black bumpers, and a lower boot whose lid comes down the tail face between

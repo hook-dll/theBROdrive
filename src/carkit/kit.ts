@@ -23,6 +23,7 @@ import { KIT_SPECS } from './specs';
 import { buildWheel } from './wheels';
 import type { KitMotion } from './rig';
 import type { Vec3 } from './builder';
+import type { EndLean } from './spec';
 
 /** Russian names for the shell's moving parts, shown on hover. */
 const PART_LABELS: Readonly<Record<string, string>> = {
@@ -97,7 +98,7 @@ export function buildKitCar(id: string): THREE.Group {
   buildInterior(ctx);
   buildBay(ctx);
   cutShellHoles(root, ctx.holes);
-  if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(frame.rearBase), -1, spec.rearLean);
+  if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(spec.rearLean.full ?? frame.rearBase), -1, spec.rearLean);
   if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
   // The finished shape in the fewest faces: flat runs merged, zero-area triangles gone.
   simplifyFlats(root);
@@ -139,29 +140,36 @@ const _inv = new THREE.Matrix4();
  * warped in their built (closed) pose, so they still close flush; wheels are added
  * afterwards and never touched. `end` is +1 at the front, −1 at the tail.
  *
- * The warp bends at `base`, so a triangle reaching across it is first cut there: left
- * whole, it stayed a straight chord through the bend while its neighbour, cut finer
- * (round a lamp's hole), followed the bend, and a slit opened between them down the
- * estates' tail corners (owner, 2026-10-19). Behind `zFull` the warp is then one linear
- * map on each side of the base, so every shared edge stays shared.
+ * The warp bends at `base` (and at `peak.y`), so a triangle reaching across it is first
+ * cut there: left whole, it stayed a straight chord through the bend while its neighbour,
+ * cut finer (round a lamp's hole), followed the bend, and a slit opened between them down
+ * the estates' tail corners (owner, 2026-10-19). Behind `zFull` the warp is then one
+ * linear map on each side of each bend, so every shared edge stays shared.
  */
-function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 | -1, lean: { readonly base: number; readonly lean: number; readonly blend: number }): void {
+function leanEnd(root: THREE.Object3D, holes: KitHole[], zFull: number, end: 1 | -1, lean: EndLean): void {
   const zStart = zFull - end * lean.blend;
+  const peak = lean.peak;
+  /** The offset towards the middle at height y, in full. */
+  const offset = (y: number): number => (peak && y > peak.y
+    ? lean.lean * (peak.y - lean.base) + peak.lean * (y - peak.y)
+    : lean.lean * (y - lean.base));
   /** Moves a car-frame point; false where it stays. */
   const warp = (p: THREE.Vector3): boolean => {
     const into = end * (p.z - zStart);
     if (into <= 0 || p.y <= lean.base) return false;
     const w = Math.min(1, into / lean.blend);
-    p.z -= end * (w * w * (3 - 2 * w) * lean.lean * (p.y - lean.base));
+    p.z -= end * (w * w * (3 - 2 * w) * offset(p.y));
     return true;
   };
   root.updateMatrixWorld(true);
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (!mesh.isMesh) return;
-    // The tail only: a leaning nose is cut along its base in the shell already (body.ts),
-    // and its bumpers and lamps are laid to it.
-    if (end === -1) splitAtBase(mesh, (z) => end * (z - zStart) > 0, lean.base);
+    // A leaning nose is cut along its base in the shell already (body.ts), and its bumpers
+    // and lamps are laid to it; every part is cut at a peak, where the warp bends again.
+    const inZone = (z: number): boolean => end * (z - zStart) > 0;
+    if (end === -1) splitAtBase(mesh, inZone, lean.base);
+    if (peak) splitAtBase(mesh, inZone, peak.y);
     const position = mesh.geometry.getAttribute('position');
     _inv.copy(mesh.matrixWorld).invert();
     let moved = false;

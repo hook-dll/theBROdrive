@@ -566,3 +566,67 @@ refs/w124.json (new in kit-drawing.ts, ±0.02).
 
 zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, triangles 12 209,
 drawing 21/21, dash 9/9; frozen: re-recorded (`--write w124`).
+
+## 12. The whole tail against the drawings and photos (2026-10-28)
+
+His words, on a straight rear view from the lab (`photos/w124/owner_kit_rear.png`) beside
+a real car (`photos/w124/owner_rear.jpg`): «какой-то слишком угловатый очень тяжелый зад.
+давай всю корму внимательно сверим по чертежам или фото. мы её явно сделали плохо». Later:
+«у w124 тоже очень много места для задних пассажиров... не настолько же».
+
+**Sources and scales.** [D] side view (5.806 mm/px along, 5.837 up, ground y 330) and plan;
+[D2] `w124_tbp_6190.gif` rear view (10.1 mm/px, ground y 310, centre x 607) and side view
+with interior dimensions (10.1 mm/px on the drawn hubs x 94 / 370); [P carsized rear]
+`carsized/w124_rear.png` (near orthographic: 592 px across the bumpers' wraps = 1.74 m,
+340 px/m, centre x 298; heights hung on [D]'s lamps, top y 489 = 0.846, foot y 547 =
+0.665, so the tail plane's ground at y ≈ 762: the tyres' foot at 742 stands an axle
+further from the camera); [P owner_rear] (perspective, 548 × 364: at the tail plane 260
+px/m on the lamps' height 47 px = 0.18 m and the plate 141 px = 0.52 m; the bumpers' wraps
+further away, so not 1.74 m across); [P R] `rear.jpg` (626 px/m across the bumper);
+[P R34, R34r] the facelift's bumpers. The carsized side photo is not used for lengths at the
+tail (its tips 4.50 m apart on the hubs' 333 px/m: perspective).
+
+| Feature | Real | Before | Built |
+|---|---|---|---|
+| Lamps, top / foot | 0.846 / 0.665 [D side y 185 / 216]; D2 rear 0.818 / 0.626; their foot ±0.46–0.47, top ±0.58 inside, out round the corner [P carsized rear] | 0.855 / 0.665 | unchanged |
+| Body under the lamps to the bumper's top | 0.087 [D: 0.665 → 0.578]; 0.5–0.6 of the lamps' height [P owner_rear 25 / 47 px, R 64 / 116, carsized 36 / 58] | 0.08, but the chrome 0.47 under 9 cm of tone: 0.185 of body colour down to the chrome, as tall as the lamps | 0.08 to the top, 0.115 to the chrome |
+| Bumper's top | 0.578–0.584 [D side x 790–843] | 0.584 | 0.584 |
+| Chrome line | 2 cm under the top [P R: y 1057 under the top 1045, 626 px/m]; at its top edge [P R34r, carsized side] | 0.47–0.48 | **0.54–0.55** |
+| Black band | from 6 cm under the top to the face's foot, as tall as the lamps [P owner_rear 45 / 47 px; R 85 px from y 1080] | 0.335–0.47 | **0.35–0.54** |
+| Bumper's face and foot | upright to 0.339, turned under to 0.25 running forward [D side x 828 → 800] | foot 0.25, face to 0.335 then 4.6 cm back (as far as the generator draws it): 8.5 cm of tone under the band from behind | foot **0.29**, face to 0.34: 5 cm under it |
+| Lid's top edge in profile | level to s 4.656 at 1.012, rounded down to the upright face at 4.697, 0.922 [D side] | level to 4.68 at 1.015, upright from 4.70 down from 0.88 | 1.016 at 4.64, **0.99 at 4.68, face from 0.92 at 4.70** |
+| The lid's lip over the plate | a dark line across the lid at the lamps' top, lamp to lamp [P owner_rear, R, carsized rear] | none | a black 8 mm line 0.849–0.857, ±0.565, on the lid (`rear.lid`) |
+| Rear view outline, orthographic | ±0.82 at 0.874, ±0.815 at 0.906, ±0.809 at 0.937, ±0.80 at 0.968, ±0.785 at 1.0, ±0.765 at 1.031 [P carsized rear] | ±0.84 at 0.89, ±0.837 at 0.92, ±0.832 at 0.95, ±0.830 at 0.98, ±0.755 at 1.01: square at the belt | ±0.840 / 0.837 / 0.822 / 0.782 / 0.750 at 0.89 / 0.92 / 0.95 / 0.98 / 1.01 (0.92–0.95: the doors' belt ±0.835, the owner's accepted side) |
+| Tail's top corners from behind (near the tail) | ±0.75 at 0.885, ±0.73 at 0.925, ±0.69 at 0.965, ±0.645 at 0.995 [P owner_rear] | the wing's top level at 0.98 to s 4.68 (±0.72, its edge ±0.65 at 1.0), down 12 cm in the last 2 cm: a square ear | at s 4.64 ±0.73 at 0.90, ±0.66 at 0.975, then the lid |
+| Rear bench's hip | s 3.18 [D2 side: the rear headroom line (958) at x 327.5; the cushion (491) x 286–335.5, s 2.76–3.265; the front's (975) at 2.42; 690 from the front seat's back to the rear's] | 3.51 (the classic's rearBase − 0.45) | **3.18** (rearBase − 0.78) |
+
+**Built.**
+- Rear bumper `drop` 0.095, `height` 0.294 (top 0.584, foot 0.29), `moulding` y 0.445 height
+  0.19 (black 0.35–0.54, its chrome edge 0.54–0.55), `foot` { y 0.34 }.
+- Stations from the back light's foot back: the wing's top rounds over into the lid instead
+  of a sharp belt under a flat ledge. New optional station field `shoulder` (spec.ts
+  `TubStation`, body.ts `station`/`section`/`lidX`): the turn from the belt to the deck's
+  edge per station. 3.96: belt 0.93 ±0.835, shoulder 0.08 / 0.075 (the deck's edge where it
+  was, ±0.755 at 1.005: the C pillar's foot unmoved); 4.45: belt 0.905 ±0.76, 0.06 / 0.08;
+  4.64: belt 0.90 ±0.73, 0.07 / 0.075; 4.68: belt 0.90 ±0.725, 0.085 / 0.06, deck 0.99; tail
+  4.70: belt 0.90 (face from 0.92). The deck's stations on its plane (1.0214 at 4.45, 1.0162
+  at 4.64); sill and crease rows on §11's plan line. The side's lean from the crease to the
+  belt held near 6° at every station (kit-surface `lean`: 5.8° → 9.5° → 3.2° failed).
+- `rear.lid`: the lip line. CABIN_W124 `bench` { rearBase, −0.78 } (the E34's cabin spreads
+  it: E34Review1 asked to set its own).
+
+**Compare.** `build/kitcheck/w124/rear-compare.png`: top, his screenshot before, the tail
+now from 5.5 m behind at 1.25 m framed to his photo's bumper width, his photo; below, the
+orthographic rear on carsized's photo at 340 px/m with the model's outline in red.
+
+**Not changed.** The doors' belt ±0.835 at 0.946 (D2 front; the rear view's ±0.81 at 0.94
+is the photo's); the side silhouette's advice at s 3.59–4.30 (the drawn C pillar meets the
+deck at s 4.09, 1.07; ours the back light's foot at 3.96, 1.035, as before); the driver's
+hip (1.341 + 0.95 = 2.29, [D2] 2.42).
+
+### Checks (2026-10-28, the whole tail)
+
+`npm run kit-check -- w124`: zfight pass, proportions pass, reality pass, mirrors L100 R100,
+dents 0, triangles 12 530, drawing 21/21, dash 9/9; frozen: moved in boot, cabin, exterior
+(not re-recorded: awaiting the owner). `tools/cabin-places.ts w124` pass. fit-models
+kit_w124: the row unchanged (box 1.740 × 1.278 × 4.740). tsc clean.

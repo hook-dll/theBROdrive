@@ -42,7 +42,7 @@ const LOT_SHELLS_HOME = 6;
 const LOT_SHELLS_PER_BAND = 1;
 /** The foreign cars stand on lots only this far from home. */
 const FOREIGN_FROM_KM = 300;
-const FOREIGN: Readonly<Record<string, true>> = { kit_nexia: true, kit_espero: true, kit_astraf: true, kit_vectraa: true, kit_w124: true };
+const FOREIGN: Readonly<Record<string, true>> = { kit_nexia: true, kit_espero: true, kit_astraf: true, kit_vectraa: true, kit_w124: true, kit_e34: true };
 /** The start car: never on a lot. */
 const START_MODEL_ID = 'kit_vaz1111';
 

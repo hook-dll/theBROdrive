@@ -588,6 +588,15 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // axle are the archive's, the 0.90 the rear-drive band.
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.13 },
   },
+  kit_e34: {
+    wheelbase: 2.761, track: 1.47, radius: 0.317, top: 211, to100: 10.6,
+    loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.5, lat: null, hz: 1.15,
+    brake80: null, grossKg: 1955,
+    source: 'BMW 520i 24V E34 (M50B20, ZF five-speed manual), 1990-1992: ultimatespecs "BMW E34 5 Series 520i" (211 km/h, 10.6 s, 11.0 m circle); auto-data.net "520i 24V (150 Hp)" (gross 1955); no braking ceiling found; geometry kit_e34 row',
+    // 110 kW on 1575 kg on the bench: 11.9 s against the catalogue's 10.6, as the W124's 97
+    // kW on 1510 kg runs +13 % and the Vectra's +16 %.
+    known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.14 },
+  },
 
 
 };
@@ -645,6 +654,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_opel_c16nz: { power: { kw: 55 }, powerRpm: 5200, torque: { nm: 125 }, torqueRpm: 2800, source: 'Opel C16NZ; auto-data.net Opel Astra F 1.6i (75 Hp), ultimatespecs' },
   engine_opel_c20ne: { power: { kw: 85 }, powerRpm: 5200, torque: { nm: 170 }, torqueRpm: 2600, source: 'Opel C20NE; auto-data.net Opel Vectra A (facelift 1992) 2.0i (115 Hp)' },
   engine_mercedes_m102_e23: { power: { kw: 97 }, powerRpm: 5100, torque: { nm: 198 }, torqueRpm: 3500, source: 'Mercedes-Benz M 102 E 23; MB archive mercedes-benz-publicarchive.com "230 E" 1989-1992' },
+  engine_bmw_m50b20: { power: { kw: 110 }, powerRpm: 5900, torque: { nm: 190 }, torqueRpm: 4700, source: 'BMW M50B20; ultimatespecs BMW E34 5 Series 520i, auto-data.net 520i 24V (150 Hp)' },
   // Not a catalogue engine: the rally 2105's own build, held to the build's figures.
   engine_lada_rally: { power: { ps: 100 }, powerRpm: 6400, torque: { nm: 132 }, torqueRpm: 4200, source: 'pack rally build targets, not factory' },
 };

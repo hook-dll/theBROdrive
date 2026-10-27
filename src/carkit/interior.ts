@@ -356,9 +356,12 @@ interface Layout {
   readonly heater?: { readonly dy: number; readonly half: P2; readonly knobs: readonly number[]; readonly radius: number };
   /**
    * Centre stack from the fascia's foot down to the tunnel, its face continuing the
-   * fascia's line: fittings placed below the fascia's foot stand on it.
+   * fascia's line: fittings placed below the fascia's foot stand on it. `yaw`: the face
+   * turned this many radians towards the driver about the upright, its passenger's edge
+   * standing out and the fittings on it turned with it (the E34's driver-oriented
+   * cockpit). Absent: square across the car.
    */
-  readonly stack?: { readonly half: number };
+  readonly stack?: { readonly half: number; readonly yaw?: number };
   readonly carpet: number;
   readonly headliner: number;
   /** The cabin floor over the sill's underside under the front seats; default `FLOOR_RISE` (the van's stands high). */
@@ -1239,9 +1242,68 @@ export const CABIN_W124: CabinLayoutOverride = {
   // 154, 61 and 86 degrees seen in perspective) round a big square pad [P]: laid square
   // to the column, 30 degrees either side of the level [E]. Size the classic's [E].
   wheel: { ...LAYOUTS.classic.wheel, spokes: [30, 150, 210, 330], hub: 'pad' },
-  // The classic's bench place; it stands between the rear wheel-house covers, its base 4 cm
-  // off them (at the default 2.2 cm it fought them at a distance, kit-zfight).
-  bench: { from: 'rearBase', offset: -0.45, clear: 0.04 },
+  // The rear bench's hip at s 3.18, 0.78 ahead of the back light's foot (the classic's 0.45
+  // put it at 3.51, over the rear axle, 4.5 cm ahead of the rear door's rear edge): the
+  // raster drawing's interior dimensions [D2 side, 10.1 mm/px on the drawn hubs: the rear
+  // headroom line (958) through the seat at s 3.18, the cushion (491) from 2.76 to its back
+  // at 3.265, the front seat's (975) at 2.42; 690 from the front seat's back to the rear's].
+  // Owner, 2026-10-28: «очень много места для задних пассажиров... не настолько же». Its
+  // base stands between the rear wheel-house covers, 4 cm off them (at the default 2.2 cm
+  // it fought them at a distance, kit-zfight).
+  bench: { from: 'rearBase', offset: -0.78, clear: 0.04 },
+};
+
+// The BMW 520i (E34) of 1990-1995, read off Wikimedia Commons "5-er e34 BMW PL.JPG" (CC
+// BY 3.0, Beemwej; 1920 x 1275, from the driver's door, a manual car, blue trim) and "5-er
+// e34 Interior BMW PL.JPG" (CC BY-SA 3.0, the same; from the passenger's side). No scale
+// on the photos: the W124's dash, measured the same way, gives the sizes [E]; positions
+// and counts are read off them [P].
+
+/**
+ * BMW E34: a broad padded top over a hood with two big dials (the speedometer left, the
+ * tachometer right) between a small fuel dial and a small temperature dial; a switch panel
+ * with the rotary light knob left of the column; a wood strip across the fascia under the
+ * cluster; a centre stack turned towards the driver with two vents side by side at its
+ * top, the radio and the heater's rotary knobs under them; a four-spoke wheel round a big
+ * pad; the lever on the console, the handbrake behind it.
+ */
+export const CABIN_E34: CabinLayoutOverride = {
+  ...CABIN_W124,
+  // The wood strip under the cluster from the door to the stack, x 0-480, y 460-620 [P].
+  wood: [-0.16, -0.125],
+  // Speedometer left (x 420, y 240), tachometer right (x 590, y 230), about 90 px in radius;
+  // the fuel dial far left (x 320, y 310) and the temperature far right (x 710, y 265), about
+  // 40 [P].
+  gauges: [
+    { channel: 'fuel', right: -0.142, up: 0.055, radius: 0.02, ...SMALL },
+    { channel: 'speed', right: -0.062, up: 0.064, radius: 0.044, full: 240, ...BIG },
+    { channel: 'rpm', right: 0.062, up: 0.064, radius: 0.044, full: 7000, ...BIG },
+    { channel: 'temp', right: 0.142, up: 0.062, radius: 0.02, ...SMALL },
+  ],
+  clock: undefined,
+  // The telltale strip under the dials (x 470-640, y 330) [P].
+  lamps: { right: 0, up: 0.004, cols: 7, pitch: 0.018, show: ['turn', 'side', 'beam', 'fuel', 'oil', 'charge', 'brake'] },
+  // The centre pair at the stack's top (x 1030-1220, y 250-310), the end vents at both
+  // doors (x 1420-1520 on the passenger's side) [P].
+  vents: [
+    { x: 0.05, dy: -0.03, half: [0.045, 0.026] },
+    { x: -0.05, dy: -0.03, half: [0.045, 0.026] },
+    { x: 0.63, dy: -0.03, half: [0.055, 0.026] },
+    { x: -0.63, dy: -0.03, half: [0.055, 0.026] },
+  ],
+  // Turned towards the driver (the stack's passenger edge stands out, x 1100-1240 at y 380
+  // against 1000-1100 at its top) [P]: 9 degrees [E].
+  stack: { half: 0.115, yaw: 0.15 },
+  // The hazard button between the centre vents' foot and the radio [E: not legible].
+  hazard: [0, -0.08],
+  // The radio (x 1100-1190, y 360-420) over the heater's two rotary knobs (y 450) [P].
+  radio: [0, -0.25],
+  heater: { dy: -0.305, half: [0.09, 0.028], knobs: [0.045, -0.045], radius: 0.022 },
+  ashtray: [0, -0.36],
+  // The rotary light knob in the switch panel left of the cluster (x 150-280, y 380-460) [P].
+  lights: { right: -0.24, dy: -0.11, kind: 'knob' },
+  // Four spokes round a big airbag pad [P].
+  wheel: { ...LAYOUTS.classic.wheel, spokes: [20, 160, 230, 310], hub: 'pad' },
 };
 
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
@@ -1933,11 +1995,17 @@ interface Mount {
   at(x: number, y: number, z: number): Vec3;
 }
 
-/** A face at `origin` looking rearward, its top leaning back by `recline` (rad). */
-function mount(origin: Vec3, recline: number): Mount {
-  const u: Vec3 = [-1, 0, 0];
-  const v: Vec3 = [0, Math.cos(recline), Math.sin(recline)];
-  const n: Vec3 = [0, Math.sin(recline), -Math.cos(recline)];
+/**
+ * A face at `origin` looking rearward, its top leaning back by `recline` (rad), turned by
+ * `yaw` (rad) about the upright towards the car's left (+x, the driver's side).
+ */
+function mount(origin: Vec3, recline: number, yaw = 0): Mount {
+  const [c, s] = [Math.cos(yaw), Math.sin(yaw)];
+  // About the upright: the face's out (-Z, rearward) turns towards +X.
+  const turn = (p: Vec3): Vec3 => [p[0] * c - p[2] * s, p[1], p[0] * s + p[2] * c];
+  const u = turn([-1, 0, 0]);
+  const v = turn([0, Math.cos(recline), Math.sin(recline)]);
+  const n = turn([0, Math.sin(recline), -Math.cos(recline)]);
   const matrix = new THREE.Matrix4()
     .makeBasis(new THREE.Vector3(...u), new THREE.Vector3(...v), new THREE.Vector3(...n))
     .setPosition(...origin);
@@ -2491,7 +2559,13 @@ class Cabin {
 
   private fascia(x: number, y: number): Mount {
     const [[dt, yt], [db, yb]] = this.lay.fascia;
-    return mount(this.P(x, y, this.fasciaS(y)), Math.atan2(-(dt - db), yt - yb));
+    const recline = Math.atan2(-(dt - db), yt - yb);
+    // On a stack turned towards the driver (+x), below the fascia's foot.
+    const st = this.lay.stack;
+    if (st?.yaw && y < this.belt + yb && Math.abs(x) <= st.half) {
+      return mount(this.P(x, y, this.fasciaS(y) - x * Math.tan(st.yaw)), recline, st.yaw);
+    }
+    return mount(this.P(x, y, this.fasciaS(y)), recline);
   }
 
   /** A point on the cluster face, `right` of the column and `up` over the cowl's belt. */
@@ -2549,8 +2623,9 @@ class Cabin {
       const foot = belt + L.fascia[1][1];
       const floor = this.tunnelTop(this.fasciaS(foot)) - 0.005;
       const back = cowl + 0.06;
-      this.prismX(b, 'trim', [-L.stack.half, L.stack.half], () => [
-        [back, foot], [this.fasciaS(foot), foot], [this.fasciaS(floor), floor], [back, this.tunnelTop(back) - 0.005],
+      const turn = Math.tan(L.stack.yaw ?? 0);
+      this.prismX(b, 'trim', [-L.stack.half, L.stack.half], (x) => [
+        [back, foot], [this.fasciaS(foot) - x * turn, foot], [this.fasciaS(floor) - x * turn, floor], [back, this.tunnelTop(back) - 0.005],
       ]);
       this.dashItems.push({ kind: 'stack', at: this.P(0, (foot + floor) / 2, this.fasciaS((foot + floor) / 2)) });
     }

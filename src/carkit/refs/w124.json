@@ -54,6 +54,7 @@
   "gaps": [
     "sideGlassRail: the panes' ends at the rail not read separately (the rear door's quarter rises to a point at the rail)",
     "moulding: the W124 has no waist strip; its line is the cladding's chrome edge (0.47-0.48 from the photos, measurements-w124.md section 7), not measured by kit-drawing",
+    "the rear view (lamps 0.665-0.846, the bumper's chrome 0.54-0.55 and black band 0.35-0.54, the tail's outline, the lid's lip) and the rear bench's hip (s 3.18, D2 interior dimensions): no kit-drawing key reads them; measured in measurements-w124.md section 12, compared in build/kitcheck/w124/rear-compare.png",
     "dash wheelDiameter, the passenger's end vent and the glovebox's far end: estimated, out of the photo (§6)"
   ],
   "overlay": {

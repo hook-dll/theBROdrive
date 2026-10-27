@@ -950,6 +950,12 @@ const AERO_OPEL_VECTRA_A: AeroSpec = { frontalArea: 1.96, liftFront: 0.09, liftR
  * × 0.82 (the Vectra's fill factor).
  */
 const AERO_MERCEDES_W124: AeroSpec = { frontalArea: 2.04, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
+/**
+ * BMW E34 saloon: Cd 0.31 for the 520i (ultimatespecs "BMW E34 5 Series 520i"; en.wikipedia
+ * gives 0.30 for the basic saloon). The W124's lift and crosswind figures (a nose over a
+ * notched boot) on its own frontal area, 1.751 m × 1.412 m × 0.82 (the Vectra's fill factor).
+ */
+const AERO_BMW_E34: AeroSpec = { frontalArea: 2.03, liftFront: 0.09, liftRear: 0.21, sideSlope: 1.35, yawSlope: 0.47 };
 
 
 
@@ -1274,6 +1280,10 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // MB archive "230 E" 1989-1992 (L × W × H, wheelbase, tracks), drom.ru (clearance), 195/65
   // R15 (free radius 190.5 + 126.75 mm): src/carkit/measurements-w124.md §2.
   kit_w124:       { length: 4.74, width: 1.74, height: 1.428, clearance: 0.15, wheelbase: 2.8, frontTrack: 1.501, rearTrack: 1.491, wheelRadius: 0.317, tyreWidth: 0.195 },
+  // s14.de/en/models/e34 (L × W × H 4720 × 1750 × 1412, wheelbase 2761), auto-data.net "520i
+  // 24V (150 Hp)" (tracks), drom.ru catalog/bmw/5-series/192870 (clearance 140), 195/65 R15
+  // (free radius 190.5 + 126.75 mm): src/carkit/measurements-e34.md §2.
+  kit_e34:        { length: 4.72, width: 1.751, height: 1.412, clearance: 0.14, wheelbase: 2.761, frontTrack: 1.47, rearTrack: 1.495, wheelRadius: 0.317, tyreWidth: 0.195 },
 };
 
 function factoryGeometry(id: string): FactoryGeometry {
@@ -1970,6 +1980,11 @@ const KIT_FOREIGN_WHEEL_SETS = ['gw_vaz_steel16', 'gw_cover_vents', 'gw_cover_tu
  * full plastic cover (measurements-w124.md #38), the covers drawn.
  */
 const KIT_W124_WHEEL_SETS = ['gw_alloy_8hole', 'gw_cover_vents', 'gw_cover_turbine'] as const;
+/**
+ * The E34's own: the owner's alloys only, the BBS cross-spoke (`gw_alloy_cross`, drawn from
+ * BMW Style 5, the E34's own wheel).
+ */
+const KIT_E34_WHEEL_SETS = ['gw_alloy_cross'] as const;
 /** The Niva family: the Niva's own wheel, or an off-roader's alloy. */
 const KIT_OFFROAD_WHEEL_SETS = [...OFFROAD_WHEEL_SET_POOL, 'gw_alloy_fan'] as const;
 
@@ -2798,6 +2813,39 @@ const GEAR_MERCEDES_W124: KitOwnGear = {
   wheelSetPool: KIT_W124_WHEEL_SETS,
 };
 
+/**
+ * BMW 520i 24V (E34) saloon, 1990-92 (M50B20, the ZF S5D 310Z five-speed on 3.46): kerb
+ * 1425 kg (ultimatespecs "BMW E34 5 Series 520i"; auto-data.net "520i 24V (150 Hp)" 1445),
+ * gross 1955 (auto-data), 211 km/h, 0-100 in 10.6 s, an 80 l tank, 195/65 R15 on 6J x 15
+ * (ultimatespecs, auto-data, carfolio "1990 BMW 520i 24v" 55913), an 11.0 m turning circle
+ * (ultimatespecs), ventilated front discs and rear discs, ABS standard from May 1992,
+ * recirculating-ball power steering, a semi-trailing-arm rear axle (s14.de/en/models/e34).
+ * Brakes the servo figure (ABS does not raise the tyres' peak). Suspension `SUSP_CAR` [E],
+ * as the W124's. No axle split printed: 0.53 [E], the W124's 0.52 with an iron six (30 kg
+ * more) ahead. Lock from the circle: asin(2.761 / (5.5 − 1.47 / 2)) = 0.618, the
+ * W124's derivation; on the bench 4.02 against the 4.02 target, kept. Cd·A 0.31 × 2.03 m²
+ * = 0.63 ran 215 km/h; set on the bench to 0.66 for the catalogue's 211. Shod from its
+ * own pool (`KIT_E34_WHEEL_SETS`).
+ */
+const GEAR_BMW_E34: KitOwnGear = {
+  bodyClass: 'car',
+  mass: 1425,
+  tyre: ROAD_TYRE,
+  engineId: 'engine_bmw_m50b20',
+  gearboxId: 'gearbox_zf_s5d310z_346',
+  tankLitres: 80,
+  wheelGrip: ROAD_TYRE_GRIP,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: SUSP_CAR,
+  steerLock: 0.618,
+  rearDriveBias: 1,
+  handlingProfile: 'road',
+  frontWeightShare: 0.53,
+  dragArea: 0.66,
+  aero: AERO_BMW_E34,
+  wheelSetPool: KIT_E34_WHEEL_SETS,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2852,6 +2900,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_astraf', GEAR_OPEL_ASTRA_F, 'astraf', 'Opel Astra F'],
     ['kit_vectraa', GEAR_OPEL_VECTRA_A, 'vectraa', 'Opel Vectra A'],
     ['kit_w124', GEAR_MERCEDES_W124, 'w124', 'Mercedes-Benz W124'],
+    ['kit_e34', GEAR_BMW_E34, 'e34', 'BMW 520i (E34)'],
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
@@ -2949,6 +2998,7 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_astraf: { trunkGrid: G3x2, comfort: 4 },
   kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
   kit_w124: { trunkGrid: G4x2, comfort: 5 },
+  kit_e34: { trunkGrid: G4x2, comfort: 5 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };

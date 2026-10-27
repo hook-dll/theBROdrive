@@ -130,14 +130,20 @@ export const BODY_1111: KitBody = {
     width: 0.135, // [F]
     frontHalfTrack: 0.605, // 1210 [F drivernotes.net; D front dimension 1210]
     rearHalfTrack: 0.6, // 1200 [F drivernotes.net]
-    // Front: liner top 0.604 over the ground, 0.36 over the hub, its edge at the hub's height
-    // 0.295 ahead and 0.32 behind [D side, refs archFront]: a half ellipse 0.3075 wide and
-    // 0.36 high, 12.5 mm behind the hub (it stood a circle of 0.364, 1.45).
-    arch: 1.23,
-    frontArchRise: 1.44,
-    archShift: [0.0125, 0],
-    // Rear: tight over the tyre, its top 0.53–0.55 [D side; P]: 0.293 → 1.17.
-    rearArch: 1.17,
+    // The owner's side photo (measurements-oka.md §1.3), its body 0.035 higher on its hubs
+    // than the drawing's taken off. Front: 0.30 ahead and 0.323 behind at the hub's height,
+    // its top 0.335 [P], a half ellipse 0.311 wide (it stood 0.3075 × 0.36 to the drawing's
+    // liner, 2.5 cm over the photo's opening).
+    arch: 1.245,
+    frontArchRise: 1.34,
+    archShift: [0.0125, -0.01],
+    // Rear: 0.31 ahead and 0.29 behind (the bumper's end), its top 0.305 and flat: a
+    // superellipse of power 2.7, wider than a circle near the top where the flat top runs
+    // back into the bumper's corner [P; D top 0.29–0.30 "flattened under the flank line"]
+    // (it stood a circle of 0.293).
+    rearArch: 1.2,
+    rearArchRise: 1.22,
+    rearArchSquare: 2.7,
   },
   doorBottom: 0.28, // [D side y 514]
   bonnetFront: 0.055,
@@ -175,9 +181,10 @@ export const LOOK_1111: KitLook = {
   repeater: { s0: 0.817, s1: 0.898, y0: 0.588, y1: 0.621 },
   front: {
     // Black plastic 0.30–0.525 [D side 0.305–0.524, front 0.29–0.527]: face sill 0.30 + 0.035
-    // − drop; wrapping round to the front arches (s 0.2 at its height) [D side, top; P].
-    // Its moulding line near the top [D front y 432.5: 0.506], clear of the indicators.
-    bumper: { kind: 'moulded', drop: 0.035, height: 0.225, wrapTo: 0.2, moulding: { y: 0.5, height: 0.012, finish: 'black' } },
+    // − drop; its sides back along the wings to the front arch, the end the arch's front
+    // edge at every height (s 0.25 at its foot, 0.38 at its top) [P owner side: 0.244 →
+    // 0.335; D side x 993–1035]. Its moulding line near the top [D front y 432.5: 0.506].
+    bumper: { kind: 'moulded', drop: 0.035, height: 0.225, wrapTo: 'arch', moulding: { y: 0.5, height: 0.012, finish: 'black' } },
     items: [
       // The black panel across the face round the lamps, 0.547–0.709 [D front y 417.5–357.5].
       { kind: 'panel', x: { centre: 0.615 }, y: { from: ['bumperTop', 0.022], to: ['bumperTop', 0.184] }, finish: 'black', proud: 0.012 },
@@ -197,10 +204,11 @@ export const LOOK_1111: KitLook = {
     ],
   },
   rear: {
-    // Black plastic 0.30–0.495 [D side 0.318–0.493, rear 0.298–0.494]; wrapping round to the
-    // rear arches (s 3.07 at its height) [D top; P "1994 VAZ 1111 red rear"]. Its moulding
-    // line under the top [E], clear of the fog lamps.
-    bumper: { kind: 'moulded', drop: 0.035, height: 0.195, wrapTo: 3.07, moulding: { y: 0.47, height: 0.012, finish: 'black' } },
+    // Black plastic 0.30–0.495 [D side 0.318–0.493, rear 0.298–0.494]; its sides forward
+    // along the wings to the rear arch, the end its back edge at every height (s 3.02 at its
+    // foot, 2.94 at its top) [P owner side: 2.996 → 2.86 over its taller band; D side x
+    // 1980–2013]. Its moulding line under the top [E], clear of the fog lamps.
+    bumper: { kind: 'moulded', drop: 0.035, height: 0.195, wrapTo: 'arch', moulding: { y: 0.47, height: 0.012, finish: 'black' } },
     items: [
       // Rectangles ±0.432–0.58, 0.346–0.427 [D rear], raised to 0.37 to stay on the bumper's
       // flat face; red, never lit (the fog lamp) [P "1994 VAZ 1111 red rear", "2000 … rear"],

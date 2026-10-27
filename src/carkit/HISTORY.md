@@ -1283,6 +1283,36 @@ Every other car `identical` (kit-fingerprint); w124 re-recorded, 12 363 → 12 1
   Every other car `identical`; w124 re-recorded, 12 209 triangles.
   *mercedes.ts stations 4.68 / 4.7, `cornerLamps`; tools/kit-drawing.ts*.
 
+## Mercedes W124, the whole tail (2026-10-28)
+
+His words, on a straight rear lab view beside a real car: «какой-то слишком угловатый
+очень тяжелый зад. давай всю корму внимательно сверим по чертежам или фото»; then «очень
+много места для задних пассажиров... не настолько же». Measured on the drawings' side and
+rear views, carsized's near-orthographic rear and his photo (measurements-w124.md §12).
+
+- **Heavy: a tall slab of body colour under the lamps, a deep bumper.** → The lamps and
+  the bumper's top were the drawing's, but the chrome line sat on the black band at 0.47,
+  9 cm under the bumper's top, so the tone above it read as body: 0.185 of body colour
+  under the lamps (as tall as they are) where the car has 0.09; and 8.5 cm of tone showed
+  under the band. → Chrome 0.54–0.55 (2–3 cm under the top, as the photos), the black band
+  0.35–0.54 (as tall as the lamps, his photo), the foot raised to 0.29 under a face to 0.34.
+- **Angular: square ears over the lamps, the lid a box.** → The wing's top stood level at
+  0.98 to 2 cm from the tail, its edge on a flat 7 × 2 cm shelf, then dropped 12 cm upright;
+  the deck ended level over an upright face. → The wing's top rounds over into the lid from
+  the back light's foot: a new optional station field `shoulder` (the turn from the belt up
+  to the deck's edge per station; absent, the car's, so no other car moves) with the belt
+  0.93 → 0.90 and the turn 6–8 cm high behind the back light, the deck's edge kept where
+  the C pillar stands; the lid's rear edge chamfered (0.99 at s 4.68) to an upright face
+  from 0.92 (drawn 0.922); a dark lip line across the lid at the lamps' top (`rear.lid`).
+  The side's lean held near 6° at every station (9.5° at 3.96 between 5.8° and 3.2° was a
+  kit-surface `lean` dent).
+- **The rear bench too far back.** → The classic's place (rearBase − 0.45) put its hip at
+  s 3.51, over the rear axle; the drawing's interior dimensions put it at 3.18. →
+  `CABIN_W124.bench` rearBase − 0.78 (cabin-places passes). The E34's cabin spreads it;
+  its own bench is set by its review.
+  *mercedes.ts stations 3.96–4.7, `rear`; spec.ts / body.ts `TubStation.shoulder`;
+  interior.ts `CABIN_W124`*.
+
 ## Tens: the firewall lining in the front doors' edges (2026-10-27)
 
 - **kit-zfight failed on the 2110 and 2112**: `kit_cabin/cabin_trim` (interior.ts
@@ -1318,6 +1348,63 @@ triangle counts unchanged.
   five `planHalfWidth` stations (0.15–0.91), built 0.775 / 0.815 / 0.834 / 0.84 / 0.842.
   Every other car `identical`; azlk2141 re-recorded, 12 580 triangles. *azlk.ts stations
   0.107–0.55*.
+
+## GAZ-24, nose and tail in profile (2026-10-27)
+
+- **"The nose's and tail's ends are triangular, two bends at once" (owner, with the drom.ru
+  side photo).** → Both ends were one upright face (the stations 0.067 and 4.637), while on
+  the car the wings' tips at the crease are the foremost and rearmost points, the face
+  below running in to the bumper and the lip above rounding in. → `EndLean.peak` (spec.ts):
+  above `peak.y` the lean's offset goes on from the value reached there at `peak.lean`; a
+  negative `lean` leans out. `BODY_GAZ24` `frontLean` { base 0.56, lean −0.19, peak 0.78 /
+  0.45 } and `rearLean` { base 0.55, lean −0.14, full 4.637 (new on the tail: where it is
+  in full; default the rear base), peak 0.77 / 0.65 } (measurements-volga.md §5). Every
+  mesh is cut at the peak (kit.ts `splitAtBase`) and the end faces in body.ts too, so no
+  chord or slit opens at the bend; the rear ribbed band's ribs 15 mm proud (the lean
+  brought their backs to 5 mm off the face, kit-zfight). Every other car identical
+  (kit-fingerprint). *spec.ts `EndLean`, kit.ts `leanEnd`, body.ts end faces, volgas.ts*.
+
+## VAZ-1111 Oka, bumpers to the arches and the arches' shape (2026-10-27)
+
+- **«пластиковые бамперы там доходят прямо до арок, а у нас нет. и в реале арки
+  поаккуратнее и задняя арка не такая круглая, как у нас»** (with his side photo). → The
+  bumpers' sides stopped upright at `wrapTo` 0.2 / 3.07, the arches' edges at the
+  bumpers' heights 0.25–0.36 / 2.94–3.02: a 0.05–0.16 m strip of wing between them, while on
+  the car the bumper's end is the arch's edge, slanting with it. The front arch stood to
+  the drawing's liner (top 0.36), the rear as a circle of 0.293. → `wrapTo: 'arch'`
+  (spec.ts, exterior.ts `flankBumperPath`, `archEdgeS`): the sides' ends on the arch's edge
+  at every height (`BodyFrame.archY`), flank points beyond the edge's nearest stopping on
+  it low down (a sweep point's `at`), the shell's hole under the side kept off them. The
+  arches measured on the owner's photo with its 3.5 cm higher ride taken off
+  (measurements-oka.md §1.3): front a half ellipse 0.311 wide, top 0.335 (`arch` 1.245,
+  `frontArchRise` 1.34); rear 0.31 ahead, 0.29 behind, top 0.305 and flat, a superellipse of
+  power 2.7 (`rearArch` 1.2, `rearArchRise` 1.22, `archShift` rear −0.01, new
+  `rearArchSquare`: the rear's power where it differs from `archSquare`). Built front 0.336 /
+  0.298 / 0.324, rear 0.306 / 0.31 / 0.29; refs/vaz1111.json from the photo. Every other car
+  identical (kit-fingerprint); vaz1111 re-recorded, 10 765 triangles. *spec.ts, body.ts
+  `archY`, exterior.ts, oka.ts*.
+
+## VAZ classics, nose and tail in profile (2026-10-27)
+
+- **"The classics' noses and tails stand upright; on the real cars they lean" (owner, on
+  the 2106 drawing: the face forward ~6 cm over the 0.3 m above the bumper, the tail out
+  ~3 cm at the top).** → Every 124 and 05 end was one upright face at its station. Measured
+  on every classic's drawing and a side photo (measurements-classics.md "Nose and tail in
+  profile"): the 124 faces lean forward from the bumper's top, each its own (2101 −0.16,
+  2103 −0.26 to the lip, 2106 −0.25 to −0.30), the 124 tail leans out −0.14 to −0.17; the
+  05 ends (2105, 2107, the 2104's nose) stand upright above a short chin and are kept. →
+  `BODY_124.rearLean` { base 0.52, lean −0.16, blend 0.1 } (2101, 2103, 2106); `frontLean`
+  per car in `KIT_SPECS`: `NOSE_2101` (2101 and 2102) { base 0.48, lean −0.16 },
+  `NOSE_2103` { base 0.516, lean −0.26 }, `NOSE_2106` { base 0.49, lean −0.25 }, each with
+  `full` 0.067 behind its face (the lamps, grille, indicators and the lamps' rings rooted
+  in the face lean whole; with the default `full`, the bonnet's front edge 2.2 cm behind the
+  face, the items' roots reached into the blend and the 2103 opened a shell slit at its
+  lamps, kit-zfight) and blend 0.12. Bases
+  over the fangs' tops, so the bumpers stay upright. The 2101's grille bars proud 0.028 →
+  0.031: their 4 mm step to the dark back, tilted with the face, fought far off. Built at
+  the deck row: 2106 nose 0.148 → 0.081, tail 4.075 → 4.113; 2103 nose 0.128 → 0.066; 2101
+  0.103 → 0.060. Every other kit car identical (kit-fingerprint; the W124 moved by the
+  uncommitted mercedes.ts work, not this). *specs.ts `BODY_124`, `NOSE_*`, `KIT_SPECS`*.
 
 ## Failed approaches (do not retry)
 

@@ -145,7 +145,8 @@ export class BodyFrame {
 
   station(s: number): TubStation {
     const st = this.spec.stations;
-    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'notchWall' | 'corner'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'notchWall' | 'corner' | 'shoulder'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
+    const car = this.spec.shoulder;
     return {
       s,
       sill: pick('sill'),
@@ -156,12 +157,16 @@ export class BodyFrame {
       wCrease: pick('wCrease'),
       wBelt: pick('wBelt'),
       flat: table(st.map((x) => [x.s, x.flat ?? 0] as const), s),
+      shoulder: {
+        inset: table(st.map((x) => [x.s, (x.shoulder ?? car).inset] as const), s),
+        rise: table(st.map((x) => [x.s, (x.shoulder ?? car).rise] as const), s),
+      },
     };
   }
 
   section(s: number): Section {
     const st = this.station(s);
-    const sh = this.spec.shoulder;
+    const sh = st.shoulder!;
     return {
       st,
       r0: [st.wSill - SILL_BEVEL, st.sill],
@@ -342,7 +347,7 @@ export class BodyFrame {
   lidX(s: number): number {
     const pillar = this.spec.cabin.pillar;
     if (!this.notched) return this.section(s).r4[0] - pillar;
-    return table(this.spec.stations.map((st) => [st.s, st.notch ?? st.wBelt - this.spec.shoulder.inset - pillar] as const), s);
+    return table(this.spec.stations.map((st) => [st.s, st.notch ?? st.wBelt - (st.shoulder ?? this.spec.shoulder).inset - pillar] as const), s);
   }
 
   /** 0 away from notched stations, 1 on one, linear between. */
@@ -393,10 +398,10 @@ export class BodyFrame {
       const d = s - this.archCentre(axle);
       if (Math.abs(d) > r) continue;
       // A low rear arch (or a tall front one) is a half ellipse; every other arch a circle on
-      // the hub. A squared arch (`archSquare`) is a superellipse of that power: a flatter
-      // top, steeper sides.
+      // the hub. A squared arch (`archSquare`, the rear's `rearArchSquare`) is a superellipse
+      // of that power: a flatter top, steeper sides.
       const rise = axle === w.rear ? w.rearArchRise : w.frontArchRise;
-      const n = w.archSquare;
+      const n = axle === w.rear ? (w.rearArchSquare ?? w.archSquare) : w.archSquare;
       const y = n !== undefined
         ? w.radius + (rise === undefined ? r : w.radius * rise) * Math.pow(Math.max(0, 1 - Math.abs(d / r) ** n), 1 / n)
         : rise === undefined ? w.radius + Math.sqrt(r * r - d * d) : w.radius + w.radius * rise * Math.sqrt(Math.max(0, 1 - (d / r) ** 2));
@@ -924,18 +929,16 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // span the notch, so the face is cut into triangles that keep to its outline.
     const tris = THREE.ShapeUtils.triangulateShape(ring.map((p) => new THREE.Vector2(p[0], p[1])), []);
     // A leaning nose (`frontLean`) is cut along its base, so above it every face has its
-    // corners there or higher and leans as one plane, the lamps on it included.
-    const cut = s === cols[0] ? spec.frontLean?.base : undefined;
+    // corners there or higher and leans as one plane, the lamps on it included; either
+    // end is cut at its lean's peak too, where it bends again.
+    const lean = s === cols[0] ? spec.frontLean : spec.rearLean;
+    const cuts = [...(s === cols[0] && lean ? [lean.base] : []), ...(lean?.peak ? [lean.peak.y] : [])];
     for (const [a, b, c] of tris) {
-      const tri = [ring[a]!, ring[b]!, ring[c]!];
-      if (cut === undefined) {
-        shell.face(tri, 'body', 'paint');
-        continue;
+      let pieces = [[ring[a]!, ring[b]!, ring[c]!]];
+      for (const cut of cuts) {
+        pieces = pieces.flatMap((tri) => ([1, -1] as const).map((sign) => clipPolygon(tri, (p) => p[1] - cut, sign)));
       }
-      for (const sign of [1, -1] as const) {
-        const piece = clipPolygon(tri, (p) => p[1] - cut, sign);
-        if (piece.length >= 3) shell.face(piece, 'body', 'paint');
-      }
+      for (const piece of pieces) if (piece.length >= 3) shell.face(piece, 'body', 'paint');
     }
     if (nose) {
       shell.face([P(nose.half[0], nose.y, s), P(top[0], top[1], s), P(0, sec.st.deck, s), P(-top[0], top[1], s), P(-nose.half[0], nose.y, s)], 'bonnet', 'paint');

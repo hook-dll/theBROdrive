@@ -53,9 +53,9 @@ The Oka shares no stampings with any other kit car, so it is its own family: `BO
 | Front / rear bumper tip | x 899.5 / 2086.5 | 0 / 3.200 | `length` **3.2** |
 | Front / rear hub | x 1100.5 / 1912.5, y 529 | 0.542 / 2.731, 0.240 | `wheels.front` **0.542**, `rear` **2.731** |
 | Tyre | hub 89 px over the ground (loaded) | 0.240 | `radius` **0.25** (between the drawn 0.240 and 0.260 free [F]) |
-| Front arch | liner top y 394, lip y 368.5 | 0.604 / 0.673 over the ground: 0.364 / 0.433 round the hub | `arch` **1.45** (0.3625) |
-| Rear arch | top y 420–425, flattened under the flank line | 0.534–0.52 → ~0.29 round the hub | `rearArch` **1.17** (0.2925) |
-| Front bumper | top y 423.5 (front view 0.527), bottom y 505 (spoiler lip to 0.29) | 0.524 / 0.305 | moulded **0.30–0.525** (`drop` 0.035 under face sill 0.30 + 0.035; `height` 0.225); `wrapTo` **0.2** (the arch's front at its height: 0.542 − 0.34) |
+| Front arch | liner top y 394, lip y 368.5 | 0.604 / 0.673 over the ground: 0.364 / 0.433 round the hub | superseded by the owner's photo (§1.3): `arch` **1.245**, `frontArchRise` **1.34** |
+| Rear arch | top y 420–425, flattened under the flank line | 0.534–0.52 → ~0.29 round the hub | superseded by the owner's photo (§1.3): `rearArch` **1.2**, `rearArchRise` **1.22**, `rearArchSquare` **2.7** |
+| Front bumper | top y 423.5 (front view 0.527), bottom y 505 (spoiler lip to 0.29); its side's end along the arch, x 1035 at its top band, x 993–1003 low down | 0.524 / 0.305; end s 0.36 → 0.25 | moulded **0.30–0.525** (`drop` 0.035 under face sill 0.30 + 0.035; `height` 0.225); `wrapTo` **'arch'** (§1.3) |
 | Face | below the lamps x 920 | s 0.055 | first station **0.055** (the bumper reaches 0.055 out of it) |
 | Bonnet's lip / wings' top at the face | (950, 338.5) / (960, 355) | 0.136, 0.753 / 0.163, 0.709 | face deck **0.755**, belt **0.71**; `frontLean` base 0.5, lean (0.136 − 0.055) / (0.755 − 0.5) = **0.32** |
 | Bonnet centre (top line) | (950, 338.5) (1100, 297.5) (1195, 281) | 0.136 / 0.541 / 0.797 → 0.753 / 0.864 / 0.909 | deck 0.78 / 0.80 / 0.864 / 0.89 at s 0.16 / 0.27 / 0.54 / 0.89 |
@@ -75,7 +75,7 @@ The Oka shares no stampings with any other kit car, so it is its own family: `BO
 | Roof's rear / tailgate line | outer line (1959, 139.5) … (2054, 300) (2065, 335) (2072.5, 400) | 2.855, 1.29 / 3.112, 0.857 / 3.142, 0.763 / 3.162, 0.588 | last column top **2.855**; tailgate glass raked 0.6 m/m to the knee, the lower panel near upright |
 | Tailgate glass foot | rear view y 987.5 | 0.865, on the line at s 3.11 | `rearKnee` **(3.11, 0.86)** |
 | Tail lamp on the flank | x 2022.5–2065 (front edge 2022.5 top, 2030 foot), y 337.5–412.5 | 3.027–3.142, 0.756–0.554 | corner lamps forward to **3.04** |
-| Rear bumper | top y 435, bottom y 500, valance to y 530; reaches x 2087.5 | 0.493 / 0.318 / 0.24 | moulded **0.30–0.495** (`height` 0.195); `wrapTo` **3.07** (the arch's back at its height: 2.731 + 0.34) |
+| Rear bumper | top y 435, bottom y 500, valance to y 530; reaches x 2087.5; its side's front end along the arch, x 1980 at its top, 2013 at its foot | 0.493 / 0.318 / 0.24; end s 2.91 → 3.00 | moulded **0.30–0.495** (`height` 0.195); `wrapTo` **'arch'** (§1.3) |
 | Sill | black rocker y 542–557 between the arches | 0.205–0.164 | `sill` **0.17** from s 0.95 to 2.4; 0.30 at the ends (the bumpers' foot) |
 | Door bottom | y 512–520 | 0.286–0.264 | `doorBottom` **0.28** |
 | Fuel flap | not on the drawing (its left side) | — | **2.42–2.52, 0.57–0.67**, `side: 'right'` [P "1994 VAZ 1111 red rear": a round cap ~0.1 across half way down the right quarter, just ahead of the arch; position E from a 3/4 view] |
@@ -100,6 +100,19 @@ The real belt runs at 0.857 along the D pillar to the tailgate's line at s 3.11 
 | 3.16 | 0.577 at 3.156 (rounding); lamps' outer edge ±0.661 [D rear] | 0.63 / 0.655 / 0.645 |
 
 Rail ±0.493 at the side glass's top corners [D front] → `railHalf` **0.49**: the side glass leans in 0.18 m over its 0.45 height.
+
+### 1.3 Arches and the bumpers' ends (the owner's side photo, 2026-10-27)
+
+The owner: «пластиковые бамперы там доходят прямо до арок, а у нас нет. и в реале арки поаккуратнее и задняя арка не такая круглая, как у нас». His photo `build/carshape/_refs/photos/oka/owner_side.jpg` **[P]** (853×360, a red base car, its left side, square on): hubs (172, 283.5) and (698, 286.5) from the rims' caps, **241.3 px/m** from the 2180 wheelbase; tyre radius 0.257 (62 px). Its body sits higher on its wheels than the drawing's: over the hub its crease reads 0.317 (kit 0.28), door bottom 0.081 (0.03), front bumper top 0.309 (0.275), roof 1.40 over the ground (D 1.35): **0.035** taken off every height below to put it on the kit's hub (0.25). Edges read per 4 px row: the red skin's edge, and where the bumper's dark grey (~35) meets the well's black (~3).
+
+| Feature | Photo, over the photo's hub (m): half width ahead / behind | On the kit's hub | Spec (built, kit-drawing) |
+|---|---|---|---|
+| Front arch | h 0.05: 0.298 / 0.319; 0.133: 0.282 / 0.303; 0.215: 0.253 / 0.269; 0.282: 0.207 / 0.224; 0.332: 0.137 / 0.157; 0.365: 0.033 / 0.07; top **0.37** | top **0.335**, **0.30** ahead (the bumper), **0.323** behind at the hub; a half ellipse (0.253 ahead at 0.54 of the top, 0.191 at 0.785, 0.104 at 0.93: power 2) | `arch` **1.245** (0.311), `frontArchRise` **1.34**, `archShift` 0.0125: built **0.336 / 0.298 / 0.324** (stood 0.364 / 0.362 / 0.36 to the drawing's liner) |
+| Rear arch | h 0.066: 0.307 ahead; 0.099: 0.298 / 0.286; 0.199: 0.261 / 0.249; 0.282: 0.203 / 0.203; 0.315: 0.157 / 0.166; 0.332: 0.12 / 0.145; 0.348: 0.041 / 0.128; top **0.355**, level from 0.12 ahead to the bumper's corner 0.13–0.2 behind | top **0.305** (0.32 by the hubs, 0.305 by the crease and door bottom; D 0.29–0.30), **0.31** ahead, **0.29** behind (the bumper); flatter than an ellipse near its top: at 0.92 of the top 0.16 against an ellipse's 0.118, at 0.97 0.13 against 0.073 (power ≈ 2.7) | `rearArch` **1.2** (0.30), `rearArchRise` **1.22**, `rearArchSquare` **2.7** (new), `archShift` rear **−0.01**: built **0.306 / 0.31 / 0.29** (stood a circle 0.294 / 0.292 / 0.292) |
+| Front bumper's side end | the bumper's dark grey to the well, top y 212 → foot y 277: 0.207 ahead of the hub at h 0.29, 0.24 at 0.248, 0.273 at 0.186, 0.29 at 0.124, 0.298 at 0.062 | s **0.335** at its top → **0.244** at its foot: the arch's front edge | `wrapTo: 'arch'` (new): the end on the arch's edge at every height, built s **0.247** at its foot (0.30), 0.324 at 0.475, **0.377** at its top (0.525) |
+| Rear bumper's side end | top y 206 → foot y 265: 0.128 behind the hub at h 0.348 (its rounded corner), 0.182 at 0.306, 0.215 at 0.265, 0.244 at 0.203, 0.265 at 0.141 | s **2.86** at its top → **2.996** at its foot: the arch's back edge | `wrapTo: 'arch'`: built s **3.02** at its foot (0.30), 2.963 at 0.475, **2.944** at its top (0.495) |
+
+The drawing agrees where it shows them: its front bumper's top band ends at x 1030–1040 (s 0.35–0.38) and its lower part at x 993–1003 (s 0.25–0.28), its rear bumper's end runs from (1980, 430) to (2013, 513) (s 2.91 → 3.00); its rear arch's top is flat under the flank line. Its rear opening reads 3 cm smaller than the photo's (two lines ahead, 0.345 and 0.253 at the hub's height); the photo is kept. The photo's bumpers are deeper (rear 0.24 against the drawing's 0.175 over the valance): not changed, outside the complaint.
 
 ## 2. Front (drawing front view; photos for colour)
 
@@ -133,7 +146,9 @@ Rail ±0.493 at the side glass's top corners [D front] → `railHalf` **0.49**: 
 - **Screen's foot vs the A pillar**: the pillar's outer line reaches the belt at s 0.79; the kit's first column stands at the screen's foot (0.89), so the pillar is 0.10 shorter at its foot.
 - **Rear fog lamp**: one, at the bumper's left end [P]; face items are built on both sides, so both ends carry a red unlit lens (the drawing shows a rectangle at each end).
 - **Filler cap**: round on the car; the flap is a rectangle 0.1 × 0.1. Its position is read off a 3/4 photo, not measured.
-- **Rear arch**: drawn flattened under the flank line; one circle of 0.29 (`rearArch` 1.17), no `rearArchRise`.
+- **Rear arch**: a superellipse (`rearArchSquare` 2.7) from the owner's photo; its back edge on the car is the bumper's end, whose top corner is squarer still (0.13 behind the hub at 0.98 of the top against the kit's 0.10).
+- **Arch lips**: the car's arches have a flared lip round the opening [P]; the kit's opening is the plain cut.
+- **Ride height**: the owner's photo sits 3.5 cm higher on its wheels than the drawing; the kit keeps the drawing's.
 - **Tracks**: 1210 / 1200 [F web, D] against 1214 / 1204 in the `cf_vaz1111` row.
 - Not modelled: number plates and their recesses in both bumpers, the sail's black finish (painted here), the roof's rear lip, the badge.
 
@@ -142,3 +157,4 @@ Rail ±0.493 at the side glass's top corners [D front] → `railHalf` **0.49**: 
 Arch openings `[top, ahead, behind]` over the hub (m), refs → built before → after (kit-drawing; STATUS.md table, HISTORY):
 
 - **vaz1111**: front 0.36 / 0.295 / 0.32: 0.364 / 0.362 / 0.36 → 0.36 / 0.294 / 0.32; rear 0.29 / 0.28 / 0.27: 0.294 / 0.292 / 0.292 → 0.294 / 0.292 / 0.292. `arch` 1.45 → 1.23, `frontArchRise` 1.44, `archShift` [0.0125, 0]; refs re-read on the drawn hub crosshair (1103, 529).
+- **vaz1111, the owner's photo (2026-10-27, §1.3)**: refs front → 0.335 / 0.30 / 0.323, rear → 0.305 / 0.31 / 0.29; built 0.36 / 0.294 / 0.32 → 0.336 / 0.298 / 0.324 and 0.294 / 0.292 / 0.292 → 0.306 / 0.31 / 0.29. `arch` 1.23 → 1.245, `frontArchRise` 1.44 → 1.34, `archShift` [0.0125, 0] → [0.0125, −0.01], `rearArch` 1.17 → 1.2, `rearArchRise` 1.22, `rearArchSquare` 2.7.

@@ -4,6 +4,32 @@
 
 ### Added
 
+- BMW E34 kit car (520i 24V saloon, 1990-95; `src/carkit/bmw.ts`, `CABIN_E34`,
+  `refs/e34.json`, `measurements-e34.md`; the M50B20 and the ZF five-speed in the
+  registry, the cross-spoke alloys), built after a feature inventory the owner answered:
+  twin kidneys between four round head lamps in black rings (`round.ring`), the face
+  leaning forward to a crease under the bonnet's lip (`frontLean` with `peak`), body-colour
+  bumpers with a broad black band in line with the black rubbing strip, black window
+  frames and B pillar, the rear door's fixed quarter glass hooking forward at its foot
+  (the Hofmeister kink), tail lamps split between the wings and the boot lid, body-colour
+  mirrors on a black base with no arm (`mirrorMount`, `mirrorHead`: the owner, «зеркала у
+  bmw не так крепятся»), the boot without the classics' tank (`bootTank: false`), and a
+  centre stack turned towards the driver (`stack.yaw`). Draft, awaiting the owner.
+
+- The GAZ-24's nose and tail in side view are chevrons, as on the owner's photo and the
+  factory drawing: the wing tips at the crease are the foremost and rearmost points, the
+  face below and the lip above both running in (`frontLean` / `rearLean` with the new
+  `peak`; `measurements-volga.md` §5). The GAZ-31029 keeps its square ends.
+- The VAZ classics' ends in side view, measured on every drawing and a side photo
+  (`measurements-classics.md` "Nose and tail in profile"): the 2101, 2102, 2103 and 2106
+  faces lean forward from the bumper's top, lamps and grilles with them, each by its own
+  amount (−0.16 / −0.16 / −0.26 / −0.25 m per m, `NOSE_*` in specs.ts); the 124 saloons'
+  tails lean out (−0.16, `BODY_124.rearLean`); bumpers stay upright. The 2105, 2107 and
+  the 2104's nose are upright as on the cars. Awaiting the owner's review.
+- The Oka's plastic bumpers run along the flanks right up to the arches (moulded
+  `wrapTo: 'arch'`), its front arch lower and closer to the tyre, the rear flatter and
+  wider (`rearArchSquare`), measured on the owner's photo (`measurements-oka.md` §1.3).
+
 - Plan views (owner, 2026-10-27, from above in the car lab): the W124's tail narrows
   from ±0.87 at the back light to ±0.75 at the bumper with rounded corners (it kept its
   width to the last 2 cm); the AZLK-2141's nose is wide and nearly square (±0.745 at the
@@ -381,26 +407,6 @@
 
 ### Changed
 
-- ON FOOT: A GROWN MAN, AND FIXED FIELDS OF VIEW (`render/cameras.ts`, `core/renderer.ts`
-  `FOOT_FIELD_OF_VIEW`/`CAR_FIELD_OF_VIEW`, `player/player.ts`, `game/settings.ts`,
-  `config.ts`, `config/gameplay.json`; reverts of 9ee9a670 and 029e338c). The boy's 1.10 m
-  eye and short quick gait are gone: the eye stands at 1.78 m (`EYE_HEIGHT`,
-  `Player.EYE_OFFSET` 0.83 over the capsule's centre; a crouch still squats to 0.95 m),
-  and the head bob and footsteps are the adult's fixed stride. The field of view is no
-  longer a setting at all: `Settings.fieldOfView`, its config bounds and
-  `CameraRig.setFieldOfView` are gone. It is authored per view: 62° on foot, 85° in the
-  chase and cabin views (plus the acceleration widening), set on getting in and out.
-
-- THE SHOP BECOMES THE GARAGE MACHINE, AND NOT EVERY SETTLEMENT HAS ONE (shells phase 5;
-  `world/vending.ts`, `world/cardmachine.ts`, `world/settlement.ts`, `world/poi.ts`,
-  `world/post.ts`, `save/save.ts`, `game/state.ts`, `app/devtools.ts`,
-  `tools/poi-placement.ts`, `tools/look/hud.mjs`, `game-design2.md` §6.3, §6.4, §8, §12,
-  §18). The one mixed «МАГАЗИН» machine is split. The GARAGE machine (`buildGarage`,
-  `GarageMachine`) sells car parts and paint: an air filter, a turbine, a radiator, a
-  gearbox and an engine (engines and gearboxes drawn from those the catalogue's cars are
-  built with, the imports stay at the scrapyards; engine and radiator sold dry), 1–2 spray
-  cans, 1–3 empty cans of 5/10/20 L, and the small goods, gum and sun shades; each kind by
-  its own roll (`GAR1` domain), 12 slots, gum then cans given up when it overflows. Its
 - TRAFFIC ON YOUR SIDE KEEPS BELOW YOUR PACE OUT OF SIGHT (`world/traffic.ts`
   `PLAYER_PACE_SHARE`, `PLAYER_PACE_SPREAD`, `PLAYER_PACE_FLOOR_MPS`, `playerPaceCap`;
   `main.ts`, `ui/menu.ts`). A car going the player's way, ahead of him and out of his
@@ -435,6 +441,26 @@
   `tools/traffic-bench.ts` one seed of four (1309652872) now reads 4.8 of 12.7 live cars
   ahead against a 40 % floor: cars he overtakes stay live until 500 m behind him.
 
+- ON FOOT: A GROWN MAN, AND FIXED FIELDS OF VIEW (`render/cameras.ts`, `core/renderer.ts`
+  `FOOT_FIELD_OF_VIEW`/`CAR_FIELD_OF_VIEW`, `player/player.ts`, `game/settings.ts`,
+  `config.ts`, `config/gameplay.json`; reverts of 9ee9a670 and 029e338c). The boy's 1.10 m
+  eye and short quick gait are gone: the eye stands at 1.78 m (`EYE_HEIGHT`,
+  `Player.EYE_OFFSET` 0.83 over the capsule's centre; a crouch still squats to 0.95 m),
+  and the head bob and footsteps are the adult's fixed stride. The field of view is no
+  longer a setting at all: `Settings.fieldOfView`, its config bounds and
+  `CameraRig.setFieldOfView` are gone. It is authored per view: 62° on foot, 85° in the
+  chase and cabin views (plus the acceleration widening), set on getting in and out.
+
+- THE SHOP BECOMES THE GARAGE MACHINE, AND NOT EVERY SETTLEMENT HAS ONE (shells phase 5;
+  `world/vending.ts`, `world/cardmachine.ts`, `world/settlement.ts`, `world/poi.ts`,
+  `world/post.ts`, `save/save.ts`, `game/state.ts`, `app/devtools.ts`,
+  `tools/poi-placement.ts`, `tools/look/hud.mjs`, `game-design2.md` §6.3, §6.4, §8, §12,
+  §18). The one mixed «МАГАЗИН» machine is split. The GARAGE machine (`buildGarage`,
+  `GarageMachine`) sells car parts and paint: an air filter, a turbine, a radiator, a
+  gearbox and an engine (engines and gearboxes drawn from those the catalogue's cars are
+  built with, the imports stay at the scrapyards; engine and radiator sold dry), 1–2 spray
+  cans, 1–3 empty cans of 5/10/20 L, and the small goods, gum and sun shades; each kind by
+  its own roll (`GAR1` domain), 12 slots, gum then cans given up when it overflows. Its
   cabinet is a workshop's tool wall, not the arcade cabinet (`CardMachineLook.cabinet`
   `'garage'`, `dressGarageShell`): dark steel cheeks with rivets up their front edges, a
   pegboard with a spanner and a hammer on each flank, a hazard band and a round spanner
