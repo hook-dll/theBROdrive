@@ -4,6 +4,12 @@
 
 ### Added
 
+- Plan views (owner, 2026-10-27, from above in the car lab): the W124's tail narrows
+  from ±0.87 at the back light to ±0.75 at the bumper with rounded corners (it kept its
+  width to the last 2 cm); the AZLK-2141's nose is wide and nearly square (±0.745 at the
+  face, was ±0.66: its drawing's top view disagrees with its own front view and the
+  photos). `tools/kit-drawing.ts` judges `planHalfWidth` [s, half width] where a refs
+  file gives it (the W124 and the 2141 so far).
 - Tens: the firewall lining leans in with the side (`firewallLean`, `CABIN_2110`), out of
   the front doors' edges (kit-zfight on the 2110/2112). Brake tests measured on budget
   tyres are printed, not judged (`BUDGET_TYRE_STOP` in tools/reality.ts): on the MXV the
