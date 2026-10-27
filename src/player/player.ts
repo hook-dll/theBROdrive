@@ -53,10 +53,10 @@ const CROUCH_HALF_HEIGHT = 0.2;
 /** How far the collider's centre drops down its body when it shortens, so the feet stay put. */
 const CROUCH_CENTRE_DROP = CAPSULE_HALF_HEIGHT - CROUCH_HALF_HEIGHT;
 /**
- * How far the eye drops in a full crouch: the camera's standing 1.62 m (render/cameras.ts,
+ * How far the eye drops in a full crouch: the camera's standing 1.78 m (render/cameras.ts,
  * `EYE_HEIGHT`) comes down to a squat's 0.95 m, under the crouched capsule's 1.1 m top.
  */
-const CROUCH_EYE_DROP = 0.67;
+const CROUCH_EYE_DROP = 0.83;
 /** Seconds for the eye to travel the whole way down or up. */
 const CROUCH_SECONDS = 0.25;
 /**
@@ -110,8 +110,8 @@ export const IMMOVABLE = 'immovable';
 export type ShoveOwner = Shoveable | typeof IMMOVABLE | null;
 
 export class Player implements Rebasable {
-  /** Standing eye height above the body origin (the standing capsule's centre), metres. */
-  static readonly EYE_OFFSET = 0.7;
+  /** Standing eye height above the body origin (the standing capsule's centre), metres: 1.78 m over the feet. */
+  static readonly EYE_OFFSET = 0.83;
   /** Distance from the body origin (the standing capsule's centre) down to the feet, metres. */
   static readonly FEET_OFFSET = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS;
 

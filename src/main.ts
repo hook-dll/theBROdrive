@@ -364,7 +364,6 @@ async function boot(): Promise<void> {
     DEFAULT_INK_STRENGTH,
     mobilePresentation,
     world.state.settings.frameScale,
-    world.state.settings.fieldOfView,
     world.state.settings.shadows,
   );
   renderer.setRetroLines(world.state.settings.retroLines);
@@ -1409,12 +1408,7 @@ async function boot(): Promise<void> {
     }
   });
 
-  const camera = new CameraRig(
-    renderer.camera,
-    physics,
-    origin,
-    world.state.settings.fieldOfView,
-  );
+  const camera = new CameraRig(renderer.camera, physics, origin);
   camera.setMode('foot');
   camera.setShake(world.state.settings.cameraShake);
   camera.setStyle(world.state.settings.cameraStyle);
@@ -3383,7 +3377,6 @@ async function boot(): Promise<void> {
       sky.setShadowMode(world.state.settings.shadows);
       renderer.setFrameScale(world.state.settings.frameScale);
       renderer.setRetroLines(world.state.settings.retroLines);
-      camera.setFieldOfView(world.state.settings.fieldOfView);
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);
       hud.setDashboardScale(world.state.settings.dashboardSize);

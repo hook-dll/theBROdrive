@@ -552,16 +552,6 @@ export interface Settings {
   frameScale: FrameScale;
   /** Very Low's frame height, lines; see `RETRO_LINE_CHOICES`. Ignored on every other rung. */
   retroLines: RetroLines;
-  /**
-   * Resting vertical field of view, degrees.
-   *
-   * A real setting rather than a constant because the projection is Hor+: the vertical
-   * angle is fixed and the aspect decides the horizontal one, so a 21:9 window shows
-   * MORE world than a 16:9 one and a portrait phone shows almost nothing sideways.
-   * The acceleration widening and the ten-power binoculars are both derived from this, so
-   * changing it moves the resting composition and nothing else.
-   */
-  fieldOfView: number;
   /** FXAA: edge antialiasing in the post pass, on the shaded picture (render/hazeshader.ts). */
   fxaa: boolean;
   /** Sun shadows (`ShadowMode`); the rung's default until the player chooses. */
@@ -658,23 +648,6 @@ export const CONTROLLER_DEADZONE_STEP = 0.01;
 export const CONTROLLER_STEER_MIN = 0.5;
 export const CONTROLLER_STEER_MAX = 2;
 export const CONTROLLER_STEER_STEP = 0.05;
-/**
- * Resting vertical field of view, and how far a player may move it.
- *
- * FOV matters more than it sounds: it sets the apparent scale of the whole world, so a
- * couple of degrees changes how big the car feels and how fast the road appears to
- * move. Every camera mode rests here, and the acceleration widening and the ten-power
- * binoculars are both measured from it.
- *
- * The bounds are the rectilinear projection's, not a taste: it stretches the picture
- * along the frame's radius by `1 / cos²(angle)`, so at 16:9 the frame edge runs 1.69x
- * at the minimum 50 (79 degrees horizontal) and 3.65x at the maximum 85 (117 degrees).
- * Past that the outer frame is a fisheye and the horizon bows; below the minimum the
- * view is a telephoto that makes 100 km/h look like 40.
- */
-export const DEFAULT_FIELD_OF_VIEW = GAMEPLAY_CONFIG.fieldOfViewDegrees;
-export const FIELD_OF_VIEW_MIN = GAMEPLAY_CONFIG.fieldOfViewMinDegrees;
-export const FIELD_OF_VIEW_MAX = GAMEPLAY_CONFIG.fieldOfViewMaxDegrees;
 /** Dashboard size range: a good deal smaller, a little bigger, never covering the road. */
 export const DASHBOARD_SIZE_MIN = 0.55;
 export const DASHBOARD_SIZE_MAX = 1.2;
@@ -728,7 +701,6 @@ export const DEFAULT_SETTINGS: Settings = {
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
   mirrorFrameRate: DEFAULT_MIRROR_FRAME_RATE,
-  fieldOfView: DEFAULT_FIELD_OF_VIEW,
   // Off by default; M switches it while driving, and the pause menu remembers which.
   mouseDriving: false,
   cameraShake: true,
@@ -963,9 +935,6 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // percentage); neither is this, so they land on the screen, as a preset would.
     frameScale: FRAME_SCALES.find((scale) => scale === obj.frameScale) ?? 1,
     retroLines: retroLinesFrom(obj.retroLines),
-    // Not a player setting any more (no slider): a save's old value is dropped so
-    // every player gets the authored view.
-    fieldOfView: DEFAULT_FIELD_OF_VIEW,
     // A save's `viewDistance` is DELIBERATELY DROPPED rather than migrated. The horizon
     // is a property of the CPU level now, and the two ladders do not line up: an old
     // save asking for `vast` on `acceptable` was a combination that should never have

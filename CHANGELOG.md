@@ -296,12 +296,15 @@
 
 ### Changed
 
-- ON FOOT: A GROWN-UP AGAIN, AT 62° (`render/cameras.ts` `FOOT_FIELD_OF_VIEW`,
-  `player/player.ts`; reverts of 9ee9a670 and 029e338c). The boy's 1.10 m eye and short
-  quick gait are gone: the eye stands at 1.62 m again (crouch to 0.95 m), the head bob and
-  footsteps are the adult's fixed stride. The on-foot view has its own fixed 62° field of
-  view; the FOV setting (85 by default) is the driving views' only, and the view switches
-  between the two on getting in and out.
+- ON FOOT: A GROWN MAN, AND FIXED FIELDS OF VIEW (`render/cameras.ts`, `core/renderer.ts`
+  `FOOT_FIELD_OF_VIEW`/`CAR_FIELD_OF_VIEW`, `player/player.ts`, `game/settings.ts`,
+  `config.ts`, `config/gameplay.json`; reverts of 9ee9a670 and 029e338c). The boy's 1.10 m
+  eye and short quick gait are gone: the eye stands at 1.78 m (`EYE_HEIGHT`,
+  `Player.EYE_OFFSET` 0.83 over the capsule's centre; a crouch still squats to 0.95 m),
+  and the head bob and footsteps are the adult's fixed stride. The field of view is no
+  longer a setting at all: `Settings.fieldOfView`, its config bounds and
+  `CameraRig.setFieldOfView` are gone. It is authored per view: 62° on foot, 85° in the
+  chase and cabin views (plus the acceleration widening), set on getting in and out.
 
 - THE SHOP BECOMES THE GARAGE MACHINE, AND NOT EVERY SETTLEMENT HAS ONE (shells phase 5;
   `world/vending.ts`, `world/cardmachine.ts`, `world/settlement.ts`, `world/poi.ts`,

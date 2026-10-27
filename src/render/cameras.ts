@@ -1,13 +1,8 @@
 import * as THREE from 'three';
 import type { InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
-import { nearPlaneForFarPlane } from '../core/renderer';
-import {
-  DEFAULT_FIELD_OF_VIEW,
-  FIELD_OF_VIEW_MAX,
-  FIELD_OF_VIEW_MIN,
-  type CameraStyle,
-} from '../game/settings';
+import { CAR_FIELD_OF_VIEW, FOOT_FIELD_OF_VIEW, nearPlaneForFarPlane } from '../core/renderer';
+import type { CameraStyle } from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
 export type CameraMode = 'foot' | 'cabin' | 'chase';
@@ -61,8 +56,8 @@ export interface CameraTarget {
 
 /** Mouse pitch clamp, radians. Keeps the view from flipping over the poles. */
 const PITCH_LIMIT = 1.45;
-/** Standing eye height above the player position, metres. */
-const EYE_HEIGHT = 1.62;
+/** Standing eye height above the player position, metres: a grown man's, 1.78 m. */
+const EYE_HEIGHT = 1.78;
 /** How far ahead of the eye the spring's look-at point sits. */
 const LOOK_AHEAD = 12;
 /**
@@ -123,6 +118,8 @@ const DIST_MAX = 7;
  * and holds the band this sits in.
  */
 const ARM_PITCH_BASE = 0.189;
+/** `tan` of half the driving views' resting FOV: the divisor of `armPitchForWidening`. */
+const CAR_HALF_TAN = Math.tan((CAR_FIELD_OF_VIEW * Math.PI) / 360);
 /** How far short of an occluder to stop the chase camera, metres. */
 const OCCLUSION_SKIN = 0.3;
 /**
@@ -161,13 +158,6 @@ const FOV_BRAKE_MAX = 2;
 const FOV_OMEGA = 6;
 /** Ten-power binoculars: the view is the resting FOV divided by this. */
 const BINOCULAR_POWER = 10;
-/**
- * The on-foot view's field of view, degrees: a person's natural framing, fixed. The FOV
- * setting (`setFieldOfView`) is the driving views' — a car wants its wide 85 for speed
- * and the mirrors; walking about at that width bent the posts, machines and the jar
- * corners, and up close to a machine everything looked far away.
- */
-const FOOT_FIELD_OF_VIEW = 62;
 const FOV_EPSILON = 0.01;
 const BOB_AMP = 0.035;
 const BOB_FREQ = 9;
@@ -430,12 +420,10 @@ export class CameraRig {
   private readonly eye = new THREE.Vector3();
   private readonly lookAt = new THREE.Vector3();
   /**
-   * The resting vertical FOV this rig returns to, and `tan` of its half — the divisor
-   * that makes the arm's elevation coupling exact at the resting view.
+   * The live vertical FOV: the resting one of the view (`FOOT_FIELD_OF_VIEW` on foot,
+   * `CAR_FIELD_OF_VIEW` in the chase and cabin views) plus the acceleration widening.
    */
-  private baseFov = DEFAULT_FIELD_OF_VIEW;
-  private baseHalfTan = Math.tan((DEFAULT_FIELD_OF_VIEW * Math.PI) / 360);
-  private fov = DEFAULT_FIELD_OF_VIEW;
+  private fov = FOOT_FIELD_OF_VIEW;
 
   private bobTime = 0;
   /** True while a V re-centre ease runs; cancelled by any mouse look. */
@@ -522,25 +510,9 @@ export class CameraRig {
     private readonly camera: THREE.PerspectiveCamera,
     private readonly physics: PhysicsWorld,
     origin: WorldOrigin,
-    fieldOfView = DEFAULT_FIELD_OF_VIEW,
   ) {
-    this.setFieldOfView(fieldOfView);
+    this.camera.fov = FOOT_FIELD_OF_VIEW;
     origin.register(this);
-  }
-
-  /**
-   * Sets the resting vertical FOV, from the pause menu, with no reload.
-   *
-   * The live `fov` follows it by the same difference rather than snapping, so a slider
-   * drag moves the view it is describing instead of jumping to rest: the acceleration
-   * widening and the binocular view are both derived from the resting value, and a
-   * player dragging this while pulling away keeps his widening while he does it.
-   */
-  setFieldOfView(degrees: number): void {
-    const next = Math.min(FIELD_OF_VIEW_MAX, Math.max(FIELD_OF_VIEW_MIN, degrees));
-    this.fov += next - this.baseFov;
-    this.baseFov = next;
-    this.baseHalfTan = Math.tan((next * Math.PI) / 360);
   }
 
   /** `Settings.cameraShake`: whether the driving view trembles at speed. */
@@ -1257,9 +1229,9 @@ export class CameraRig {
    * that effect exactly as it was; above it the FOV ceiling is the only bound.
    */
   private armPitchForWidening(): number {
-    if (this.fov <= this.baseFov) return ARM_PITCH_BASE;
+    if (this.fov <= CAR_FIELD_OF_VIEW) return ARM_PITCH_BASE;
     const halfTan = Math.tan(THREE.MathUtils.degToRad(this.fov) / 2);
-    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / this.baseHalfTan));
+    return Math.atan(Math.tan(ARM_PITCH_BASE) * (halfTan / CAR_HALF_TAN));
   }
 
   /**
@@ -1347,7 +1319,7 @@ export class CameraRig {
     const cue = !widen ? 0
       : s >= 0 ? Math.min(s * FOV_ACCEL_DEG_PER_MPS2, FOV_ACCEL_MAX)
       : Math.max(s * FOV_BRAKE_DEG_PER_MPS2, -FOV_BRAKE_MAX);
-    const resting = this.onFoot ? FOOT_FIELD_OF_VIEW : this.baseFov;
+    const resting = this.onFoot ? FOOT_FIELD_OF_VIEW : CAR_FIELD_OF_VIEW;
     const targetFov = this.binoculars ? resting / BINOCULAR_POWER : resting + cue;
     this.fov += (targetFov - this.fov) * (1 - Math.exp(-FOV_OMEGA * dt));
     this.updateProjection();
@@ -1418,6 +1390,6 @@ export class CameraRig {
     }
     this.eye.copy(_vA);
     this.lookAt.copy(_vB);
-    this.fov = this.baseFov;
+    this.fov = CAR_FIELD_OF_VIEW;
   }
 }

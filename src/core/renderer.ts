@@ -9,7 +9,6 @@ import { setSceneFrameHeight } from '../render/sceneframe';
 import { DEFAULT_EYE_HEIGHT_M, HAZE_FRAGMENT, HAZE_VERTEX } from '../render/hazeshader';
 import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import {
-  DEFAULT_FIELD_OF_VIEW,
   DEFAULT_INK_STRENGTH,
   screenLinesFor,
   shadowModeDefault,
@@ -54,6 +53,17 @@ export const CAMERA_NEAR = 0.08;
 export function nearPlaneForFarPlane(far: number): number {
   return Math.max(CAMERA_NEAR, far / MAX_DEPTH_RATIO);
 }
+/**
+ * The fixed vertical fields of view, degrees: not a player setting. FOV sets the apparent
+ * scale of the whole world, so it is authored per view rather than offered as a slider.
+ * On foot 62, a person's natural framing: walking about at the car's width bent the
+ * posts and machines and pushed everything up close far away. The chase and cabin views
+ * 85, wide for the sense of speed and the mirrors (render/cameras.ts adds the
+ * acceleration widening on top). The projection is Hor+, so the aspect decides the
+ * horizontal angle.
+ */
+export const FOOT_FIELD_OF_VIEW = 62;
+export const CAR_FIELD_OF_VIEW = 85;
 
 /**
  * Standoff margin, metres: the far plane is measured from the CAMERA, not from the
@@ -436,7 +446,6 @@ export class Renderer {
      * ignores it for `retroLines`.
      */
     private frameScale: FrameScale = 1,
-    fieldOfView = DEFAULT_FIELD_OF_VIEW,
     /** `Settings.shadows`; a lab without the setting draws its rung's default. */
     shadowMode: ShadowMode = shadowModeDefault(quality),
   ) {
@@ -510,7 +519,7 @@ export class Renderer {
     const viewportWidth = Math.max(1, canvas.clientWidth);
     const viewportHeight = Math.max(1, canvas.clientHeight);
     this.camera = new THREE.PerspectiveCamera(
-      fieldOfView,
+      CAR_FIELD_OF_VIEW,
       viewportWidth / viewportHeight,
       CAMERA_NEAR,
       CAMERA_FAR,
@@ -557,7 +566,7 @@ export class Renderer {
         uResolution: { value: new THREE.Vector2(1, 1) },
         uEyeAbove: { value: DEFAULT_EYE_HEIGHT_M },
         uCameraRotation: { value: new THREE.Matrix3() },
-        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(fieldOfView) / 2) },
+        uTanHalfFov: { value: Math.tan(THREE.MathUtils.degToRad(CAR_FIELD_OF_VIEW) / 2) },
         uPanini: { value: 0 },
         uCameraNear: { value: CAMERA_NEAR },
         uCameraFar: { value: CAMERA_FAR },
