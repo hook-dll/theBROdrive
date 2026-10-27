@@ -144,6 +144,20 @@ const ONCOMING_PLATOON_CHANCE = 0.75;
  */
 export const SAME_DIRECTION_SHARE = 0.75;
 /**
+ * TRAFFIC ON THE PLAYER'S SIDE KEEPS TO HIS PACE, AND BELOW IT (owner, 2026-10-27: a
+ * road where he is mostly the fastest car). A car going his way, ahead of him and out of
+ * his sight (`railsNear` false), has its speed cap set to this share of his speed, give
+ * or take `PLAYER_PACE_SPREAD` per car, so the road ahead fills with cars he closes on
+ * whatever he drives. Never above what its own driver would do (the cap only lowers its
+ * own pace, `Autopilot.cruisePace`), never under `PLAYER_PACE_FLOOR_MPS`; a frantic driver
+ * keeps its own, and a car behind him or oncoming gets its own back once out of his
+ * sight. In view the cap holds where it was, so nothing he watches changes speed for it.
+ */
+const PLAYER_PACE_SHARE = 0.7;
+const PLAYER_PACE_SPREAD = 0.1;
+/** The slowest sleeper's lowest cap (`drawDriver`, 58 km/h): no car is held under it. */
+const PLAYER_PACE_FLOOR_MPS = 58 / 3.6;
+/**
  * WHO DRIVES WHAT: the driver's character comes from the car (owner, 2026-10-10), not
  * from one share for the whole stream. `[sleeper, hurried, frantic]` odds per model:
  *
@@ -685,6 +699,8 @@ interface TrafficCar {
   readonly speedCap: number;
   /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
   readonly pace: number;
+  /** Where in the `PLAYER_PACE_SPREAD` band this car keeps to the player's pace, -1..1. */
+  readonly playerPaceDraw: number;
   roadLateral: number;
   /** Current body projection across the road, including yaw/roll. */
   roadHalfWidth: number;
@@ -809,6 +825,8 @@ interface PendingSpawn {
   readonly speedCap: number;
   /** Share of its mode's pace this driver uses; see `Autopilot.setPace`. */
   readonly pace: number;
+  /** See `TrafficCar.playerPaceDraw`; a platoon mate takes its leader's. */
+  readonly playerPaceDraw: number;
   readonly lane: number;
   readonly rear: boolean;
   /** Platoon mates still to come in behind this car; see `drawPlatoonMates`. */
@@ -2161,6 +2179,9 @@ export class RoadTraffic {
             continue;
           }
         }
+        // Out of his sight only; see PLAYER_PACE_SHARE. A car on rails reads the cap
+        // at its next survey (`railCruise`).
+        if (!this.railsNear(car, playerS)) car.autopilot.setSpeedCap(this.playerPaceCap(car, playerS));
       }
       if (car.railsHoldoff > 0) car.railsHoldoff -= dt;
       if (car.fullDetailFor > 0) car.fullDetailFor -= dt;
@@ -2769,6 +2790,7 @@ export class RoadTraffic {
       mode: driver.mode,
       speedCap: driver.speedCap,
       pace: driver.pace,
+      playerPaceDraw: 2 * this.random() - 1,
       lane: spawn.lane,
       rear: spawn.s < this.playerS,
       platoonMates: mates,
@@ -2942,6 +2964,7 @@ export class RoadTraffic {
       forwardSpeed: 0,
       speedCap: request.speedCap,
       pace: request.pace,
+      playerPaceDraw: request.playerPaceDraw,
       spawnS: request.forwardS,
       autopilot,
       input: emptyInput(),
@@ -3051,6 +3074,7 @@ export class RoadTraffic {
       mode: leader.autopilot.mode,
       speedCap: leader.speedCap,
       pace: leader.pace,
+      playerPaceDraw: leader.playerPaceDraw,
       lane,
       rear: s < this.playerS,
       platoonMates: mates - 1,
@@ -3463,6 +3487,32 @@ export class RoadTraffic {
 
   set oncomingPlatoons(value: number | null) {
     this.oncomingPlatoonsOverride = value === null ? null : Math.min(1, Math.max(0, value));
+  }
+
+  private playerPaceOverride: number | null = null;
+
+  /**
+   * The middle of the band of the player's speed his side's traffic keeps to out of his
+   * sight: `PLAYER_PACE_SHARE`, or the dev menu's override (`__bro.traffic.playerPace =
+   * 0.8`; `null` hands it back). Each car sits `PLAYER_PACE_SPREAD` either side of it.
+   */
+  get playerPace(): number {
+    return this.playerPaceOverride ?? PLAYER_PACE_SHARE;
+  }
+
+  set playerPace(value: number | null) {
+    this.playerPaceOverride = value === null ? null : Math.min(2, Math.max(0, value));
+  }
+
+  /**
+   * The speed cap a car out of the player's sight drives to; see PLAYER_PACE_SHARE.
+   * Only ahead of him: a car behind was put there to come up his mirror (`queueSpawn`),
+   * and one he has passed gets its own pace back once it is out of his sight.
+   */
+  private playerPaceCap(car: TrafficCar, playerS: number): number {
+    if (car.direction !== 1 || car.style === 'frantic' || car.forwardS < playerS) return car.speedCap;
+    const share = this.playerPace + car.playerPaceDraw * PLAYER_PACE_SPREAD;
+    return Math.min(car.speedCap, Math.max(PLAYER_PACE_FLOOR_MPS, share * this.playerSpeed));
   }
 
   /** The fewest cars a density draw can ask for against the present cap. */

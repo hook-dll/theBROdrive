@@ -401,6 +401,18 @@
   built with, the imports stay at the scrapyards; engine and radiator sold dry), 1–2 spray
   cans, 1–3 empty cans of 5/10/20 L, and the small goods, gum and sun shades; each kind by
   its own roll (`GAR1` domain), 12 slots, gum then cans given up when it overflows. Its
+- TRAFFIC ON YOUR SIDE KEEPS BELOW YOUR PACE OUT OF SIGHT (`world/traffic.ts`
+  `PLAYER_PACE_SHARE`, `PLAYER_PACE_SPREAD`, `PLAYER_PACE_FLOOR_MPS`, `playerPaceCap`;
+  `main.ts`, `ui/menu.ts`). A car going the player's way, ahead of him and out of his
+  sight (`railsNear` false), has its speed cap set on each lifetime sample to 60-80 % of
+  his speed (a draw per car, a platoon's shared), never above its own driver's pace and
+  never under 58 km/h; a frantic driver keeps its own, and a car behind him gets its own
+  back once out of sight. In view the cap is left as it was, so nothing he watches
+  changes speed for it. Dev menu slider «Pace vs you» (70 %, 150 % is off in effect) and
+  `__bro.traffic.playerPace`. Measured headless at 110 km/h, cap 20, seeds 1298704429,
+  527486576 and 1135279471, five minutes each, off → on: his side's cars past 350 m ahead
+  83 → 73 km/h, overtaken 4.3 → 4.6 a minute.
+
 - TRAFFIC MOSTLY GOES YOUR WAY, AND THE ONCOMING SIDE COMES IN GROUPS (`world/traffic.ts`
   `SAME_DIRECTION_SHARE`, `ONCOMING_PLATOON_CHANCE`, `nextDirection`, `drawPlatoonMates`,
   `queuePlatoonMate`, `findSpawnS`; `main.ts`, `ui/menu.ts`). The owner wants a road like

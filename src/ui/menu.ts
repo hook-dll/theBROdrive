@@ -826,6 +826,9 @@ export interface PauseHooks {
     /** Chance each extra car joins an oncoming group (world/traffic.ts `oncomingPlatoons`). */
     readonly oncomingPlatoons: number;
     setOncomingPlatoons(value: number | null): void;
+    /** Middle of the band of his speed his side keeps to out of sight (world/traffic.ts `playerPace`). */
+    readonly playerPace: number;
+    setPlayerPace(value: number | null): void;
   };
   /**
    * Record a fully fuelled car into the world.
@@ -2894,8 +2897,9 @@ export class MainMenu {
           devTools.push(row);
         }
         // Sliders and a readout across the grid: the ceiling in cars, the share of it the
-        // density draw may fall to, the share driving the player's way and how bunched the
-        // oncoming side comes. The readout is the stream's own answer.
+        // density draw may fall to, the share driving the player's way, how bunched the
+        // oncoming side comes and the share of his speed his side keeps to out of sight.
+        // The readout is the stream's own answer.
         if (import.meta.env.DEV && hooks.traffic) {
           const traffic = hooks.traffic;
           const box = el('div', 'menu-dev-traffic');
@@ -3002,6 +3006,14 @@ export class MainMenu {
               () => Math.round(traffic.oncomingPlatoons * 100),
               (v) => `${v}%`,
               (v) => traffic.setOncomingPlatoons(v / 100),
+            ).row,
+            knob(
+              'Pace vs you',
+              0,
+              150,
+              () => Math.round(traffic.playerPace * 100),
+              (v) => `${v}%`,
+              (v) => traffic.setPlayerPace(v / 100),
             ).row,
             readout,
             ...mixKnobs.map((k) => k.row),

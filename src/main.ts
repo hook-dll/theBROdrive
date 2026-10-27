@@ -3316,6 +3316,12 @@ async function boot(): Promise<void> {
           setOncomingPlatoons: (value: number | null) => {
             traffic.oncomingPlatoons = value;
           },
+          get playerPace() {
+            return traffic.playerPace;
+          },
+          setPlayerPace: (value: number | null) => {
+            traffic.playerPace = value;
+          },
         }
       : undefined,
     ink: import.meta.env.DEV
