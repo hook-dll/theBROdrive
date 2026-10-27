@@ -14,6 +14,8 @@
     "wheelbase": { "v": 2.2, "src": "F infocar.ua, ru.wikipedia" },
     "overhangFront": { "v": 0.688, "src": "D side front hub x 880.5, measurements-niva.md §1" },
     "overhangRear": { "v": 0.845, "src": "D side rear hub x 1486.3 (2.888) to rear tip x 1719 (3.733), measurements-niva.md §1" },
+    "archFront": { "v": [0.455, 0.37, 0.385], "src": "D side (niva.jpg, read on the drawn front hub (880, 431) px): the opening's top y 306, its edge at the hub's height x 779 ahead and x 986 behind" },
+    "archRear": { "v": [0.39, 0.4, 0.385], "src": "D side (niva.jpg, read on the drawn rear hub (1486, 431) px): the opening's top y 324, its edge at the hub's height x 1376 ahead and x 1592 behind; the drawn hubs stand 0.03 over the registration's 0.30; the edge is the black well band's outer edge (the flare lines outside it are the lip); front ahead read where the edge ends 0.08 over the hub, rear behind 0.10 over it" },
     "screenFoot": { "v": [1.152, 1.01], "src": "D side A pillar at the belt (1008, 244), measurements-niva.md §1" },
     "screenTop": { "v": [1.583, 1.496], "src": "D side A pillar at the rail (1127, 110), measurements-niva.md §1" },
     "backLightTop": { "v": [3.326, 1.434], "src": "D rear glass top 1.434 on the D side tailgate line (3.30, 1.478) lean 0.586, measurements-niva.md §1, §1.1" },

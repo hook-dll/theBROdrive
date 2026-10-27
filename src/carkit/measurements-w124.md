@@ -303,7 +303,7 @@ sweep 90° without the real arm's lift]. Interior blue cloth and dash from DASH.
   s 4.1 (the glass's drawn line and the built one agree, backLightFoot passes). Front IoU
   0.967: x ±0.5–0.72 3–4 cm low at the roof's edge.
 - **Triangles** 13 621, over the 13 000 warning (cladding, ribs, wrapped bumpers); 12 444
-  after §8.
+  after §8, 12 363 after §9.
 - **0–100** 12.4 s against the catalogue's 11.1 (`CATALOGUE_OPTIMISTIC`, as the other
   foreign cars), top 204 km/h, turn 4.11 m (W124Gear's bench, tools/reality.ts).
 
@@ -394,3 +394,60 @@ drawing 20/20 (with `archFront`, `archRear`), dash 9/9; frozen: re-recorded with
 `tools/kit-fingerprint.ts --write w124`. Silhouette advice unchanged in kind: side IoU
 0.706 (s 0.10–0.25 the drawn star, s 1.52–1.61 the drawing's thick A pillar, s 3.59–4.08
 the drawing's second line from the roof to the boot), front 0.968.
+
+## 9. The owner's second review (2026-10-27)
+
+His words, on lab screenshots: «сравни расположение колеса с фото» (the near front: the
+bumper's corner well ahead of the tyre, a dark gap over and ahead of it), and «багажник
+выравнял откровенно плохо. что это за конструкция?».
+
+**Front wheel: what the game draws.** Measured on a lab capture side-on through a 3° lens
+from 40 m (391 px/m at the hub): the bumper's tip 0.795 ahead of the hub, the arch's top
+0.368 over it, the tyre 0.317 (its 0.634 across in 248 px). The loader is not the cause:
+the kit body is natively 4.752 × 1.762 × 1.430 with its lowest point 0.143, so it is
+shrunk 0.3 % along, 1.2 % across and 0.7 % in height and set 7 mm higher; the front hub
+moves 4 mm in its arch (kit-proportions); the fit row's front hub stands 0.815 behind the
+bumper's tip (2.37 − 1.5546). The radius is the factory 0.317 (195/65 R15).
+
+**The photos.** `side.jpg` reads the bumper's tip 0.355 ahead of the tyre's front (the
+drawing 0.49) because the car stands about 10° off square with its front away: its front
+tyre is 163 px across against the rear's 173 (6 % further), and 0.815 cos 10° − 0.75
+sin 10° (the hub on the near side) = 0.67 against the photo's 0.672 from the tip to the
+hub; the rear overhang reads long by the same turn. The 190E photo he compared with is
+taken a little from the front as well. The arch on `side.jpg`, read along rays from the
+hub (331 px/m, the lit body's edge): 0.344 ahead at the hub's height, 0.36 at 45°, 0.38
+at the top, 0.36 at 135° behind, 0.338 at 150°; over the hub the black well from 0.316 to
+0.372, the tyre's tread (luminance ~33) plainly lighter than the well (~8). So the built
+0.343 × 0.371 opening was the photo's; what differs in the game is the tyre as black as
+the well, so the 2.6 cm at the sides and 5.4 cm on top read as one dark hole round a small
+wheel.
+
+**Built.** The front arch closed round the tyre: `arch` 1.08 → 1.04 (0.33 at the hub's
+height, 1.3 cm off the tyre), `frontArchRise` 1.17 → 1.10 (0.349 over the hub, 3.2 cm
+over the tyre); kit-drawing `archFront` built [0.35, 0.33, 0.33] against the photo's
+[0.371, 0.34, 0.35], within its 0.03. The bumper's wrap to 0.47 [D side x 105] now ends
+1.5 cm ahead of the arch's edge (0.485). The overhangs stay 0.815 / 1.125.
+
+**Boot.** §8's deck had a station at the lid's front edge (4.08, 1.055, the wings' top
+1.02): up 4 cm in 12 cm from the back light's foot across the whole width, the wings' top
+humped with it, then down to the tail: a ridge behind the glass, the boot a box laid on
+the car. The sources: [D] centre line 1.016 at 3.98, 1.056 at 4.10, 1.004 at 4.68; [P S]
+the side outline 1.031 at 4.00, 1.066 at 4.09–4.27 (the C pillar's flank, then the wall
+behind it whitens the outline); [D2] side view (10.0 mm/px, tips x 9 / 481, ground y
+149): the outline 1.076 at 4.14, 1.066 at 4.37, 1.056 at 4.52, 1.046 at 4.64, the corner
+1.026 at 4.70, no rise from the glass's foot; [P R, R34, R34r] a flat lid from the glass
+to one edge over the lamps, its sides rolling into the wings. Built: one plane from the
+back light's foot (3.96, 1.035: 2 cm over [D]'s 1.015, kit-drawing `backLightFoot`
+reads 1.015 at the glass's edge) to the edge over the tail (4.68, 1.015), no station
+between; the wings' top edge 0.985 → 0.98 under it, the crown across 3 cm at the glass and
+1.5 at the tail (3 cm at the tail folded one triangle of the tail's top at the lid's cut,
+x −0.50: kit-surface `flip`). The tail face, the notch and the lamps unchanged.
+
+### Checks (`npm run kit-check -- w124`, 2026-10-27, after the second review)
+
+zfight pass, proportions pass, reality pass, mirrors L100 R100, dents 0, triangles 12 363,
+drawing 20/20, dash 9/9; frozen: re-recorded with `tools/kit-fingerprint.ts --write
+w124` after every other car's exhaust was re-recorded (all 26 identical). Silhouette
+advice: side IoU 0.705, s 3.59–4.30 low (the drawing's lid rise and its second line from
+the roof); front 0.966. Lab captures: `build/kitcheck/w124/lab-side.png`,
+`lab-front-wheel.png` (his angle), `lab-rear34.png`, `lab-rear-side.png`.

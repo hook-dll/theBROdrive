@@ -11,8 +11,13 @@
   lowest edge (`exterior.ts` `bumperFoot`); never under clearance + 2 mm, rising into the
   floor as into a tunnel where the floor is lower. One rule for all: `exhaustTuck` (the
   UAZs) is gone. Only `exhaust_trim` moved on every car (same triangles; the UAZs 12
-  fewer); fingerprints not re-recorded until the owner has looked. Sills raised for the
-  old exhaust can return: the W124 now, the Vectra A and the Volgas later.
+  fewer); the owner accepted it and every car's fingerprint was re-recorded. Sills raised
+  for the old exhaust can return: the W124 now, the Vectra A and the Volgas later.
+- W124, owner's review 2: the front arch closed round the tyre (0.33 × 0.349 over the
+  tyre's 0.317, was 0.343 × 0.371; the loader and the 0.815 overhang were right, the
+  black ring round an equally black tyre read as a small wheel set back); the boot deck
+  one plane from the back light's foot to the crisp edge over the tail, no ridge across
+  behind the glass and no hump in the wings' top; 12 444 → 12 363 triangles.
 - W124, owner's review 1: arches measured on the side photo and drawing (front a half
   ellipse 0.343 × 0.371 that hugs the tyre, new `frontArchRise`; rear kept, 0.39 over the
   hub; `archSegments` 8), and checked from now on for any car (`kit-drawing`

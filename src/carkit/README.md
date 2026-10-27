@@ -380,8 +380,8 @@ front edge at the belt, and the A pillar looks far too wide (HISTORY.md).
 1.0 is as wide as the tyre; absent, the rear takes `arch`), `rearArchRise?` (the rear
 arch's top over the hub, over the tyre radius, where it is lower than a circle: its skin
 and liner become a half ellipse; the 2110's 0.81 covers the tyre's top), `frontArchRise?`
-(the same for the front arch: a half ellipse `arch` wide and this high; the W124's 1.17 over
-1.08 stands close round the tyre's sides and clear over its top), `archSegments?` (segments
+(the same for the front arch: a half ellipse `arch` wide and this high; the W124's 1.10 over
+1.04 stands close round the tyre's sides and 3 cm over its top), `archSegments?` (segments
 round each arch, tub columns at even angles; absent 12; the W124's 8 for its triangle
 budget), `archToSill?`
 (the arch's edge in the skin and the well's inner wall never run below the sill there

@@ -11,6 +11,8 @@
     "width": { "v": 1.8, "src": "F ru.wikipedia (drawing's 1820 is over the mirrors)" },
     "height": { "v": 1.476, "src": "F ru.wikipedia; D dimension 1476" },
     "wheelbase": { "v": 2.8, "src": "F; D dimension 2800" },
+    "archFront": { "v": [0.39, 0.38, 0.43], "src": "D side (gaz31029_bp-31029-vector-full.jpg, read on the drawn front hub (161, 274) px): the opening's top y 208, its edge at the hub's height x 96 ahead and x 236 behind" },
+    "archRear": { "v": [0.28, 0.41, 0.43], "src": "D side (gaz31029_bp-31029-vector-full.jpg, read on the drawn rear hub (648, 274) px): the opening's top y 226, its edge at the hub's height x 576 ahead and x 722 behind; the drawn hubs stand 0.034 over the registration's 0.30; rear behind: the edge at the mud flap read by eye" },
     "screenFoot": { "v": [1.447, 1.066], "tol": 0.04, "src": "D side cowl (253, 150), measurements-volga.md §2.1-2.2 (s 1.447 as read there)" },
     "backLightTop": { "v": [3.461, 1.368], "tol": 0.04, "src": "D side roof's rear end x 606.7 (3.461), top line 1.368 at 3.48, measurements-volga.md §2.1, §3.2" },
     "backLightFoot": { "v": [3.922, 0.967], "src": "D side (686.7, 166.7), measurements-volga.md §2.3" },

@@ -72,8 +72,11 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    boot, fluted head lamps, the sill to the drawing, triangles) reworked
    (`measurements-w124.md` §8: the front arch a half ellipse `frontArchRise`, the boot deck
    level from the lid's front edge, `ribs` on the head lamps, sill 0.19 / doors 0.21 after
-   the flatter exhaust, 13 621 → 12 444 triangles with `archSegments`): **draft, awaiting
-   his next look** (review sheet `build/kitcheck/w124/review.png`).
+   the flatter exhaust, 13 621 → 12 444 triangles with `archSegments`). The second review
+   (the front tyre set back in its arch, the boot a box) reworked (`measurements-w124.md`
+   §9: the front arch closed round the tyre, the deck one plane to the tail; 12 363
+   triangles): **draft, awaiting his next look** (lab captures
+   `build/kitcheck/w124/lab-*.png`).
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).
@@ -326,6 +329,57 @@ Audi 80 / Saab / Volvo period alloys; the off-roaders' own (Land Cruiser 80 and 
 Cherokee ZJ), and the off-roaders' larger, chunkier tyre. When a foreign car is added, its
 row may name its own pool instead of the foreign one (the W124 its 8-hole and covers).
 
+## Arches against the drawings (2026-10-27)
+
+Each car's `archFront` / `archRear` read off its `overlay.side` drawing (refs/<car>.json, the
+pixels in each `src`): `[top over the hub, reach ahead, reach behind at the hub's height]` (m),
+the skin's edge where the body begins (the dark well band's outer edge where a drawing shades
+the well; the inner line of a doubled lip), on the drawn hub (gaz24, gaz31029, uaz469, uaz2206
+and vaz2121 draw their hubs 0.03-0.07 over the registration's 0.30; read on the drawn wheel).
+vaz2115 from its registered side photo P19 (it has no drawing); vaz2105 shares the 2107
+drawing; vaz2109 draws no wheels. vaz2101 and vaz2131 have no side registration. Judged at
+W124's default 0.03 by `nice -n 15 bun tools/kit-drawing.ts --no-images`: 14 of 50 arches
+within (W124's two included). `open`: the built skin stops over the hub's height and the line
+meets no body (the tool reads 0.8); where the drawn edge also ends over it, the reach is
+read at its lower end (see each `src`). Readings by eye on 4-7 mm/px drawings: about ±0.01-0.02.
+
+| car | front ref | front built | front | rear ref | rear built | rear |
+|---|---|---|---|---|---|---|
+| vaz2102 | 0.34 / 0.3 / 0.34 | 0.326 / 0.326 / 0.326 | ok | 0.25 / 0.32 / 0.31 | 0.326 / 0.326 / 0.326 | too high +0.08 |
+| vaz2103 | 0.34 / 0.31 / 0.33 | 0.326 / 0.326 / 0.326 | ok | 0.26 / 0.31 / 0.33 | 0.326 / 0.326 / 0.326 | too high +0.07 |
+| vaz2104 | 0.335 / 0.33 / 0.35 | 0.332 / open / 0.332 | open ahead at hub height (drawn edge 0.33) | 0.28 / 0.36 / 0.36 | 0.332 / 0.332 / 0.332 | too high +0.05 |
+| vaz2105 | 0.345 / 0.3 / 0.355 | 0.332 / open / 0.332 | open ahead at hub height (drawn edge 0.3) | 0.285 / 0.36 / 0.37 | 0.332 / 0.332 / 0.332 | too high +0.05; behind -0.04 (stops short) |
+| vaz2106 | 0.36 / 0.32 / 0.35 | 0.326 / 0.326 / 0.326 | too low -0.03 | 0.29 / 0.32 / 0.385 | 0.326 / 0.326 / 0.326 | too high +0.04; behind -0.06 (stops short) |
+| vaz2107 | 0.345 / 0.3 / 0.355 | 0.332 / open / 0.332 | open ahead at hub height (drawn edge 0.3) | 0.285 / 0.36 / 0.37 | 0.332 / 0.332 / 0.332 | too high +0.05; behind -0.04 (stops short) |
+| vaz2108 | 0.335 / 0.35 / 0.32 | 0.36 / 0.36 / 0.358 | behind +0.04 (reaches too far back) | 0.32 / 0.34 / 0.33 | 0.36 / 0.36 / 0.36 | too high +0.04 |
+| vaz2109 | 0.345 / 0.35 / 0.34 | 0.36 / 0.36 / 0.358 | ok | 0.32 / 0.32 / 0.38 | 0.36 / 0.36 / 0.36 | too high +0.04; ahead +0.04 (reaches too far forward) |
+| vaz21099 | 0.375 / 0.365 / 0.33 | 0.36 / 0.36 / 0.358 | ok | 0.33 / 0.345 / 0.33 | 0.36 / 0.36 / 0.36 | ok |
+| vaz2115 | 0.33 / 0.36 / 0.31 | 0.36 / 0.36 / 0.36 | behind +0.05 (reaches too far back) | 0.3 / 0.34 / 0.32 | 0.36 / 0.36 / 0.36 | too high +0.06; behind +0.04 (reaches too far back) |
+| vaz2110 | 0.36 / 0.345 / 0.31 | 0.346 / 0.346 / 0.346 | behind +0.04 (reaches too far back) | 0.185 / 0.3 / 0.3 | 0.234 / 0.288 / 0.286 | too high +0.05 |
+| vaz2112 | 0.35 / 0.35 / 0.33 | 0.346 / 0.346 / 0.346 | ok | 0.29 / 0.35 / 0.31 | 0.234 / 0.288 / 0.286 | too low -0.06; ahead -0.06 (stops short) |
+| vaz2111 | 0.36 / 0.345 / 0.31 | 0.346 / 0.346 / 0.346 | behind +0.04 (reaches too far back) | 0.265 / 0.29 / 0.33 | 0.234 / 0.288 / 0.286 | too low -0.03; behind -0.04 (stops short) |
+| vaz2121 | 0.455 / 0.37 / 0.385 | 0.446 / open / 0.446 | behind +0.06 (reaches too far back); open ahead at hub height (drawn edge 0.37) | 0.39 / 0.4 / 0.385 | 0.446 / 0.446 / open | too high +0.06; ahead +0.05 (reaches too far forward); open behind at hub height (drawn edge 0.385) |
+| vaz1111 | 0.32 / 0.29 / 0.31 | 0.364 / 0.362 / 0.36 | too high +0.04; too wide (ahead +0.07, behind +0.05) | 0.22 / 0.32 / 0.29 | 0.294 / 0.292 / 0.292 | too high +0.07 |
+| gaz24 | 0.38 / 0.35 / 0.47 | 0.416 / 0.414 / 0.408 | too high +0.04; shifted forward (ahead +0.06, behind -0.06) | 0.33 / 0.39 / 0.45 | 0.338 / 0.348 / 0.35 | too narrow (ahead -0.04, behind -0.10) |
+| gaz31029 | 0.39 / 0.38 / 0.43 | 0.392 / 0.392 / 0.392 | behind -0.04 (stops short) | 0.28 / 0.41 / 0.43 | 0.3 / 0.342 / 0.346 | too narrow (ahead -0.07, behind -0.08) |
+| azlk2141 | 0.355 / 0.34 / 0.38 | 0.404 / 0.404 / 0.396 | too high +0.05; ahead +0.06 (reaches too far forward) | 0.34 / 0.34 / 0.35 | 0.372 / 0.372 / 0.382 | too high +0.03; too wide (ahead +0.03, behind +0.03) |
+| uaz469 | 0.46 / 0.5 / 0.56 | 0.5 / open / open | too high +0.04; open ahead at hub height (drawn edge 0.5); open behind at hub height (drawn edge 0.56) | 0.44 / 0.56 / 0.55 | 0.5 / open / open | too high +0.06; open ahead at hub height (drawn edge 0.56); open behind at hub height (drawn edge 0.55) |
+| uaz2206 | 0.38 / 0.37 / 0.365 | 0.364 / open / open | open ahead at hub height (drawn edge 0.37); open behind at hub height (drawn edge 0.365) | 0.32 / 0.325 / 0.35 | 0.278 / open / open | too low -0.04; open ahead at hub height (drawn edge 0.325); open behind at hub height (drawn edge 0.35) |
+| nexia | 0.345 / 0.37 / 0.355 | 0.37 / 0.368 / 0.364 | ok | 0.29 / 0.37 / 0.355 | 0.306 / 0.36 / 0.36 | ok |
+| espero | 0.36 / 0.39 / 0.35 | 0.37 / 0.37 / 0.366 | ok | 0.345 / 0.36 / 0.4 | 0.334 / 0.372 / 0.372 | ok |
+| astraf | 0.31 / 0.34 / 0.32 | 0.36 / 0.348 / 0.36 | too high +0.05; behind +0.04 (reaches too far back) | 0.31 / 0.35 / 0.36 | 0.318 / 0.342 / 0.346 | ok |
+| vectraa | 0.36 / 0.37 / 0.33 | 0.378 / 0.378 / 0.376 | behind +0.05 (reaches too far back) | 0.35 / 0.37 / 0.34 | 0.326 / 0.356 / 0.36 | ok |
+| w124 | 0.371 / 0.34 / 0.35 | 0.35 / 0.33 / 0.33 | ok (closed round the tyre, owner's review 2) | 0.39 / 0.39 / 0.4 | 0.388 / 0.374 / 0.386 | ok |
+
+Read: the classics (2102-2107) and the Oka draw the rear arch low over the tyre (0.22-0.29)
+where the built ones are round at the tyre's 0.33; the eights' (2108/09/15) rear arches stand
+0.04-0.06 too high; the Oka, the 2141 and the Astra are too big round the front tyre (0.04-0.12
+wider or higher); the front arches of the eights, tens and Vectra reach 0.04-0.05 too far
+back; the Volgas' drawn arches sweep
+far back behind the rear (gaz24 front too: shifted forward); the tens' rear is the other
+way round (2112/2111 drawn larger than built, the 2110's flat top drawn lower still). No
+spec was changed.
+
 ## Check results (`npm run kit-check`, 2026-10-19)
 
 Every car through all eight checks (README "6. Check"); evidence in `build/kitcheck/`.
@@ -357,7 +411,7 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | Espero | pass | pass | pass | L100 R100 | 0 | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |
 | Vectra A | pass | pass | pass | L100 R100 | 0 | 13 866 | 12/12 (door bottom 0.255 accepted: the silencer) | 4/4 |
-| W124 (draft, review 1) | pass | pass | pass (0-100 12.4 vs 11.1 accepted, `CATALOGUE_OPTIMISTIC`) | L100 R100 | 0 | 12 444 | 20/20 (front glass from the A pillar accepted; sill and door bottom at the drawing) | 9/9 |
+| W124 (draft, review 2) | pass | pass | pass (0-100 12.4 vs 11.1 accepted, `CATALOGUE_OPTIMISTIC`) | L100 R100 | 0 | 12 363 | 20/20 (front glass from the A pillar accepted; sill and door bottom at the drawing) | 9/9 |
 
 Dents and drawing round (2026-10-19): kit-surface passes on all 27 (05 bonnet ends at the drawn 0.90, the scuttle behind it; 05 belt width at s 3.33; 2104 tail lean; 2115 wing belt; Niva corner plan through ±0.786 with a station at 0.4; GAZ-24 boot one convex curve; UAZ-469 sill tucked from the wing; deck and lid quads folded outward (body.ts); 2206 nose lean; Espero tail corners at 0.925; 2107 grille bars without hidden back faces). Drawing: roofHalfWidth is now read at the rail (it was 3 cm under a crowned top); the front door's glass run is its longest (vent wings, quarter lights); Nexia/AZLK roof refs corrected to the A pillar line at the rail; 05 shoulder rise 0.035 (front view ±0.773 at 0.90), a black sail ahead of the door glass (mirrorS on it). Still out of tolerance: 2103/2106 waist strip (the ref is read in the vaz_2103/2106.jpg frames, ~7 % taller than BODY_124: re-register it), 2108 bonnet lip, 2109 front door, the tens' screen foot, mirror, glass at the rail and boot, the Niva's screen foot and belt width, the Oka's belt width, the GAZ-24's screen foot, rail and door, the GAZ-31029's door and boot lid, the AZLK's front glass edge and mirror, the UAZ-2206's screen and glass runs, the Nexia's belt width. The 2107's 0-100 was not looked at.
 

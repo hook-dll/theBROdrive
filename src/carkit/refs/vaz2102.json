@@ -51,6 +51,8 @@
       "v": 1.032,
       "src": "D dimension 1032 (vaz_2102.jpg)"
     },
+    "archFront": { "v": [0.34, 0.3, 0.34], "src": "D side (vaz_2102.jpg, read on the drawn front hub (496, 211) px): the opening's top y 160, its edge at the hub's height x 450 ahead and x 547 behind" },
+    "archRear": { "v": [0.25, 0.32, 0.31], "src": "D side (vaz_2102.jpg, read on the drawn rear hub (864, 211) px): the opening's top y 174, its edge at the hub's height x 815 ahead and x 911 behind" },
     "screenFoot": {
       "v": [
         1.16,

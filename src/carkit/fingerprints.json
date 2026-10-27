@@ -5,7 +5,7 @@
       "bay": "38c3b2317a534bd4",
       "boot": "e156bbddc489e7d7",
       "cabin": "e23eec5645cc1008",
-      "exterior": "945fe9edcb4ee41b",
+      "exterior": "91dfde937a9cea0c",
       "under": "c09d37f23b783430",
       "wheel": "6082a299a863e704"
     }
@@ -16,7 +16,7 @@
       "bay": "35c0866de331d2e",
       "boot": "eb0be27e3b537e7f",
       "cabin": "31db623765c63b2",
-      "exterior": "7a9e5870734c8987",
+      "exterior": "3bbdebbee73e7709",
       "under": "9b74751040ca3eaf",
       "wheel": "89506a99881e7546"
     }
@@ -27,7 +27,7 @@
       "bay": "d52127ec024fcff7",
       "boot": "59b185b211e99110",
       "cabin": "2aa8be9e5b0b0a5d",
-      "exterior": "3c09ac7db174e71d",
+      "exterior": "bcdb1dda524eb398",
       "under": "fa13f1afb6b926e9",
       "wheel": "a0ebfa370740b823"
     }
@@ -38,7 +38,7 @@
       "bay": "f073301cf43ddfc6",
       "boot": "b233c348b1be0f41",
       "cabin": "81b6c0557c0e0f06",
-      "exterior": "f60bd96ddfccb928",
+      "exterior": "738d741a9d684512",
       "under": "84d55f7923bb32c8",
       "wheel": "7026bbcef0ee9b07"
     }
@@ -49,7 +49,7 @@
       "bay": "b2aa9e974b127ead",
       "boot": "f7a7c7fabcd619e2",
       "cabin": "7510b591a80cac62",
-      "exterior": "dad7f2265f8cd22",
+      "exterior": "693f56e9d97efa9d",
       "under": "6afb8f81fe6c46f7",
       "wheel": "4a8b12857992942b"
     }
@@ -60,28 +60,28 @@
       "bay": "925b8035ee26f0ca",
       "boot": "690a30776f4be6a1",
       "cabin": "ab3b54302406aa50",
-      "exterior": "7ee16b4023f04347",
+      "exterior": "c3014941116da3c0",
       "under": "12481ccb31a61de",
       "wheel": "e221fcb6e7213c89"
     }
   },
   "uaz2206": {
-    "triangles": 11369,
+    "triangles": 11357,
     "zones": {
       "bay": "14c81cf3558c623e",
       "cabin": "a8b3eab6d66cc98b",
-      "exterior": "b97012248cfa01f",
+      "exterior": "fdad5d7676bb11e9",
       "under": "33a5044436fdc8e4",
       "wheel": "af410dd80b59289b"
     }
   },
   "uaz469": {
-    "triangles": 11248,
+    "triangles": 11236,
     "zones": {
       "bay": "8b4f0047ec80346a",
       "boot": "b6100a2cadbbe3d3",
       "cabin": "bde4898e50e9f28f",
-      "exterior": "340538bc5171eec9",
+      "exterior": "772539c8f2818490",
       "under": "7a65158652f2adb",
       "wheel": "26473fcd48b3e010"
     }
@@ -92,7 +92,7 @@
       "bay": "661f504ebedd77b7",
       "boot": "b7733389fd36c288",
       "cabin": "e93c8d903385391c",
-      "exterior": "d853c774225937c7",
+      "exterior": "caa2000f3a387b17",
       "under": "aee84b3276ab8bac",
       "wheel": "4ca0f378c48abb62"
     }
@@ -103,7 +103,7 @@
       "bay": "65312a20b42db07b",
       "boot": "b62c7a3edb811c6c",
       "cabin": "6587ef1ba069e6e4",
-      "exterior": "c47e2cb174d506f6",
+      "exterior": "e897b6d87643a8bd",
       "under": "943fb055e6f6300b",
       "wheel": "be3fb082c3c2b8c2"
     }
@@ -114,7 +114,7 @@
       "bay": "ee1a87b213a18f12",
       "boot": "8f44ed64794b58d5",
       "cabin": "d4d7363a53066750",
-      "exterior": "11ee0695d2f2de5b",
+      "exterior": "fc18e12d375a1b92",
       "under": "ee5a703f649d96b3",
       "wheel": "ed914172be0e50fc"
     }
@@ -125,7 +125,7 @@
       "bay": "cbe8373c3f426429",
       "boot": "577ffb6dc0b8fced",
       "cabin": "4c7b3b88458dab03",
-      "exterior": "d2ef0594ec846389",
+      "exterior": "225b9b62cd21dc4c",
       "under": "ee63de9010c0fcd7",
       "wheel": "75421c6643e543af"
     }
@@ -136,7 +136,7 @@
       "bay": "e2838bbbda749345",
       "boot": "75bb51a9cec51d6",
       "cabin": "1e3872c898f1d709",
-      "exterior": "ea2b7535dacd2721",
+      "exterior": "aaab4d2ad25a43ca",
       "under": "6192a648a1a80611",
       "wheel": "a0f9192bf6cad9e"
     }
@@ -147,7 +147,7 @@
       "bay": "659d7ea0a89f9144",
       "boot": "aad1a597b381b92e",
       "cabin": "226c51c47db81029",
-      "exterior": "d3e371e7ff71e9c5",
+      "exterior": "7a6b9b6cf068a0b2",
       "under": "985973a0ddf093d2",
       "wheel": "9f934fbe5978fa49"
     }
@@ -158,7 +158,7 @@
       "bay": "195a8faba902a87f",
       "boot": "3beae6bf6ccd05a8",
       "cabin": "f304e4b41bfb72b8",
-      "exterior": "7845c17e785a1b69",
+      "exterior": "e05f0b40dedcfc1b",
       "under": "4d8f18a19cda8cc7",
       "wheel": "2d23125d50494a42"
     }
@@ -169,7 +169,7 @@
       "bay": "5a1b84018080b1c2",
       "boot": "47a86c1a8f3eb357",
       "cabin": "33248fc48c562888",
-      "exterior": "727f73f5aa4a9698",
+      "exterior": "d5846e3c43d0aafa",
       "under": "b73468dc5bc6026a",
       "wheel": "abb91356bc218e04"
     }
@@ -180,7 +180,7 @@
       "bay": "9a74e999eaceaf86",
       "boot": "4185273e188625c6",
       "cabin": "2a42e54aede4bcf4",
-      "exterior": "856326d3f2c9f666",
+      "exterior": "18a5d29867625e68",
       "under": "51f129699394b358",
       "wheel": "84e19ff5399abb41"
     }
@@ -191,7 +191,7 @@
       "bay": "9a74e999eaceaf86",
       "boot": "4185273e188625c6",
       "cabin": "f70fd1b2caad5969",
-      "exterior": "2489ed98b5168e5d",
+      "exterior": "f75dea03ad7c2674",
       "under": "51f129699394b358",
       "wheel": "84e19ff5399abb41"
     }
@@ -202,7 +202,7 @@
       "bay": "41e45cfe9908ec74",
       "boot": "9dd0334d7a9412a8",
       "cabin": "2eea71bbe8f9d4ba",
-      "exterior": "f9b3c822fc5b7f23",
+      "exterior": "16dd8578dbdc86e2",
       "under": "b78d455a90c2bdfa",
       "wheel": "eebe26cc35470c98"
     }
@@ -213,7 +213,7 @@
       "bay": "7c4ed306de9bf600",
       "boot": "3a8ae93b5557fe89",
       "cabin": "d5f78f11e2cf94d4",
-      "exterior": "4cf25c01cf5e3def",
+      "exterior": "e743a9af6942bb17",
       "under": "d07a4500826ade04",
       "wheel": "eefa84f6979bb42c"
     }
@@ -224,7 +224,7 @@
       "bay": "35357cc80772f5c1",
       "boot": "a5dfd32a60e2a66a",
       "cabin": "2fb15e1edc93d2ec",
-      "exterior": "495b7f170884904",
+      "exterior": "1bcb876ddde245d0",
       "under": "32972ab433936ff8",
       "wheel": "9758c6ec1b09d7f2"
     }
@@ -235,7 +235,7 @@
       "bay": "ea1f22ee358e0c7a",
       "boot": "56f0cee6f426f151",
       "cabin": "87bfcb59fa23de78",
-      "exterior": "2e9961283b4dcc18",
+      "exterior": "1a6b606ca0a2372d",
       "under": "63580ccc58f0d969",
       "wheel": "c332b23fa911ef26"
     }
@@ -246,7 +246,7 @@
       "bay": "34c8dc81a8ae8517",
       "boot": "10520eb429be0be1",
       "cabin": "1dfee306d0295ccb",
-      "exterior": "217f1af4cb0ee987",
+      "exterior": "90b82191b705235d",
       "under": "aedf27027ac12bd6",
       "wheel": "d81a7847b7ce2fcd"
     }
@@ -257,7 +257,7 @@
       "bay": "b7b16566133d9e09",
       "boot": "1040af0dcb0140f7",
       "cabin": "c00d5a1204674281",
-      "exterior": "55670342ffdac53b",
+      "exterior": "60d06a817c7810e2",
       "under": "c349c182239e4f",
       "wheel": "3e33c5e6ee6a0c7e"
     }
@@ -268,7 +268,7 @@
       "bay": "5f1a476452320512",
       "boot": "dabd5b9e44c481da",
       "cabin": "e4832865915a8010",
-      "exterior": "4a69abc1c99c948",
+      "exterior": "13672923fe958220",
       "under": "d09ade1611040421",
       "wheel": "b392f41e122d7980"
     }
@@ -279,18 +279,18 @@
       "bay": "b94dc7d3c6fa7814",
       "boot": "2a566122f09e7776",
       "cabin": "842819dc994e1f21",
-      "exterior": "8c764f55c405a851",
+      "exterior": "5f2dbf0da476b990",
       "under": "305547e859f6fd22",
       "wheel": "a5b66395827bd9ca"
     }
   },
   "w124": {
-    "triangles": 12444,
+    "triangles": 12363,
     "zones": {
-      "bay": "46f19dd7af80033b",
-      "boot": "b4788c5cc77b6e5e",
-      "cabin": "ff5de0334d75860e",
-      "exterior": "776403e8ac2b029a",
+      "bay": "565e352635febc58",
+      "boot": "a2930c6daa260147",
+      "cabin": "b11b927626b497db",
+      "exterior": "14713cb00e87d5b2",
       "under": "4a593efdc301d9f3",
       "wheel": "a62fec5c09a7ab72"
     }

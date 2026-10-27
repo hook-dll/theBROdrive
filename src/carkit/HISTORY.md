@@ -1139,6 +1139,37 @@ each measurements file's "Review 2".
   (the Exhaust change, bay.ts), then the W124's sill 0.19 and doors' bottom 0.21; the
   `accepted` deviation in refs/w124.json removed. *mercedes.ts stations, `doorBottom`*.
 
+## Mercedes W124, the owner's second review (2026-10-27)
+
+- **«сравни расположение колеса с фото»** (his lab shot of the near front: the bumper's
+  corner well ahead of the tyre, a dark gap over and ahead of it, the tyre small and set
+  back in the arch; compared with a square side shot of a 190E). → Not the loader and not
+  the overhang: the kit body measures 4.752 long natively, so the loader shrinks it 0.3 %
+  along and 0.7 % in height and moves the front hub 4 mm in its arch (kit-proportions); a
+  narrow-lens side capture of the lab reads the bumper's tip 0.795 ahead of the hub, the
+  arch's top 0.368 over it, the tyre 0.317, as built and as the drawing's 0.81 / 0.366. The
+  side photo's shorter look (bumper tip 0.355 ahead of the tyre against the drawing's
+  0.49) is that car standing about 10° off square, its front away (its front tyre 6 %
+  smaller than its rear; 0.815 cos 10° − 0.75 sin 10° = 0.67 against the photo's 0.672
+  from the tip to the hub). The arch itself was the photo's: a half ellipse 0.343 × 0.371
+  read to the lip's lit edge, 2.6 cm clear of the tyre's sides and 5.4 cm over it. On the
+  white car that gap is a thin shadow, the grey tyre (luminance ~33) standing out of the
+  black well (~8); in the lab the tyre is as black as the well, so the whole dark ring
+  reads as the hole the wheel sits in. → The front arch closed round the tyre: 0.33 wide at
+  the hub's height and 0.349 high (`arch` 1.04, `frontArchRise` 1.10), 1.3 cm off its
+  sides and 3.2 cm over it, within the refs' 0.03 of the photo. The overhang stays 0.815.
+  *mercedes.ts `wheels`*.
+- **«багажник выравнял откровенно плохо. что это за конструкция?»** → The first review's
+  deck was two planes: up 4 cm from the back light's foot (1.015) to a station at the
+  lid's front edge (4.08, 1.055), the wings' top edge raised 3.5 cm with it, then down to
+  the tail: a ridge across the whole width 12 cm behind the glass and a hump in the wings'
+  line, so the boot read as a box laid on the car. → One plane from the back light's foot
+  (3.96, 1.035) to the crisp edge over the tail (4.68, 1.015), no station between; the
+  wings' top edge straight under it (0.985 → 0.98), the crown across easing from 3 cm at
+  the glass to 1.5 at the tail (3 cm there folded the tail's top at the lid's cut,
+  kit-surface). The drawing's 4 cm rise at the lid's front edge is not drawn (D2's side
+  view draws the deck level from the glass). *mercedes.ts stations*.
+
 ## Exhaust under the floor (2026-10-27)
 
 - **«выхлоп у всех машин разный, это мы выхлоп везде одинаковый добавляем, а ведь его можно
@@ -1163,7 +1194,8 @@ each measurements file's "Review 2".
   under the carpet. The classic's run moved inboard (x −0.09) inside the floor's
   crossmembers. `exhaustTuck` is gone (the rule subsumes it, 10 mm instead of 30 mm under
   the UAZs' floors). 152 triangles per car as before (the UAZs 164 → 152). Every car's
-  exhaust moved (owner's request); fingerprints not re-recorded. kit-zfight: no exhaust
+  exhaust moved (owner's request); the owner accepted it, and every car's fingerprint was
+  re-recorded with it before the W124's second review. kit-zfight: no exhaust
   cluster on any car; the Vectra at its drawn 0.205 sill (0.30 at the back light's foot)
   and the W124 at 0.19 pass too. *bay.ts `exhaust`, `pipeUnder`, `canUnder`, `tube`
   `ridge`; exterior.ts `bumperFoot`; spec.ts, uaz.ts*.

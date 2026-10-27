@@ -47,6 +47,8 @@
       "v": 0.951,
       "src": "D10 rear hub 3.317 to the tip 4.268 (measurements-2110.md §1)"
     },
+    "archFront": { "v": [0.36, 0.345, 0.31], "src": "D10 side (vaz_2110.jpg, read on the drawn front hub (822, 335) px): the opening's top y 247, its edge at the hub's height x 738 ahead and x 898 behind" },
+    "archRear": { "v": [0.185, 0.3, 0.3], "src": "D10 side (vaz_2110.jpg, read on the drawn rear hub (1431, 335) px): the opening's top y 289, its edge at the hub's height x 1358 ahead and x 1504 behind; rear: a flat-topped arch over the tyre (top 0.185 at the hub, the tyre's black ends there), its sides hug the tyre" },
     "screenFoot": {
       "v": [
         1.154,

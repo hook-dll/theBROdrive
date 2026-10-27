@@ -46,6 +46,8 @@
       "v": 1.057,
       "src": "D dimension 1057 (vaz_2107_1982.jpg)"
     },
+    "archFront": { "v": [0.345, 0.3, 0.355], "src": "D side (vaz_2107_1982.jpg, read on the drawn front hub (1764, 887) px): the opening's top y 680, its edge at the hub's height x 1584 ahead and x 1976 behind" },
+    "archRear": { "v": [0.285, 0.36, 0.37], "src": "D side (vaz_2107_1982.jpg, read on the drawn rear hub (3210, 887) px): the opening's top y 716, its edge at the hub's height x 2994 ahead and x 3432 behind" },
     "screenFoot": {
       "v": [
         0.985,

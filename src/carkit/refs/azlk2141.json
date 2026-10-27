@@ -14,6 +14,8 @@
     "wheelbase": { "v": 2.58, "src": "F drom.ru; D dimension 2580" },
     "overhangFront": { "v": 0.91, "src": "F drom.ru 910" },
     "overhangRear": { "v": 0.86, "src": "F drom.ru 860" },
+    "archFront": { "v": [0.355, 0.34, 0.38], "src": "D side (azlk2141_tbp_1990.jpg, read on the drawn front hub (182, 278) px): the opening's top y 216, its edge at the hub's height x 122 ahead and x 248 behind" },
+    "archRear": { "v": [0.34, 0.34, 0.35], "src": "D side (azlk2141_tbp_1990.jpg, read on the drawn rear hub (633, 278) px): the opening's top y 219, its edge at the hub's height x 574 ahead and x 694 behind; the dark lower panels (bumper, sill) count as body; reach read by eye where the watermark crosses" },
     "screenFoot": { "v": [1.336, 0.96], "src": "D side A pillar outer line (255, 163), measurements-2141.md §1" },
     "screenTop": { "v": [1.85, 1.325], "src": "D side A pillar line at the rail 1.325 (line (255,163) → (352,92)), measurements-2141.md §1" },
     "backLightTop": { "v": [3.496, 1.249], "tol": 0.05, "src": "D rear glass top y 527.5 (1.249) on the side tailgate line (3.25, 1.377) at 0.52 m per m, measurements-2141.md §1, §3" },

@@ -52,6 +52,8 @@
         "why": "the hubs as drawn on vaz_2107_1982.jpg (635 / 3048, the arches and doors drawn round them), not its dimension line (655 / 2424 / 1057): 4136 − 3048 = 1088 (measurements-classics.md, A discrepancy inside the 2107 drawing); the loader lays the factory 2424 over the drawn axles (kit-proportions: under 8 mm a hub)"
       }
     },
+    "archFront": { "v": [0.345, 0.3, 0.355], "src": "D side (vaz_2107_1982.jpg, read on the drawn front hub (1771, 887) px): the opening's top y 680, its edge at the hub's height x 1591 ahead and x 1984 behind" },
+    "archRear": { "v": [0.285, 0.36, 0.37], "src": "D side (vaz_2107_1982.jpg, read on the drawn rear hub (3217, 887) px): the opening's top y 716, its edge at the hub's height x 3001 ahead and x 3439 behind" },
     "screenFoot": {
       "v": [
         0.985,

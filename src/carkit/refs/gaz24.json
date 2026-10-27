@@ -14,6 +14,8 @@
     "wheelbase": { "v": 2.8, "src": "F dimension line 2800" },
     "overhangFront": { "v": 0.756, "src": "F dimension line 756" },
     "overhangRear": { "v": 1.179, "src": "F 4735 − 756 − 2800" },
+    "archFront": { "v": [0.38, 0.35, 0.47], "src": "D side (gaz_24.jpg, read on the drawn front hub (653, 267) px): the opening's top y 192, its edge at the hub's height x 584 ahead and x 745 behind" },
+    "archRear": { "v": [0.33, 0.39, 0.45], "src": "D side (gaz_24.jpg, read on the drawn rear hub (1205, 267) px): the opening's top y 202, its edge at the hub's height x 1129 ahead and x 1293 behind; the drawn hubs stand 0.043 over the registration's 0.30 (hub read at the wheel's centre); front: the arch's front edge ends 0.08 over the hub, read there; behind both arches the line sweeps back to the sill" },
     "screenFoot": { "v": [1.357, 1.091], "src": "D side cowl (775, 120), measurements-volga.md §1.1" },
     "screenTop": { "v": [1.75, 1.459], "tol": 0.03, "src": "D side roof's front (852, 46-50), measurements-volga.md §1.1" },
     "backLightTop": { "v": [3.336, 1.387], "src": "D side roof scan: back light's top 1.387 at 3.336, measurements-volga.md §3.2" },

@@ -49,6 +49,8 @@
       "v": 0.855,
       "src": "F length 4170 − wheelbase 2490 − D front overhang 0.825"
     },
+    "archFront": { "v": [0.35, 0.35, 0.33], "src": "D12 side (vaz_2112.jpg, read on the drawn front hub (818, 335) px): the opening's top y 247, its edge at the hub's height x 730 ahead and x 900 behind" },
+    "archRear": { "v": [0.29, 0.35, 0.31], "src": "D12 side (vaz_2112.jpg, read on the drawn rear hub (1444, 335) px): the opening's top y 262, its edge at the hub's height x 1356 ahead and x 1522 behind; rear behind: the skin 0.31; its mud flap reaches 0.36" },
     "screenFoot": {
       "v": [
         1.154,

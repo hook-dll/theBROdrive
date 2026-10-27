@@ -13,6 +13,8 @@
     "width": { "v": 1.718, "src": "F drom.ru; D dimension line 1718 (§1)" },
     "height": { "v": 1.388, "src": "F drom.ru; D dimension line 1388 (§1)" },
     "wheelbase": { "v": 2.62, "src": "F drom.ru; D dimension line 2620 (§1)" },
+    "archFront": { "v": [0.36, 0.39, 0.35], "src": "D side (daewoo_espero_1995.jpg, read on the drawn front hub (191, 277) px): the opening's top y 212, its edge at the hub's height x 123 ahead and x 251 behind" },
+    "archRear": { "v": [0.345, 0.36, 0.4], "src": "D side (daewoo_espero_1995.jpg, read on the drawn rear hub (641, 277) px): the opening's top y 214, its edge at the hub's height x 579 ahead and x 710 behind; a dark-grey rendering: the edge between the well's darker grey and the body's; reach ahead of the front and of the rear tyre read by eye (the dark apron and the watermark)" },
     "screenFoot": { "v": [1.267, 0.91], "src": "D side cowl (246, 167): s 1.267, 0.905-0.914 (§2)" },
     "screenTop": { "v": [2.03, 1.322], "src": "D side A pillar to the rail (377, 91) (§2)" },
     "backLightTop": { "v": [3.342, 1.322], "src": "D side back light top (603, 91): s 3.342 at the rail, y (332-91)x0.005486 (§2)" },

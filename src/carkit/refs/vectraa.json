@@ -11,6 +11,8 @@
     "width": { "v": 1.706, "src": "F auto-data 1706 (§1); D 1700" },
     "height": { "v": 1.4, "src": "F auto-data 1400; D 1400 (§1)" },
     "wheelbase": { "v": 2.6, "src": "F auto-data; D 2600 (§1)" },
+    "archFront": { "v": [0.36, 0.37, 0.33], "src": "D side (opel_vectra_a.jpg, read on the drawn front hub (228, 277) px): the opening's top y 215, its edge at the hub's height x 164 ahead and x 284 behind" },
+    "archRear": { "v": [0.35, 0.37, 0.34], "src": "D side (opel_vectra_a.jpg, read on the drawn rear hub (674, 277) px): the opening's top y 217, its edge at the hub's height x 611 ahead and x 733 behind" },
     "screenFoot": { "v": [1.222, 0.937], "src": "D side cowl (290, 168) (§2)" },
     "screenTop": { "v": [1.863, 1.36], "src": "D side A pillar top (400, 96) (§2)" },
     "backLightTop": { "v": [3.11, 1.394], "src": "D side back light top line from s 3.11 at 1.394 (§2)" },

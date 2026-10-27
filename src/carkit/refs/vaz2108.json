@@ -35,6 +35,8 @@
       "v": 0.761,
       "src": "D08 side: overhang 761 (samaras.ts BODY_2108 comment)"
     },
+    "archFront": { "v": [0.335, 0.35, 0.32], "src": "D08 side (vaz2108.jpg, read on the drawn front hub (831, 353) px): the opening's top y 265, its edge at the hub's height x 739 ahead and x 914 behind" },
+    "archRear": { "v": [0.32, 0.34, 0.33], "src": "D08 side (vaz2108.jpg, read on the drawn rear hub (1474, 353) px): the opening's top y 269, its edge at the hub's height x 1385 ahead and x 1560 behind" },
     "screenFoot": {
       "v": [
         1.08,

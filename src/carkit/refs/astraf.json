@@ -11,6 +11,8 @@
     "width": { "v": 1.688, "src": "F auto-data 1688 (§1)" },
     "height": { "v": 1.41, "src": "F auto-data; D 1410 (§1)" },
     "wheelbase": { "v": 2.517, "src": "F auto-data, avto-russia; D 2517 (§1)" },
+    "archFront": { "v": [0.31, 0.34, 0.32], "src": "D side (opel_astra_f.jpg, read on the drawn front hub (237, 279) px): the opening's top y 226, its edge at the hub's height x 178 ahead and x 291 behind" },
+    "archRear": { "v": [0.31, 0.35, 0.36], "src": "D side (opel_astra_f.jpg, read on the drawn rear hub (673, 279) px): the opening's top y 226, its edge at the hub's height x 613 ahead and x 735 behind; the watermark crosses the front arch: top read 0.1 ahead of the hub, behind by eye" },
     "screenFoot": { "v": [1.13, 0.93], "src": "D side cowl (297, 172) (§2)" },
     "screenTop": { "v": [1.79, 1.342], "src": "D side A pillar to the rail (410, 102) (§2)" },
     "backLightTop": { "v": [3.48, 1.354], "src": "D side the roof's end x 700 (s 3.48, 1.354), the tailgate glass's top (§2)" },

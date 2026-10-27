@@ -40,6 +40,8 @@
       "v": 0.957,
       "src": "D99 tips/hubs: overhang 957 (measurements-samara.md §0)"
     },
+    "archFront": { "v": [0.375, 0.365, 0.33], "src": "D99 side (vaz_21099.jpg, read on the drawn front hub (758, 341) px): the opening's top y 250, its edge at the hub's height x 668 ahead and x 840 behind" },
+    "archRear": { "v": [0.33, 0.345, 0.33], "src": "D99 side (vaz_21099.jpg, read on the drawn rear hub (1368, 341) px): the opening's top y 261, its edge at the hub's height x 1282 ahead and x 1449 behind; rear: the edge ends 0.05 over the hub; behind read there" },
     "screenFoot": {
       "v": [
         1.08,

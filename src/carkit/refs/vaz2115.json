@@ -42,6 +42,8 @@
       "src": "F length 4330 − wheelbase 2460 − P p19 front 0.848 (measurements-samara.md §3.1)",
       "tol": 0.025
     },
+    "archFront": { "v": [0.33, 0.36, 0.31], "src": "P19 side (vaz2115_p19_purple_side.jpg, read on the drawn front hub (375, 533) px): the opening's top y 387, its edge at the hub's height x 216 ahead and x 512 behind" },
+    "archRear": { "v": [0.3, 0.34, 0.32], "src": "P19 side (vaz2115_p19_purple_side.jpg, read on the drawn rear hub (1460, 533) px): the opening's top y 400, its edge at the hub's height x 1310 ahead and x 1602 behind; a photo (P19, the overlay's registered side photo), not a drawing" },
     "doorFront": {
       "v": [
         1.296,

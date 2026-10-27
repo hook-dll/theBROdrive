@@ -41,6 +41,8 @@
       "v": 0.469,
       "src": "DO side: rear hub 2.731 to the tip 3.200 (measurements-oka.md §1)"
     },
+    "archFront": { "v": [0.32, 0.29, 0.31], "src": "DO side (vaz_1111_oka.jpg, read on the drawn front hub (1106, 507) px): the opening's top y 388, its edge at the hub's height x 998 ahead and x 1221 behind" },
+    "archRear": { "v": [0.22, 0.32, 0.29], "src": "DO side (vaz_1111_oka.jpg, read on the drawn rear hub (1918, 507) px): the opening's top y 425, its edge at the hub's height x 1799 ahead and x 2025 behind" },
     "screenFoot": {
       "v": [
         0.891,

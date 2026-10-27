@@ -28,8 +28,8 @@ import type { KitBody } from './specs';
  * drawn hubs]. The face at s 0.06 behind the bumper (reach 0.06 [D x 21 / 31]); the
  * bonnet rising from its lip 0.78 to 0.986 at the cowl (s 1.341); the A pillar to the rail
  * at 1.893; the roof 1.43 from 2.47 to 3.17, falling into the back light from 3.48 to its
- * foot at 3.96 (1.015); the boot deck up to 1.055 at the lid's front edge and nearly level
- * to the tail (1.02), the lid down the tail face between the corner lamps. Sill 0.19, door
+ * foot at 3.96 (1.035); the boot deck one plane from there to a crisp edge over the tail
+ * (1.015), the lid down the tail face between the corner lamps. Sill 0.19, door
  * bottoms 0.22, belt 0.922 along the doors rising to 0.95 at the C pillar.
  */
 export const BODY_W124: KitBody = {
@@ -54,18 +54,18 @@ export const BODY_W124: KitBody = {
     // station between. The sill 0.19 [D side y 297], arch to arch.
     { s: 2.5, sill: 0.19, crease: 0.6, belt: 0.925, deck: 0.94, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
     { s: 3.555, sill: 0.19, crease: 0.6, belt: 0.946, deck: 0.971, wSill: 0.85, wCrease: 0.87, wBelt: 0.835 },
-    // rearBase: the back light's foot (x 706, 1.015) [D side]; the sill behind the rear arch
-    // up to the bumper's foot.
-    { s: 3.96, sill: 0.26, crease: 0.6, belt: 0.985, deck: 1.015, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
-    // The boot deck: up from the back light's foot to the lid's front edge, then nearly
-    // level, falling 3.5 cm straight to a crisp corner over the tail [D side: 1.016 at s
-    // 3.98, 1.056 at 4.10–4.13, 1.045 at 4.30, 1.033 at 4.45, 1.016 at 4.59, 1.004 at 4.68;
-    // P S: 1.066 at 4.10 to 1.038 at 4.67, level]; no hump (owner, 2026-10-27). The
-    // tail's corners rounding in [D2 rear: ±0.86 at the bumper, ±0.84 at the belt]. The
-    // wing's top edge (the belt row) rises with the lid, so the deck keeps one crown across
-    // (1.5 cm) from the lid's front edge to the tail.
-    { s: 4.08, sill: 0.27, crease: 0.6, belt: 1.02, deck: 1.055, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
-    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.985, deck: 1.02, wSill: 0.805, wCrease: 0.82, wBelt: 0.782 },
+    // rearBase: the back light's foot [D side (706, 156): 1.015; built 1.035, so the deck runs
+    // straight from it without a ridge]; the sill behind the rear arch up to the bumper's foot.
+    { s: 3.96, sill: 0.26, crease: 0.6, belt: 0.985, deck: 1.035, wSill: 0.85, wCrease: 0.87, wBelt: 0.83 },
+    // The boot deck: one plane from the back light's foot to a crisp edge over the tail,
+    // falling 2 cm [D side: 1.056 at 4.10 to 1.004 at 4.68; P S: 1.066 at 4.10 to 1.038 at
+    // 4.67; D2 side: level]: no station between, so no ridge across at the lid's front edge
+    // and no hump (owner, 2026-10-27: «что это за конструкция?»). The wing's top edge (the
+    // belt row) runs straight under it, the crown across easing from 3 cm at the glass to
+    // 1.5 at the tail (3 cm there folds the tail's top at the lid's cut), so the deck's
+    // sides run into the wings with no step. The tail's corners rounding in [D2 rear: ±0.86
+    // at the bumper, ±0.84 at the belt; D plan: ±0.80 at s 4.45, ±0.765 at 4.67].
+    { s: 4.68, sill: 0.34, crease: 0.6, belt: 0.98, deck: 1.015, wSill: 0.805, wCrease: 0.82, wBelt: 0.782 },
     // The tail face [D side x 828–835: upright from the deck's edge 0.99 at s 4.70]: the
     // lid's rear panel above the lamps (0.858 [D side y 183]) across, and down between them
     // to their foot (0.655 [P R: the lid's foot just under the lamps']), cut at ±0.42 (the
@@ -149,11 +149,14 @@ export const BODY_W124: KitBody = {
     width: 0.195, // [F]
     frontHalfTrack: 0.7505, // 1501 [F]
     rearHalfTrack: 0.7455, // 1491 [F]
-    // Front: close round the tyre's sides, clear over its top: a half ellipse 0.343 wide at
-    // the hub's height and 0.371 high [P S, the near (rear) edge: ±0.35 at the hub,
-    // 0.33 at 0.10 over it, 0.29 at 0.20, 0.21 at 0.30, top 0.371; D side: top 0.366].
-    arch: 1.08,
-    frontArchRise: 1.17,
+    // Front: close round the tyre's sides and top: a half ellipse 0.33 wide at the hub's
+    // height and 0.349 high, 1.3 cm off the tyre at its sides and 3.2 over it (owner,
+    // 2026-10-27, on the lab: «сравни расположение колеса с фото»: the black of the 0.343 ×
+    // 0.371 opening read as a small tyre set back in a big hole). [P S, the near (rear)
+    // edge: ±0.34–0.35 at the hub, 0.36 at 45°, 0.37–0.38 at the top: the lip's lit edge;
+    // D side: top 0.366].
+    arch: 1.04,
+    frontArchRise: 1.1,
     // Rear: a circle, top 0.387 over the hub [D side: 0.383; P S: 0.39–0.40, the near
     // (front) edge 0.39 at the hub, 0.36 at 0.10, 0.315 at 0.20, 0.26 at 0.30].
     rearArch: 1.22,

@@ -53,6 +53,8 @@
       "v": 1.443,
       "src": "F passport 1443"
     },
+    "archFront": { "v": [0.335, 0.33, 0.35], "src": "D side (vaz_2104.jpg, read on the drawn front hub (780, 364) px): the opening's top y 282, its edge at the hub's height x 699 ahead and x 866 behind" },
+    "archRear": { "v": [0.28, 0.36, 0.36], "src": "D side (vaz_2104.jpg, read on the drawn rear hub (1370, 364) px): the opening's top y 296, its edge at the hub's height x 1282 ahead and x 1458 behind; front: the wing's lower edge ends ~0.03 over the hub, ahead read there" },
     "screenFoot": {
       "v": [
         0.985,

@@ -12,6 +12,8 @@
     "width": { "v": 1.662, "src": "F drom.ru (§0)" },
     "height": { "v": 1.393, "src": "F drom.ru (§0)" },
     "wheelbase": { "v": 2.52, "src": "F drom.ru; D dimension 2520 (§0)" },
+    "archFront": { "v": [0.345, 0.37, 0.355], "src": "D side (daewoo_nexia.jpg, read on the drawn front hub (720, 323) px): the opening's top y 251, its edge at the hub's height x 643 ahead and x 793 behind" },
+    "archRear": { "v": [0.29, 0.37, 0.355], "src": "D side (daewoo_nexia.jpg, read on the drawn rear hub (1239, 323) px): the opening's top y 263, its edge at the hub's height x 1163 ahead and x 1312 behind; the arch's double line: its inner line" },
     "screenTop": { "v": [1.948, 1.355], "src": "D side screen / A pillar outer line meets the roof at (1.948, 1.355) (§1)" },
     "backLightFoot": { "v": [3.95, 1.03], "src": "D side back light foot drawn at 3.95, 1.03 on the centre line (§1 Back light; note under the table)" },
     "beltY": { "v": 0.875, "src": "D side window sill py 204 at x 950 (§1)" },

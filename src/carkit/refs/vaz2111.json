@@ -49,6 +49,8 @@
       "v": 0.964,
       "src": "D11 rear hub x 1393.5 to the tip x 1624 at 4.185 mm/px"
     },
+    "archFront": { "v": [0.36, 0.345, 0.31], "src": "D11 side (vaz_2111.jpg, read on the drawn front hub (800, 344) px): the opening's top y 258, its edge at the hub's height x 717 ahead and x 874 behind" },
+    "archRear": { "v": [0.265, 0.29, 0.33], "src": "D11 side (vaz_2111.jpg, read on the drawn rear hub (1395, 344) px): the opening's top y 281, its edge at the hub's height x 1326 ahead and x 1474 behind" },
     "screenFoot": {
       "v": [
         1.154,
