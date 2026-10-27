@@ -8,12 +8,14 @@
  * without every caller learning to check first.
  */
 
+import type { KitRig } from '../carkit/rig';
 import type { SurfaceType } from '../core/surfaces';
 import type { Settings } from '../game/settings';
 import type { VehicleAudioState } from '../vehicle/vehicle';
 import { AudioMixer, setListenerPose, setPannerPosition, sliderGain } from './mixer';
 import { playCrash, VehicleAudio, type CarPose } from './vehicleaudio';
 import { TRAFFIC_RELEASE_S, TrafficAudio } from './trafficaudio';
+import { CabinMusic } from './cabinmusic';
 import type { SampleName } from './samples';
 import { Ambience, type AmbienceFrame } from './ambience';
 import type { CabinOpenness } from './cabinopenness';
@@ -54,6 +56,8 @@ const TRAFFIC_CRASH_LIFE_MS = 5000;
 interface TrafficCandidate {
   id: string;
   state: VehicleAudioState;
+  /** Its doors and windows, for how much of its music gets out; null for a non-kit body. */
+  kit: KitRig | null;
   x: number;
   y: number;
   z: number;
@@ -75,6 +79,8 @@ export class GameAudio {
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
   private readonly ambience = new Ambience(this.mixer);
+  /** The loops other cars play in their cabins (cabinmusic.ts), rendered at startup. */
+  private readonly cabinMusic = new CabinMusic();
   private readonly radios = new Map<string, Radio>();
   /** Voiced cars by id, and the same voices as a list (at most TRAFFIC_VOICES). */
   private readonly trafficVoices = new Map<string, TrafficVoice>();
@@ -107,6 +113,10 @@ export class GameAudio {
 
   applySettings(settings: Settings): void {
     this.worldVolume = settings.worldVolume;
+    // Other cars' music is out in the world (the World slider, through the traffic bus)
+    // and it is music: the Radio slider scales it too, so turning the radio down turns
+    // everyone's down.
+    this.cabinMusic.level = sliderGain(settings.radioVolume);
     this.mixer.setVolume(settings.masterVolume);
     this.mixer.setBusVolumes(settings.carVolume, settings.worldVolume, settings.radioVolume);
     this.radioStationUrls = [settings.radioStation1Url, settings.radioStation2Url];
@@ -231,6 +241,7 @@ export class GameAudio {
   updateTrafficVehicle(
     id: string,
     state: VehicleAudioState,
+    kit: KitRig | null,
     x: number,
     y: number,
     z: number,
@@ -241,11 +252,12 @@ export class GameAudio {
     const d2 = dx * dx + dy * dy + dz * dz;
     let c = this.trafficCandidates[this.trafficCandidateCount];
     if (!c) {
-      c = { id, state, x, y, z, d2 };
+      c = { id, state, kit, x, y, z, d2 };
       this.trafficCandidates.push(c);
     } else {
       c.id = id;
       c.state = state;
+      c.kit = kit;
       c.x = x;
       c.y = y;
       c.z = z;
@@ -311,7 +323,7 @@ export class GameAudio {
     for (let v = 0; v < active.length; v++) {
       const voice = active[v]!;
       const c = voice.candidate!;
-      voice.audio.update(c.state, c.x, c.y, c.z, this.listenerX, this.listenerY, this.listenerZ, dt);
+      voice.audio.update(c.state, c.kit, c.x, c.y, c.z, this.listenerX, this.listenerY, this.listenerZ, dt);
     }
 
     // Faded voices are parked for the next car, or let go past the pool's size. A
@@ -343,8 +355,8 @@ export class GameAudio {
   /** A parked voice, or a new one, for car `c`. */
   private acquireTrafficVoice(c: TrafficCandidate): void {
     let voice = this.trafficPool.pop();
-    if (voice) voice.audio.reuse();
-    else voice = { audio: new TrafficAudio(this.mixer), id: '', candidate: null, parkAt: 0 };
+    if (voice) voice.audio.reuse(c.id);
+    else voice = { audio: new TrafficAudio(this.mixer, this.cabinMusic, c.id), id: '', candidate: null, parkAt: 0 };
     voice.id = c.id;
     voice.candidate = c;
     this.trafficVoices.set(c.id, voice);

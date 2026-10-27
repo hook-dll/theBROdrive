@@ -945,9 +945,9 @@ async function boot(): Promise<void> {
     groundUnder,
     toast: (text) => hud.setToast(text),
   });
-  /** The racing rival's engine, heard as a traffic car's; one visitor for every frame. */
-  const hearRaceCar = (id: string, vehicle: Vehicle): void => {
-    audio.updateTrafficVehicle(id, vehicle.audio, vehicle.root.position.x, vehicle.root.position.y, vehicle.root.position.z);
+  /** A traffic car or the racing rival, offered for a voice; one visitor for every frame. */
+  const hearCar = (id: string, vehicle: Vehicle): void => {
+    audio.updateTrafficVehicle(id, vehicle.audio, vehicle.kit, vehicle.root.position.x, vehicle.root.position.y, vehicle.root.position.z);
   };
   /**
    * A COUPLED RIG LIVES AND SLEEPS WHOLE. The cars on one tow bar, and a car with a
@@ -3038,16 +3038,8 @@ async function boot(): Promise<void> {
     ambienceFrame.roadS = activeS;
     audio.updateAmbience(ambienceFrame, frameDt);
     audio.beginTrafficFrame();
-    traffic.forEachVehicle((id, vehicle) => {
-      audio.updateTrafficVehicle(
-        id,
-        vehicle.audio,
-        vehicle.root.position.x,
-        vehicle.root.position.y,
-        vehicle.root.position.z,
-      );
-    });
-    race.forEachDriven(hearRaceCar);
+    traffic.forEachVehicle(hearCar);
+    race.forEachDriven(hearCar);
     audio.endTrafficFrame(frameDt);
     hud.setRadio(audio.radioReadout);
 

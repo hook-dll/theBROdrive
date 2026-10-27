@@ -4,6 +4,20 @@
 
 ### Added
 
+- Music from other cars' cabins (`src/audio/cabinmusic.ts`): about a third of the traffic
+  has something playing, fixed by the car's id (loop, level, start point, ±3 % speed):
+  four-on-the-floor «тумц», a chanson waltz on accordion, a hummed and sung line, 80s
+  synth-pop, a talk station, estrada with a singer, a boom car's 808s, palm-muted rock.
+  Eight 4-7.5 s loops, mono at 16 kHz, 2.8 MB, rendered at startup with
+  OfflineAudioContext from oscillators and noise (no files, no network), the closed car
+  baked in (two low-passes at 420-700 Hz, a 110 Hz boom, the speakers' soft clipping);
+  each rendered twice over and the second pass kept, so it loops without a seam (pass 2
+  against pass 3: -81 dB or better). It plays through the car's own voice before its
+  panner: heard within 12-25 m, +10 dB with every window and door open (its kit rig's
+  `cabinOpenness`), -8 dB by 90 km/h under its wind and engine, moved by the same
+  Doppler as the engine; it fades with the voice and a pooled voice takes the next car's
+  music. On the traffic bus (World slider), scaled by the Radio slider; silent on pause.
+
 - Kit cars' cabins are no longer one colour per model: every car leaves the works in its
   own interior trim, picked from its id as its paint is (so a saved car keeps it): the
   model's own or one of a muted palette — grey, sand, blue, brown, black, burgundy,

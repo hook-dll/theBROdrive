@@ -24,10 +24,17 @@
  * distance where the air has taken the treble it works with, so a far car is panned
  * equal-power, switched over at `EQUALPOWER_FROM_M` (where the voice is ~25 dB down)
  * and back at `HRTF_WITHIN_M`.
+ *
+ * MUSIC. A car with music playing (cabinmusic.ts, fixed by its id) adds its loop to
+ * the voice before the panner: heard within some 25 m, louder with its windows or doors
+ * open, quieter as it gathers speed and its own wind and engine cover it.
  */
 
+import type { KitRig } from '../carkit/rig';
 import { AUDIO_CONFIG } from '../config';
 import type { VehicleAudioState } from '../vehicle/vehicle';
+import { cabinMusicFor, type CabinMusic, type CabinMusicPick } from './cabinmusic';
+import { cabinOpenness, type CabinOpenness } from './cabinopenness';
 import { EngineVoice } from './enginevoice';
 import { AudioMixer, ramp, setPannerPosition, snapPannerPosition, steer } from './mixer';
 
@@ -42,6 +49,19 @@ const EQUALPOWER_FROM_M = 120;
 const HRTF_WITHIN_M = 100;
 /** A panner target closer than this to the last one written is not written, metres. */
 const PLACE_EPS_M = 0.005;
+/**
+ * A loop (-18 dBFS RMS) at a car's loudest, shut and standing: ~-25 dBFS into the
+ * voice, a few dB under its engine at idle (-23 dBFS, measured offline).
+ */
+const CABIN_MUSIC_GAIN = 0.45;
+/** Music at full within NEAR, gone by FAR, metres (on top of the panner's roll-off). */
+const MUSIC_NEAR_M = 12;
+const MUSIC_FAR_M = 25;
+/** Every window and door open: this much louder than shut (+10 dB). */
+const MUSIC_OPEN_BOOST = 2.2;
+/** By this speed the music is down by `MUSIC_SPEED_DROP` under the car's wind and engine, m/s. */
+const MUSIC_SPEED_MPS = 25;
+const MUSIC_SPEED_DROP = 0.6;
 
 /** Initial values of the per-frame params, as built (`reuse` puts them back). */
 const AIR_HZ = 12000;
@@ -52,6 +72,8 @@ const AIR = 0;
 const ROAR = 1;
 const HISS = 2;
 const ROAD = 3;
+const MUSIC = 4;
+const MUSIC_RATE = 5;
 
 export class TrafficAudio {
   private readonly out: GainNode;
@@ -62,7 +84,13 @@ export class TrafficAudio {
   private readonly hissFilter: BiquadFilterNode;
   private readonly roadGain: GainNode;
   private readonly sources: AudioBufferSourceNode[] = [];
-  private readonly last = new Float64Array(4).fill(Number.NaN);
+  private readonly last = new Float64Array(6).fill(Number.NaN);
+  /** This car's music, if `hasMusic`; its loop starts once rendered. */
+  private readonly musicGain: GainNode;
+  private readonly pick: CabinMusicPick = { loop: 0, level: 0, offset: 0, rate: 1 };
+  private readonly openness: CabinOpenness = { left: 0, right: 0 };
+  private hasMusic = false;
+  private musicSource: AudioBufferSourceNode | null = null;
   private lastDistance = -1;
   private radialMps = 0;
   /** Last panner target; NaN until the first update, which snaps there. */
@@ -72,7 +100,11 @@ export class TrafficAudio {
   private hrtf = true;
   private disposed = false;
 
-  constructor(private readonly mixer: AudioMixer) {
+  constructor(
+    private readonly mixer: AudioMixer,
+    private readonly music: CabinMusic,
+    carId: string,
+  ) {
     const ctx = mixer.ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 0;
@@ -118,15 +150,22 @@ export class TrafficAudio {
     roar.connect(this.roarFilter).connect(roarLevel).connect(this.roadGain);
     hiss.connect(this.hissFilter).connect(this.roadGain);
 
+    this.musicGain = ctx.createGain();
+    this.musicGain.gain.value = 0;
+    this.musicGain.connect(this.air);
+    this.hasMusic = cabinMusicFor(carId, this.pick);
+
     ramp(this.out.gain, TRAFFIC_GAIN, mixer.now, 0.25);
   }
 
   /**
    * `x,y,z` is the car and `lx,ly,lz` the listener, both in the same (relative)
-   * frame. `dt` is the frame's own delta.
+   * frame. `kit` is the car's rig, whose doors and windows let its music out. `dt` is
+   * the frame's own delta.
    */
   update(
     state: VehicleAudioState,
+    kit: KitRig | null,
     x: number,
     y: number,
     z: number,
@@ -183,6 +222,42 @@ export class TrafficAudio {
     steer(this.roarFilter.frequency, last, ROAR, ROAR_HZ * pitch, now, 0.05);
     steer(this.hissFilter.frequency, last, HISS, (700 + 500 * t) * pitch, now, 0.05);
     steer(this.roadGain.gain, last, ROAD, ROAD_GAIN * t ** 1.6 * state.wheelContactFraction, now, 0.1);
+    if (this.hasMusic) this.updateMusic(kit, distance, speed, pitch, now);
+  }
+
+  private updateMusic(kit: KitRig | null, distance: number, speed: number, pitch: number, now: number): void {
+    let src = this.musicSource;
+    if (!src) {
+      const buffer = this.music.loops[this.pick.loop];
+      if (!buffer) return;
+      src = new AudioBufferSourceNode(this.mixer.ctx, { buffer, loop: true, playbackRate: this.pick.rate });
+      src.connect(this.musicGain);
+      src.start(now, this.pick.offset * buffer.duration);
+      this.musicSource = src;
+    }
+    let level = 0;
+    if (distance < MUSIC_FAR_M && this.music.level > 0) {
+      const far = Math.min(1, Math.max(0, (distance - MUSIC_NEAR_M) / (MUSIC_FAR_M - MUSIC_NEAR_M)));
+      const near = 1 - far * far * (3 - 2 * far);
+      let open = 0;
+      if (kit) {
+        // From outside, the car's openings by side; a driver's ears are as good as any.
+        cabinOpenness(kit, 'driver', 1, this.openness);
+        open = (this.openness.left + this.openness.right) / 2;
+      }
+      const covered = 1 - MUSIC_SPEED_DROP * Math.min(1, speed / MUSIC_SPEED_MPS);
+      level = CABIN_MUSIC_GAIN * this.pick.level * this.music.level * near * covered * (1 + MUSIC_OPEN_BOOST * open);
+    }
+    steer(this.musicGain.gain, this.last, MUSIC, level, now, 0.15);
+    // Doppler moves the music with the engine.
+    steer(src.playbackRate, this.last, MUSIC_RATE, this.pick.rate * pitch, now, 0.05);
+  }
+
+  private stopMusic(): void {
+    if (!this.musicSource) return;
+    this.musicSource.stop();
+    this.musicSource.disconnect();
+    this.musicSource = null;
   }
 
   /** Fades out; the owner parks or disposes it `TRAFFIC_RELEASE_S` later. */
@@ -191,19 +266,20 @@ export class TrafficAudio {
     ramp(this.out.gain, 0, this.mixer.now, 0.1);
   }
 
-  /** Off the bus and its engine asleep, faded out, until `reuse`. */
+  /** Off the bus, its engine asleep and its music stopped, faded out, until `reuse`. */
   park(): void {
     if (this.disposed) return;
     this.out.disconnect();
     this.engine.sleep();
+    this.stopMusic();
   }
 
   /**
-   * A parked voice for another car: back on the bus, every per-frame param where a new
-   * voice's starts, and fading in as one does. The first update places it outright and
-   * gives its engine the car's character.
+   * A parked voice for car `carId`: back on the bus, every per-frame param where a new
+   * voice's starts, fading in as one does, and that car's music, if any. The first
+   * update places it outright and gives its engine the car's character.
    */
-  reuse(): void {
+  reuse(carId: string): void {
     if (this.disposed) return;
     const now = this.mixer.now;
     this.out.connect(this.mixer.traffic);
@@ -215,6 +291,7 @@ export class TrafficAudio {
       [this.roarFilter.frequency, ROAR_HZ],
       [this.hissFilter.frequency, HISS_HZ],
       [this.roadGain.gain, 0],
+      [this.musicGain.gain, 0],
     ] as const) {
       param.cancelScheduledValues(now);
       param.setValueAtTime(value, now);
@@ -222,12 +299,15 @@ export class TrafficAudio {
     this.last.fill(Number.NaN);
     this.lastDistance = -1;
     this.radialMps = 0;
+    this.stopMusic();
+    this.hasMusic = cabinMusicFor(carId, this.pick);
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     for (const src of this.sources) src.stop();
+    this.stopMusic();
     this.engine.dispose();
     this.out.disconnect();
     this.panner.disconnect();
