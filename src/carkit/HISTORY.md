@@ -1458,6 +1458,24 @@ Checks: `npm run kit-check -- e34` passes (zfight, proportions, reality, mirrors
 0 dents, 13 979 triangles, drawing 21/21, dash 9/9); every other car identical in
 kit-fingerprint (the W124 moved by its own tail work, not this).
 
+## BMW E34, the roof's rear corners (2026-10-28)
+
+- **«сзади над задним стеклом артефакты крыши»** (`owner_kit_roofrear.png`, from behind
+  and above: yellow-grey slivers and torn triangles at both corners of the roof over the
+  back light). → The rear door's frame met the rail at 3.443 (glass column 3.506) and
+  3.447 (the door's rear edge 3.519), but the back light's column (top 3.45) puts the
+  roof's edge over the glass `railInset` ahead of its top, at 3.41. The roof's rows and
+  the rail's chamfer ran 3.40 → 3.443 → 3.447 → back to 3.41: the last strip folded over
+  the one before (faces facing forward, up to 75° off the roof), the step `cornerDrop`
+  0.03 on the same 4 mm made it worse, and the headliner 2.8 cm under it showed through
+  the fold. → The door's frame meets the rail at 3.405 / 3.41 (the glass column at the
+  belt 3.506 → 3.51 so the quarter's rear edge at the belt stays at 3.484 for
+  `sideGlassBelt`), so every row runs rearward; `cornerDrop` dropped (README: no step
+  corner on a `roofDrop` roof). *bmw.ts `BODY_E34.cabin.columns`*.
+
+Checks: `npm run kit-check -- e34` passes (zfight, proportions, reality, mirrors L90 % R88 %,
+0 dents, 13 952 triangles, drawing 21/21, dash 9/9). A spec change in bmw.ts alone.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

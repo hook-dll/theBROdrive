@@ -87,8 +87,9 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    (black lamp rings, the shark nose, the Hofmeister kink, the stack turned to the driver,
    alloys, no fog lamps) built and the first draft made 2026-10-27 (`bmw.ts`, `CABIN_E34`,
    its own running gear `GEAR_BMW_E34`); the mirrors on a black base without an arm after
-   his first look at the front view. kit-check passes, 14 006 triangles: **draft,
-   awaiting his next look**.
+   his first look at the front view; the roof's rear corners over the back light without
+   their fold (2026-10-28). kit-check passes, 13 952 triangles: **draft, awaiting his
+   next look**.
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`
 running gear (awaiting the owner's review).

@@ -1167,6 +1167,14 @@
 
 ### Fixed
 
+- The BMW E34's roof over the back light no longer tears at its rear corners (owner,
+  «сзади над задним стеклом артефакты крыши»): the rear door's frame met the rail at
+  3.443 / 3.447, behind the roof's edge over the back light (3.41), so the roof's last
+  row ran forward and the roof and the rail's chamfer folded over themselves, the beige
+  headliner showing through. The door's frame now meets the rail at 3.405–3.41 and the
+  back light's corners are square (no `cornerDrop`). `bmw.ts` only; every other car
+  unchanged.
+
 - THE TRAFFIC BENCH'S GROUND REACHES THE VERGE (`tools/traffic-bench.ts`
   `RIBBON_HALF_WIDTH`). Its road collider ended 5.9 m from the crown, and a frantic
   driver's bypass round a queue runs 4-6 m out, on what is solid verge in the game: a

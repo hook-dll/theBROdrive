@@ -122,17 +122,23 @@ export const BODY_E34: KitBody = {
       // inside the door's painted frame (`glassDrop`) in two straight runs, 1.305 at the bar
       // to 1.165 at 3.41 to 1.09 at 3.48, its edge down the door's rear edge to 1.0 at 3.50
       // and its foot cut forward to the belt at 3.44 (`glassRise`). The frame above the curve
-      // is the door's, body colour [P S, R34].
+      // is the door's, body colour [P S, R34]. The door's frame meets the rail at 3.405–3.41,
+      // no further back than the roof's edge over the back light (its top 3.45 less
+      // `railInset`, 3.41): at 3.443 / 3.447 the roof's last row ran forward from them to 3.41
+      // and the roof and the rail's chamfer folded back over themselves at both rear corners,
+      // the headliner showing through (owner, 2026-10-28: «сзади над задним стеклом артефакты
+      // крыши»). The glass's rear edge 4 mm further back at the belt for it (3.51).
       { s: 3.44, top: 3.4, upper: 'door2', glass: 'fixed', glassDrop: 0.105 },
-      { s: 3.506, top: 3.443, upper: 'door2', glassRise: 0.045, glassDrop: 0.17 },
-      // The rear door's rear edge, the door's frame 1.3 cm wide behind the glass [D side: 3.49
+      { s: 3.51, top: 3.405, upper: 'door2', glassRise: 0.045, glassDrop: 0.17 },
+      // The rear door's rear edge, the door's frame 1 cm wide behind the glass [D side: 3.49
       // at the belt, 3.48 at 0.857, 3.474 at 0.816, 3.457 at 0.774, forward round the rear
       // arch's front to the sill at 3.22; P S: 3.51 at the belt]. (The glass on the shut line
       // itself put the jamb's seal in the cabin lining's plane: kit-zfight.)
-      { s: 3.519, top: 3.447, upper: 'body', foot: { y: 0.85, s: 3.22, knee: [3.38, 0.6] } },
+      { s: 3.519, top: 3.41, upper: 'body', foot: { y: 0.85, s: 3.22, knee: [3.38, 0.6] } },
       // The C pillar, body colour, to the back light's foot; the roof over the back light's
-      // top at 3.45 [D side x 622, y 103].
-      { s: 4.05, top: 3.45, cornerDrop: 0.03 },
+      // top at 3.45 [D side x 622, y 103]. Its corners square: a step `cornerDrop` with the
+      // roof's profile (`roofDrop`) folds the roof in behind the header (README).
+      { s: 4.05, top: 3.45 },
     ],
     // The side glass's top along both doors [D side y 108: 1.317] under its 2 cm rubber.
     rail: 1.335,

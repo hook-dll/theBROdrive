@@ -275,3 +275,13 @@ crease (0.78), on the shoulder's turn, so it bent at the corner; the crease now 
 mirrors L90 % R88 %, dents 0, 13 979 triangles, drawing 21/21, dash 9/9; tsc clean;
 cabin-places pass; kit-fingerprint: every other car identical (the W124 moved by its own
 tail work in the tree).
+
+## 9. The roof's rear corners (2026-10-28)
+
+`owner_kit_roofrear.png`: «сзади над задним стеклом артефакты крыши». On the built mesh the
+rear door's frame met the rail at 3.443 / 3.447, the roof's edge over the back light
+(top 3.45 − `railInset` 0.04) at 3.41: the roof's last row and the rail's chamfer ran
+forward and folded, the headliner showing through. Now the glass column 3.51 → top 3.405,
+the door's rear edge 3.519 → top 3.41, the back light's column without `cornerDrop`.
+Unchanged on the drawing rows: `sideGlassBelt` rear 3.484 (real 3.523, ±0.04), `doorRear`.
+kit-check passes, 13 952 triangles, drawing 21/21.
