@@ -573,7 +573,10 @@ known deviation held within 3 points), turn ±3%, wheelbase/track/radius ±0.5%.
 Loaded wheelbase, front track and rolling radius equal the factory figures on all 13
 (0.0%). Threshold 100-0 against a road test: 2110 54.6 m against Za Rulem's 55.0 m for a
 21102 (judged, −0.7%); the 2112 55.0 m, the 2104 51.5 m against Autoreview's 49.4 m and the
-2109 53.2 m against 44.7 m are printed only (second-hand figures, or another body's).
+2109 53.2 m against 44.7 m are printed only (second-hand figures, or another body's). Since
+the MXV road tyre (2026-10-27) the 2110 stops in 47.4 m (−13.8%) and Za Rulem's figure is
+printed only too: it was measured on the 21102's budget tyres (`BUDGET_TYRE_STOP` in
+`tools/reality.ts`, docs/physics-references.md "Braking on the MXV").
 
 `~` = a known 0-100 deviation, accepted with its cause in `tools/reality.ts`:
 - **Catalogue optimistic** (2108, 2109, 21099, 2115, 2110, 2112: +11 to +23%). A point-mass

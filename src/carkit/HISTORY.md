@@ -1268,6 +1268,28 @@ onto `w124_side.png` registered on its hubs (measurements-w124.md §10).
 
 Every other car `identical` (kit-fingerprint); w124 re-recorded, 12 363 → 12 194 triangles.
 
+## Tens: the firewall lining in the front doors' edges (2026-10-27)
+
+- **kit-zfight failed on the 2110 and 2112**: `kit_cabin/cabin_trim` (interior.ts
+  `floor()`, the firewall lining under the dash) against `door_fl/door_fl_paint` (body.ts,
+  the front door's painted front edge), s 1.33, y 0.74, 73 cm², 1.2–2.0 mm apart, seen
+  beyond 25 m. → The lining stands at the firewall (cowl + 0.02, s 1.33) with upright
+  outer edges at the toe board's width, 85 mm inside the side there (x 0.7245 at y 0.49).
+  The tens' front door's front edge stands 1.5 mm ahead of it (its column at 1.325) and
+  the side falls in to 0.788 at y 0.74 and 0.73 at the scuttle, so the door's inner skin
+  came to x 0.710 at 0.74: the lining's last 15 mm lay in the door's front edge face. (On
+  the 2111 the door's front reaches 1.273, across the firewall: the edge stood 11 mm through
+  its card, hidden.) On the other cars kit-zfight finds no such pair (the 2109's door
+  front stands 10 mm ahead of the lining, which is 15 mm inside its card). →
+  `Layout.firewallLean` (new, `CABIN_2110`): the lining's
+  outer edges lean in from the toe board's top to the scuttle, 85 mm inside the side at
+  both ends (x 0.645 at 0.94); at 0.74 it now stands 30 mm inside the door's inner skin.
+  Absent, the edges stay upright, so no other car changes. *interior.ts `floor()`,
+  `CABIN_2110`*.
+
+Every other car `identical` (kit-fingerprint); vaz2110, vaz2111, vaz2112 re-recorded (cabin),
+triangle counts unchanged.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

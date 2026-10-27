@@ -4,6 +4,10 @@
 
 ### Added
 
+- Tens: the firewall lining leans in with the side (`firewallLean`, `CABIN_2110`), out of
+  the front doors' edges (kit-zfight on the 2110/2112). Brake tests measured on budget
+  tyres are printed, not judged (`BUDGET_TYRE_STOP` in tools/reality.ts): on the MXV the
+  2110 stops in 47.4 m against Za Rulem's 55.0 m on its 13-inch budget tyres.
 - ARCHES TO THE DRAWINGS, every car (owner, 2026-10-27: the arches' shape makes a car
   recognisable). Each refs file carries the drawn `archFront` / `archRear` [top over hub,
   reach ahead, reach behind], `kit-drawing` judges them; all 54 within 0.03 m. The cut in

@@ -228,6 +228,14 @@ interface Layout {
   /** Toe board: its top over the floor at the firewall and its run back to the floor. */
   readonly toeTop: number;
   readonly toeRun: number;
+  /**
+   * The firewall lining's outer edges lean in with the body's side from the toe board's
+   * top to the scuttle, `SIDE_CLEAR` inside the side at both ends, instead of standing
+   * upright at the toe board's width. For a side that falls in above the crease where a
+   * front door's front edge stands at the firewall (the tens': 1.5 mm ahead of it), so
+   * the upright edge would reach into the door's front edge.
+   */
+  readonly firewallLean?: true;
   /** Tunnel heights over the floor (at the toe board's top, its foot and the rear) and half widths (base, top; front and rear). */
   readonly tunnel: {
     readonly heights: readonly [number, number, number];
@@ -905,6 +913,10 @@ export const CABIN_2110: CabinLayoutOverride = {
   frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
   // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 0.8 cm below it, 2026-10-18).
   visor: { half: 0.16, depth: 0.137 },
+  // The front doors' front edges stand 1.5 mm ahead of the firewall lining (2110, 2112)
+  // or across it (2111), and the side falls in from about 0.81 at the toe board's top to
+  // 0.73 at the scuttle: an upright edge stood 15 mm into the doors' front edges at 0.74.
+  firewallLean: true,
 };
 
 // The Daewoo Nexia N100 on the Samara's furniture (a moulded dash, struts and a
@@ -2159,7 +2171,11 @@ class Cabin {
     const sections = this.rows.map((r) => this.floorSection(r));
     for (let i = 0; i + 1 < sections.length; i++) b.bridge('trim', sections[i]!, sections[i + 1]!);
     const top = this.frame.deckY(this.fw, this.frame.section(this.fw).r4[0]) - 0.015;
-    b.color(shade(this.lay.carpet, 0.85)).bridge('trim', sections[0]!, sections[0]!.map((p) => [p[0], top, p[2]] as Vec3));
+    // Leaning, its outer edges reach the scuttle as far inside the side there as the toe
+    // board's ends are at their height.
+    const edge = this.lay.firewallLean ? this.frame.sideX(this.fw, top) - SIDE_CLEAR - 0.005 : Infinity;
+    const up = sections[0]!.map((p) => [Math.sign(p[0]) * Math.min(Math.abs(p[0]), edge), top, p[2]] as Vec3);
+    b.color(shade(this.lay.carpet, 0.85)).bridge('trim', sections[0]!, up);
   }
 
   /**

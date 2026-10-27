@@ -103,8 +103,9 @@ interface Target {
   readonly grossKg: number;
   /**
    * A measured 100-0 km/h road test, m, held to TOLERANCE.brake against the threshold
-   * stop at the test load. `judged: false` for a figure only found second-hand: it is
-   * printed beside the car, not held against it.
+   * stop at the test load. `judged: false` for a figure only found second-hand, or
+   * measured on a tyre other than the game's road tyre (`BUDGET_TYRE_STOP`): it is
+   * printed beside the car, not held against it, and its `source` says why.
    */
   readonly brakeTest?: { readonly m: number; readonly judged: boolean; readonly source: string };
   /** Steady-state lateral acceleration, g, where a period test is known. */
@@ -180,6 +181,7 @@ const NIVA_LOSSES = 'Niva tyre rolling and full-time 4x4 losses not modelled (se
 
 const STATED = 'driver + passenger (stated)';
 const ASSUMED = 'driver + passenger (assumed: the VAZ manuals\' condition)';
+const BUDGET_TYRE_STOP = 'measured on a budget tyre; the game\'s road tyre is the MXV (see note)';
 
 /*
  * The manifest. Sources, abbreviated per entry:
@@ -202,8 +204,18 @@ const ASSUMED = 'driver + passenger (assumed: the VAZ manuals\' condition)';
  *   100 thr a measured 100-0 road test against the THRESHOLD stop
  *           (`Vehicle.thresholdBrakePedal`) at the test load, since a test driver
  *           without ABS brakes at the threshold rather than on locked wheels. Only one
- *           was read first-hand (Za Rulem's VAZ-21102); the Autoreview figures quoted
- *           in a forum post are printed and not judged.
+ *           was read first-hand (Za Rulem's VAZ-21102), and it is no longer judged
+ *           (`BUDGET_TYRE_STOP`, below); the Autoreview figures quoted in a forum post
+ *           are printed and not judged.
+ *
+ * BUDGET_TYRE_STOP. Za Rulem's 21102 stopped from 100 in 55.0 m on its standard
+ * 13-inch tyres, a budget tyre. Since 2026-10-27 every road car runs the Michelin MXV
+ * (`ROAD_TYRE_GRIP` 0.62, carmodels.ts) instead of the budget KAMA-217 (0.53), so the
+ * measured stop is no longer the game car's condition. The threshold stop at +150 kg,
+ * old grip against new: kit_vaz2110 53.7 m (-2.4%) → 47.4 m (-13.8%); gt_vaz2110
+ * 66.8 m (+21%) → 59.7 m (+8.5%, inside tolerance only by luck). Both are printed and
+ * not judged. Holding them would need a wider tolerance or the budget tyre back; the
+ * owner chose the tyre.
  *
  * What this replaces were "100-0 equivalents of period road tests", 0.5 g for the
  * GAZ-21 to 0.66 g for a Samara, carried over from the pack's first reality table with
@@ -355,7 +367,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.41, radius: 0.288, top: 162, to100: 15,
     loadKg: DRIVER_AND_PASSENGER_KG, load: ASSUMED, turn: 5.2, lat: null, hz: 1.3,
     brake80: 38, grossKg: 1480,
-    brakeTest: { m: 55.0, judged: true, source: 'Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/' },
+    brakeTest: { m: 55.0, judged: false, source: `Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/; ${BUDGET_TYRE_STOP}` },
     source: 'man. autoprospect.ru/vaz/2110-zhiguli/1-obshhie-svedeniya.html (2110, carburettor); brake, gross manual.countryauto.ru/vaz/2110/1-obwie-svedenija.html',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.138 },
   },
@@ -464,7 +476,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
     brake80: 38, grossKg: 1480,
-    brakeTest: { m: 55.0, judged: true, source: 'Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/' },
+    brakeTest: { m: 55.0, judged: false, source: `Za Rulem 2004, VAZ-21102: zr.ru/content/articles/10785-kak_popast_v_desatku/; ${BUDGET_TYRE_STOP}` },
     source: 'VAZ-21102 (2111 engine): M110 (top, 0-100, turn, brake ceiling); R110 (load condition, gross 1480); geometry kit_vaz2110 row',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.161 },
   },
@@ -472,7 +484,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 167, to100: 14,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
     brake80: 38, grossKg: 1495,
-    brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
+    brakeTest: { m: 55.0, judged: false, source: `the 21102 saloon's (Za Rulem 2004), same brakes and tyres; ${BUDGET_TYRE_STOP}` },
     source: 'VAZ-21122 (2111 engine): M110 (top, 0-100, turn, brake ceiling; gross as kerb 1020 + payload 475); R110 (load condition); geometry kit_vaz2112 row (autoopt.ru vaz-2112)',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.161 },
   },
@@ -480,7 +492,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
     wheelbase: 2.492, track: 1.4, radius: 0.288, top: 162, to100: 14,
     loadKg: DRIVER_AND_PASSENGER_KG, load: STATED, turn: 5.2, lat: null, hz: 1.3,
     brake80: 38, grossKg: 1540,
-    brakeTest: { m: 55.0, judged: false, source: 'the 21102 saloon\'s (Za Rulem 2004), same brakes and tyres' },
+    brakeTest: { m: 55.0, judged: false, source: `the 21102 saloon's (Za Rulem 2004), same brakes and tyres; ${BUDGET_TYRE_STOP}` },
     source: 'VAZ-2111 (2111 engine): M110 (kerb 1040, payload 500, 162 km/h, 14.0 s, turn, brake ceiling); R110 (load condition); geometry kit_vaz2111 row (vaz.ru/v2111.htm)',
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.187 },
   },

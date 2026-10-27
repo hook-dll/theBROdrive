@@ -510,7 +510,9 @@ new material or program: the paint's vertex colour is white, so every other car 
 
 `Partial<Layout>` (interior.ts) over the platform's layout. Fields a car may change: seat
 `hip`, rear `bench` (`{ from: 'rearBase' | 'hip', offset }`; the estates pull it forward),
-`cushion`/`benchCushion`, `recline`, `bolsters`, `seatX`, toe board, `tunnel`, `console`,
+`cushion`/`benchCushion`, `recline`, `bolsters`, `seatX`, toe board, `firewallLean` (the
+firewall lining's outer edges lean in with the side to the scuttle instead of standing
+upright: the tens', whose door fronts stand at the firewall), `tunnel`, `console`,
 the `dash` and `fascia` sections, `dashLoft` (sections across the width where one cannot
 serve it: the 2110's driver's half up to the knee panel and shallow end caps at the
 doors), `wood` band, `binnacle` and `cluster`, `gauges` (round or
