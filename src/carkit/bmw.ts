@@ -47,7 +47,7 @@ export const BODY_E34: KitBody = {
     // The wing's top (the bonnet's shut line) rising straight back into the side glass's foot
     // [P S, on the hubs: the shut line 0.86 at s 1.29, 0.905 at the A pillar's foot]; the
     // bonnet on the centre line [D side: 0.905 at 1.1, 0.925 at the screen's foot].
-    { s: 1.2, sill: 0.19, crease: 0.7, belt: 0.855, deck: 0.912, wSill: 0.86, wCrease: 0.875, wBelt: 0.855 },
+    { s: 1.2, sill: 0.19, crease: 0.7, belt: 0.855, deck: 0.912, wSill: 0.86, wCrease: 0.875, wBelt: 0.857 },
     // The screen's foot on the centre line [D side (258, 175)]; the cowl at the A pillar's
     // foot behind it (`screenFoot`).
     { s: 1.33, sill: 0.19, crease: 0.72, belt: 0.86, deck: 0.925, wSill: 0.86, wCrease: 0.875, wBelt: 0.857 },
@@ -55,11 +55,13 @@ export const BODY_E34: KitBody = {
     // 0.90]. The side glass's foot (belt + 0.03) one straight line from here to the quarter's
     // hook, rising 0.03 a metre [D side: 0.913 at s 1.93, 0.925 at 2.33, 0.943 at 2.85, 0.954
     // at 3.35, 0.96 at 3.43; P S on the hubs: 0.904 at 1.96, 0.914 at 2.32, 0.935 at 2.88, 0.951
-    // at 3.30, 0.959 at 3.45]. The flank ±0.86 at the belt [D front: the outline 0.85–0.9].
+    // at 3.30, 0.959 at 3.45]. The flank ±0.86 at the belt [D front: the outline 0.85–0.9];
+    // the side over the crease leaning in a little more as it rises towards the tail (6.6° at
+    // 1.2 to 15° at 4.05: one lean in and out failed kit-surface).
     { s: 1.53, sill: 0.19, crease: 0.76, belt: 0.868, deck: 0.935, wSill: 0.86, wCrease: 0.875, wBelt: 0.857 },
-    { s: 2.5, sill: 0.19, crease: 0.78, belt: 0.895, deck: 1.0, wSill: 0.86, wCrease: 0.875, wBelt: 0.857 },
+    { s: 2.5, sill: 0.19, crease: 0.78, belt: 0.895, deck: 1.0, wSill: 0.86, wCrease: 0.875, wBelt: 0.855 },
     // The rear door's shut line at the belt.
-    { s: 3.51, sill: 0.19, crease: 0.78, belt: 0.927, deck: 1.01, wSill: 0.86, wCrease: 0.875, wBelt: 0.857 },
+    { s: 3.519, sill: 0.19, crease: 0.78, belt: 0.927, deck: 1.01, wSill: 0.86, wCrease: 0.875, wBelt: 0.849 },
     // rearBase: the back light's foot on the deck [D side (726, 162): s 4.05, 1.0]; the sill
     // behind the rear arch up to the bumper's foot. The wing's top on the line from the side
     // glass's foot; the shoulder line rising to the tail lamps' top [P S: 0.78 at the
@@ -114,18 +116,20 @@ export const BODY_E34: KitBody = {
       { s: 3.195, top: 3.195, upper: 'door2', glass: 'fixed' },
       // The quarter's rear edge, the Hofmeister kink: from the bar's top it sweeps down and
       // back in a long curve, falls nearly upright to just over the belt and hooks forward
-      // to its foot [D side: 3.32 at 1.22, 3.43 at 1.14, 3.49 at 1.10, the tip 3.51 at 1.04,
-      // the foot 3.47 at 0.965; P S on the hubs: 3.29 at 1.28, 3.40 at 1.21, 3.50 at 1.125,
-      // 3.545 at 1.03, the foot 3.52 at 0.96]. Drawn as the glass's top chamfered inside the
-      // door's painted frame (`glassDrop`) in two straight runs, 1.305 at the bar to 1.17 at
-      // 3.40 to 1.09 at 3.47, the edge down this column's line to 1.0 at 3.48 and its foot
-      // cut forward to the belt at 3.43 (`glassRise`). The frame above the curve is the
-      // door's, body colour [P S, R34].
-      { s: 3.43, top: 3.39, upper: 'door2', glass: 'fixed', glassDrop: 0.102 },
-      { s: 3.49, top: 3.44, upper: 'door2', glassRise: 0.045, glassDrop: 0.17 },
-      // The rear door's rear edge [D side: 3.49 at the belt, 3.45 at 0.78, forward round the
-      // rear arch's front to the sill at 3.22; P S: 3.51 at the belt].
-      { s: 3.51, top: 3.445, upper: 'body', foot: { y: 0.8, s: 3.22, knee: [3.38, 0.6] } },
+      // to its foot [D side: 3.32 at 1.22, 3.43 at 1.14, 3.49 at 1.10, 3.52 at 1.03, 3.50 at
+      // 0.99, the foot 3.48 at 0.96; P S on the hubs: 3.29 at 1.28, 3.40 at 1.21, 3.50 at
+      // 1.125, 3.545 at 1.03, the foot 3.52 at 0.96]. Drawn as the glass's top chamfered
+      // inside the door's painted frame (`glassDrop`) in two straight runs, 1.305 at the bar
+      // to 1.165 at 3.41 to 1.09 at 3.48, its edge down the door's rear edge to 1.0 at 3.50
+      // and its foot cut forward to the belt at 3.44 (`glassRise`). The frame above the curve
+      // is the door's, body colour [P S, R34].
+      { s: 3.44, top: 3.4, upper: 'door2', glass: 'fixed', glassDrop: 0.105 },
+      { s: 3.506, top: 3.443, upper: 'door2', glassRise: 0.045, glassDrop: 0.17 },
+      // The rear door's rear edge, the door's frame 1.3 cm wide behind the glass [D side: 3.49
+      // at the belt, 3.48 at 0.857, 3.474 at 0.816, 3.457 at 0.774, forward round the rear
+      // arch's front to the sill at 3.22; P S: 3.51 at the belt]. (The glass on the shut line
+      // itself put the jamb's seal in the cabin lining's plane: kit-zfight.)
+      { s: 3.519, top: 3.447, upper: 'body', foot: { y: 0.85, s: 3.22, knee: [3.38, 0.6] } },
       // The C pillar, body colour, to the back light's foot; the roof over the back light's
       // top at 3.45 [D side x 622, y 103].
       { s: 4.05, top: 3.45, cornerDrop: 0.03 },
@@ -235,13 +239,13 @@ export const LOOK_E34: KitLook = {
     // The wing's tail lamps outside the lid: the amber indicator band over the red tail and
     // brake lamp, wrapping round onto the flank [D rear: ±0.62–0.80, amber 0.785–0.845, red
     // 0.63–0.78; D side: to s 4.53; P R, R34]; the red in two rows, one seam across [P R].
-    // Their inner edge 8–9 mm outside the lid's cut (±0.594 at 0.63, ±0.605 at the top), so
+    // Their inner edge 6 mm outside the lid's cut (±0.594 at 0.63, ±0.605 at the top), so
     // the band runs on across the lid's lamps with only the cut between [P R: the units meet
     // at the cut].
     {
       end: 'rear',
       points: [
-        { x: 0.613, y: [0.785, 0.845], role: 'blinker' },
+        { x: 0.611, y: [0.785, 0.845], role: 'blinker' },
         { y: [0.785, 0.845], role: 'blinker' },
         { s: 4.54, y: [0.79, 0.84] },
       ],
@@ -250,7 +254,7 @@ export const LOOK_E34: KitLook = {
       end: 'rear',
       ribs: 1,
       points: [
-        { x: [0.603, 0.61], y: [0.63, 0.778], role: 'brake' },
+        { x: [0.6, 0.607], y: [0.63, 0.778], role: 'brake' },
         { y: [0.63, 0.778], role: 'brake' },
         { s: 4.53, y: [0.635, 0.775] },
       ],
@@ -293,19 +297,26 @@ export const LOOK_E34: KitLook = {
     // arch [D side x 718: s 3.97].
     bumper: { kind: 'moulded', drop: 0.14, height: 0.33, finish: 'paint', moulding: { y: 0.4725, height: 0.055, finish: 'black' }, corner: 0.15, wrapTo: 3.97, inlays: [{ x: [0, 0.8], y: [0, 0.13], finish: 'black' }] },
     items: [],
-    // The lid's lamps inboard of the wings', riding on the lid, one band with the wing units'
-    // red [D rear: ±0.355–0.59, 0.63–0.78; P R: two rows split by a dark seam, the reversing
-    // lamp the lighter cell over the outer part, ±0.44–0.59; P R34]. Owner, 2026-10-27
-    // («выпуклые фары на крышке багажника»): bevelled lenses 1.5 cm out of the lid read as a
-    // proud panel beside the flush wing units. Now as the wing units: flat cells 4 mm out
-    // of the lid (`slant` 0: square, unbevelled), on a black housing 2 mm out that shows as
-    // the seams, the row seam as wide as the wing units' rib (0.693–0.715); the outer edge
-    // 7 mm inside the lid's cut (as the Espero's band).
+    // The lid's part of the band, from the wing units in to the plate, one band with the wing
+    // units' red [D rear: the lamps ±0.355–0.59, 0.63–0.78; P R, scaled on the lid's cut at
+    // ±0.60: the lamp ±0.36–0.60 in two rows split by a dark seam, the upper row red, the
+    // lighter reversing cell ±0.41–0.53, red; inboard a panel ±0.27–0.36 in two rows (the
+    // lock in it, right), and next to the plate a single tall red reflector ±0.175–0.265; P
+    // R34: the same band to the plate]. Owner, 2026-10-27 («выпуклые фары на крышке
+    // багажника»): bevelled lenses 1.5 cm out of the lid read as a proud panel beside the
+    // flush wing units. Now as the wing units: flat cells 4 mm out of the lid (`slant` 0:
+    // square, unbevelled), on a black housing 2 mm out that shows as the seams, the row seam
+    // where the wing units' rib is (0.693–0.715); the outer edge 7 mm inside the lid's cut
+    // (as the Espero's band).
     lid: [
-      { kind: 'panel', x: { from: { centre: 0.362 }, to: { centre: 0.585 } }, y: { from: ['bumperTop', 0.102], to: ['bumperTop', 0.246] }, finish: 'black', proud: 0.002 },
-      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.587 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.163] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.44 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.446 }, to: { centre: 0.591 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'panel', x: { from: { centre: 0.172 }, to: { centre: 0.587 } }, y: { from: ['bumperTop', 0.102], to: ['bumperTop', 0.246] }, finish: 'black', proud: 0.002 },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.17 }, to: { centre: 0.264 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.354 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.163] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.354 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.589 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.163] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.405 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.411 }, to: { centre: 0.529 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'tail', x: { from: { centre: 0.535 }, to: { centre: 0.589 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
     ],
   },
 };

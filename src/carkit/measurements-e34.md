@@ -1,9 +1,10 @@
 # BMW 5 Series E34 saloon: sources, figures, feature inventory
 
-Status: **first draft 2026-10-27, awaiting the owner's next look** (README "Workflow" step 2).
-The owner reviewed §4–5 (§7 has his answers); the draft is `bmw.ts`, `CABIN_E34`. Review
-sheet `build/kitcheck/e34/review.png`, overlays `build/kitcheck/e34/drawing-side.png`,
-`drawing-front.png`; the inventory sheet `build/kitcheck/e34/inventory.png`.
+Status: **first draft 2026-10-27, reworked after the owner's first review (§8), awaiting his
+next look** (README "Workflow" step 2). The draft is `bmw.ts`, `CABIN_E34`. Review sheet
+`build/kitcheck/e34/review.png`, the side against the photo `build/kitcheck/e34/side-compare.png`,
+overlays `build/kitcheck/e34/drawing-side.png`, `drawing-front.png`; the inventory sheet
+`build/kitcheck/e34/inventory.png`.
 
 Tags: **[D]** drawing, **[P]** photo, **[F]** factory/catalogue, **[E]** estimate.
 
@@ -201,3 +202,76 @@ Checks (`npm run kit-check -- e34`): zfight pass, proportions pass, reality pass
 against 211 with Cd·A 0.66; 0-100 11.9 against 10.6 accepted as `CATALOGUE_OPTIMISTIC`;
 turn 4.04 against 4.02), mirrors L78 R74, dents 0, 14 006 triangles (over the 13k advisory,
 under the 15k gate), drawing 21/21, dash 9/9; not frozen until the owner accepts it.
+
+## 8. The owner's first review (2026-10-27)
+
+His lab shots `build/carshape/_refs/photos/e34/owner_kit_side.png`, `owner_kit_tail.png`.
+Readings: the drawing [D] `s = (x − 28) × 0.0058`, `y = (331 − py) × 0.00591`, glass found
+as its white fill; the side photo [S] registered on its hubs (x 477.5 / 1553.5, the
+factory 2761 between them: 2.566 mm/px, heights on the same scale from the ground at y
+1002, the roof 1.412 at y 465), dark runs scanned per column; [D2] the raster drawing
+`e34_tbp_76.gif` (6.85 mm/px on its hubs x 435 / 838). `build/kitcheck/e34/side-compare.png`:
+the built car's right side in orthographic projection at the photo's scale, front hub on
+the photo's front hub, over the photo and with its outline on it.
+
+### 8.1 «ох уж эта линия остекления»
+
+| Line | D | S | §7 draft | Now |
+|---|---|---|---|---|
+| Side glass's foot | 0.913 at 1.93, 0.925 at 2.33, 0.943 at 2.85, 0.954 at 3.35, 0.96 at 3.43 (y 176–167) | 0.904 at 1.96, 0.914 at 2.32, 0.935 at 2.88, 0.951 at 3.30, 0.959 at 3.45 | 0.98 (read at y 165, over the line), 1.0 at 3.5; the belt 0.90 at the cowl kinked up to 0.975 at 1.5 | one straight line: belt 0.868 at 1.53, 0.895 at 2.5, 0.927 at 3.519 (+ 0.03 shoulder and rubber: the glass's foot 0.898 → 0.957); built `beltY` 0.914 |
+| Wing's top to the A pillar | — | the shut line 0.86 at 1.29 rising to 0.905 at the pillar's foot | level 0.857, then up 7.5 cm behind the pillar | straight from 0.855 at 1.2 into the belt |
+| A pillar | the screen's line (258, 175) → (364, 104): 1.33 / 0.925 → 1.95 / 1.34 on the centre line; the pillar's band (300, 180) → (380, 105), 4 cm wide; the front glass's edge (305, 180) → (380, 112): 1.61 → 2.04 | light band 1.73–1.75 at 1.0; glass edge 1.61 at 0.90, 1.86 at 1.11, 2.01 at 1.24 | cowl 1.33 → 1.95; frame 1.38, glass 1.40–1.51 | cowl (pillar's foot) 1.53 → 2.0; black frame 1.553 → 2.03; glass from 1.575 → 2.06 (built 1.60 at the belt); `screenFoot` 0.2 / `screenTop` 0.05 keep the centre line at 1.33 / 1.95 |
+| B pillar | the front glass to 2.49 at the belt, the rear from 2.63; 2.59–2.67 at the rail | front glass's edge 2.495 → 2.595 at the rail, rear glass's 2.645 → 2.675 | 2.475–2.645 → 2.56–2.67 | 2.475–2.645 → 2.585–2.675 |
+| Quarter bar | x 573–581: 3.164–3.204 | 3.15–3.17 at the rail, 3.19–3.21 at the belt | 3.165–3.195 upright | unchanged |
+| Quarter's rear edge (Hofmeister) | 3.32 at 1.22, 3.43 at 1.14, 3.49 at 1.10, 3.52 at 1.03, 3.50 at 0.99, the foot 3.48 at 0.96 | 3.29 at 1.28, 3.40 at 1.21, 3.50 at 1.125, 3.545 at 1.03, the foot 3.52 at 0.96 | straight 3.42 → 3.235 at the rail, the foot 3.42–3.47 | the glass's top chamfered inside the door's painted frame (`glassDrop` 0.105 at 3.44, 0.17 at 3.506): 1.305 at the bar → 1.165 at 3.41 → 1.09 at 3.48, down to 1.0 at 3.49, the foot hooked forward to the belt at 3.44 (`glassRise` 0.045); built 3.196–3.48 at the belt band |
+| Rear door's rear edge | 3.49 at the belt, 3.48 at 0.857, 3.474 at 0.816, 3.457 at 0.774 | 3.50–3.51 at the belt | 3.5, upright to 0.8 | 3.519, upright to 0.85, the door's frame 1.3 cm behind the glass (on the shut line itself the jamb's seal lay in the lining's plane: kit-zfight) |
+| Rail, roof | the glass's top 1.317; roof 1.37 at 2.0 … 1.355 at 3.45 | 1.32–1.35 along the doors | rail 1.335 | unchanged; the first `roofDrop` point at the pillar's new top, 2.0 |
+| Back light | (622, 103) → (726, 162) | — | 3.45 → 4.05 | unchanged |
+| Mirror head | s 1.72–1.86, 0.93–1.07 | 1.75–1.88, 0.90–1.06 | belt + 0.07 | belt + 0.11 (`mirrorHeightOffset` 0.04): centre 0.985 over the belt now 10 cm lower |
+
+Also: the shoulder line (crease) rising to the tail lamps' top behind the rear door (0.78
+→ 0.81 at 4.05, 0.845 at the tail) [S: 0.845 over the lamps]; the side's lean over the crease
+kept rising evenly nose to tail (wBelt 0.855 at 2.5, 0.849 at 3.519; a dip at the rear door
+was a kit-surface `lean` dent). refs/e34.json: `beltY` 0.98 → 0.916, `doorFront` [1.531,
+2.523], `doorRear` [2.523, 3.474], `sideGlassBelt` [[1.61, 2.49], [2.63, 3.164], [3.204,
+3.523]] all re-read on D (10 cm under the glass's foot, over the glass's foot); the
+`accepted` override on `sideGlassBelt` is gone.
+
+### 8.2 «сзади места как в лимузине»
+
+`CABIN_E34` spread `CABIN_W124`, whose bench was the classic's rearBase − 0.45: 3.60 on the
+E34, over the rear axle. D2 (the doors left off): the driver's hip (backrest meets cushion)
+x 662, s 2.40, the cushion 1.97–2.53; the rear hip x 785, 3.25, its cushion from 2.88; the
+wheel's centre x 572, 1.79. D: the rear arch's front at the hub's height 3.30. Built: `hip`
+0.87 from the cowl 1.53 (2.40; was 0.95 from 1.33, 2.28), `bench` rearBase − 0.81 (3.24; the
+W124 since moved its own to − 0.78, the E34 now sets its own). The cowl moved 1.33 → 1.53,
+so the dash, the wheel (1.91), pedals (1.58 / 1.68), lever (1.98) and console (1.70–2.08)
+were moved forward to stay where they stood; the dash 0.17 deep to its fascia (1.70); the
+wheel's hub at its old 0.93 (`dy` 0.062: the belt at the cowl 3 cm lower). The drawn wheel
+centre 1.79 is 12 cm ahead of the built one: kept 11 cm behind the hood, as the W124's, so
+the rim clears it. Knee room: the front backrest's back ~2.6 to the bench's front ~2.9.
+cabin-places passes.
+
+### 8.3 «выпуклые фары на крышке багажника»
+
+The Espero's fix (HISTORY "Espero lamp review 2", daewoo.ts `LOOK_ESPERO.rear.lid`): flat
+lenses 2–4 mm out of the lid in the corner units' style. Here: the lid's cells `slant` 0
+(square, no bevel), 2 mm deep, 2 mm out, on a black housing panel 2 mm out whose edges show
+as the seams; the row seam where the wing units' one rib is (`ribs: 1`, 0.693–0.715).
+
+The band on R (rear.jpg, the lid's cut taken as D's ±0.60): from the plate (±0.175) a single
+tall red reflector to ±0.265; a two-row panel to ±0.36 (the lock in it, right); the lamp to
+±0.60 in two rows, the upper red / lighter reversing cell ±0.41–0.53 / red; the wing unit
+outside the cut, a pale (amber) top cell over two red rows. D's rear view draws only
+±0.355–0.80; R34 (a 1990–95 car) shows the band to the plate too. Built: reflector
+±0.17–0.264 and panel ±0.27–0.354 `inert`, lamp ±0.36–0.589 (`tail`, reversing ±0.411–0.529),
+heights 0.63–0.778 with the wing units' red; the wing units' inner edge 6 mm outside the cut
+(±0.60–0.611). The draft's corner bulge: the amber band (0.785–0.845) lay above the tail's
+crease (0.78), on the shoulder's turn, so it bent at the corner; the crease now at 0.845.
+
+### 8.4 Checks
+
+`npm run kit-check -- e34`: zfight pass, proportions pass (fit row not stale), reality pass,
+mirrors L90 % R88 %, dents 0, 13 979 triangles, drawing 21/21, dash 9/9; tsc clean;
+cabin-places pass; kit-fingerprint: every other car identical (the W124 moved by its own
+tail work in the tree).

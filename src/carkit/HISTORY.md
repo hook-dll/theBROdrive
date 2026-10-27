@@ -1406,6 +1406,58 @@ triangle counts unchanged.
   0.103 → 0.060. Every other kit car identical (kit-fingerprint; the W124 moved by the
   uncommitted mercedes.ts work, not this). *specs.ts `BODY_124`, `NOSE_*`, `KIT_SPECS`*.
 
+## BMW E34, first review: glazing line, rear bench, lid lamps (2026-10-27)
+
+His lab shots of the side and the tail (`build/carshape/_refs/photos/e34/owner_kit_*.png`);
+re-measured on the vector drawing and on the Commons side photo registered on its hubs
+(measurements-e34.md §8; `build/kitcheck/e34/side-compare.png`: our side ortho at the
+photo's scale, hubs on its hubs).
+
+- **«ох уж эта линия остекления. явно не так должно быть».** → The side glass's foot had
+  been read at the drawing's y 165 (0.98), over the real line; the belt climbed from the
+  wing (0.90 at the cowl) to 0.975 at s 1.5 behind the A pillar's foot, a kink up, and the
+  pillar's foot stood at the screen's centre-line foot (1.33). The real DLO is low and
+  straight: the glass's foot 0.90 at the pillar to 0.96 at the quarter's hook [D, S]. → The
+  belt one straight line 0.868 at the A pillar's foot (1.53) to 0.927 at the rear door's
+  edge and 0.955 at the back light's foot; the wing's top rising straight into it; the A
+  pillar from 1.53 to the rail at 2.0, thin, the black frame and the glass (from 1.575)
+  right behind it, the screen curved in plan so its centre-line foot and top stay at the
+  drawn 1.33 / 1.95 (`screenFoot` 0.2, `screenTop` 0.05); the B pillar leaning as on the
+  photo (tops 2.585–2.675); the Hofmeister kink as the quarter glass's top chamfered inside
+  the door's frame in two straight runs (`glassDrop` 0.105 at 3.44, 0.17 at 3.506) with its
+  foot hooked forward (`glassRise` 0.045), the door's frame 1.3 cm behind it (the glass on
+  the shut line itself put the jamb seal in the lining's plane, kit-zfight); the mirror's
+  head held at its measured height (`mirrorHeightOffset` 0.04, the belt under it 10 cm
+  lower); the shoulder line rising to the tail lamps' top at the tail. The side's lean
+  kept rising evenly nose to tail (a dip at the rear door was a kit-surface `lean` dent).
+  refs/e34.json re-read: `beltY` 0.98 → 0.916, `doorFront`, `doorRear`, `sideGlassBelt`
+  (no `accepted` any more). *bmw.ts `BODY_E34` stations, `cabin.columns`, `LOOK_E34`
+  mirror; refs/e34.json*.
+- **«сзади места как в лимузине, задние сиденья невероятно глубоко расположены».** →
+  `CABIN_E34` spread `CABIN_W124`, whose bench was the classic's rearBase − 0.45: the
+  E34's rearBase 4.05 put the rear hip at 3.60, over the rear axle. → The raster drawing
+  with its doors off (`e34_tbp_76.gif`) puts the driver's hip at 2.40 and the rear hip at
+  3.25, just ahead of the rear arch: `CABIN_E34` `hip` 0.87 from the new cowl (2.40) and
+  its own `bench` rearBase − 0.81 (3.24), no longer the W124's; the dash, wheel, pedals,
+  lever and console moved with the cowl (1.33 → 1.53) to stay where they stood, the dash
+  0.17 deep. cabin-places passes. *interior.ts `CABIN_E34`*.
+- **«выпуклые фары на крышке багажника мы уже чинили у espero - должны быть такие же, как
+  и остальные задние фонари, не выпуклой панелью».** → The lid's lamps were bevelled
+  `lens` boxes 1.5 cm out of the lid beside flush wing units; the wing's amber band lay on
+  the shoulder's turn (crease 0.78 under it), so it bent up at the corner; the lid's
+  lamps stopped at ±0.36 where the photo's band runs to the plate. → As the Espero's lid
+  band: flat cells 4 mm out (`slant` 0, no bevel) on a black housing 2 mm out showing as
+  the seams, the row seam where the wing units' rib is (`ribs: 1`); from the plate out: a
+  tall red reflector ±0.17–0.264, a two-row panel to ±0.354, the lamp to ±0.589 with the
+  reversing cell ±0.411–0.529 in its upper row [P R]; the wing units 6 mm outside the lid's
+  cut so one band runs across; the tail stations' crease at the lamps' top (0.845), the
+  amber on the upright face. *bmw.ts `LOOK_E34.rear.lid`, `cornerLamps`, stations
+  4.05–4.665*.
+
+Checks: `npm run kit-check -- e34` passes (zfight, proportions, reality, mirrors L90 % R88 %,
+0 dents, 13 979 triangles, drawing 21/21, dash 9/9); every other car identical in
+kit-fingerprint (the W124 moved by its own tail work, not this).
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

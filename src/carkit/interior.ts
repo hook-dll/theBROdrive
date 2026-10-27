@@ -1303,7 +1303,32 @@ export const CABIN_E34: CabinLayoutOverride = {
   // The rotary light knob in the switch panel left of the cluster (x 150-280, y 380-460) [P].
   lights: { right: -0.24, dy: -0.11, kind: 'knob' },
   // Four spokes round a big airbag pad [P].
-  wheel: { ...LAYOUTS.classic.wheel, spokes: [20, 160, 230, 310], hub: 'pad' },
+  wheel: { ...LAYOUTS.classic.wheel, spokes: [20, 160, 230, 310], hub: 'pad', ds: 0.382, dy: 0.062 },
+  // Review 2026-10-27 («сзади места как в лимузине»): the seats and the dash on the raster
+  // drawing's cabin [D2 `e34_tbp_76.gif`, the doors left off; 6.85 mm/px on the drawn hubs
+  // x 435 / 838]: the driver's hip where the backrest meets the cushion, s 2.40 (x 662; the
+  // cushion 1.97–2.53, x 598–680), the rear hip 3.25 (x 785; the bench's cushion from 2.88,
+  // x 732), 0.85 behind the driver's and 5 cm ahead of the rear arch's front at the hub's
+  // height [D 3.30]. The classic's 0.45 ahead of the back light's foot put it at 3.60, over
+  // the rear axle. The cowl is the A pillar's foot at 1.53, 0.2 behind where the draft's
+  // stood, so everything measured from it is moved forward to stay where it was (the
+  // fascia 1.70, the wheel 1.91, the pedals 1.68); the dash 0.17 deep from the cowl to its
+  // fascia (the W124's 0.338, 0.168 shallower: the E34's A pillar stands that far back
+  // over its footwell), its heights from the belt as before, the wheel's hub at its old
+  // height (0.93). The drawn wheel's centre stands at 1.79 [D2 x 572], 12 cm further
+  // forward: held 11 cm behind the hood as the W124's, so the rim clears it.
+  hip: 0.87,
+  bench: { from: 'rearBase', offset: -0.81, clear: 0.04 },
+  dash: [
+    [0.07, 0.045], [0.122, 0.055], [0.157, 0.04], [0.17, 0.008], [0.17, -0.215],
+    [0.152, -0.245], [0.09, -0.255], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.17, 0.008], [0.17, -0.215]],
+  binnacle: [[0.067, 0.05], [0.092, 0.135], [0.232, 0.148], [0.272, 0.136], [0.272, 0.12], [0.184, 0.11], [0.184, -0.012], [0.132, -0.012]],
+  cluster: 0.184,
+  pedals: { pivot: [0.05, -0.16], pad: [0.15, 0.135] },
+  gear: { ds: 0.452, height: 0.22, lean: 0.04 },
+  console: { ds0: 0.172, ds1: 0.552, height: 0.2 },
 };
 
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
