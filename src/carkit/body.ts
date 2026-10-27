@@ -808,11 +808,19 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const bBelt = b.rows[sideCount(j + 1)]!;
       const aEdge = a.rows[sideCount(j) + 1]!;
       const bEdge = b.rows[sideCount(j + 1) + 1]!;
-      shell.face(
-        [P(side * aBelt[0], aBelt[1], a.s), P(side * bBelt[0], bBelt[1], b.s), P(side * bEdge[0], bEdge[1], b.s), P(side * aEdge[0], aEdge[1], a.s)],
-        inCabin && lower !== 'body' ? doorName(lower, side) : 'body',
-        'paint',
-      );
+      const shoulder: Vec3[] = [P(side * aBelt[0], aBelt[1], a.s), P(side * bBelt[0], bBelt[1], b.s), P(side * bEdge[0], bEdge[1], b.s), P(side * aEdge[0], aEdge[1], a.s)];
+      const shoulderOwner = inCabin && lower !== 'body' ? doorName(lower, side) : 'body';
+      const sn = norm(cross(sub(shoulder[1]!, shoulder[0]!), sub(shoulder[2]!, shoulder[0]!)));
+      if (spec.shoulder.convex && Math.abs(dot(sn, sub(shoulder[3]!, shoulder[0]!))) > DECK_TWIST) {
+        // Cut on the diagonal standing further out (along the face's outward normal, out and
+        // up), so both sides fold the same way, outward.
+        const out = scale(sn, Math.sign(side * sn[0] + sn[1]) || 1);
+        const on13 = dot(sub(lerp3(shoulder[1]!, shoulder[3]!, 0.5), lerp3(shoulder[0]!, shoulder[2]!, 0.5)), out) > 0;
+        const [p0, p1, p2, p3] = shoulder as [Vec3, Vec3, Vec3, Vec3];
+        for (const tri of on13 ? [[p0, p1, p3], [p1, p2, p3]] : [[p0, p1, p2], [p0, p2, p3]]) shell.face(tri, shoulderOwner, 'paint');
+      } else {
+        shell.face(shoulder, shoulderOwner, 'paint');
+      }
       if (inCabin) continue;
       const aDeck = a.rows.slice(sideCount(j) + 1);
       const bDeck = b.rows.slice(sideCount(j + 1) + 1);
@@ -1030,15 +1038,20 @@ export function buildShell(frame: BodyFrame): ShellResult {
         if (kind === 'front') {
           k = along(b, t, b[1] + cabin.screenBottom);
           q = along(b, t, t[1] - cabin.screenHeader);
-        } else if (cabin.rearKnee) {
-          const centreB = frame.deckY(s, 0);
-          const centreT = cabin.rail + cabin.crown - frame.roofDrop(top);
-          const kt = (cabin.rearKnee.y - centreB) / (centreT - centreB);
-          k = [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), frame.z(cabin.rearKnee.s)];
-          q = along(k, t, t[1] - cabin.rearHeader);
         } else {
-          k = along(b, t, b[1] + cabin.rearBottom);
-          q = along(b, t, t[1] - cabin.rearHeader);
+          // `rearTopLevel`: the glass's top at the outer corner's height all across.
+          const outerY = cabin.rail + frame.crownAt(cowlFracs[2]!) - (column.cornerDrop ?? 0) - frame.roofDrop(top);
+          const glassTop = (cabin.rearTopLevel ? outerY : t[1]) - cabin.rearHeader;
+          if (cabin.rearKnee) {
+            const centreB = frame.deckY(s, 0);
+            const centreT = cabin.rail + cabin.crown - frame.roofDrop(top);
+            const kt = (cabin.rearKnee.y - centreB) / (centreT - centreB);
+            k = [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), frame.z(cabin.rearKnee.s)];
+            q = along(k, t, glassTop);
+          } else {
+            k = along(b, t, b[1] + cabin.rearBottom);
+            q = along(b, t, glassTop);
+          }
         }
         const inset = kind === 'front' ? cabin.railInset : -cabin.railInset;
         const u: Vec3 = P(side * frac * (cabin.railHalf - cabin.railInset), crownY + frame.roofDrop(top) + cabin.railRise - frame.roofDrop(top + inset), top + inset);

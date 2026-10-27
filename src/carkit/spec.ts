@@ -206,6 +206,14 @@ export interface CabinSpec {
   readonly rearBottom: number;
   readonly rearHeader: number;
   /**
+   * The back light's top edge straight across, a plain trapezoid from behind (the W124):
+   * every top corner of the glass at the outer one's height, `rearHeader` under the roof's
+   * edge at the outer corner; the header over the glass deepens towards the centre line as
+   * the roof's crown rises. Absent: the glass's top follows the crown, `rearHeader` under
+   * the roof's edge all across.
+   */
+  readonly rearTopLevel?: true;
+  /**
    * A hatch's tailgate folds at a knee: glass above, a painted panel below. The knee's
    * position on the centre line; absent, the back light runs straight to its base.
    */
@@ -324,8 +332,13 @@ export interface KitCarSpec {
   readonly stations: readonly TubStation[];
   readonly cabin: CabinSpec;
   readonly wheels: WheelSpec;
-  /** Shoulder: the belt turns in by `inset` and up by `rise` to the deck's edge. */
-  readonly shoulder: { readonly inset: number; readonly rise: number };
+  /**
+   * Shoulder: the belt turns in by `inset` and up by `rise` to the deck's edge. `convex`:
+   * a twisted shoulder quad (where the stations' own `shoulder`s change it, the W124's tail
+   * corners) is cut on the diagonal that folds it outward. Absent: one face, fanned by the
+   * builder, so the two sides fold on mirrored diagonals and one of them in (a dent).
+   */
+  readonly shoulder: { readonly inset: number; readonly rise: number; readonly convex?: true };
   /** Bottom of the doors (top of the sill below them). */
   readonly doorBottom: number;
   /** Bonnet from this s to the cowl. */

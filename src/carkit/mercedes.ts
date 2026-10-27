@@ -96,8 +96,11 @@ export const BODY_W124: KitBody = {
     { s: 4.7, sill: 0.35, crease: 0.6, belt: 0.9, deck: 0.655, notch: 0.572, notchWall: 0.112, wSill: 0.7, wCrease: 0.715, wBelt: 0.68 },
   ],
   // The side glass's foot ±0.765 over the skin's ±0.835 [D2 front: the glass ±0.735 at 1.05,
-  // ±0.61 at the rail].
-  shoulder: { inset: 0.07, rise: 0.02 },
+  // ±0.61 at the rail]. The tail corners' stations turn their own steeper shoulders, which
+  // twist the shoulder's faces between them: cut on their outward diagonal (`convex`), else
+  // the left corner folded in over the lamp where the right folded out (owner, 2026-10-28:
+  // «левая какая-то другая и странная, как будто укушенная»).
+  shoulder: { inset: 0.07, rise: 0.02, convex: true },
   // The face rakes back above the bumper, the lamps and grille with it [P carsized side: 0.09
   // back over the 0.2 from 0.60 to 0.80; D side: 0.05 over 0.21].
   frontLean: { base: 0.56, lean: 0.35, blend: 0.3, full: 0.26 },
@@ -136,10 +139,13 @@ export const BODY_W124: KitBody = {
       // 4-segment round cost 356 triangles, the foot's 3 cm one 112).
       { s: 3.555, top: 3.21, upper: 'body', foot: { y: 0.92, s: 3.21, knee: [3.535, 0.8] } },
       // The C pillar, body colour, to the back light's foot; the roof runs back over the back
-      // light's top to 3.56 at 1.354 [D side x 635]. The glass's top corners rounded [P
-      // carsized rear, R34: r ≈ 0.08 at the roof's corners]: the corner cut in one convex
-      // chamfer (`cornerDrop`) (owner, 2026-10-27: «линии остекления заднего окна»).
-      { s: 3.96, top: 3.56, cornerDrop: 0.035 },
+      // light's top to 3.56 at 1.354 [D side x 635]. The glass's top straight across, a plain
+      // trapezoid from behind [P R, R34] (owner, 2026-10-28: «заднее стекло по всем фото
+      // выглядит довольно ровной трапецией»; its top had followed the roof's crown down to a
+      // chamfered corner, `cornerDrop` 0.035): at its outer corner's height under the roof's
+      // lip (`rearTopLevel`), 1.263 at 3.63 on the centre line [D side: the glass's top under
+      // the lip at (640, 115), 1.255 at 3.59].
+      { s: 3.96, top: 3.56 },
     ],
     // The side glass's top level along both doors [D side y 100: 1.343] under its 2 cm rubber.
     rail: 1.36,
@@ -167,7 +173,8 @@ export const BODY_W124: KitBody = {
     // The back light in a thin seal, the C pillars beside it 3–5 cm from behind [P carsized
     // rear: the glass ±0.50 at its top under the roof's ±0.53, ±0.65 at its foot].
     rearBottom: 0.02,
-    rearHeader: 0.025,
+    rearHeader: 0.025, // at the glass's outer top corners; deeper towards the centre line
+    rearTopLevel: true,
     pillar: 0.07, // [E]
   },
   wheels: {

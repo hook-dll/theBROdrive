@@ -1498,6 +1498,34 @@ tail work); a script building every car checked the roles (only trim, only the f
 colours) and two vaz2101 material copies in different trims (same program key and
 source, only `uKitTrim` differs).
 
+## Mercedes W124, the back light's top and the tail's corners (2026-10-28)
+
+His lab shot from behind and above (`build/carshape/_refs/photos/w124/owner_kit_backlight.png`).
+
+- **«заднее стекло по всем фото выглядит довольно ровной трапецией, значит, надо поправить
+  этот выгиб/арку крыши стекла сверху».** → The glass's top ran `rearHeader` under the
+  roof's edge all across, so it followed the crown (power 4) and the corner chamfer
+  (`cornerDrop` 0.035): level to ±0.31, then down 7 cm to its corner. → `CabinSpec.rearTopLevel`
+  (new; absent on every other car): every top corner of the glass at the outer one's
+  height, the header deepening to 6.9 cm on the centre line, where the drawing has the
+  glass's top under the roof's lip (1.255; now 1.263, was 1.297); `cornerDrop` dropped.
+  The roof and its profile unchanged. *spec.ts `CabinSpec.rearTopLevel`, body.ts `end`;
+  mercedes.ts columns, cabin*.
+- **«задние углы кормы, чуть выше задних поворотников — левый и правый выполнены
+  по-разному. правая часть нравится, а левая какая-то другая и странная, как будто
+  укушенная».** → Not the fuel flap (right, ahead of the arch). The tail stations' own
+  steeper shoulders twist the shoulder's faces (belt to the deck's edge) at 4.0–4.70; each
+  was one face fanned by the builder, whose winding is mirrored between the sides, so the
+  left was cut on the diagonal that folds it in (a lit wedge over the lamp), the right on
+  the one that folds it out. → `shoulder.convex` (new; absent on every other car): a
+  twisted shoulder quad is cut on its outward diagonal on both sides, as the deck's are
+  (`DECK_TWIST`). *spec.ts `KitCarSpec.shoulder`, body.ts shoulder; mercedes.ts*.
+
+Checks: `npm run kit-check -- w124`: zfight, proportions, reality, mirrors L100 % R100 %,
+0 dents, 12 530 triangles, drawing 21/21, dash 9/9; frozen ✗ as at HEAD before it (the
+record predates the tail work; not re-recorded, awaiting the owner). Every other car
+identical in kit-fingerprint; tsc clean.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

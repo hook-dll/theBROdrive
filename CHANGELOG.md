@@ -1193,6 +1193,15 @@
 
 ### Fixed
 
+- The Mercedes W124's back light is a plain trapezoid from behind (owner: «заднее стекло
+  по всем фото выглядит довольно ровной трапецией»): its top no longer follows the roof's
+  crown down to chamfered corners but runs straight at the outer corners' height, the
+  header over it deepening to the centre line as on the drawing (`CabinSpec.rearTopLevel`,
+  new). Its two tail corners over the indicators are alike (owner: «левая … как будто
+  укушенная»): the shoulder's twisted faces there were fanned on mirrored diagonals, the
+  left one folding in; they are now cut on their outward diagonal on both sides
+  (`shoulder.convex`, new). Every other car unchanged.
+
 - The BMW E34's roof over the back light no longer tears at its rear corners (owner,
   «сзади над задним стеклом артефакты крыши»): the rear door's frame met the rail at
   3.443 / 3.447, behind the roof's edge over the back light (3.41), so the roof's last

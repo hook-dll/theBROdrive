@@ -81,7 +81,10 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    the doors' rear edges (`handles.grip`), smooth head lamps, the lid between leaning lamp
    edges (`notchWall`), a bright quarter-glass bar (column `finish: 'chrome'`), aprons
    drawn back under the bumpers (bumper `foot`), the back light's top corners chamfered;
-   12 194 triangles: **draft, awaiting his next look**.
+   12 194 triangles. After his look at the back light (2026-10-28): the glass a plain
+   trapezoid, its top straight (`rearTopLevel`, no `cornerDrop`), and both tail corners
+   over the indicators alike (`shoulder.convex`); 12 530 triangles: **draft, awaiting his
+   next look**.
    Next after it (owner's pick, 2026-10-27): the **BMW E34** (520i 24V saloon, 1990–95):
    sources and the feature inventory (`measurements-e34.md` §4–5); the owner's answers
    (black lamp rings, the shark nose, the Hofmeister kink, the stack turned to the driver,

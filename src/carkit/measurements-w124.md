@@ -630,3 +630,33 @@ hip (1.341 + 0.95 = 2.29, [D2] 2.42).
 dents 0, triangles 12 530, drawing 21/21, dash 9/9; frozen: moved in boot, cabin, exterior
 (not re-recorded: awaiting the owner). `tools/cabin-places.ts w124` pass. fit-models
 kit_w124: the row unchanged (box 1.740 × 1.278 × 4.740). tsc clean.
+
+## 13. The back light's top and the tail's corners (2026-10-28)
+
+`owner_kit_backlight.png` (from behind and above).
+
+**«заднее стекло … довольно ровной трапецией».** Built, the glass's top followed the roof's
+crown (`crown` 0.05, `crownPower` 4) and the corner chamfer (`cornerDrop` 0.035): 1.297 on
+the centre line and at ±0.306, 1.228 at its corner ±0.557, an arch from behind. [P R, R34]:
+the top straight, the sides straight. Now `rearTopLevel`: every top corner of the glass at
+the outer one's height, 1.263, `cornerDrop` gone; the header over the glass 2.5 cm at the
+corners, 6.9 cm on the centre line, where the glass's top now stands at (3.632, 1.263)
+[D side: the glass's top under the roof's lip at (640, 115), (3.59, 1.255); before, 1.297 at
+3.586, 4 cm over it]. The roof and its profile unchanged (`backLightTop` row unchanged).
+
+**«задние углы кормы … левая какая-то другая … как будто укушенная».** The screenshot is
+from behind, so its left is the car's left (+x). The tail stations' own shoulders (4.45:
+0.06 / 0.08, 4.64: 0.07 / 0.075, 4.68: 0.085 / 0.06) twist the shoulder quads between them
+(belt row to the deck's edge, 4.0 → 4.45 → 4.64 → 4.68 → 4.70); each was one face fanned
+by the builder, and the face's winding is mirrored between the sides, so the left side was
+cut on the diagonal belt(a)–edge(b), folding in over the lamp (a lit wedge at 0.66–0.76,
+0.90–0.985, s 4.45–4.64), the right on edge(a)–belt(b), folding out. Not the fuel flap
+(right, s 3.3–3.8, unchanged). Now `shoulder.convex`: a twisted shoulder quad is cut on its
+outward diagonal on both sides; mirrored ray depths over the tail (six directions) agree
+within 3 mm but for the flap, the exhaust and the C pillar's fanned strips (≤ 9 cm at
+grazing rays, not visible).
+
+Checks: `npm run kit-check -- w124`: zfight pass, proportions pass, reality pass, mirrors
+L100 R100, dents 0, triangles 12 530, drawing 21/21, dash 9/9; frozen: moved in boot,
+cabin, exterior, as before this change (the record predates §12; not re-recorded: awaiting
+the owner). Every other car identical in kit-fingerprint. tsc clean.

@@ -289,7 +289,7 @@ author.
 | `stations` | `TubStation[]`, nose to tail; the first is the front face, the last the tail face. A station's `corner: true` marks an intended break in the side's plan there (a corner on the real car, its source in a comment): it changes no geometry, and `tools/kit-surface.ts` does not flag the turn as a dent. |
 | `cabin` | `CabinSpec`: the greenhouse. |
 | `wheels` | `WheelSpec`: axles, tyre, tracks, arches. |
-| `shoulder` | `{ inset, rise }`: the belt turns in by `inset` and up by `rise` to the deck's edge. |
+| `shoulder` | `{ inset, rise, convex? }`: the belt turns in by `inset` and up by `rise` to the deck's edge. `convex`: a twisted shoulder quad (between stations with their own `shoulder`s) is cut on its outward diagonal; absent, it is one face fanned by the builder, and the two sides fold on mirrored diagonals, one of them in (the W124's left tail corner, «как будто укушенная», 2026-10-28). |
 | `doorBottom` | Height of the doors' bottom edge (top of the sill under them). |
 | `bonnetFront` | `s` where the bonnet starts; it runs to the cowl. |
 | `bonnet?` | `{ inset, nose? }`: the bonnet's side cut `inset` in from the deck's edge instead of at the pillar row (the 2110's covers the whole top, its shut lines along the wings' top edge); it ends 12 mm (`SCUTTLE`) short of the cowl and the bay's inner wings stand under the cut. `nose: { y, half: [bottom, top] }`: the bonnet comes down the front face between the head lamps to height `y` (set `bonnetFront` to the first station); `front.lid` items ride on it. Absent: the pillar-row bonnet. |
@@ -332,6 +332,7 @@ author.
 | `wiperMount?` | `'top'`: the spindles in the screen frame's header, the arms hanging down and parked to the right along it, sweeping down (the old UAZ-469). Absent: under the screen's foot. |
 | `wipers?` | `1`: a single wiper on the driver's (left) spindle of the pair, fitted to the glass as the pair's are (the W124's monowiper; its lifting sweep is not drawn, so `wiperBlade` is the longest that sweeps 90° upright). Absent: the pair. |
 | `rearBottom`, `rearHeader` | Same for the back light. |
+| `rearTopLevel?` | `true`: the back light's top edge straight across, a plain trapezoid from behind: every top corner of the glass at the outer one's height, `rearHeader` under the roof's edge there; the header over the glass deepens towards the centre line as the roof's crown rises (the W124). Absent: the glass's top follows the crown. |
 | `rearKnee?` | `{ s, y }` on the centre line where a hatch's tailgate folds: glass above, painted panel below. Absent: the back light runs straight to its base. |
 | `pillar` | Pillar strip width at the windscreen and back-light edges. |
 
