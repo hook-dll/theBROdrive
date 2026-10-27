@@ -115,6 +115,7 @@ import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
+import { RaceTrackProvider, raceTrackProgramAnchor } from './world/racetrack/mesh';
 import { updateWeather, weather, weatherBeginS } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -512,14 +513,15 @@ async function boot(): Promise<void> {
   const tumbleweeds = new TumbleweedField(renderer.scene, road, terrain, world.seed, origin, wheelSpray);
   // Tufts, shrubs and rosettes burst into the same spray ring; no Rapier colliders.
   const groundCover = new GroundCoverField(wheelSpray, origin);
-  // The 20 km marks, the sidetracks, the loose items, the market's machines and lot signs
-  // and the post machines, pumps and key boxes (POI kit boxes and sign boards) are built
-  // only where they stand; their hidden program anchors are in the scene from boot so the
-  // first one in view links nothing. Telegraph poles are drawn per chunk as
-  // InstancedMeshes: their program is linked here too.
+  // The 20 km marks, the sidetracks, the race tracks, the loose items, the market's
+  // machines and lot signs and the post machines, pumps and key boxes (POI kit boxes and
+  // sign boards) are built only where they stand; their hidden program anchors are in the
+  // scene from boot so the first one in view links nothing. Telegraph poles are drawn per
+  // chunk as InstancedMeshes: their program is linked here too.
   renderer.scene.add(
     monumentProgramAnchor(),
     sidetrackProgramAnchor(),
+    raceTrackProgramAnchor(),
     poleProgramAnchor(),
     delineatorProgramAnchor(),
     itemProgramAnchor(),
@@ -645,6 +647,10 @@ async function boot(): Promise<void> {
   // one breakable registry for the whole world, not one per provider.
   streamer.register(new DelineatorProvider(roadDistance, debris));
   streamer.register(new SidetrackProvider(roadDistance));
+  // The race tracks beside some posts (world/racetrack/): ribbon, paddock, lane, paint and
+  // props in the chunk of their post, colliders once it is physical. The shared lattice
+  // again, for the lane's drape on the drawn ground.
+  streamer.register(new RaceTrackProvider(roadDistance));
   streamer.register(new MonumentProvider());
   streamer.register(
     new PoiProvider(

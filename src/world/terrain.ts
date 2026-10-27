@@ -14,6 +14,7 @@ import { embankmentDropAt } from './roadprofile';
 import { SurfaceField, roadSurfaceY } from './roadsurface';
 import { onTerminusPad, terminusWeight } from './terminus';
 import { laybyFlattenWeight, laybyLevel, laybyNear, onLaybyPad } from './layby';
+import { RaceTrackField } from './racetrack/site';
 
 /**
  * Terrain height is the `Landscape` field plus bounded dune relief. The road is not
@@ -429,12 +430,24 @@ export class Terrain {
     this.basins.setGradeReader((x, z) => this.undugOpen(x, z, RELIEF_FULL, 0));
     // After the basins: a landform refuses any stretch a lake is dug beside.
     this.landforms = new RoadsideLandforms(road, seed, this.basins);
+    // After both: a track keeps off lakes and landforms, and levels the open ground it
+    // stands on (racetrack/site.ts). It reads the ground WITHOUT itself, as the basins do.
+    this.raceTracks = new RaceTrackField({
+      seed,
+      road,
+      terrain: this,
+      natural: (x, z, dist, s) => this.basins.shape(x, z, this.undugOpen(x, z, dist, s), s),
+      landforms: this.landforms,
+      basins: this.basins,
+    });
   }
 
   /** Lake basins dug into this terrain, and the schedule they come from. */
   readonly basins: LakeBasins;
   /** Basins, ridges and gaps beside the road; see `landforms.ts`. */
   readonly landforms: RoadsideLandforms;
+  /** The race tracks beside the posts, and the ground they level; see `racetrack/site.ts`. */
+  readonly raceTracks: RaceTrackField;
   /** Scratch for one landform sample: `undugOpen` and `horizonHeight` are per vertex. */
   private readonly landform = newLandformSample();
   /** Whole-road distance for the mountain gate; built on first vista sample. */
@@ -636,10 +649,12 @@ export class Terrain {
     // either side of it is a RESOLUTION fade for wheel-scale relief; multiplying a
     // seven-metre crest by it would have thinned the crest over exactly the twenty
     // metres it is supposed to climb, and cut its outer flank off at 62 m mid-air.
+    // A race track's levelled ground (racetrack/site.ts) is smooth sand: no detail on it.
     return (
       (this.fineRelief(x, z, lateral, s) * fade + this.corridorShape(x, z, dist, s, inner)) *
       (1 - paved) *
-      (1 - level)
+      (1 - level) *
+      this.raceTracks.detailShare(x, z, s)
     );
   }
 
@@ -662,7 +677,8 @@ export class Terrain {
     return (
       (this.fineRelief(x, z, lateral, s) * fade + this.corridorShape(x, z, dist, s, inner)) *
       (1 - paved) *
-      (1 - level)
+      (1 - level) *
+      this.raceTracks.detailShare(x, z, s)
     );
   }
 
@@ -714,8 +730,9 @@ export class Terrain {
     const open = this.undugOpen(x, z, dist, s);
     // Lake basins are DUG: they are part of the collided ground, in the mesh and in
     // the tile worker, so the water in `render/lakewater.ts` stands in a real hollow
-    // (see world/lakes.ts). Away from a basin this returns `open` untouched.
-    return this.basins.shape(x, z, open, s);
+    // (see world/lakes.ts). Away from a basin this returns `open` untouched. A race
+    // track's ground is levelled the same way, after it (racetrack/site.ts).
+    return this.raceTracks.level(x, z, s, this.basins.shape(x, z, open, s));
   }
 
   /**
@@ -929,6 +946,8 @@ export class Terrain {
         (1 - this.landform.flatten);
     }
     h += this.landform.lift;
+    // A track's levelled ground, so the drawn ribbon is not standing on vista dunes.
+    h = this.raceTracks.level(x, z, hintS, h);
     h += this.horizonMountainHeight(x, z);
     return h;
   }

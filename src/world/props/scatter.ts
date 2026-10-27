@@ -366,6 +366,8 @@ export class ScatterProvider implements ChunkProvider {
           const p = ctx.road.offsetPoint(s, lateral);
           // Not inside a mesa's footprint (world/mesas.ts): that ground is rock wall.
           if (mesas.blocks(p.x, p.z, MESA_SCATTER_CLEARANCE_M)) break cell;
+          // Nor on a race track's levelled ground or its lane (world/racetrack/site.ts).
+          if (ctx.terrain.raceTracks.covers(p.x, p.z, s)) break cell;
           // From the FRAME, not by projection: this cell was generated from (s, lateral),
           // so `surfaceAt`'s road search would spend 5 us rediscovering what the loop
           // counter already knows.
@@ -442,6 +444,7 @@ export class ScatterProvider implements ChunkProvider {
         if (laybyKeepsClear(seed, s, lateral, ctx.road.halfWidthAt(s), LAYBY_CLEAR_M)) return;
         const p = ctx.road.offsetPoint(s, lateral);
         if (mesas.blocks(p.x, p.z, MESA_SCATTER_CLEARANCE_M)) return;
+        if (ctx.terrain.raceTracks.covers(p.x, p.z, s)) return;
         if (ctx.terrain.surfaceFromFrame(p.x, p.z, lateral, s) === SurfaceType.Rock) return;
         const form = pickDesertForm(covers, formRoll);
         const scale = form.minScale + scaleRoll * (form.maxScale - form.minScale);

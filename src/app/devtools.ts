@@ -54,6 +54,8 @@ import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
 import { poisBetween } from '../world/poi';
 import { postBracket, postStop } from '../world/poststops';
+import { postHasTrack } from '../world/racetrack/site';
+import type { RaceTrack } from '../world/racetrack/track';
 import { settlementLayout, spotPose } from '../world/settlement';
 import { toyBoxApproach } from '../world/toybox';
 import type { DebrisField } from '../world/debris';
@@ -160,6 +162,8 @@ export interface DevTools {
  * right-hand lane on an ordinary two-lane road.
  */
 const DEV_JUMP_LATERAL = -1.9;
+/** Posts `jumpToTrack` looks through for a race track: about one in four has one. */
+const DEV_TRACK_SEARCH_POSTS = 200;
 
 /**
  * Builds the dev surface and installs the `window.__bro` console handle.
@@ -501,12 +505,34 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * `updateLakeSeek`'s loop until `settled()` — every wanted visual tile attached and
    * no streaming job pending — so a caller only waits on that one flag.
    */
-  let jumpHold: { s: number; frames: number; stand: { x: number; z: number; yaw: number } | null } | null = null;
-  const placeAtJump = (s: number, stand: { x: number; z: number; yaw: number } | null = null): void => {
+  let jumpHold: {
+    s: number;
+    frames: number;
+    stand: { x: number; z: number; yaw: number } | null;
+    /** A race track's grid slot to set the driven car (or the player) down on. */
+    grid?: { x: number; y: number; z: number; heading: number };
+  } | null = null;
+  const placeAtJump = (
+    s: number,
+    stand: { x: number; z: number; yaw: number } | null = null,
+    grid?: { x: number; y: number; z: number; heading: number },
+  ): void => {
     if (stand) {
       ctx.player.teleport(stand.x, ctx.terrain.heightAt(stand.x, stand.z, s) + 1.2, stand.z, s);
       ctx.player.pushState();
       ctx.camera.setYaw(stand.yaw);
+      return;
+    }
+    if (grid) {
+      const drivingId = ctx.world.state.player.drivingCarId;
+      const driven = drivingId ? ctx.vehicles.get(drivingId) : undefined;
+      if (driven) {
+        driven.rescueTo(grid.x, grid.y + 0.6 - driven.contactPlaneLocalY, grid.z, grid.heading, 0);
+        driven.pushTransform();
+      }
+      ctx.player.teleport(grid.x, grid.y + 1.5, grid.z, s);
+      ctx.player.pushState();
+      ctx.camera.setYaw(grid.heading);
       return;
     }
     const sample = ctx.road.sampleAt(s);
@@ -562,7 +588,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   const updateJump = (): void => {
     if (!jumpHold) return;
-    placeAtJump(jumpHold.s, jumpHold.stand);
+    placeAtJump(jumpHold.s, jumpHold.stand, jumpHold.grid);
     // A few frames first: the streamers only learn the new position on their next
     // update, and until then their queues look empty.
     jumpHold.frames++;
@@ -661,6 +687,33 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     const playerS = ctx.world.state.player.s;
     const { before, after } = postBracket(seed, playerS);
     return before < 0 || (postStop(seed, after).s - playerS < playerS - postStop(seed, before).s) ? after : before;
+  };
+  /**
+   * `jumpToTrack(n = 0)`: to the `n`th race track (world/racetrack/) from the post nearest
+   * the player on (0 is the nearest one at or past it), set down on the first grid slot
+   * facing the lap — in the driven car when there is one, on foot otherwise — and held
+   * there until the world under it has streamed, as `jumpTo` holds (poll `settled()`).
+   * Returns the track (its `id`, `lengthM`, `startGrid`, `road`…), or null when none lies
+   * within the next `DEV_TRACK_SEARCH_POSTS` posts.
+   */
+  dev['jumpToTrack'] = (n = 0): RaceTrack | null => {
+    const seed = ctx.world.seed;
+    let skip = Math.max(0, Math.floor(n));
+    const first = nearestPost();
+    for (let post = first; post < first + DEV_TRACK_SEARCH_POSTS; post++) {
+      if (!postHasTrack(seed, post)) continue;
+      const track = ctx.terrain.raceTracks.track(post);
+      if (!track || skip-- > 0) continue;
+      const slot = track.startGrid[0];
+      const s = ctx.road.project(slot.x, slot.z, track.postS).s;
+      const grid = { x: slot.x, y: slot.y, z: slot.z, heading: slot.heading };
+      jumpHold = { s, frames: 0, stand: null, grid };
+      placeAtJump(s, null, grid);
+      ctx.hud.setToast(`${track.id}: ${(track.lengthM / 1000).toFixed(2)} km lap beside post ${post}, ${(track.postS / 1000).toFixed(0)} km`);
+      return track;
+    }
+    ctx.hud.setToast(`no race track in the next ${DEV_TRACK_SEARCH_POSTS} posts`);
+    return null;
   };
   /** Drops `items` on the ground in a row in front of the player. */
   const dropInFront = (items: readonly Item[]): void => {

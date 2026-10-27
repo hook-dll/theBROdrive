@@ -248,13 +248,18 @@ export function desertPoiClearOfRoad(poi: Poi, road: Road, roadDistance: RoadDis
 }
 
 /**
- * Whether a desert POI's spot is off every roadside landform (`landforms.ts`). A
- * building wants level ground, and a basin wall or the flank of a gap is a quarter
- * of slope; like a lake basin, it simply has no building on it.
+ * Whether a desert POI's spot is off every roadside landform (`landforms.ts`) and every
+ * race track's levelled ground and lane (`racetrack/site.ts`). A building wants level
+ * ground, and a basin wall or the flank of a gap is a quarter of slope; like a lake
+ * basin, it simply has no building on it. A track is the bigger thing: the building
+ * gives way to it.
  */
 function desertPoiClearOfLandforms(poi: Poi, road: Road, terrain: Terrain): boolean {
   const point = road.offsetPoint(poi.s, poi.lateral);
-  return !terrain.landforms.covers(point.x, point.z, poi.s, radiusStructure(poi.structure));
+  return (
+    !terrain.landforms.covers(point.x, point.z, poi.s, radiusStructure(poi.structure)) &&
+    !terrain.raceTracks.covers(point.x, point.z, poi.s)
+  );
 }
 
 /**

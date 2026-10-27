@@ -601,6 +601,15 @@ const markingMaterial = applyGroundLight(applyCloudShadow(
   ),
 ));
 
+/**
+ * The road's paint, for painted features outside the ribbon (a race track's lines,
+ * curbs and grid): position, three-component colour and an up normal, drawn 2 mm proud
+ * by its polygon offset. Shared; never disposed.
+ */
+export function roadMarkingMaterial(): THREE.MeshStandardMaterial {
+  return markingMaterial;
+}
+
 /** 1 inside [lo, hi], 0 outside, smoothstepped over `soft` metres at either end. */
 function softBand(v: number, lo: number, hi: number, soft: number): number {
   const a = (v - lo) / soft;

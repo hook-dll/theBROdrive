@@ -4,6 +4,49 @@
 
 ### Added
 
+- RACE TRACKS BESIDE THE POSTS, part A: the track (`world/racetrack/layout.ts`,
+  `site.ts`, `track.ts`, `mesh.ts` new; `world/terrain.ts` `raceTracks`, `openBase`,
+  `detailAt`, `explorationDetailAt`, `horizonHeight`; `world/roadmesh.ts`
+  `roadMarkingMaterial`; `world/props/scatter.ts`, `world/deserttiledata.ts`,
+  `world/poi.ts` keep-clears; `main.ts` provider and program anchor; `app/devtools.ts`
+  `__bro.jumpToTrack`; `tools/racetrack-gen.ts` new; `game-design2.md` §19). From post 2
+  on, a seeded roll (`postHasTrack`, 0.33) asks for a closed circuit in the desert on the
+  lay-by's side of the settlement, and about seven rolls in eight find room: a little
+  under a third of the settlements have one. The loop is a rounded star polygon of six
+  to nine corners, so it is simple by construction and closes exactly — hairpins of
+  20-27 m, tight, medium and fast corners, sweepers to 300 m, counter-corners where a
+  vertex is pulled in, and a chicane or esses (a double S, which returns heading and
+  offset) dropped into the long straights — with every curvature step eased into a 12 m
+  clothoid and the closure restored by Newton on two straights to 0.1 mm. 1.8-3.5 km,
+  8.6-10 m of asphalt with 10 m of run-off, no two stretches more than 70 m apart along
+  the lap nearer than 36 m. Its profile is the ground smoothed along the loop plus a hill,
+  crests (vertical radius 260 m or more) and a dip, under 12% everywhere; fast corners
+  are banked in up to 8% and one corner in most laps is 1.5-3% off-camber; the lap is
+  cut into three to five surface sectors (asphalt, `Gravel`, and dirt as
+  `LooseShoulder`), the start sector always asphalt. The start straight runs along the
+  road 150-250 m out with a concrete paddock on its road side, reached by a gravel lane
+  from the pad 21 m before the post. A placement is refused, and another tried, when the
+  levelled ground would come within 75 m of the road, another pass of the road comes
+  near, a lake, landform or mesa touches it, the lane meets a house or the track, or the
+  ground stands more than 8 m off the track's plane at the run-off's edge. THE GROUND IS
+  LEVELLED IN `Terrain.openBase`: a 4 m lattice per track, the track's plane across the
+  run-off and the paddock, smoothstepped back into the desert over a 40 m skirt, heights
+  from every nearby stretch by a soft minimum so a hairpin's infield has no crease — so
+  the tiles, their colliders, the vista and every worker level the same ground, and the
+  scatter, the tiles' props and desert buildings keep off it. The chunk at the lap's
+  mean road arclength builds it in the road's own asphalt and marking materials and the
+  settlements' flat palette (ribbon, paddock, lane, edge lines, curbs, chequered line,
+  grid boxes, start gantry, tyre walls): about 18-22k triangles, and 40-50 static
+  trimesh bodies once physical, the ribbon in 30-row slabs registered with their
+  sector's surface. `RaceTrack` is the data part B races on: `sampleAt(s)`,
+  `surfaceY`, `startGrid`, `finishS`, `checkpoints`, `accessLane`, `paddock` and `road`,
+  a `DriveRoad` the autopilot drives as is. Measured (`tools/racetrack-gen.ts`, three
+  seeds, 180 posts): 56 tracks, all closed, C1 and clear of themselves, all different,
+  all mixing surfaces; the ground under the asphalt 2 cm below it at worst, the run-off
+  within 22 cm of the track's plane, the skirt adding at most 39% to the desert's slope;
+  placement 16-60 ms per post; the frantic autopilot laps all six sampled tracks from the
+  grid at 64-81 km/h mean without leaving the asphalt. Not yet: the rival, start lights,
+  laps, the stake and trailer races (part B).
 - THE CLAW MACHINE GIVES STICKERS (shells phase 6; `world/claw.ts` new, `render/figurine.ts`
   new, `render/stickerart.ts` `stickerDieCut`, `world/settlement.ts`, `world/poi.ts`,
   `world/fixturefield.ts` `frames`/`steer`, `player/machinefocus.ts`,

@@ -393,6 +393,8 @@ export function generateDesertTileData(
     if (!farFromRoad && context.roadDistance.distAt(worldX, worldZ, DIST_LATTICE) < 65) continue;
     // Nor inside a mesa (world/mesas.ts): it is solid rock there, collided and drawn.
     if (mesaFieldOf(context.road, context.terrain).blocks(worldX, worldZ, MESA_PROP_CLEARANCE_M)) continue;
+    // Nor on a race track's levelled ground or its lane (world/racetrack/site.ts).
+    if (context.terrain.raceTracks.covers(worldX, worldZ, regionS)) continue;
     const surface = context.terrain.openSurfaceAt(worldX, worldZ);
     const share = (surface === SurfaceType.Rock ? region.rocks : region.flora) / fullest;
     if (hash01(context.seed, PROP_TAG, tx, tz, i, 12) >= share) continue;
