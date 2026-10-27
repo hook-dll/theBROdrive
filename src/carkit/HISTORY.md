@@ -1476,6 +1476,28 @@ kit-fingerprint (the W124 moved by its own tail work, not this).
 Checks: `npm run kit-check -- e34` passes (zfight, proportions, reality, mirrors L90 % R88 %,
 0 dents, 13 952 triangles, drawing 21/21, dash 9/9). A spec change in bmw.ts alone.
 
+## Every car its own interior trim (2026-10-28)
+
+- **«почему у нас mercedes синий салон, а 2101 — красный? почему бы не сделать несколько
+  вариантов цветов (не ярких, приглушённых) и снабжать автомобили рандомными салонами».**
+  → A model's cabin was one colour pair (`KitLook.upholstery`, `dash`) baked into its
+  shared template: every W124 blue, every 2101 red. → Each car picks a trim from its
+  appearance key, as its paint: the model's own or one of a muted palette (grey, sand,
+  blue, brown, black, burgundy, olive) its model allows; the upholstery family (seats,
+  bench, inserts, door cards, armrests, side trim) and the dash family (dash, console,
+  shelf, cappings, knobs) are marked per vertex (lamp byte 9 / 10) and tinted in the
+  car's own material by a uniform. VAZ, GAZ, AZLK, UAZ, Opel and Daewoo keep their own
+  dash; the W124 and E34 take the trim's. No geometry, vertex colour, draw or program
+  added: every fingerprint unchanged. *trims.ts, builder.ts `TrimFamily`/`InkLog`,
+  materials.ts `finishKitSurfaces`, render/materials.ts `setCarKitTrim`, render/carmodel.ts
+  `applyKitTrim`*.
+
+Checks: tsc (this change; other agents' vehicle.ts edits in progress fail on their own);
+kit-fingerprint every car identical but the W124, which moves at HEAD already (its own
+tail work); a script building every car checked the roles (only trim, only the family's
+colours) and two vaz2101 material copies in different trims (same program key and
+source, only `uKitTrim` differs).
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

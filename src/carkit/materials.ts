@@ -19,7 +19,10 @@
  *    lens lit by its role, `CAR_LAMP_INERT` for one nothing switches, `CAR_LAMP_UNLIT` for a
  *    lit face drawn in its own colour at any hour: a cluster's warning lamp is lit by
  *    sliding it out from behind its dark lens, interior.ts, so lighting one is a pose and
- *    links no program).
+ *    links no program); on trim built in the car's upholstery or dash colour, or a shade
+ *    of either (builder.ts `TrimFamily`), `CAR_TRIM_UPHOLSTERY` or `CAR_TRIM_DASH`: each
+ *    car tints those by its own interior trim (carkit/trims.ts), the colour built is the
+ *    model's own.
  *
  * Names are the contract with render/carmodel.ts. `kit-body` passes its paint-slot rule,
  * so every car gets its own copy of the one material (its paint, `kit` variant of
@@ -32,8 +35,10 @@
 
 import * as THREE from 'three';
 import { MATERIALS_CONFIG } from '../config';
-import { CAR_LAMP_INERT, CAR_LAMP_UNLIT, CAR_SURFACE_ATTRIBUTE, CAR_SURFACE_FINISH } from '../render/materials';
-import type { KitSlot } from './builder';
+import { CAR_LAMP_INERT, CAR_LAMP_UNLIT, CAR_SURFACE_ATTRIBUTE, CAR_SURFACE_FINISH, CAR_TRIM_DASH, CAR_TRIM_UPHOLSTERY } from '../render/materials';
+import { inkKey, type InkLog, type KitSlot, type TrimFamily } from './builder';
+
+const TRIM_ROLE: Readonly<Record<TrimFamily, number>> = { upholstery: CAR_TRIM_UPHOLSTERY, dash: CAR_TRIM_DASH };
 
 /** What one slot is: its colour and finish, and what kind of surface. */
 export interface KitSlotFinish {
@@ -116,6 +121,9 @@ const _color = new THREE.Color();
  * the one material, or the glass. Runs once the car's geometry is final: the passes before
  * it (holes, leans, flat runs) rewrite positions and the build colours. `tone` is the
  * car's `KitLook.tone`, the grey (in display terms) its tone slot multiplies the paint by.
+ * A trim triangle whose colour its builder inked in a trim family (the geometry's
+ * `userData.kitInks`, builder.ts `InkLog`) gets that family's role; a colour one builder
+ * inked both in a family and plain cannot be told apart, and throws.
  */
 export function finishKitSurfaces(root: THREE.Object3D, tone?: number): void {
   root.traverse((node) => {
@@ -158,6 +166,31 @@ export function finishKitSurfaces(root: THREE.Object3D, tone?: number): void {
     const surface = new Uint8Array(count * 4);
     const bytes = [look.paint ? 255 : 0, Math.round(look.roughness * 255), Math.round(look.metalness * 255), look.lamp];
     for (let i = 0; i < count; i++) surface.set(bytes, i * 4);
+    const inks = geometry.userData.kitInks as InkLog | undefined;
+    if (inks && slot === 'trim') {
+      // One colour per triangle; runs of one colour are usual, so the last key is kept.
+      let lastR = -1;
+      let lastG = -1;
+      let lastB = -1;
+      let role = 0;
+      for (let i = 0; i < count; i += 3) {
+        const r = colors[i * 3]!;
+        const g = colors[i * 3 + 1]!;
+        const bl = colors[i * 3 + 2]!;
+        if (r !== lastR || g !== lastG || bl !== lastB) {
+          lastR = r;
+          lastG = g;
+          lastB = bl;
+          const key = inkKey(r, g, bl);
+          const family = inks.get(key);
+          if (family === 'mixed') {
+            throw new Error(`Kit mesh "${mesh.name}": colour #${key.toString(16).padStart(6, '0')} is inked both as interior trim and plain in one builder; give one of them another shade`);
+          }
+          role = family ? TRIM_ROLE[family] : 0;
+        }
+        if (role !== 0) for (let k = 0; k < 3; k++) surface[(i + k) * 4 + 3] = role;
+      }
+    }
     geometry.setAttribute(CAR_SURFACE_ATTRIBUTE, new THREE.BufferAttribute(surface, 4, true));
     mesh.material = kitBodyMaterial();
   });

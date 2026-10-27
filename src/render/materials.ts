@@ -644,10 +644,14 @@ function patchCarBodyShader(
  * (vehicle/vehiclelamps.ts: head, tail, stop, reverse, left and right blinker);
  * `CAR_LAMP_INERT` a lens nothing switches; `CAR_LAMP_UNLIT` a lit face drawn in its own
  * colour at any hour (a kit cluster's warning lamp, the courtesy lamp). Only 1-6 glow.
+ * On a kit car the same byte marks its interior trim: `CAR_TRIM_UPHOLSTERY` and
+ * `CAR_TRIM_DASH`, the vertex colour each car tints by its own trim (`setCarKitTrim`).
  */
 export const CAR_SURFACE_ATTRIBUTE = 'carSurface';
 export const CAR_LAMP_INERT = 7;
 export const CAR_LAMP_UNLIT = 8;
+export const CAR_TRIM_UPHOLSTERY = 9;
+export const CAR_TRIM_DASH = 10;
 /** Per kit vertex: whether its part casts a shadow and whether it receives one (bytes). */
 export const KIT_SHADOW_ATTRIBUTE = 'kitShadow';
 /**
@@ -665,12 +669,14 @@ export interface LensGlow {
   emissiveIntensity: number;
 }
 
-/** A kit car's lamp state in its one material, per lens role (`CAR_SURFACE_ATTRIBUTE`). */
+/** A kit car's lamp state and interior trim in its one material, per lens role (`CAR_SURFACE_ATTRIBUTE`). */
 interface KitBodyUniforms {
   readonly lensColor: { value: THREE.Color[] };
   readonly lensLevel: { value: Float32Array };
   /** Dust on the lenses, 0..1, as `makeCarGrimeMaterial`'s `uGrime` on a lens material. */
   readonly lensGrime: { value: number };
+  /** The upholstery's and the dash's tint (`setCarKitTrim`); white leaves the model's own. */
+  readonly trim: { value: THREE.Color[] };
   readonly glows: readonly LensGlow[];
 }
 const kitBodyUniforms = new WeakMap<THREE.Material, KitBodyUniforms>();
@@ -712,6 +718,7 @@ attribute vec4 ${CAR_SURFACE_ATTRIBUTE};
 attribute vec2 ${KIT_SHADOW_ATTRIBUTE};
 uniform vec3 uKitLensColor[ 6 ];
 uniform float uKitLensLevel[ 6 ];
+uniform vec3 uKitTrim[ 2 ];
 varying vec4 vKitSurface;
 varying vec2 vKitRole;
 varying vec3 vKitGlow;`;
@@ -720,7 +727,9 @@ varying vec3 vKitGlow;`;
  * The surface bytes to the fragment: paint share, roughness, metalness, and whether the
  * part receives shadows; whether it is a switched lens and whether it is unlit; and its
  * glow, this car's level of its role in that role's colour, as a lens material's
- * `emissive * emissiveIntensity`. Roles pick by masks, as the far mesh's do.
+ * `emissive * emissiveIntensity`. Roles pick by masks, as the far mesh's do. The interior
+ * trim's vertex colour takes this car's tint (`setCarKitTrim`), here, so the fragment
+ * is as it was.
  */
 const KIT_BODY_VERTEX_COLOR = `#include <color_vertex>
 vKitSurface = vec4( ${CAR_SURFACE_ATTRIBUTE}.xyz, ${KIT_SHADOW_ATTRIBUTE}.y );
@@ -728,6 +737,8 @@ float kitRole = floor( ${CAR_SURFACE_ATTRIBUTE}.w * 255.0 + 0.5 );
 vec3 kitRoleA = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 1.0, 2.0, 3.0 ) ) );
 vec3 kitRoleB = 1.0 - step( 0.5, abs( vec3( kitRole ) - vec3( 4.0, 5.0, 6.0 ) ) );
 vKitRole = vec2( dot( kitRoleA + kitRoleB, vec3( 1.0 ) ), 1.0 - step( 0.5, abs( kitRole - ${CAR_LAMP_UNLIT}.0 ) ) );
+vColor.rgb *= mix( vec3( 1.0 ), uKitTrim[ 0 ], 1.0 - step( 0.5, abs( kitRole - ${CAR_TRIM_UPHOLSTERY}.0 ) ) )
+  * mix( vec3( 1.0 ), uKitTrim[ 1 ], 1.0 - step( 0.5, abs( kitRole - ${CAR_TRIM_DASH}.0 ) ) );
 vKitGlow = uKitLensColor[ 0 ] * ( uKitLensLevel[ 0 ] * kitRoleA.x )
   + uKitLensColor[ 1 ] * ( uKitLensLevel[ 1 ] * kitRoleA.y )
   + uKitLensColor[ 2 ] * ( uKitLensLevel[ 2 ] * kitRoleA.z )
@@ -860,6 +871,7 @@ function patchKitBodyShader(
   shader.uniforms.uKitLensColor = kit.lensColor;
   shader.uniforms.uKitLensLevel = kit.lensLevel;
   shader.uniforms.uKitLensGrime = kit.lensGrime;
+  shader.uniforms.uKitTrim = kit.trim;
   shader.uniforms.uKitSpotReach = spotReach;
   if (!shader.fragmentShader.includes('#include <lights_physical_pars_fragment>')) {
     throw new Error('Three physical fragment layout changed');
@@ -895,6 +907,18 @@ export function carLensGlows(material: THREE.Material): readonly LensGlow[] | nu
 export function setCarLensGrime(material: THREE.Material, grime: number): void {
   const uniforms = kitBodyUniforms.get(material);
   if (uniforms) uniforms.lensGrime.value = grime;
+}
+
+/**
+ * A kit car's interior trim (its one material): the factors its upholstery's and its
+ * dash's vertex colours (`CAR_TRIM_UPHOLSTERY`, `CAR_TRIM_DASH`) are multiplied by, in
+ * the working (linear) space; white for the model's own (carkit/trims.ts `kitTrimTint`).
+ */
+export function setCarKitTrim(material: THREE.Material, upholstery: THREE.Color, dash: THREE.Color): void {
+  const uniforms = kitBodyUniforms.get(material);
+  if (!uniforms) return;
+  uniforms.trim.value[0]!.copy(upholstery);
+  uniforms.trim.value[1]!.copy(dash);
 }
 
 const KIT_CAST_PROGRAM_KEY = 'kit-cast-v1';
@@ -1366,6 +1390,7 @@ export function makeCarBodyConditionMaterial(
       lensColor: { value: colors },
       lensLevel: { value: levels },
       lensGrime: { value: 0 },
+      trim: { value: [new THREE.Color(1, 1, 1), new THREE.Color(1, 1, 1)] },
       glows: colors.map((color, role) => new KitLensGlow(color, levels, role)),
     };
     kitBodyUniforms.set(material, lamps);

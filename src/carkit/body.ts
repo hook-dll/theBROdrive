@@ -1404,7 +1404,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
       // A door's card and its frame meet at the belt at two depths: the card's top closes
       // the step between their inner skins (the window sill).
       if (!f0.owner.startsWith('door') || depthOf(f0) === depthOf(f1)) continue;
-      builderOf(f0.owner).color(frame.spec.look.upholstery).poly('trim', [innerOf(f0, a)!, innerOf(f0, b)!, innerOf(f1, b)!, innerOf(f1, a)!]);
+      builderOf(f0.owner).color(frame.spec.look.upholstery, 'upholstery').poly('trim', [innerOf(f0, a)!, innerOf(f0, b)!, innerOf(f1, b)!, innerOf(f1, a)!]);
       continue;
     }
     if (!MOVING.test(f0.owner) && !MOVING.test(f1.owner)) continue;
@@ -1430,7 +1430,7 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
     if (!MOVING.test(f.owner) || f.mat === 'glass') continue;
     const pts = f.v.map((v) => innerOf(f, v)!).reverse();
     const b = builderOf(f.owner);
-    if (f.owner.startsWith('door') || f.owner.startsWith('tailgate')) b.color(frame.spec.look.upholstery).poly('trim', pts);
+    if (f.owner.startsWith('door') || f.owner.startsWith('tailgate')) b.color(frame.spec.look.upholstery, 'upholstery').poly('trim', pts);
     else b.poly('paint', pts);
   }
 

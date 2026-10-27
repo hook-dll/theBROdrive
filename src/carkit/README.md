@@ -148,14 +148,15 @@ from the angle he complained about; changes are judged there, not in code.
 | `bmw.ts` | The BMW 520i (E34) saloon, 1990–95: `BODY_E34` / `LOOK_E34` (platform `classic`, rear drive). Draft, awaiting the owner. |
 | `measurements-classics.md`, `measurements-estates.md`, `measurements-samara.md`, `measurements-2110.md`, `measurements-niva.md`, `measurements-oka.md`, `measurements-volga.md`, `measurements-2141.md`, `measurements-nexia.md` | Measurement reports: every figure with its drawing or photo, scale and tag. |
 | `refs/<car>.json` | The real car's numbers, machine-readable, each with its source: body positions from the drawing and photos, the dash from interior photos, the drawing's pixel registration for the overlays ([Reference files](#reference-files-refscarjson)). `tools/kit-drawing.ts` holds the built car to them. |
-| `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours. |
+| `builder.ts` | `PartBuilder`: flat triangles per material slot, transform stack, primitives (`box`, `bevelBox`, `extrude`, `cylinderX/Y/Z`, `torusY`, `bridge`, `poly`), vertex colours; `color(hex, family)` marks an ink as the car's upholstery or dash (`TrimFamily`), logged per builder (`InkLog`) for the trim's geometry. |
 | `body.ts` | `BodyFrame` (cross-section, deck and lid lookups) and `buildShell`: tub, greenhouse and roof as one face list, then cut into parts. Shell constants (`SHUT_GAP`, `JAMB_DEPTH`, `DOOR_THICKNESS`, `NOTCH_WALL`, …). |
 | `exterior.ts` | End faces (`FaceLook.items` / `.lid`), bumpers swept round the corners, sill strip, flank strips (waist moulding, feature line: `buildFlankStrip`), repeaters, flank lamps, mirrors, handles, wipers, filler neck. |
 | `interior.ts` | Trim, dashboard, gauges, wheel, pedals, levers, seats, door cards. Per-platform layout table `LAYOUTS`, per-car overrides `CABIN_2101/2103/2105/2107/2110`. |
 | `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). The exhaust is one rule on every car (`exhaust`): the pipe (Ø36, its section standing on a corner) runs `EXHAUST_GAP` (10 mm) under the shell's floor, wherever that floor is, from the down-pipe through a flat oval resonator (0.11 × 0.06) inside the floor crossmembers, dips under the rear axle (and the classic's Panhard rod) or the Samara's beam, and climbs behind it into a flat oval silencer (0.30 × 0.07, at the back of its room, where the floor has risen); the tail pipe leaves under the tail's floor and exits at the right rear under the bumper's foot (exterior.ts `bumperFoot`). Nothing of it goes below 2 mm over the clearance (`exhaustLow`): where the floor stands too low for that (the Nivas, the Oka, a sill drawn low), the pipe rises into the floor and a can stands up into it (`TUNNEL_RISE`, 12 mm over it, under the cabin's carpet), as a real tunnel takes them. The UAZs' high floors follow the same rule (it replaced their `exhaustTuck`). The bay is laid out in a `BayRoom`: under the bonnet (`bonnetRoom`, the shell's walls round it), or on a van in the cabin under the engine cover (`coverRoom`, interior.ts `engineCoverRoom`), with the same four bonnet cells. |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `simplify.ts` | `simplifyFlats`: the finished car's flat runs merged into the fewest, fattest triangles and zero-area ones dropped (step 9 of [How the body is built](#how-the-body-is-built)). |
-| `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices ([Draw calls](#draw-calls-one-car-three-draws)). |
+| `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices, and the interior trim's family role ([Draw calls](#draw-calls-one-car-three-draws), [Interior trims](#interior-trims-per-car)). |
+| `trims.ts` | Interior trims: the muted palette (`INTERIOR_TRIMS`), which a model may have (`kitTrimOptions`: its own look's first), and the tint a car applies (`kitTrimTint`). See [Interior trims](#interior-trims-per-car). |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
 | `context.ts` | `KitContext`, `addBuilt`, `pivotGroup`, `attach`: how modules put geometry into the scene; `mirrorFrame`, `addMirrorFace`: a mirror head's aim and its live face. |
 | `kit.ts` | `buildKitCar(id)`: assembles everything; hinge motions of the shell's parts (`shellMotion`); `leanEnd` (`rearLean`, `frontLean`). |
@@ -189,7 +190,8 @@ Integration outside the folder:
   set as one mesh (`CarModelInstance.wheelDraw`). `cloneWheels` rescales the pack's wheel
   sets to the kit tyre. Static clones (a lot car's distant preview: `cloneStaticModel`) are
   the whole mid shell, its panes as the tinted mirror and its wheels as one plain mesh: three
-  draws; nothing on them opens.
+  draws; nothing on them opens. Each car's copy gets its interior trim (`applyKitTrim`,
+  from its appearance key; `setKitTrimOverride`, `?trim=` in dev).
   Mid traffic (`CarMidInstance`) draws the shut shell without its detail groups in the
   car's own one material (lenses lit by its own lamps) and its panes in its own glass,
   the wheels as instances (render/farcars.ts); `Vehicle.showMid` poses the rig far.
@@ -429,7 +431,7 @@ cabin: … }`) share everything not overridden. Current families:
 | Field | Meaning |
 |---|---|
 | `label` | Display label (`'VAZ-2108'`). |
-| `upholstery`, `dash` | Interior vinyl and dash colours (hex). |
+| `upholstery`, `dash` | Interior vinyl and dash colours (hex): the model's own trim, the one it is built in. A car of the model draws its own trim over them ([Interior trims](#interior-trims-per-car)); this pair is always one of its options. |
 | `dashPainted?` | A painted steel dash (both UAZes): its body, instrument plate and glovebox lid in the paint slot, so they take the car's colour and wear; `dash` then only shades the knobs. |
 | `headrests` | Head restraints on the front seats. |
 | `front`, `rear` | `FaceLook`: one end of the car. |
@@ -733,7 +735,7 @@ generated design's (`gw_*`, `rims.ts`, built on first use: render/carmodel.ts
 `poolWheelSet`). A generated set draws in the car's own kit material (it carries the
 attributes that material reads), so it costs no program. The kit's own wheel
 (`buildWheel`, wheels.ts) only sets where the wheels stand and how big they are. In the lab,
-`Экземпляр` (and `?variant=`) steps the appearance key: paint and wheels change together.
+`Экземпляр` (and `?variant=`) steps the appearance key: paint, wheels and interior trim change together.
 
 A generated design (`RimDesign`) is data: a flange and a face profile (radius over the
 rim's, x in metres at the nominal 0.29 m tyre), bands of the face cut into sectors with a
@@ -749,6 +751,46 @@ window each (an outline in the sector's frame, star-shaped about its middle; wal
    900–1500, the window walls being most of an alloy's.
 5. `node tools/look/programs.mjs`: no new program.
 
+## Interior trims: per car
+
+A model is built once, in its look's `upholstery` and `dash`; every car of it then wears
+its own trim, picked from its appearance key as its paint is (render/carmodel.ts
+`applyKitTrim`: `appearanceHash('<model>:interior', key)` over the model's options), so a
+saved car keeps its cabin with nothing stored, and traffic, lot and contract cars each
+get theirs from their own id.
+
+- **Marking.** Every ink derived from the look's colours is drawn with
+  `color(hex, 'upholstery' | 'dash')` (interior.ts: seats, inserts, bench and its skirt,
+  head restraints, armrests, side panels and the rake trim, the rear wheel-house covers;
+  dash, console, parcel shelf, engine cover, door cappings, louvres, ashtray, knobs;
+  body.ts: door and tailgate inner skins and window sills). The builder logs, per colour
+  drawn in `trim`, which family it was inked in
+  (`InkLog`, on the trim geometry's `userData.kitInks`); `finishKitSurfaces` gives those
+  triangles the lamp byte `CAR_TRIM_UPHOLSTERY` (9) or `CAR_TRIM_DASH` (10). A colour one
+  builder inked both ways throws (the Samaras' bumper groove shares its colour with the
+  2108's bench skirt; they are different builders, so both stay right). Carpet and
+  headliner are the layout's, not the look's, and stay.
+- **Drawing.** The car's own material copy holds `uKitTrim[2]` (`setCarKitTrim`), each
+  family's factor: the trim's colour over the model's own, per channel in linear
+  (`kitTrimTint`), white for the model's own. The kit vertex patch multiplies the vertex
+  colour by it: one uniform write per car, no new program (the program key is unchanged),
+  no draw, no geometry or colour byte changed, so every fingerprint stays. A shade of the
+  model's colour becomes about the same shade of the trim's. The far mesh and the die-cast
+  draw the model's own.
+- **Palette** (`INTERIOR_TRIMS`, upholstery / dash): grey `#5b5d61`/`#2c2e31`, sand
+  `#8a7c64`/`#4f463a`, blue `#44506a`/`#2a3140`, brown `#5c4434`/`#2f251e`, black
+  `#2e2e30`/`#1c1c1d`, burgundy `#5c2d2c`/`#2f1d1d`, olive `#585a48`/`#30322a`.
+- **Per model** (`KIT_TRIMS`; the model's own always first): VAZ classics and GAZ-24
+  burgundy, brown, sand, grey, blue; GAZ-31029 grey, brown, black, blue, sand; Samaras and
+  tens grey, black, blue, brown, sand; Oka grey, black, blue, burgundy; Nivas brown, grey,
+  black, sand; 2141 grey, black, blue, brown; UAZes brown, black, olive, grey; Nexia,
+  Espero, Astra, Vectra grey, sand, blue, black. All these keep their own dash (one black
+  or grey plastic, the UAZ's painted). The W124 (grey, sand, black, brown, burgundy) and
+  the E34 (grey, sand, black, burgundy) take the trim's dash: their dashes were coloured
+  to the cabin. A model left out has only its own.
+- **Lab.** `Экземпляр` steps each car's own draw; «Салон» (`__carLab.trim(id | null)`,
+  `?trim=<id>`) puts every kit car in one palette trim.
+
 ## Lab
 
 - URL: `http://localhost:5199/?car-lab&time=12` (the kit cars; `time` hours,
@@ -763,6 +805,7 @@ window each (an outline in the sector's frame, star-shaped about its middle; wal
   - `mid(id, on)` — draw the car as mid traffic does (its mid paint, glass and the shared
     parts), posed far; `only(id | null)` — show one car alone;
   - `wheels(setId | null)` — rebuild every car on one wheel set (a `sv_*` or `gw_*` id);
+  - `trim(trimId | null)` — rebuild every kit car in one interior trim (`INTERIOR_TRIMS` id);
   - `kit(id).set(channel, v)`, `.activate(controlId)` (`'door_fl'`, `'door_rl'`, `'bonnet'`,
     `'boot'`, `'tailgate'`, `'flap'`, `'window_fl'`, …), `.controls()`;
   - `set({ dirt, scratches, timeHours, variant })`;

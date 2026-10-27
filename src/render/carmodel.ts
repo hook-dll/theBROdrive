@@ -24,6 +24,7 @@ import {
   carPaintGrimeFrame,
   kitCastDepthMaterial,
   setCarBodyPalettePaint,
+  setCarKitTrim,
   setCarGrime,
   weatherStaticCarPaint,
   TINTED_GLASS,
@@ -47,6 +48,7 @@ import {
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
 import { kitBodyMaterial } from '../carkit/materials';
+import { INTERIOR_TRIMS, kitTrimOption, kitTrimOptions, kitTrimTint } from '../carkit/trims';
 import { buildRimWheel, isGeneratedWheelSet, rimDesign } from '../carkit/rims';
 import { kitGlassOpacity } from '../carkit/rig';
 import { MATERIALS_CONFIG } from '../config';
@@ -457,6 +459,36 @@ function applyRandomPaint(root: THREE.Object3D, def: CarModelDef, appearanceKey:
       }
     }
   });
+}
+
+/**
+ * Dev: every kit car built from now on has this palette trim (carkit/trims.ts
+ * `INTERIOR_TRIMS` id; null hands back each car's own draw). `?trim=<id>` sets it from
+ * the start, so a look tool shoots the real game in it.
+ */
+let kitTrimOverride: string | null = import.meta.env?.DEV === true && typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('trim')
+  : null;
+
+export function setKitTrimOverride(id: string | null): void {
+  kitTrimOverride = id;
+}
+
+const trimUpholstery = new THREE.Color();
+const trimDash = new THREE.Color();
+
+/**
+ * Gives a kit car its interior trim, as `applyRandomPaint` its colour: one of its model's
+ * trims (carkit/trims.ts `kitTrimOptions`), picked from the car's appearance key, so a
+ * saved car keeps its cabin with nothing stored. Written into its own material copies.
+ */
+function applyKitTrim(paint: readonly THREE.Material[], def: CarModelDef, appearanceKey: string): void {
+  if (!def.kit) return;
+  const forced = kitTrimOverride === null ? undefined : INTERIOR_TRIMS.find((trim) => trim.id === kitTrimOverride);
+  const options = kitTrimOptions(def.kit);
+  const option = forced ? kitTrimOption(def.kit, forced) : options[appearanceHash(`${def.id}:interior`, appearanceKey) % options.length]!;
+  kitTrimTint(def.kit, option, trimUpholstery, trimDash);
+  for (const material of paint) setCarKitTrim(material, trimUpholstery, trimDash);
 }
 
 /**
@@ -1954,6 +1986,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
   }
   prepareSovietShellFaces(body, t.def);
   applyRandomPaint(body, t.def, appearanceKey);
+  applyKitTrim(paint, t.def, appearanceKey);
   markStickerSurfaces(body, t.def, glass);
   body.name = 'body';
   const decals = new CarStickerDecals(
@@ -2164,6 +2197,7 @@ function cloneStaticModel(t: Template, appearanceKey: string): StaticCarInstance
     const paint = [...clones.values()];
     const glass = cloneCarGlass(group, paint, true);
     applyRandomPaint(group, t.def, appearanceKey);
+    applyKitTrim(paint, t.def, appearanceKey);
     for (const material of glass) material.opacity = kitGlassOpacity(Infinity);
     let sets = kitStaticWheels.get(t.def.id);
     if (!sets) kitStaticWheels.set(t.def.id, (sets = new Map()));

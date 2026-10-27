@@ -2301,7 +2301,7 @@ class Cabin {
           // The top meets the lining's foot, LINING_DEPTH in from the deck's edge.
           return [this.P(x(yb), yb, s), this.P(x(yc), yc, s), this.P(x(belt), belt, s), this.P(side * (sec.r4[0] - LINING_DEPTH), sec.r4[1], s)];
         });
-        this.fixed.color(this.spec.look.upholstery);
+        this.fixed.color(this.spec.look.upholstery, 'upholstery');
         for (let k = 0; k + 1 < columns.length; k++) this.fixed.bridge('trim', columns[k]!, columns[k + 1]!);
       }
     }
@@ -2330,7 +2330,7 @@ class Cabin {
           const yt = Math.max(yb, table(byS, s));
           return [this.P(x(s, yb), yb, s), this.P(x(s, yt), yt, s)];
         });
-        this.fixed.color(this.spec.look.upholstery);
+        this.fixed.color(this.spec.look.upholstery, 'upholstery');
         for (let k = 0; k + 1 < columns.length; k++) this.fixed.bridge('trim', columns[k]!, columns[k + 1]!);
       }
     }
@@ -2360,7 +2360,7 @@ class Cabin {
       if (s > s0 + 0.004 && s < s1 - 0.004) ss.push(s);
     }
     ss.push(s1);
-    const b = this.fixed.color(shade(this.spec.look.upholstery, 0.8));
+    const b = this.fixed.color(shade(this.spec.look.upholstery, 0.8), 'upholstery');
     for (const side of [1, -1]) {
       const xi = side * (this.frame.wellX(w.rear) - 0.02);
       const xo = (s: number): number => side * (this.frame.sideX(s, top(s)) - SIDE_CLEAR);
@@ -2409,7 +2409,7 @@ class Cabin {
     const s1 = cowl + c.ds1;
     const at = this.P(c.half, this.standY, (s0 + s1) / 2);
     this.hinge(this.group, ORIGIN, 'engine_cover', at, { channel: 'engine_cover', kind: 'rot', axis: [0, 0, 1], amount: -COVER_LIFT }, { id: 'engine_cover', label: 'Кожух двигателя' }, (h) => {
-      h.color(shade(this.spec.look.dash, 0.9));
+      h.color(shade(this.spec.look.dash, 0.9), 'dash');
       pad(h, 'trim', this.P(0, (this.standY + y1) / 2, (s0 + s1) / 2), [c.half, (y1 - this.standY) / 2, (s1 - s0) / 2], COVER_CHAMFER, COVER_TAPER, false);
     });
   }
@@ -2564,7 +2564,7 @@ class Cabin {
     };
     const ss = [0, 0.25, 0.5, 0.75, 1].map((k) => lerp(s0, s1, k));
     const row = (side: number): Vec3[] => ss.map((s) => this.P(side * edge(s), y, s));
-    const b = this.fixed.color(shade(this.spec.look.dash, 1.1)).bridge('trim', row(1), row(-1));
+    const b = this.fixed.color(shade(this.spec.look.dash, 1.1), 'dash').bridge('trim', row(1), row(-1));
     if (this.hatch) return;
     // A saloon's boot stands behind the shelf: a wall at its rear edge from the cushion's
     // height up to the back light's foot (where the lining starts) shuts it off, above the
@@ -2608,14 +2608,15 @@ class Cabin {
 
   /**
    * Inks `b` for a dash surface and returns its slot: the paint slot in white on a painted
-   * steel dash (`KitLook.dashPainted`), so it takes the car's colour; `colour` in trim otherwise.
+   * steel dash (`KitLook.dashPainted`), so it takes the car's colour; `colour` (the dash's
+   * colour or a shade of it, trim family `dash`) in trim otherwise.
    */
   private dashSurface(b: PartBuilder, colour: number): KitSlot {
     if (this.spec.look.dashPainted) {
       b.color(0xffffff);
       return 'paint';
     }
-    b.color(colour);
+    b.color(colour, 'dash');
     return 'trim';
   }
 
@@ -2754,7 +2755,7 @@ class Cabin {
         const [hx, hy] = v.half ?? [0.035, 0.024];
         b.push(m.matrix).color(COLOURS.black);
         inlay(b, 'trim', rectCorners(0, 0, hx, hy, 0));
-        b.color(look.dash);
+        b.color(look.dash, 'dash');
         const n = Math.round(hy / 0.012) - 1;
         // Louvres 6 mm deep from 4.5 mm off the backing laid in the face: apart in depth from the road.
         for (let i = -n; i <= n; i++) beam(b, 'trim', [-(hx - 0.003), i * 0.012, 0.0075], [hx - 0.003, i * 0.012, 0.0075], 0.003, 0.004);
@@ -2777,7 +2778,7 @@ class Cabin {
         b.push((on === 'cluster' ? this.clusterAt(a, dy) : this.fascia(a, belt + dy)).matrix);
         // No back faces: each sits on the face it is mounted on.
         b.color(COLOURS.black).box('trim', [0, 0, 0.003], [0.017, 0.027, 0.003], 0b011111);
-        b.color(shade(look.dash, 1.4)).box('trim', [0, 0.003, 0.009], [0.012, 0.02, 0.003], 0b011111);
+        b.color(shade(look.dash, 1.4), 'dash').box('trim', [0, 0.003, 0.009], [0.012, 0.02, 0.003], 0b011111);
         b.pop();
       }
     }
@@ -2977,7 +2978,7 @@ class Cabin {
     const [x, dy] = this.lay.ashtray;
     const m = this.fascia(x, this.belt + dy);
     fineDetail(this.hinge(this.group, ORIGIN, 'ashtray', m.at(0, 0, 0), { channel: 'ashtray', kind: 'pos', axis: m.n, amount: 0.08 }, { id: 'ashtray', label: 'Пепельница' }, (b) => {
-      b.push(m.matrix).color(shade(this.spec.look.dash, 1.2));
+      b.push(m.matrix).color(shade(this.spec.look.dash, 1.2), 'dash');
       pad(b, 'trim', [0, 0, 0.005], [0.065, 0.02, 0.005], 0.003);
       b.color(COLOURS.black).box('chrome', [0, 0.012, 0.0105], [0.03, 0.003, 0.0008]);
       b.color(COLOURS.metal).box('trim', [0, -0.002, -0.04], [0.058, 0.016, 0.04]);
@@ -3002,7 +3003,7 @@ class Cabin {
       pad(this.fixed, 'trim', [0, 0, 0.003], [0.017, 0.027, 0.003], 0.002);
       this.fixed.pop();
       fineDetail(this.hinge(this.group, ORIGIN, 'light_switch', lm.at(0, 0, 0.006), { channel: 'lights', kind: 'rot', axis: lm.u, amount: 0.16 }, lightCtl, (b) => {
-        b.push(lm.matrix).color(shade(this.spec.look.dash, 1.4));
+        b.push(lm.matrix).color(shade(this.spec.look.dash, 1.4), 'dash');
         pad(b, 'trim', [0, 0, 0.011], [0.012, 0.022, 0.005], 0.003);
         b.color(COLOURS.green).quad('trim', [-0.005, 0.006, 0.0162], [0.005, 0.006, 0.0162], [0.005, 0.014, 0.0162], [-0.005, 0.014, 0.0162]);
         b.pop();
@@ -3112,7 +3113,7 @@ class Cabin {
     if (L.console) {
       const { ds0, ds1, height } = L.console;
       const y1 = this.floorY + height;
-      b.color(shade(this.spec.look.dash, 1.05));
+      b.color(shade(this.spec.look.dash, 1.05), 'dash');
       pad(b, 'trim', this.P(0, (this.floorY + y1) / 2, cowl + (ds0 + ds1) / 2), [0.1, (y1 - this.floorY) / 2, (ds1 - ds0) / 2], 0.02);
       this.dashItems.push({ kind: 'console', at: this.P(0, y1, cowl + (ds0 + ds1) / 2) });
     }
@@ -3181,9 +3182,9 @@ class Cabin {
       const frameBottom = this.floorY + 0.025;
       b.color(COLOURS.black);
       pad(b, 'trim', this.P(x, (frameBottom + frameTop) / 2, hip - 0.17), [0.2, (frameTop - frameBottom) / 2, 0.2], 0.02);
-      b.pushAt(this.P(x, top - 0.065, hip - 0.17), [-0.07, 0, 0]).color(uph);
+      b.pushAt(this.P(x, top - 0.065, hip - 0.17), [-0.07, 0, 0]).color(uph, 'upholstery');
       pad(b, 'trim', ORIGIN, [0.25, 0.065, 0.26], 0.04);
-      inlay(b.color(insert), 'trim', [[-0.11, 0.065, -0.19], [0.11, 0.065, -0.19], [0.11, 0.065, 0.19], [-0.11, 0.065, 0.19]]);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.11, 0.065, -0.19], [0.11, 0.065, -0.19], [0.11, 0.065, 0.19], [-0.11, 0.065, 0.19]]);
       b.pop();
     });
     // The front passenger's cushion holds things (vehicle/cabin.ts): the room over its
@@ -3201,10 +3202,10 @@ class Cabin {
     const t = L.recline;
     const backAt = this.P(x, top - 0.035, hip + 0.07);
     const back = this.hinge(seat, baseAt, `seatback_${pos}`, backAt, { channel: `seatback_${pos}`, kind: 'rot', axis: [1, 0, 0], amount: -0.6 }, { id: `seatback_${pos}`, label: `Спинка сиденья ${WHERE[pos]}` }, (b) => {
-      b.pushAt(backAt, [-t, 0, 0]).color(uph);
+      b.pushAt(backAt, [-t, 0, 0]).color(uph, 'upholstery');
       pad(b, 'trim', [0, 0.27, -0.05], [0.245, 0.27, 0.065], 0.04, 0.88);
       if (L.bolsters) for (const sx of [-1, 1]) pad(b, 'trim', [sx * 0.2, 0.24, -0.005], [0.045, 0.22, 0.05], 0.03);
-      inlay(b.color(insert), 'trim', [[-0.1, 0.07, 0.015], [0.1, 0.07, 0.015], [0.1, 0.48, 0.015], [-0.1, 0.48, 0.015]]);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.1, 0.07, 0.015], [0.1, 0.07, 0.015], [0.1, 0.48, 0.015], [-0.1, 0.48, 0.015]]);
       b.pop();
     });
 
@@ -3214,7 +3215,7 @@ class Cabin {
       b.pushAt(headAt, [-t, 0, 0]);
       b.color(COLOURS.black);
       for (const sx of [-0.07, 0.07]) beam(b, 'chrome', [sx, -0.045, 0], [sx, 0.015, 0], 0.005, 0.005);
-      b.color(uph);
+      b.color(uph, 'upholstery');
       pad(b, 'trim', [0, 0.065, 0], [0.13, 0.065, 0.05], 0.028);
       b.pop();
     });
@@ -3234,7 +3235,7 @@ class Cabin {
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const skirtTop = top - 0.12;
-    b.color(shade(uph, 0.85));
+    b.color(shade(uph, 0.85), 'upholstery');
     pad(b, 'trim', this.P(0, (this.standY + skirtTop) / 2, H + (BENCH_BACK - 0.36) / 2), [wall, (skirtTop - this.standY) / 2, (BENCH_BACK + 0.36) / 2], 0.015);
     if (!this.hatch) {
       const s0 = H + 0.1;
@@ -3242,14 +3243,14 @@ class Cabin {
       const y1 = top + 0.025;
       b.box('trim', this.P(0, (this.floorY + y1) / 2, (s0 + s1) / 2), [wall, (y1 - this.floorY) / 2, (s1 - s0) / 2]);
     }
-    b.pushAt(this.P(0, top - 0.07, H - 0.13), [-0.06, 0, 0]).color(uph);
+    b.pushAt(this.P(0, top - 0.07, H - 0.13), [-0.06, 0, 0]).color(uph, 'upholstery');
     pad(b, 'trim', ORIGIN, [half, 0.07, 0.25], 0.04);
-    b.color(insert);
+    b.color(insert, 'upholstery');
     for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.12, 0.07, -0.18], [sx + 0.12, 0.07, -0.18], [sx + 0.12, 0.07, 0.18], [sx - 0.12, 0.07, 0.18]]);
     b.pop();
-    b.pushAt(this.P(0, top - 0.035, H), [-L.benchRecline, 0, 0]).color(uph);
+    b.pushAt(this.P(0, top - 0.035, H), [-L.benchRecline, 0, 0]).color(uph, 'upholstery');
     pad(b, 'trim', [0, 0.25, -0.05], [half, 0.25, 0.065], 0.04, 0.97);
-    b.color(insert);
+    b.color(insert, 'upholstery');
     for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.11, 0.06, 0.015], [sx + 0.11, 0.06, 0.015], [sx + 0.11, 0.42, 0.015], [sx - 0.11, 0.42, 0.015]]);
     b.pop();
     const group = new THREE.Group();
@@ -3383,7 +3384,7 @@ class Cabin {
       const ay = belt - 0.23;
       const as = s0 + (front ? 0.58 : 0.5) * len;
       const ah = front ? 0.15 : 0.12;
-      b.color(shade(this.spec.look.upholstery, 0.75));
+      b.color(shade(this.spec.look.upholstery, 0.75), 'upholstery');
       b.bevelBox('trim', card(as, ay, 0.03), [0.03, 0.025, ah], 0.012);
       b.color(COLOURS.black);
       const cup = (s: number, k: number): Vec3 => card(s, ay + 0.025, 0.03 + k * 0.016);
@@ -3405,7 +3406,7 @@ class Cabin {
       const [u0, u1] = upper;
       const ky = (s: number): number => f.section(s).r4[1] + cab.glassBottom - 0.004;
       const cap = (s: number, d: number): Vec3 => this.P(side * (this.glassX(s, ky(s)) - d), ky(s), s);
-      b.color(this.spec.look.dash).quad('trim', cap(u0 + 0.01, 0.02), cap(u1 - 0.01, 0.02), cap(u1 - 0.01, DOOR_CARD + 0.002), cap(u0 + 0.01, DOOR_CARD + 0.002));
+      b.color(this.spec.look.dash, 'dash').quad('trim', cap(u0 + 0.01, 0.02), cap(u1 - 0.01, 0.02), cap(u1 - 0.01, DOOR_CARD + 0.002), cap(u0 + 0.01, DOOR_CARD + 0.002));
       const knob = cap(u1 - 0.07, 0.05);
       fit.cylinderY('chrome', add(knob, [0, 0.014, 0]), 0.0065, 0.016, 6);
 

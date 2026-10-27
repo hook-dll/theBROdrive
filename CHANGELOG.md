@@ -4,6 +4,16 @@
 
 ### Added
 
+- Kit cars' cabins are no longer one colour per model: every car leaves the works in its
+  own interior trim, picked from its id as its paint is (so a saved car keeps it): the
+  model's own or one of a muted palette — grey, sand, blue, brown, black, burgundy,
+  olive — each model allowing its period's (VAZ classics burgundy, brown, sand, grey,
+  blue; the 90s foreign cars grey, sand, blue, black; …). Seats, bench, door cards and
+  armrests follow the upholstery; the W124 and E34 dashes follow too, the others keep
+  their black or grey plastic. One uniform in the car's own material, no new program or
+  draw (`src/carkit/trims.ts`, `setCarKitTrim`); the car lab's «Салон» puts every car in
+  one trim (`?trim=`, `__carLab.trim`).
+
 - BMW E34 kit car (520i 24V saloon, 1990-95; `src/carkit/bmw.ts`, `CABIN_E34`,
   `refs/e34.json`, `measurements-e34.md`; the M50B20 and the ZF five-speed in the
   registry, the cross-spoke alloys), built after a feature inventory the owner answered:

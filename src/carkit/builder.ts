@@ -47,6 +47,34 @@ export function colour(hex: number): Vec3 {
   return [c.r, c.g, c.b];
 }
 
+/**
+ * Interior trim families (carkit/trims.ts): an ink derived from the car's
+ * `KitLook.upholstery` or `KitLook.dash` belongs to that family, and a car instance
+ * recolours each family by its own trim (render/materials.ts `setCarKitTrim`).
+ */
+export type TrimFamily = 'upholstery' | 'dash';
+
+/**
+ * One builder's trim inks: per sRGB colour drawn in the `trim` slot, the trim family it
+ * was inked in, null for a plain ink, 'mixed' when both. `build` hangs it on each
+ * geometry as `userData.kitInks`, which every later pass keeps (cuts, leans, flat runs);
+ * `finishKitSurfaces` reads it.
+ */
+export type InkLog = Map<number, TrimFamily | null | 'mixed'>;
+
+const _ink = new THREE.Color();
+
+/** The sRGB hex a linear vertex colour displays as: the key of an `InkLog`. */
+export function inkKey(r: number, g: number, b: number): number {
+  return _ink.setRGB(r, g, b).getHex();
+}
+
+function logInk(log: InkLog, key: number, family: TrimFamily | null | 'mixed'): void {
+  const seen = log.get(key);
+  if (seen === undefined) log.set(key, family);
+  else if (seen !== family) log.set(key, 'mixed');
+}
+
 /** Which caps a prism gets (`PartBuilder.extrude`): both, none, or only the one at z0 or z1. */
 export type Caps = boolean | 'z0' | 'z1';
 
@@ -54,6 +82,10 @@ export class PartBuilder {
   private readonly slots = new Map<KitSlot, SlotBuffer>();
   private readonly stack: THREE.Matrix4[] = [new THREE.Matrix4()];
   private ink: Vec3 = [1, 1, 1];
+  private inkFamily: TrimFamily | null = null;
+  /** The current ink is not yet in `inks` (it goes in with its first trim triangle). */
+  private inkPending = true;
+  private readonly inks: InkLog = new Map();
 
   get matrix(): THREE.Matrix4 {
     return this.stack[this.stack.length - 1]!;
@@ -80,9 +112,14 @@ export class PartBuilder {
     return this;
   }
 
-  /** Vertex colour for the following faces (only vertex-coloured slots read it). */
-  color(hex: number | Vec3): this {
+  /**
+   * Vertex colour for the following faces (only vertex-coloured slots read it). `family`:
+   * the colour is the car's upholstery or dash, or a shade of it (`TrimFamily`).
+   */
+  color(hex: number | Vec3, family: TrimFamily | null = null): this {
     this.ink = typeof hex === 'number' ? colour(hex) : hex;
+    this.inkFamily = family;
+    this.inkPending = true;
     return this;
   }
 
@@ -112,6 +149,10 @@ export class PartBuilder {
     buffer.positions.push(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, _c.x, _c.y, _c.z);
     const [r, g, bl] = this.ink;
     buffer.colors.push(r, g, bl, r, g, bl, r, g, bl);
+    if (this.inkPending && slot === 'trim') {
+      logInk(this.inks, inkKey(r, g, bl), this.inkFamily);
+      this.inkPending = false;
+    }
     return this;
   }
 
@@ -268,7 +309,7 @@ export class PartBuilder {
     return this;
   }
 
-  /** One mesh per slot; non-indexed, flat normals. */
+  /** One mesh per slot; non-indexed, flat normals. The trim's carries the builder's `InkLog`. */
   build(): Map<KitSlot, THREE.BufferGeometry> {
     const out = new Map<KitSlot, THREE.BufferGeometry>();
     for (const [slot, buffer] of this.slots) {
@@ -279,6 +320,7 @@ export class PartBuilder {
       geometry.computeVertexNormals();
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
+      if (slot === 'trim') geometry.userData.kitInks = this.inks;
       out.set(slot, geometry);
     }
     return out;
@@ -307,6 +349,7 @@ export class PartBuilder {
       mine.positions = mine.positions.concat(buffer.positions);
       mine.colors = mine.colors.concat(buffer.colors);
     }
+    for (const [key, family] of other.inks) logInk(this.inks, key, family);
     return this;
   }
 }

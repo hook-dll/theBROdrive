@@ -110,7 +110,8 @@ stage 4 = driving):
 ## Per-car status
 
 All cars: in the world and the lab; interior, opening parts, lamps, LOD, dust/scratches/
-stickers on the body and on the opening parts work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`.
+stickers on the body and on the opening parts work; wheels from `DISTINCT_SOVIET_WHEEL_SETS`;
+each car its own interior trim from a muted palette (`trims.ts`, README "Interior trims").
 Triangle counts in README.
 
 | Car | Spec | Measured on | Status | Left / known gaps |

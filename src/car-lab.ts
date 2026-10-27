@@ -21,7 +21,9 @@
  *
  * Automation: `window.__carLab` (see `CarLabApi`) sets state and focuses cars without
  * the UI, which is how report screenshots are taken reproducibly. Query parameters
- * `dirt`, `scratches`, `time` and `focus` seed the same state from the URL.
+ * `dirt`, `scratches`, `time` and `focus` seed the same state from the URL; `trim` (an
+ * interior trim id, carkit/trims.ts) puts every kit car in that trim, as the «Салон»
+ * selector does; the «Экземпляр» slider shows each car's own draw of trim and paint.
  */
 
 import * as THREE from 'three';
@@ -36,6 +38,7 @@ import {
   carSpawnYAboveGround,
   createCarModel,
   loadCarModel,
+  setKitTrimOverride,
   setWheelSetOverride,
   type CarModelInstance,
 } from './render/carmodel';
@@ -45,6 +48,7 @@ import { makeFlatMaterial } from './render/materials';
 import { Sky } from './render/sky';
 import { loadStarField } from './render/starcatalog';
 import { KitRig, type KitControl, type KitPicked } from './carkit/rig';
+import { INTERIOR_TRIMS } from './carkit/trims';
 import type { VehicleLamps } from './vehicle/vehiclelamps';
 import { CAR_MODELS, type CarModelDef } from './vehicle/carmodels';
 
@@ -107,6 +111,8 @@ export interface CarLabApi {
   only(modelId: string | null): void;
   /** Rebuilds every car on one wheel set from the pools (a pack id or a `gw_*` design), or on its own draw again with null. */
   wheels(setId: string | null): void;
+  /** Rebuilds every kit car in one interior trim (carkit/trims.ts `INTERIOR_TRIMS` id), or in its own draw again with null. */
+  trim(trimId: string | null): void;
   /** A kit car's rig: set a channel, click a control by id, list the controls. */
   kit(modelId: string): {
     set(channel: string, value: number): void;
@@ -157,6 +163,8 @@ function createInterface(
   const styleRow = CAR_FACTORIES.length > 1
     ? `<label><span>Стиль</span><select data-control="factory">${CAR_FACTORIES.map((f, i) => `<option value="${i}">${f.label}</option>`).join('')}</select><output></output></label>`
     : '';
+  // `?trim` is carmodel.ts's override from the start: the selector shows it.
+  const initialTrim = new URLSearchParams(window.location.search).get('trim') ?? '';
   // The unified car style is a compile-time flag in carmodel.ts, so its control
   // reloads the lab rather than rebuilding the grid (see the module note).
   const unifiedRow = '<label class="toggle"><span>Единый стиль</span><input data-toggle="carstyle" type="checkbox"><output></output></label>';
@@ -176,6 +184,7 @@ function createInterface(
     <label><span>Царапины</span><input data-control="scratches" type="range" min="0" max="1" step="0.01"><output></output></label>
     <label><span>Время суток</span><input data-control="timeHours" type="range" min="0" max="24" step="0.05"><output></output></label>
     <label><span>Экземпляр</span><input data-control="variant" type="range" min="0" max="19" step="1"><output></output></label>
+    <label><span>Салон</span><select data-control="trim"><option value="">по экземпляру</option>${INTERIOR_TRIMS.map((trim) => `<option value="${trim.id}"${trim.id === initialTrim ? ' selected' : ''}>${trim.label}</option>`).join('')}</select><output></output></label>
     <label><span>Качество</span><select data-control="quality"><option value="acceptable">Acceptable</option><option value="standard">Standard</option><option value="blessing">Blessing</option></select><output></output></label>
     ${unifiedRow}
     ${styleRow}
@@ -220,6 +229,9 @@ function createInterface(
       }
     } else if (key === 'focus') {
       api.focus(input.value || undefined);
+      return;
+    } else if (key === 'trim') {
+      api.trim(input.value || null);
       return;
     }
     sync();
@@ -566,6 +578,10 @@ export async function bootCarLab(): Promise<void> {
     },
     wheels(setId) {
       setWheelSetOverride(setId);
+      for (const car of cars) buildCar(car);
+    },
+    trim(trimId) {
+      setKitTrimOverride(trimId);
       for (const car of cars) buildCar(car);
     },
     kit(modelId) {
