@@ -89,10 +89,17 @@
     },
     "backLightFoot": {
       "v": [
-        3.279,
+        3.387,
         0.842
       ],
-      "src": "D back light foot at the boot s 3254, 842 high (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px)) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table)"
+      "src": "D the 2101 drawing's profile outline carried to 0.842, s 3.362 (vaz2101.json backLightFoot: the C pillar's outer line, not the glass's seal line read as 3.254 before) +0.025: the 2103's front overhang 628 against the 2101's 603 (vaz_2103.jpg dimensions; README BODY_124 table). The 2103 drawing's own outline meets its deck at (1766, 266) = s 3.402 (its glass's seal line at s 3.285)",
+      "accepted": {
+        "v": [
+          3.342,
+          0.842
+        ],
+        "why": "the 124 shell as the owner accepted it (2026-10-28): 0.045 ahead of the drawn outline, 0.035 across the edge (tol 0.03); the 2101 side photo puts the foot nearer the built car than the drawings do (vaz2101.json backLightFoot)"
+      }
     },
     "moulding": {
       "v": [

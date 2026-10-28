@@ -381,8 +381,14 @@ export interface KitCarSpec {
    * `peak` bends it once more (see `EndLean`).
    */
   readonly frontLean?: EndLean;
-  /** Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges. */
-  readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right' };
+  /**
+   * Fuel flap on a rear wing (the right one unless `side` says left): s and height ranges.
+   * `cup`: how far inside the skin the filler cup's back lies (exterior.ts `buildFiller`;
+   * 0.035 when absent, the flap's own thickness). On a flank upright at the flap the closed
+   * flap's inner skin lies at that depth too, and the cup's back fights it seen through the
+   * glass from the far side: such a car sets a deeper cup.
+   */
+  readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right'; readonly cup?: number };
   readonly look: KitLook;
   /** Per-car changes to the platform's cabin layout (interior.ts `LAYOUTS`): another dash, wheel or gauges. */
   readonly cabinLayout?: CabinLayoutOverride;

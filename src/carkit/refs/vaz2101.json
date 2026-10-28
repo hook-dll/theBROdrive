@@ -78,10 +78,17 @@
     },
     "backLightFoot": {
       "v": [
-        3.254,
+        3.362,
         0.842
       ],
-      "src": "D back light foot at the boot s 3254, 842 high (specs.ts BODY_124 comment (2101 drawing, 4.703 mm/px))"
+      "src": "D side (vaz_2101.jpg, 4.703 mm/px, ground row 336, bumper tip px 518.8 = the front hub's 647 less 603 mm): the profile's rear outline (the C pillar's outer line, the edge the check measures on the built car) at px 1221.5 (s 3.305) 0.902 high and px 1209.5 (s 3.248) 0.962 high, carried down to 0.842 as the check carries the built edge (ds/dy −0.95); the line meets the deck at (1232, 154) = s 3.354, 0.856. The earlier 3.254 was the glass's seal line (the inner double line, its foot (1206, 158) = s 3.232, 0.837), not the outline",
+      "accepted": {
+        "v": [
+          3.317,
+          0.842
+        ],
+        "why": "the 124 shell as the owner accepted it (2026-10-28): its back light 0.045 ahead of the drawn outline at 0.842, 0.035 across the edge (tol 0.03; 0.03 / 0.02 at 0.90 / 0.96, a slightly steeper glass, ds/dy −0.75). A side photo (P Commons 'Lada 1200L in Kerava, Finland (side view).jpg', 1920 px, scale 2.54 mm/px from the rear tyre's 0.576 diameter) puts the outline's foot 0.296 behind the rear door's shut line (read there 2.969, the drawing's 2.972): s ≈ 3.265 in the door's plane, up to 0.05 more for the pillar standing inboard of it; the built edge at the deck (3.306 at 0.856) lies between photo and drawing"
+      }
     }
   },
   "dash": {

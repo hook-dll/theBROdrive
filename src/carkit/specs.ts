@@ -67,7 +67,8 @@ function onBody(body: KitBody, ds: number, length: number): KitBody {
  * 2101 drawing, 4.703 mm/px: overhangs 603 / 1046 over a 2424 wheelbase; the body sheet
  * starts 103 mm behind the bumper; bonnet lip 748 high rising to 884 at the cowl
  * (s 1160); an upright screen to the roof's front at s 1416; roof to s 2996; back
- * light down to the boot at s 3254, 842 high; tail top 762 at s 3970. Sill 263, door
+ * light's glass down to the boot at s 3254, 842 high (its seal line; the profile's outline
+ * meets the deck at s 3354, 856: refs backLightFoot); tail top 762 at s 3970. Sill 263, door
  * bottoms 287, belt 856, glass 865 to 1237, roof gutter 1275, roof 1337. Front door
  * 1171 to 2079, B pillar to 2121, rear door to 2972 over the rear arch.
  */
@@ -141,7 +142,9 @@ const BODY_124: KitBody = {
   // per m]; the 2101 and 2103 side photos −0.14 / −0.28 [P]. Above the rear fangs' top
   // (0.51 on the 2106, the highest), the deck row 0.785 out 0.043.
   rearLean: { base: 0.52, lean: -0.16, blend: 0.1 },
-  flap: { s0: 3.2, s1: 3.31, y0: 0.66, y1: 0.76 },
+  // The cup behind the flap 0.05 deep: the flank stands upright there, and at the default
+  // 0.035 its back lay 0.4–2 mm off the closed flap's inner skin (kit-zfight).
+  flap: { s0: 3.2, s1: 3.31, y0: 0.66, y1: 0.76, cup: 0.05 },
 };
 
 // The 124 noses lean forward from the bumper's top (owner, 2026-10-27; measurements-

@@ -4,6 +4,15 @@
 
 ### Changed
 
+- THE 2101, 2103 AND 2106 FUEL FLAP NO LONGER FLICKERS AGAINST ITS FILLER CUP
+  (`carkit/exterior.ts` `buildFiller`, `flap.cup`). The cup's back lay 35 mm inside the
+  skin, the flap's own thickness: on the 124 shell's upright flank that is where the
+  closed flap's inner skin lies too (0.4–2 mm apart, seen through the glass from the far
+  side). `BODY_124` sets the cup 50 mm deep; every other car is identical. The three
+  cars' `backLightFoot` ref read the drawing's glass seal line (3.254) where the check
+  measures the profile's outline (3.362 on vaz_2101.jpg); corrected, with the built car
+  accepted 4.5 cm ahead of it (a side photo puts the foot nearer the built car).
+
 - EVERY KIT CAR PARKS ITS WIPERS LOW ALONG THE SCREEN'S FOOT, AS THE E34 DOES
   (`carkit/exterior.ts` `buildWipers`). The blade had to lie wholly on the glass, so on
   the short arms the screens allow its inner end cleared the foot only 10–26° up: tips

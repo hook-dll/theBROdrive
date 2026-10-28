@@ -1803,19 +1803,21 @@ function buildFiller(ctx: KitContext): void {
   const y = (flap.y0 + flap.y1) / 2;
   const side = flap.side === 'left' ? 1 : -1;
   const skin = frame.sideX(s, y);
-  const x = side * (skin - 0.035);
+  // The cup's back (spec.ts `flap.cup`): the flap's own thickness unless the car sets it deeper.
+  const depth = flap.cup ?? 0.035;
+  const x = side * (skin - depth);
   const b = new PartBuilder().color(0x1a1b1c);
   // 12 mm inside the opening each way, clear of the flap's edge returns and the jambs.
   const hz = (flap.s1 - flap.s0) / 2 - 0.012;
   const hy = (flap.y1 - flap.y0) / 2 - 0.012;
   const corners = ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([ds, dy]): [number, number] => [s + ds * hz, y + dy * hy]);
   const rim = corners.map(([cs, cy]): Vec3 => [side * (skinX(frame, cs, cy) - 0.005), cy, frame.z(cs)]);
-  const back = corners.map(([cs, cy]): Vec3 => [side * (skin - 0.035), cy, frame.z(cs)]);
+  const back = corners.map(([cs, cy]): Vec3 => [side * (skin - depth), cy, frame.z(cs)]);
   for (let i = 0; i < 4; i++) b.quad('trim', back[i]!, back[(i + 1) % 4]!, rim[(i + 1) % 4]!, rim[i]!);
   b.quad('trim', back[3]!, back[2]!, back[1]!, back[0]!);
   b.color(0x2e3032).cylinderX('trim', [x + side * 0.002, y, frame.z(s)], 0.026, 0.01, 8);
   addBuilt(ctx.root, b, [0, 0, 0], 'filler');
-  // From the cup's back (0.05 inside the skin) to FILLER_PROUD outside it.
+  // From 0.05 inside the skin (at or behind the cup's back) to FILLER_PROUD outside it.
   const inner = skin - 0.05;
   const outer = skin + FILLER_PROUD;
   const marker = new THREE.Object3D();
