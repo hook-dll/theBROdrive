@@ -2195,6 +2195,8 @@ export class Autopilot {
   private laybyScanSpeed = 0;
   /** Share of the mode's pace this driver uses; see `setPace`. */
   private paceValue = 1;
+  /** Share of the mode's own tyre reserves this driver plans on; see `setGripShare`. */
+  private gripShareValue = 1;
   /** Ambient traffic may use a per-driver following distance. */
   private followingHeadwayValue: number | null = null;
   private oncomingGap = Infinity;
@@ -2880,6 +2882,15 @@ export class Autopilot {
   setPace(fraction: number): void {
     this.paceValue = clamp(fraction, 0.4, 1);
   }
+  /**
+   * A RACER'S SKILL AT THE LIMIT, for the races at the tracks (race/rival.ts): a share,
+   * 0.6..1, of the mode's `gripReserve` and `brakeReserve`, so a less skilled racer
+   * corners and brakes on less of the tyres and a full one is the mode as tuned. Traffic
+   * never sets it: 1 is the mode exactly.
+   */
+  setGripShare(share: number): void {
+    this.gripShareValue = clamp(share, 0.6, 1);
+  }
   setFollowingHeadway(seconds: number): void {
     this.followingHeadwayValue = clamp(seconds, 0.9, 3.4);
   }
@@ -3138,7 +3149,7 @@ export class Autopilot {
       (2 * waypointRight) / Math.max(relativeX * relativeX + relativeZ * relativeZ, MIN_PURSUIT_DISTANCE_SQ);
     const lateralAccel = Math.min(
       config.lateralAccel,
-      Math.max(1e-3, vehicle.estimatedLateralAccel(SurfaceType.Asphalt, speed) * config.gripReserve),
+      Math.max(1e-3, vehicle.estimatedLateralAccel(SurfaceType.Asphalt, speed) * config.gripReserve * this.gripShareValue),
     );
     const holdDistance = Math.max(LANE_HOLD_MIN_DISTANCE_M, speed * config.holdSeconds);
     const holdCap = Math.min(
@@ -3537,7 +3548,7 @@ export class Autopilot {
     const currentPhysicalBrake = vehicle.estimatedBrakeDecel(currentSurface);
     const currentBrakeAccel = Math.max(
       MIN_PLANNED_BRAKE_MPS2,
-      Math.min(config.brakeAccel, currentPhysicalBrake * config.brakeReserve) +
+      Math.min(config.brakeAccel, currentPhysicalBrake * config.brakeReserve * this.gripShareValue) +
         currentRoad.grade * GRAVITY,
     );
     const gradeLoad = Math.min(
@@ -3568,7 +3579,7 @@ export class Autopilot {
     );
     const currentLateralAccel = Math.min(
       config.lateralAccel,
-      physicalLateralAccel * config.gripReserve,
+      physicalLateralAccel * config.gripReserve * this.gripShareValue,
     );
     // The same, on the graded strip past the paint. See VERGE_CROSS_FALL.
     this.vergeLateralAccel = Math.max(
@@ -3578,7 +3589,7 @@ export class Autopilot {
         (vehicle.estimatedLateralAccel(SurfaceType.LooseShoulder, speed) *
           Math.sqrt(Math.max(0.35, 1 - gradeLoad * gradeLoad)) -
           GRAVITY * VERGE_CROSS_FALL) *
-          config.gripReserve,
+          config.gripReserve * this.gripShareValue,
       ),
     );
     const vergeLineAccel = this.vergeLateralAccel * MANOEUVRE_LATERAL_SHARE;
@@ -5411,7 +5422,7 @@ export class Autopilot {
       const paceSpeed = Math.max(speed, clearRoadSpeed);
       let physicalLateral = vehicle.estimatedLateralAccel(surface, paceSpeed) * gradeShare;
       let lateralAccel =
-        Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
+        Math.min(config.lateralAccel, physicalLateral * config.gripReserve * this.gripShareValue) * manoeuvreShare;
       let localLimit = Math.min(
         straightLimit,
         bendSpeed(this.modeValue, lateralAccel, bank, curvature, roadCurvature),
@@ -5419,7 +5430,7 @@ export class Autopilot {
       if (localLimit < paceSpeed) {
         physicalLateral = vehicle.estimatedLateralAccel(surface, localLimit) * gradeShare;
         lateralAccel =
-          Math.min(config.lateralAccel, physicalLateral * config.gripReserve) * manoeuvreShare;
+          Math.min(config.lateralAccel, physicalLateral * config.gripReserve * this.gripShareValue) * manoeuvreShare;
         localLimit = Math.min(
           straightLimit,
           bendSpeed(this.modeValue, lateralAccel, bank, curvature, roadCurvature),
@@ -5450,7 +5461,7 @@ export class Autopilot {
       profileLimit[i] = localLimit;
       profileGrip[i] = physicalLateral;
       profileCurvature[i] = curvature;
-      profileBrake[i] = Math.min(config.brakeAccel, physicalBrake * config.brakeReserve);
+      profileBrake[i] = Math.min(config.brakeAccel, physicalBrake * config.brakeReserve * this.gripShareValue);
     }
     // THE BRAKING ZONE IS PLANNED ON WHAT THE TYRES HAVE LEFT FOR IT.
     //
@@ -6111,7 +6122,7 @@ export class Autopilot {
     const bendBrakeShare = Math.max(
       BEND_BRAKE_SHARE_FLOOR,
       Math.sqrt(
-        Math.max(0, 1 - Math.min(1, (lateralUse / (physicalLateralAccel * config.gripReserve)) ** 2)),
+        Math.max(0, 1 - Math.min(1, (lateralUse / (physicalLateralAccel * config.gripReserve * this.gripShareValue)) ** 2)),
       ),
     );
     // …UNLESS HALF A PEDAL CANNOT LOSE THE SPEED IN THE ROOM THERE IS. Behind a MOVING

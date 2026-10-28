@@ -1,8 +1,9 @@
 import type * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../core/input';
-import type { PhysicsWorld } from '../core/physics';
+import { FIXED_DT, type PhysicsWorld } from '../core/physics';
+import { hash01 } from '../core/rng';
 import { formatPay } from '../economy/economy';
-import { createServiceableCarState, poseOnGround } from '../game/spawn';
+import { createServiceableCarState, poseOnGround, type GroundPose } from '../game/spawn';
 import type { CarState, GameWorld, TrailerState } from '../game/state';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { Autopilot } from '../vehicle/autopilot';
@@ -15,87 +16,125 @@ import { TRACK_LIFT_M } from '../world/racetrack/mesh';
 import { CHUNK_SPREAD_M, postHasTrack } from '../world/racetrack/site';
 import type { RaceTrack, TrackPose, TrackProjection } from '../world/racetrack/track';
 import type { Terrain } from '../world/terrain';
-import { hash01 } from '../core/rng';
-import { raceRivalId, raceTrailerId } from './ids';
-import { carClassOf, RIVAL_MODES, rivalPlan, type CarClass, type RivalPlan } from './rival';
-import { RACE_LAPS, RaceSession, type RaceEnd, type Racer } from './session';
-import { advanceRound, canStake, raceRound, RACE_PRIZE, RACE_STAKE, refundStake, settleStake, takeStake } from './stake';
+import { raceRivalId, raceTrailerId, type RaceTrailerOwner } from './ids';
+import { FLIPPED_UP, recoverAt, RecoveryWatch } from './recovery';
+import { carClassOf, fieldPlan, FIELD_SIZE, type CarClass, type FieldPlan, type RivalDriver } from './rival';
+import { RACE_LAPS, RaceSession, type RaceEnd } from './session';
+import { advanceRound, canStake, raceRound, racePrize, RACE_PRIZES, RACE_STAKE, refundStake, settleStake, takeStake } from './stake';
 import { RaceVisuals } from './visuals';
 
 /**
- * THE RACES AT THE TRACKS (game-design2.md §19.7): the rival who waits at a track's grid,
- * the offer, the start, the laps and the result, run in the live world.
+ * THE RACES AT THE TRACKS: the field that waits at a track's grid, the offer, the start,
+ * the laps, the results and the prize, run in the live world.
  *
  * WHERE. Every `SCAN_S` (never while a race is on) the director looks for the race track
- * (world/racetrack/) nearest the player whose grid is within `NEAR_M`. Its rival exists
+ * (world/racetrack/) nearest the player whose grid is within `NEAR_M`. Its field exists
  * only while that track's colliders do — the grid has fixed ground under it, which is the
  * owner chunk in the physics band — and is taken out of the world the moment they go.
  *
- * THE RIVAL is a car in world state (`raceRivalId`), standing in grid slot 1
- * (`startGrid[0]`, right of the crown) with the "RACE ME!" board beside it
- * (race/visuals.ts): streamed, drawn, collided and saved like every other car, LOCKED like
- * a handed-in haul (contracts/world.ts `haulLoadLock`). It is drawn for the track's round
- * and the car the player is in (race/rival.ts `rivalPlan`), put down only where it is not
- * seen up close, and swapped, unseen, for the right one when the round moves on or the
- * player comes in another car.
+ * THE FIELD is `FIELD_SIZE` rival cars in world state (`raceRivalId`), standing in grid
+ * boxes 0.. (pole first, the quickest driver on it; race/rival.ts `fieldPlan`) with the
+ * "RACE ME!" board beside the player's box, `PLAYER_SLOT`, the last of the grid. They are
+ * streamed, drawn, collided and saved like every other car, LOCKED like a handed-in haul
+ * (contracts/world.ts `haulLoadLock`). A field is drawn for the track's round and the car
+ * the player is in, its cars put down ONE PER SCAN (a car materialising is a body and a
+ * mesh; four at once is a hitch), each only where its box is not seen up close, and the
+ * whole field swapped, unseen, when the round moves on or the player comes in another car.
  *
- * THE OFFER. Stopped in grid slot 2 (`startGrid[1]`) in the driver's seat beside a waiting
- * rival, the player is offered the race on F (`prompt`): refused with "need 3 shells"
- * while the jar holds fewer than `RACE_STAKE`, and with "unhitch first" while his car tows
- * anything or is towed. F there is the race's, whatever the answer, until it is let go:
- * it never also gets him out of the car. Accepting takes the stake (race/stake.ts).
+ * THE OFFER. Stopped in the player's box in the driver's seat with the whole field live,
+ * the player is offered the race on F (`prompt`): refused with "need 3 shells" while the
+ * jar holds fewer than `RACE_STAKE`, and with "unhitch first" while his car tows anything
+ * or is towed. F there is the race's, whatever the answer, until it is let go: it never
+ * also gets him out of the car. Accepting takes the stake (race/stake.ts).
  *
  * THE START. A trailer race (a third of the rounds) first puts identical loaded trailers
- * on both cars, coupled in state, which the trailer field hitches as it materialises them.
- * The lights go red, red, red, green (`RaceSession`), and until the green the player's car
- * is held (`holdPlayer`: no throttle, full brake, whatever the pedals or his autopilot
- * ask) and the rival stands parked.
+ * on every car, coupled in state, which the trailer field hitches as it materialises them.
+ * Every car of the race is put in the RACERS collision group (`RACER_GROUPS`). The lights
+ * go red, red, red, green (`RaceSession`), and until the green the player's car is held
+ * (`holdPlayer`: no throttle, full brake, whatever the pedals or his autopilot ask) and
+ * the field stands parked.
  *
- * THE RACE. The rival is driven here, by its own `Autopilot` on the track's `road`, in
- * the mode and pace of its level, and held live by the active-world reconcile whatever
- * its distance (`keepsLive`). Both cars' laps are `RaceSession`'s. The player forfeits
- * on the session's own terms (off the track area 10 s, 150 m away) and here: out of the
- * car, the car on its roof `FLIPPED_S`, or the car gone or its engine dead `WRECKED_S`.
- * The rival lost to the world (its body slept or removed) calls the race off and pays the
- * stake back: that was not the player's doing.
+ * THE RACE. Each rival is driven here, by its own `Autopilot` on the track's `road`: the
+ * frantic racer, at its own skill's grip share and pace (race/rival.ts), held live by
+ * the active-world reconcile whatever its distance (`keepsLive`). Every car's laps are
+ * `RaceSession`'s. A rival KNOCKED OFF OR STUCK (race/recovery.ts: off the track area,
+ * on its roof, or no progress for a few seconds) is put back on the lap's centre
+ * (`recoverAt`: where it was, never past a checkpoint it has not taken) the moment
+ * neither it nor that spot is in the player's view, or after `RECOVER_WAIT_S`
+ * whatever the view, and is a GHOST for `GHOST_S` (it collides with the ground and the
+ * world, not with the other racers: `GHOST_GROUPS`) and for as long after as another
+ * racer is within `GHOST_CLEAR_M`, so it never lands in somebody. That is what makes a
+ * rival hard to get rid of by shoving: it is back on the lap a few seconds later.
  *
- * THE RESULT. Won: `RACE_PRIZE` shells into the jar and "YOU WIN!"; lost: the stake is
- * gone, nothing more. Either way the track's round moves on (`raceRounds`), the player's
- * trailer is taken off, and the rival drives a slow cool-down lap to its slot and stops;
- * whenever it is out of view (and in any case once the player has gone) it is swapped for
- * the next round's rival.
+ * THE PLAYER'S KEYS (CONTROLS.md). `raceReturn` (T, the pad's right stick press) puts his
+ * car back on the lap's centre at his last checkpoint (the line, or his grid box before
+ * the first crossing), as a ghost, standing still. `raceRestart` (Backspace) puts the
+ * whole field and him back on the grid and starts the lights again: the stake already
+ * out stays out, nothing is paid twice. He is OUT on the session's own terms (off the
+ * track area 20 s, 150 m away) and here: out of the car, on its roof `FLIPPED_S`, or the
+ * car gone or its engine dead `WRECKED_S`.
+ *
+ * THE RESULTS. When the player has taken the flag (or is out) and the field is in or
+ * `FINISH_WAIT_S` has passed, the stake is settled for his place (race/stake.ts
+ * `RACE_PRIZES`: 1st 9, 2nd 5, 3rd 3, out of the prizes nothing), the track's round moves
+ * on, the trailers come off, and the results panel (ui/hudrace.ts) shows the order, the
+ * times and the prize. While it is up, Backspace or F races the SAME field again for a
+ * new stake (a rematch: everybody back on the grid); driving `RESULTS_AWAY_M` from the
+ * grid closes it. A rival that takes the flag drives a slow cool-down lap to its box and
+ * stops; one out of the player's view is simply stood back in its box.
+ *
+ * A rival lost to the world mid-race (its body slept or removed) calls the race off and
+ * pays the stake back: that was not the player's doing.
  *
  * NO PER-STEP ALLOCATION while racing: every receiver is a field; the scans that do
- * allocate run twice a second, and never during a race.
+ * allocate run twice a second and never during a race, and the results are built once.
  */
 
 /** The track the player is at is looked for this often, seconds. */
 const SCAN_S = 0.5;
 /** A track's grid this close to the player is the track he is at, metres. */
 const NEAR_M = 900;
-/** Closer than this a rival is not put down where the camera sees its slot, metres. */
+/** Closer than this a rival is not put down where the camera sees its box, metres. */
 const SEEN_SPAWN_M = 250;
-/** A stale rival is swapped only with the player at least this far from it, metres. */
+/** A stale field is swapped only with the player at least this far from its grid, metres. */
 const SWAP_CLEAR_M = 40;
-/** Grid slot 2 is "in": this far along and across from its middle, metres; and stopped. */
+/** The player's grid box: the last, behind the field. */
+export const PLAYER_SLOT = FIELD_SIZE;
+/** The player's box is "in": this far along and across from its middle, metres; and stopped. */
 const SLOT_ALONG_M = 4;
 const SLOT_ACROSS_M = 2.2;
 const SLOT_STILL_KMH = 2;
-/** Something stands in slot 1 when it is this near its middle, metres. */
+/** Something stands in a box when it is this near its middle, metres. */
 const SLOT_TAKEN_M = 3.5;
-/** The player's car on its roof this long (up vector's y under `FLIPPED_UP`) forfeits, seconds. */
-const FLIPPED_S = 3;
-const FLIPPED_UP = 0.3;
-/** The player's engine dead this long forfeits, seconds. */
+/** The player's car on its roof this long (up vector's y under `FLIPPED_UP`) puts him out, seconds. */
+const FLIPPED_S = 10;
+/** The player's engine dead this long puts him out, seconds. */
 const WRECKED_S = 10;
+/** A due recovery waits this long for the car and its spot to be out of view, seconds. */
+const RECOVER_WAIT_S = 3;
+/** A put-back car is a ghost this long, and longer while another racer is within `GHOST_CLEAR_M`; never past `GHOST_MAX_S`. */
+const GHOST_S = 3;
+const GHOST_CLEAR_M = 5;
+const GHOST_MAX_S = 10;
+/**
+ * Collision groups (Rapier: membership << 16 | filter). A race's cars are members of
+ * bit 2 only and collide with everything; a ghost is a member of bit 2 that does not
+ * filter bit 2, so it meets the ground and the world but no racer. Everything else in
+ * the game keeps the default, every bit.
+ */
+const RACER_BIT = 0x0004;
+const RACER_GROUPS = (RACER_BIT << 16) | 0xffff;
+const GHOST_GROUPS = (RACER_BIT << 16) | (0xffff & ~RACER_BIT);
+const DEFAULT_GROUPS = 0xffffffff;
 /** The cool-down: the sleeper driver at this share of its pace, given up after this long. */
 const COOLDOWN_PACE = 0.6;
-const COOLDOWN_MAX_S = 300;
-/** The cool-down ends stopped this near the slot along the lap, metres. */
+const COOLDOWN_MAX_S = 240;
+/** The cool-down ends stopped this near its box along the lap, metres. */
 const COOLDOWN_PARKED_M = 6;
-/** Seconds the result banner stays up, and the "GO!" after the green. */
-const BANNER_S = 4;
+/** Seconds the "GO!" stays up after the green. */
 const GO_S = 1.2;
+/** The results close with the player this far from the grid, metres. */
+const RESULTS_AWAY_M = 300;
 /** A trailer race's load on each trailer: from this to this, kg, drawn per round. */
 const TRAILER_LOAD_MIN_KG = 150;
 const TRAILER_LOAD_MAX_KG = 350;
@@ -104,8 +143,8 @@ const TRAILER_LOAD_DOMAIN = 0x52544c31;
 /** The trailer is set down just over its ride height, as a haul's (contracts/world.ts). */
 const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
-const PROMPT_RACE = '[F] RACE! 3 shells → win 6';
-const PROMPT_POOR = 'RACE ME! — need 3 shells';
+const PROMPT_RACE = `[F] RACE! ${RACE_STAKE} shells → win ${RACE_PRIZES[0]}`;
+const PROMPT_POOR = `RACE ME! — need ${RACE_STAKE} shells`;
 const PROMPT_HITCHED = 'RACE ME! — unhitch first';
 
 /** What the director needs of the running game (main.ts). */
@@ -117,52 +156,105 @@ export interface RaceHost {
   /** Fixed ground somewhere under an ABSOLUTE point. */
   groundUnder(x: number, y: number, z: number): boolean;
   toast(text: string): void;
+  /** The key bound to input action `id`, as the menu writes it (core/input.ts `formatKey`). */
+  keyLabel(id: string): string;
+}
+
+/** One line of the results. */
+export interface RaceResultRow {
+  readonly place: number;
+  readonly name: string;
+  /** Race time, or "+1 LAP", "—" (still running when it closed), "OUT". */
+  readonly time: string;
+  readonly best: string;
+  readonly player: boolean;
+}
+
+/** The results panel (ui/hudrace.ts): built once when a race is over. */
+export interface RaceResults {
+  readonly headline: string;
+  readonly won: boolean;
+  readonly rows: readonly RaceResultRow[];
+  /** "+9 shells", "no prize", "stake back"… */
+  readonly prize: string;
+  /** What the keys do now. */
+  readonly hint: string;
 }
 
 /** What the HUD shows of a race (ui/hudrace.ts); one object, rewritten in place. */
 export interface RaceReadout {
-  /** A race on (lights, laps) or a result up: the race panel is shown. */
+  /** A race on (lights, laps) or its results up: the race panel is shown. */
   active: boolean;
   /** 0 none, 1-3 red, 4 green. */
   lights: number;
   /** "GO!" is up. */
   go: boolean;
-  /** Racing: the lap the player is on, of `laps`, and his place. */
+  /** Racing: the lap the player is on, of `laps`, and his place of `racers`. */
   racing: boolean;
   lap: number;
   laps: number;
-  position: 1 | 2;
-  /** The result banner, or null. */
-  banner: string | null;
-  /** The banner is the player's win. */
-  won: boolean;
+  position: number;
+  racers: number;
+  /** The keys line under the chip ("[⌫] restart  [T] back to track"). */
+  keys: string;
+  /** Called out while it applies: the player off the track or on his roof. */
+  hint: string | null;
+  /** The results, or null. */
+  results: RaceResults | null;
+}
+
+/** What a rival of the field is doing. */
+type RivalState = 'waiting' | 'racing' | 'cooldown';
+
+/** One rival of the live field. */
+interface FieldCar {
+  readonly id: string;
+  readonly index: number;
+  readonly driver: RivalDriver;
+  /** Its racing driver, and its cool-down one. */
+  readonly autopilot: Autopilot;
+  readonly cooldown: Autopilot;
+  readonly input: InputFrame;
+  state: RivalState;
+  /** Put down in the world yet. */
+  spawned: boolean;
+  readonly watch: RecoveryWatch;
+  /** Seconds a due recovery has waited for the view. */
+  dueS: number;
+  /** Seconds of ghost left (> 0) and spent; 0 when solid. */
+  ghostS: number;
+  ghostFor: number;
+  cooldownS: number;
+  cooldownAt: number;
+  toSlot: number;
+}
+
+/** The field waiting at (or racing round) a track. */
+interface Field {
+  readonly track: RaceTrack;
+  readonly plan: FieldPlan;
+  readonly round: number;
+  readonly playerClass: CarClass;
+  readonly cars: readonly FieldCar[];
 }
 
 interface LiveRace {
-  readonly track: RaceTrack;
-  readonly plan: RivalPlan;
-  readonly round: number;
   readonly playerCarId: string;
   readonly session: RaceSession;
-  readonly autopilot: Autopilot;
   readonly trailer: boolean;
+  /** The trailers' load, kg, for a re-hitch. */
+  readonly trailerKg: number;
   flippedS: number;
   deadS: number;
+  playerGhostS: number;
+  playerGhostFor: number;
 }
-
-/** What the rival is doing: waiting at its slot, racing, or driving its cool-down lap. */
-type RivalState = 'waiting' | 'racing' | 'cooldown';
 
 export class RaceDirector {
   /** The track the player is at, or null. */
   private track: RaceTrack | null = null;
-  /** The rival in the world: its track, the round and plan it was drawn for. */
-  private rival: { track: RaceTrack; plan: RivalPlan; round: number; playerClass: CarClass } | null = null;
-  private rivalState: RivalState = 'waiting';
+  private field: Field | null = null;
   private race: LiveRace | null = null;
-  /** The cool-down lap: its driver, how long it has run, and the lap left to the slot (metres, with its arclength as the next hint). */
-  private cooldown: { autopilot: Autopilot; seconds: number; s: number; toSlot: number } | null = null;
-  private readonly rivalInput: InputFrame = emptyInput();
   private readonly visuals: RaceVisuals;
   private scanIn = 0;
   private booted = false;
@@ -170,13 +262,30 @@ export class RaceDirector {
   private swallowF = false;
   private prevInteract = false;
   private promptValue: string | null = null;
-  /** The next rival may be put down where it is seen (dev `jumpToTrack`). */
+  /** The next field may be put down where it is seen (dev `jumpToTrack`). */
   private seenSpawnOnce = false;
-  private bannerS = 0;
-  readonly readout: RaceReadout = { active: false, lights: 0, go: false, racing: false, lap: 1, laps: RACE_LAPS, position: 1, banner: null, won: false };
+  /** The dev tools drive the player's car round the lap (`devAutoDrive`). */
+  private devPilot: Autopilot | null = null;
+  readonly readout: RaceReadout = {
+    active: false,
+    lights: 0,
+    go: false,
+    racing: false,
+    lap: 1,
+    laps: RACE_LAPS,
+    position: 1,
+    racers: FIELD_SIZE + 1,
+    keys: '',
+    hint: null,
+    results: null,
+  };
   private readonly position = { x: 0, y: 0, z: 0 };
-  private readonly rivalPosition = { x: 0, y: 0, z: 0 };
+  private readonly other = { x: 0, y: 0, z: 0 };
+  private readonly point = { x: 0, y: 0, z: 0 };
   private readonly at: TrackProjection = { s: 0, lateral: 0, height: 0 };
+  private readonly recovery = { s: 0, lateral: 0 };
+  private readonly xs = new Float64Array(FIELD_SIZE + 1);
+  private readonly zs = new Float64Array(FIELD_SIZE + 1);
 
   constructor(
     private readonly world: GameWorld,
@@ -194,34 +303,46 @@ export class RaceDirector {
     return this.promptValue;
   }
 
-  /** The rival car's id while one is in the world, else null. */
-  get rivalId(): string | null {
-    return this.rival ? raceRivalId(this.rival.track.postIndex) : null;
+  /** The field car `id` is, or null. */
+  private fieldCar(id: string): FieldCar | null {
+    const field = this.field;
+    if (!field) return null;
+    for (const car of field.cars) if (car.id === id) return car;
+    return null;
   }
 
   /** The director drives car `id` this step (the main loop must not settle it). */
   drives(id: string): boolean {
-    if (id !== this.rivalId) return false;
-    return (this.rivalState === 'racing' && this.race !== null && !this.race.session.held) || (this.rivalState === 'cooldown' && this.cooldown !== null);
-  }
-
-  /** Car `id` stays live whatever its distance: the rival of a race, or on its cool-down. */
-  keepsLive(id: string): boolean {
-    return id === this.rivalId && this.rivalState !== 'waiting';
-  }
-
-  /** Visits the rival while it is driven, for its engine to be heard. */
-  forEachDriven(visit: (id: string, vehicle: Vehicle) => void): void {
-    const id = this.rivalId;
-    if (id === null || !this.drives(id)) return;
-    const vehicle = this.host.vehicle(id);
-    if (vehicle) visit(id, vehicle);
+    const car = this.fieldCar(id);
+    if (!car) return false;
+    return (car.state === 'racing' && this.race !== null && !this.race.session.held) || car.state === 'cooldown';
   }
 
   /**
-   * Before the controllers of one fixed step: the scan, the offer and its F, and the
-   * rival's own driving. `anchorX`/`anchorZ` is where the player is, ABSOLUTE, and `roadS`
-   * its arclength. `f` is the step's input; F is taken out of it while it is the race's.
+   * Car `id` stays live whatever its distance: a rival racing, on its cool-down, or
+   * anywhere in the field while the results are up (the rematch needs every car).
+   */
+  keepsLive(id: string): boolean {
+    const car = this.fieldCar(id);
+    return car !== null && (car.state !== 'waiting' || this.readout.results !== null);
+  }
+
+  /** Visits every rival while it is driven, for its engine to be heard. */
+  forEachDriven(visit: (id: string, vehicle: Vehicle) => void): void {
+    const field = this.field;
+    if (!field) return;
+    for (const car of field.cars) {
+      if (!this.drives(car.id)) continue;
+      const vehicle = this.host.vehicle(car.id);
+      if (vehicle) visit(car.id, vehicle);
+    }
+  }
+
+  /**
+   * Before the controllers of one fixed step: the scan, the offer and its F, the race
+   * keys, and the rivals' own driving. `anchorX`/`anchorZ` is where the player is,
+   * ABSOLUTE, and `roadS` its arclength. `f` is the step's input; F is taken out of it
+   * while it is the race's.
    */
   beforeStep(dt: number, f: InputFrame, anchorX: number, anchorZ: number, roadS: number): void {
     if (!this.booted) {
@@ -238,30 +359,37 @@ export class RaceDirector {
       }
     }
     this.offer(f);
-    this.driveRival(dt);
+    this.keys(f);
+    this.driveRivals(dt);
   }
 
   /**
    * Holds the player's car on the grid until the green: whatever the pedals or his own
    * autopilot asked, no throttle and the brake on. Called right before his car's step.
+   * With the dev drive on (`devAutoDrive`) the race's own racer drives it after the green.
    */
   holdPlayer(f: InputFrame): void {
     const race = this.race;
-    if (!race || !race.session.held) return;
-    f.throttle = 0;
-    f.brake = 1;
-    f.reverse = false;
+    if (!race) return;
+    if (race.session.held) {
+      f.throttle = 0;
+      f.brake = 1;
+      f.reverse = false;
+      return;
+    }
+    const pilot = this.devPilot;
+    const vehicle = pilot ? this.host.vehicle(race.playerCarId) : null;
+    if (!pilot || !vehicle || race.session.playerDone) return;
+    if (!pilot.engaged) pilot.setEngaged(true);
+    pilot.drive(FIXED_DT, vehicle, f, this.origin.x, this.origin.z);
   }
 
-  /** After the physics step: the laps, the forfeits, the result, and the cool-down's end. */
+  /** After the physics step: the laps, the recoveries, the results, and the cool-downs. */
   afterStep(dt: number): void {
-    if (this.bannerS > 0) {
-      this.bannerS -= dt;
-      if (this.bannerS <= 0) this.readout.banner = null;
-    }
     const race = this.race;
     if (race) this.stepRace(dt, race);
-    if (this.cooldown) this.stepCooldown(dt);
+    this.stepCooldowns(dt);
+    this.stepResults();
     this.updateReadout();
   }
 
@@ -272,7 +400,7 @@ export class RaceDirector {
   }
 
   // -------------------------------------------------------------------------
-  // The rival in the world.
+  // The field in the world.
   // -------------------------------------------------------------------------
 
   private scan(anchorX: number, anchorZ: number, roadS: number): void {
@@ -283,7 +411,7 @@ export class RaceDirector {
       if (!postHasTrack(seed, post.index)) continue;
       const track = this.terrain.raceTracks.track(post.index);
       if (!track) continue;
-      const slot = track.startGrid[0];
+      const slot = track.startGrid[0]!;
       const d = Math.hypot(slot.x - anchorX, slot.z - anchorZ);
       if (d < bestD) {
         bestD = d;
@@ -291,38 +419,89 @@ export class RaceDirector {
       }
     }
     this.track = best;
-    const rival = this.rival;
-    const solid = best !== null && this.host.groundUnder(best.startGrid[0].x, best.startGrid[0].y, best.startGrid[0].z);
-    if (rival) {
+    const pole = best?.startGrid[0];
+    const solid = best !== null && pole !== undefined && this.host.groundUnder(pole.x, pole.y, pole.z);
+    const field = this.field;
+    if (field) {
       // Its track out of reach or its ground gone: out of the world at once, seen or not
       // (the world round it is going too).
-      if (rival.track !== best || !solid) {
-        this.removeRival();
+      if (field.track !== best || !solid) {
+        this.removeField();
         return;
       }
-      if (this.rivalState !== 'waiting' && this.rivalState !== 'cooldown') return;
+      if (field.cars.some((car) => car.state !== 'waiting') || this.readout.results !== null) return;
       // The round moved on, or the player came in another class of car: swapped unseen.
-      const round = raceRound(this.world, rival.track.postIndex);
-      const plan = rivalPlan(seed, rival.track.postIndex, round, this.playerClass());
-      const stale = round !== rival.round || plan.modelId !== rival.plan.modelId;
-      if (stale && !this.seenNear(rival.track.startGrid[0], anchorX, anchorZ, SWAP_CLEAR_M)) this.removeRival();
+      const round = raceRound(this.world, field.track.postIndex);
+      const playerClass = this.playerClass();
+      const stale = round !== field.round || playerClass.powerKw !== field.playerClass.powerKw || playerClass.massKg !== field.playerClass.massKg;
+      if (stale && !this.seenNear(field.track.startGrid[PLAYER_SLOT]!, anchorX, anchorZ, SWAP_CLEAR_M)) {
+        this.removeField();
+        return;
+      }
+      this.spawnNext(field, anchorX, anchorZ);
       return;
     }
     if (!best || !solid) return;
-    const slot = best.startGrid[0];
-    if (!this.seenSpawnOnce && this.seenNear(slot, anchorX, anchorZ, SEEN_SPAWN_M)) return;
-    if (this.slotTaken(slot, anchorX, anchorZ)) return;
-    this.seenSpawnOnce = false;
-    this.spawnRival(best);
+    this.field = this.makeField(best);
+    this.visuals.show(best, this.field.plan, best.startGrid[PLAYER_SLOT]!);
+    this.spawnNext(this.field, anchorX, anchorZ);
   }
 
-  /** The slot is within `near` of the player, or in view within `SEEN_SPAWN_M`. */
+  private makeField(track: RaceTrack): Field {
+    const postIndex = track.postIndex;
+    const round = raceRound(this.world, postIndex);
+    const playerClass = this.playerClass();
+    const plan = fieldPlan(this.world.seed, postIndex, round, playerClass);
+    const cars = plan.rivals.map((driver, index): FieldCar => {
+      const autopilot = new Autopilot(track.road, this.physics);
+      autopilot.setMode('frantic');
+      autopilot.setGripShare(driver.gripShare);
+      autopilot.setPace(driver.pace);
+      const cooldown = new Autopilot(track.road, this.physics);
+      cooldown.setMode('sleeper');
+      cooldown.setPace(COOLDOWN_PACE);
+      return {
+        id: raceRivalId(postIndex, index),
+        index,
+        driver,
+        autopilot,
+        cooldown,
+        input: emptyInput(),
+        state: 'waiting',
+        spawned: this.world.state.cars[raceRivalId(postIndex, index)] !== undefined,
+        watch: new RecoveryWatch(),
+        dueS: 0,
+        ghostS: 0,
+        ghostFor: 0,
+        cooldownS: 0,
+        cooldownAt: 0,
+        toSlot: 0,
+      };
+    });
+    return { track, plan, round, playerClass, cars };
+  }
+
+  /** The next car of the field not yet in the world, put down in its box when unseen. One per scan. */
+  private spawnNext(field: Field, anchorX: number, anchorZ: number): void {
+    const car = field.cars.find((c) => !c.spawned);
+    if (!car) {
+      this.seenSpawnOnce = false;
+      return;
+    }
+    const slot = field.track.startGrid[car.index]!;
+    if (!this.seenSpawnOnce && this.seenNear(slot, anchorX, anchorZ, SEEN_SPAWN_M)) return;
+    if (this.slotTaken(slot, anchorX, anchorZ)) return;
+    if (!this.world.state.cars[car.id]) this.world.apply({ t: 'car_add', car: this.standingCar(car.id, car.driver.modelId, field.track, slot) });
+    car.spawned = true;
+  }
+
+  /** The box is within `near` of the player, or in view within `SEEN_SPAWN_M`. */
   private seenNear(slot: TrackPose, anchorX: number, anchorZ: number, near: number): boolean {
     const d = Math.hypot(slot.x - anchorX, slot.z - anchorZ);
     return d < near || (d < SEEN_SPAWN_M && this.host.inView(slot.x, slot.y + 1, slot.z, 3));
   }
 
-  /** Anything stands in slot 1: a car, or the player on foot. */
+  /** Anything stands in a box: a car, or the player on foot. */
   private slotTaken(slot: TrackPose, anchorX: number, anchorZ: number): boolean {
     if (Math.hypot(slot.x - anchorX, slot.z - anchorZ) < SLOT_TAKEN_M) return true;
     for (const id in this.world.state.cars) {
@@ -341,28 +520,23 @@ export class RaceDirector {
     return car ? carClassOf(car) : carClassOf({ modelId: DEFAULT_CAR_MODEL_ID, bonnet: [] });
   }
 
-  private spawnRival(track: RaceTrack): void {
-    const postIndex = track.postIndex;
-    const round = raceRound(this.world, postIndex);
-    const playerClass = this.playerClass();
-    const plan = rivalPlan(this.world.seed, postIndex, round, playerClass);
-    const id = raceRivalId(postIndex);
-    if (!this.world.state.cars[id]) this.world.apply({ t: 'car_add', car: this.standingCar(id, plan.modelId, track, track.startGrid[0]) });
-    this.rival = { track, plan, round, playerClass };
-    this.rivalState = 'waiting';
-    this.visuals.show(track, plan);
+  /** The ground plane under a car of `modelId` standing at (`x`, `z`) on the track, near arclength `s`. */
+  private groundPose(modelId: string, track: RaceTrack, x: number, z: number, heading: number, s: number): { y: number; plane: GroundPose | null } {
+    const measure = carModelMeasure(carModel(modelId).id);
+    const at = this.at;
+    const plane = poseOnGround(measure.wheels, x, z, heading, (gx, gz) => {
+      track.project(gx, gz, s, at);
+      return track.surfaceY(at.s, at.lateral) + TRACK_LIFT_M;
+    });
+    track.project(x, z, s, at);
+    const groundY = plane ? plane.groundY : track.surfaceY(at.s, at.lateral) + TRACK_LIFT_M;
+    return { y: carSpawnYAboveGround(measure, groundY), plane };
   }
 
   /** A car of `modelId` standing on its wheels at grid pose `slot`, as a haul's car is stood (contracts/world.ts). */
   private standingCar(id: string, modelId: string, track: RaceTrack, slot: TrackPose): CarState {
-    const measure = carModelMeasure(carModel(modelId).id);
-    const at = this.at;
-    const plane = poseOnGround(measure.wheels, slot.x, slot.z, slot.heading, (gx, gz) => {
-      track.project(gx, gz, slot.s, at);
-      return track.surfaceY(at.s, at.lateral) + TRACK_LIFT_M;
-    });
-    const groundY = plane ? plane.groundY : slot.y + TRACK_LIFT_M;
-    const car = createServiceableCarState(id, modelId, slot.x, carSpawnYAboveGround(measure, groundY), slot.z, slot.heading);
+    const { y, plane } = this.groundPose(modelId, track, slot.x, slot.z, slot.heading, slot.s);
+    const car = createServiceableCarState(id, modelId, slot.x, y, slot.z, slot.heading);
     if (plane) {
       car.qx = plane.qx;
       car.qy = plane.qy;
@@ -372,25 +546,43 @@ export class RaceDirector {
     return car;
   }
 
-  private removeRival(): void {
-    const rival = this.rival;
-    if (!rival) return;
-    const postIndex = rival.track.postIndex;
-    for (const who of ['rival', 'player'] as const) {
+  /**
+   * Puts live car `vehicle` (of `modelId`) on the track at arclength `s`, `lateral` off
+   * the centre, standing still on its wheels, facing the lap.
+   */
+  private standOnTrack(vehicle: Vehicle, modelId: string, track: RaceTrack, s: number, lateral: number): void {
+    const point = track.offsetPoint(s, lateral, this.point);
+    const sample = track.road.sampleAt(s);
+    const { y, plane } = this.groundPose(modelId, track, point.x, point.z, sample.heading, s);
+    vehicle.rescueTo(point.x, y, point.z, sample.heading, sample.grade);
+    if (plane) vehicle.chassis.setRotation({ x: plane.qx, y: plane.qy, z: plane.qz, w: plane.qw }, true);
+  }
+
+  private removeField(): void {
+    const field = this.field;
+    if (!field) return;
+    this.removeTrailers(field);
+    for (const car of field.cars) {
+      car.autopilot.setEngaged(false);
+      car.cooldown.setEngaged(false);
+      if (this.world.state.cars[car.id]) this.world.apply({ t: 'car_remove', carId: car.id });
+    }
+    this.field = null;
+    this.readout.results = null;
+    this.visuals.show(null, null, null);
+  }
+
+  private removeTrailers(field: Field): void {
+    const postIndex = field.track.postIndex;
+    const owners: RaceTrailerOwner[] = ['player', ...field.cars.map((car) => car.index)];
+    for (const who of owners) {
       const trailerId = raceTrailerId(postIndex, who);
       if (this.world.state.trailers[trailerId]) this.world.apply({ t: 'trailer_remove', trailerId });
     }
-    const id = raceRivalId(postIndex);
-    if (this.world.state.cars[id]) this.world.apply({ t: 'car_remove', carId: id });
-    this.rival = null;
-    this.rivalState = 'waiting';
-    this.cooldown?.autopilot.setEngaged(false);
-    this.cooldown = null;
-    this.visuals.show(null, null);
   }
 
   // -------------------------------------------------------------------------
-  // The offer.
+  // The offer, and the race keys.
   // -------------------------------------------------------------------------
 
   private offer(f: InputFrame): void {
@@ -405,15 +597,24 @@ export class RaceDirector {
       }
     }
     this.promptValue = null;
-    const rival = this.rival;
+    const field = this.field;
     const state = this.world.state;
     const carId = state.player.drivingCarId;
-    if (!rival || this.rivalState !== 'waiting' || this.race !== null || carId === null || state.player.seat !== 'driver') return;
+    if (!field || this.race !== null || carId === null || state.player.seat !== 'driver') return;
+    // The results up: F (as Backspace) is the rematch, wherever the player stands by the track.
+    if (this.readout.results !== null) {
+      if (!pressed) return;
+      f.interact = false;
+      f.interactDown = false;
+      this.swallowF = true;
+      this.rematch(carId);
+      return;
+    }
+    if (field.cars.some((car) => car.state !== 'waiting' || !this.host.vehicle(car.id))) return;
     const vehicle = this.host.vehicle(carId);
-    const rivalVehicle = this.host.vehicle(raceRivalId(rival.track.postIndex));
-    if (!vehicle || !rivalVehicle || vehicle.speedKmh > SLOT_STILL_KMH) return;
-    const track = rival.track;
-    const slot = track.startGrid[1];
+    if (!vehicle || vehicle.speedKmh > SLOT_STILL_KMH) return;
+    const track = field.track;
+    const slot = track.startGrid[PLAYER_SLOT]!;
     vehicle.absoluteTranslation(this.position);
     const at = track.project(this.position.x, this.position.z, slot.s, this.at);
     let along = at.s - slot.s;
@@ -431,9 +632,42 @@ export class RaceDirector {
       this.host.toast(this.promptValue === PROMPT_POOR ? `the race costs ${formatPay(RACE_STAKE)} — the jar is short` : 'unhitch first: the race is car against car');
       return;
     }
-    if (!takeStake(this.world, track.postIndex, rival.round)) return;
-    // The cars were live a moment ago; should either not be, the stake goes straight back.
+    if (!takeStake(this.world, track.postIndex, field.round)) return;
+    // The cars were live a moment ago; should any not be, the stake goes straight back.
     if (!this.startRace(carId)) refundStake(this.world);
+  }
+
+  /** The race keys: restart (a rematch while the results are up) and back to the track. */
+  private keys(f: InputFrame): void {
+    const restart = f.raceRestart;
+    const back = f.raceReturn;
+    f.raceRestart = false;
+    f.raceReturn = false;
+    const carId = this.world.state.player.drivingCarId;
+    if (carId === null || this.world.state.player.seat !== 'driver') return;
+    if (restart) {
+      if (this.race) this.restartRace(this.race);
+      else if (this.readout.results !== null) this.rematch(carId);
+    }
+    if (back && this.race && !this.race.session.held && !this.race.session.playerDone) this.returnPlayer(this.race);
+  }
+
+  /** The results up: the same field again from the grid, for a new stake. */
+  private rematch(carId: string): void {
+    const field = this.field;
+    if (!field || this.race) return;
+    if (this.coupled(carId)) {
+      this.host.toast('unhitch first: the race is car against car');
+      return;
+    }
+    if (!takeStake(this.world, field.track.postIndex, field.round)) {
+      this.host.toast(`the race costs ${formatPay(RACE_STAKE)} — the jar is short`);
+      return;
+    }
+    if (!this.startRace(carId)) {
+      refundStake(this.world);
+      this.host.toast('the field is not all here yet');
+    }
   }
 
   /** Car `carId` tows a trailer or a car, or is on somebody's bar. */
@@ -449,43 +683,126 @@ export class RaceDirector {
   // The race.
   // -------------------------------------------------------------------------
 
-  /** Starts the race against the waiting rival with the player in `playerCarId`; the stake is the caller's. */
+  /**
+   * Starts a race of the waiting field with the player in `playerCarId`: everybody stood
+   * in their grid boxes (the player too, wherever he was), the lights on. The stake is
+   * the caller's.
+   */
   private startRace(playerCarId: string): boolean {
-    const rival = this.rival;
-    if (!rival || this.race) return false;
-    const track = rival.track;
-    const rivalId = raceRivalId(track.postIndex);
-    const rivalVehicle = this.host.vehicle(rivalId);
+    const field = this.field;
+    if (!field || this.race) return false;
+    const track = field.track;
     const playerVehicle = this.host.vehicle(playerCarId);
-    if (!rivalVehicle || !playerVehicle) return false;
-    const autopilot = new Autopilot(track.road, this.physics);
-    autopilot.setMode(RIVAL_MODES[rival.plan.level]);
-    const session = new RaceSession(track);
-    playerVehicle.absoluteTranslation(this.position);
-    rivalVehicle.absoluteTranslation(this.rivalPosition);
-    session.start(this.position.x, this.position.z, this.rivalPosition.x, this.rivalPosition.z);
-    if (rival.plan.trailer) {
-      const kg = TRAILER_LOAD_MIN_KG + (TRAILER_LOAD_MAX_KG - TRAILER_LOAD_MIN_KG) * hash01(this.world.seed, TRAILER_LOAD_DOMAIN, track.postIndex, rival.round);
-      this.hitchTrailer(raceTrailerId(track.postIndex, 'rival'), rivalId, this.rivalPosition, Math.min(kg, TRAILER_CAPACITY_KG));
-      this.hitchTrailer(raceTrailerId(track.postIndex, 'player'), playerCarId, this.position, Math.min(kg, TRAILER_CAPACITY_KG));
-    }
-    this.race = { track, plan: rival.plan, round: rival.round, playerCarId, session, autopilot, trailer: rival.plan.trailer, flippedS: 0, deadS: 0 };
-    this.rivalState = 'racing';
-    this.cooldown?.autopilot.setEngaged(false);
-    this.cooldown = null;
-    this.readout.banner = null;
-    this.bannerS = 0;
+    if (!playerVehicle) return false;
+    for (const car of field.cars) if (!this.host.vehicle(car.id)) return false;
+    const kg = Math.min(
+      TRAILER_CAPACITY_KG,
+      TRAILER_LOAD_MIN_KG + (TRAILER_LOAD_MAX_KG - TRAILER_LOAD_MIN_KG) * hash01(this.world.seed, TRAILER_LOAD_DOMAIN, track.postIndex, field.round),
+    );
+    const race: LiveRace = {
+      playerCarId,
+      session: new RaceSession(track, FIELD_SIZE + 1),
+      trailer: field.plan.trailer,
+      trailerKg: kg,
+      flippedS: 0,
+      deadS: 0,
+      playerGhostS: 0,
+      playerGhostFor: 0,
+    };
+    this.race = race;
+    this.readout.results = null;
+    this.readout.keys = `[${this.host.keyLabel('raceRestart')}] restart   [${this.host.keyLabel('raceReturn')}] back to track`;
+    this.grid(race);
     return true;
   }
 
+  /** Everybody to the grid, the trailers re-hitched, every car a solid racer, the lights from red. */
+  private grid(race: LiveRace): void {
+    const field = this.field!;
+    const track = field.track;
+    const playerVehicle = this.host.vehicle(race.playerCarId);
+    const playerCar = this.world.state.cars[race.playerCarId];
+    if (playerVehicle && playerCar) {
+      const slot = track.startGrid[PLAYER_SLOT]!;
+      this.standOnTrack(playerVehicle, playerCar.modelId, track, slot.s, slot.lateral);
+      this.setGroups(playerVehicle, RACER_GROUPS);
+      this.xs[0] = slot.x;
+      this.zs[0] = slot.z;
+    }
+    // A driver that was somewhere else on the lap must find it again from scratch.
+    this.devPilot?.setEngaged(false);
+    race.flippedS = 0;
+    race.deadS = 0;
+    race.playerGhostS = 0;
+    for (const car of field.cars) {
+      const vehicle = this.host.vehicle(car.id);
+      const slot = track.startGrid[car.index]!;
+      if (vehicle) {
+        this.standOnTrack(vehicle, car.driver.modelId, track, slot.s, slot.lateral);
+        this.setGroups(vehicle, RACER_GROUPS);
+      }
+      this.xs[car.index + 1] = slot.x;
+      this.zs[car.index + 1] = slot.z;
+      car.state = 'racing';
+      car.autopilot.setEngaged(false);
+      car.cooldown.setEngaged(false);
+      car.watch.reset();
+      car.dueS = 0;
+      car.ghostS = 0;
+    }
+    if (race.trailer) {
+      this.hitchTrailer(raceTrailerId(track.postIndex, 'player'), race.playerCarId, race.trailerKg);
+      for (const car of field.cars) this.hitchTrailer(raceTrailerId(track.postIndex, car.index), car.id, race.trailerKg);
+    }
+    race.session.start(this.xs, this.zs);
+  }
+
+  /** Backspace mid-race: the same race again from the grid, the stake as it is. */
+  private restartRace(race: LiveRace): void {
+    if (race.session.phase === 'finished') return;
+    this.grid(race);
+    this.host.toast('back to the grid');
+  }
+
+  /** T: the player's car back on the lap's centre at his last checkpoint, standing, a ghost for a moment. */
+  private returnPlayer(race: LiveRace): void {
+    const field = this.field!;
+    const track = field.track;
+    const vehicle = this.host.vehicle(race.playerCarId);
+    const car = this.world.state.cars[race.playerCarId];
+    if (!vehicle || !car) return;
+    const counter = race.session.counters[0]!;
+    let s: number;
+    let lateral = 0;
+    if (counter.lap === 0) {
+      const slot = track.startGrid[PLAYER_SLOT]!;
+      s = slot.s;
+      lateral = slot.lateral;
+    } else {
+      s = (counter.next > 0 ? track.checkpoints[counter.next - 1]! : 0) + 2;
+    }
+    this.standOnTrack(vehicle, car.modelId, track, s, lateral);
+    track.offsetPoint(s, lateral, this.point);
+    race.session.relocate(0, this.point.x, this.point.z, s);
+    if (race.trailer) this.hitchTrailer(raceTrailerId(track.postIndex, 'player'), race.playerCarId, race.trailerKg);
+    this.setGroups(vehicle, GHOST_GROUPS);
+    race.playerGhostS = GHOST_S;
+    race.playerGhostFor = 0;
+    race.flippedS = 0;
+    this.devPilot?.setEngaged(false);
+  }
+
   /**
-   * A loaded trailer coupled to car `carId` in state: the trailer field materialises it
-   * with the car and puts it on the ball (vehicle/trailer.ts `restoreHitch`), which
-   * stands it behind the car first. The crate is the load: `cargoKg` on the bed, against
-   * the headboard as a haul's.
+   * A loaded trailer coupled to car `carId` in state, where the car now stands: the
+   * trailer field materialises it with the car and puts it on the ball (vehicle/
+   * trailer.ts `restoreHitch`), which stands it behind the car first. The crate is the
+   * load: `cargoKg` on the bed, against the headboard as a haul's.
    */
-  private hitchTrailer(id: string, carId: string, at: { x: number; y: number; z: number }, cargoKg: number): void {
+  private hitchTrailer(id: string, carId: string, cargoKg: number): void {
     if (this.world.state.trailers[id]) this.world.apply({ t: 'trailer_remove', trailerId: id });
+    const vehicle = this.host.vehicle(carId);
+    const at = vehicle ? vehicle.absoluteTranslation(this.other) : this.world.state.cars[carId];
+    if (!at) return;
     const trailer: TrailerState = {
       id,
       hitchedTo: carId,
@@ -502,35 +819,64 @@ export class RaceDirector {
     this.world.apply({ t: 'trailer_add', trailer });
   }
 
-  private driveRival(dt: number): void {
-    const id = this.rivalId;
-    if (id === null || !this.drives(id)) return;
-    const vehicle = this.host.vehicle(id);
-    if (!vehicle) return;
-    const autopilot = this.rivalState === 'racing' ? this.race!.autopilot : this.cooldown!.autopilot;
-    if (!autopilot.engaged) autopilot.setEngaged(true);
-    if (this.cooldown && autopilot === this.cooldown.autopilot) autopilot.setHoldDistance(this.cooldown.toSlot);
-    autopilot.drive(dt, vehicle, this.rivalInput, this.origin.x, this.origin.z);
-    vehicle.fixedUpdate(dt, this.rivalInput);
+  private setGroups(vehicle: Vehicle, groups: number): void {
+    for (const collider of vehicle.collisionColliders) collider.setCollisionGroups(groups);
+  }
+
+  private driveRivals(dt: number): void {
+    const field = this.field;
+    if (!field) return;
+    for (const car of field.cars) {
+      if (!this.drives(car.id)) continue;
+      const vehicle = this.host.vehicle(car.id);
+      if (!vehicle) continue;
+      const autopilot = car.state === 'racing' ? car.autopilot : car.cooldown;
+      if (!autopilot.engaged) autopilot.setEngaged(true);
+      if (car.state === 'cooldown') autopilot.setHoldDistance(car.toSlot);
+      autopilot.drive(dt, vehicle, car.input, this.origin.x, this.origin.z);
+      vehicle.fixedUpdate(dt, car.input);
+    }
   }
 
   private stepRace(dt: number, race: LiveRace): void {
-    const state = this.world.state;
-    const rivalVehicle = this.host.vehicle(raceRivalId(race.track.postIndex));
-    if (!rivalVehicle) {
-      this.callOff();
+    const field = this.field;
+    if (!field) {
+      this.race = null;
       return;
+    }
+    const state = this.world.state;
+    for (const car of field.cars) {
+      const vehicle = this.host.vehicle(car.id);
+      if (!vehicle) {
+        this.callOff(race);
+        return;
+      }
+      vehicle.absoluteTranslation(this.position);
+      this.xs[car.index + 1] = this.position.x;
+      this.zs[car.index + 1] = this.position.z;
     }
     const playerVehicle = this.host.vehicle(race.playerCarId);
+    if (playerVehicle) {
+      playerVehicle.absoluteTranslation(this.position);
+      this.xs[0] = this.position.x;
+      this.zs[0] = this.position.z;
+    }
     const session = race.session;
-    if (playerVehicle) playerVehicle.absoluteTranslation(this.position);
-    rivalVehicle.absoluteTranslation(this.rivalPosition);
-    if (session.step(dt, this.position.x, this.position.z, this.rivalPosition.x, this.rivalPosition.z)) {
-      this.finish(race);
+    const over = session.step(dt, this.xs, this.zs);
+    if (!session.held) {
+      for (const car of field.cars) {
+        if (car.state !== 'racing') continue;
+        if (session.finished(car.index + 1)) this.toCooldown(field, car);
+        else this.watchRival(dt, field, race, car);
+      }
+      this.stepPlayerGhost(dt, race, playerVehicle);
+    }
+    if (over) {
+      this.finish(field, race);
       return;
     }
-    if (session.held) return;
-    // The player's own forfeits.
+    if (session.held || session.playerDone) return;
+    // The player's own ways out.
     let end: RaceEnd | null = null;
     if (state.player.drivingCarId !== race.playerCarId) end = 'left-car';
     else if (!playerVehicle || !state.cars[race.playerCarId]) end = 'wrecked';
@@ -543,84 +889,209 @@ export class RaceDirector {
       if (race.flippedS > FLIPPED_S) end = 'flipped';
       else if (race.deadS > WRECKED_S) end = 'wrecked';
     }
-    if (end !== null && session.decide('rival', end)) this.finish(race);
+    if (end !== null) session.playerOut(end);
   }
 
-  /** The race decided (`session.winner`): the stake settled, the round on, the cars freed. */
-  private finish(race: LiveRace): void {
-    const won = race.session.winner === 'player';
-    settleStake(this.world, won);
-    advanceRound(this.world, race.track.postIndex, race.round);
-    this.endRace(race);
-    this.showBanner(won ? 'YOU WIN!' : 'RIVAL WINS', won);
+  /** The player's ghost after a return: solid again once its time is up and nobody is on top of it. */
+  private stepPlayerGhost(dt: number, race: LiveRace, vehicle: Vehicle | null): void {
+    if (race.playerGhostS <= 0 || !vehicle) return;
+    race.playerGhostFor += dt;
+    race.playerGhostS -= dt;
+    if (race.playerGhostS > 0) return;
+    if (race.playerGhostFor < GHOST_MAX_S && this.nearRacer(0)) {
+      race.playerGhostS = dt;
+      return;
+    }
+    race.playerGhostS = 0;
+    this.setGroups(vehicle, RACER_GROUPS);
+  }
+
+  /** Another racer within `GHOST_CLEAR_M` of racer `i` (positions as of this step). */
+  private nearRacer(i: number): boolean {
+    for (let j = 0; j <= FIELD_SIZE; j++) {
+      if (j !== i && Math.hypot(this.xs[j]! - this.xs[i]!, this.zs[j]! - this.zs[i]!) < GHOST_CLEAR_M) return true;
+    }
+    return false;
+  }
+
+  /** A racing rival: off, flipped or stuck long enough is put back on the lap; a ghost turns solid again. */
+  private watchRival(dt: number, field: Field, race: LiveRace, car: FieldCar): void {
+    const vehicle = this.host.vehicle(car.id)!;
+    const i = car.index + 1;
+    if (car.ghostS > 0) {
+      car.ghostFor += dt;
+      car.ghostS -= dt;
+      if (car.ghostS <= 0) {
+        if (car.ghostFor < GHOST_MAX_S && this.nearRacer(i)) car.ghostS = dt;
+        else this.setGroups(vehicle, RACER_GROUPS);
+      }
+    }
+    const counter = race.session.counters[i]!;
+    const q = vehicle.root.quaternion;
+    const up = 1 - 2 * (q.x * q.x + q.z * q.z);
+    if (!car.watch.step(dt, counter, up)) {
+      car.dueS = 0;
+      return;
+    }
+    car.dueS += dt;
+    const track = field.track;
+    const { s, lateral } = recoverAt(track, counter, track.startGrid[car.index]!, this.recovery);
+    track.offsetPoint(s, lateral, this.point);
+    const seen = this.host.inView(this.xs[i]!, track.centreY(counter.s) + 1, this.zs[i]!, 3) || this.host.inView(this.point.x, track.centreY(s) + 1, this.point.z, 3);
+    if (seen && car.dueS < RECOVER_WAIT_S) return;
+    this.standOnTrack(vehicle, car.driver.modelId, track, s, lateral);
+    race.session.relocate(i, this.point.x, this.point.z, s);
+    if (race.trailer) this.hitchTrailer(raceTrailerId(track.postIndex, car.index), car.id, race.trailerKg);
+    this.setGroups(vehicle, GHOST_GROUPS);
+    car.ghostS = GHOST_S;
+    car.ghostFor = 0;
+    car.watch.reset();
+    car.dueS = 0;
+    // A fresh engagement: the driver finds itself on the lap again from scratch.
+    car.autopilot.setEngaged(true);
+  }
+
+  /** Rival `car` took the flag (or the race is over): the slow lap to its box. */
+  private toCooldown(field: Field, car: FieldCar): void {
+    const vehicle = this.host.vehicle(car.id);
+    car.autopilot.setEngaged(false);
+    car.state = 'cooldown';
+    car.cooldownS = 0;
+    const track = field.track;
+    if (vehicle) {
+      vehicle.absoluteTranslation(this.position);
+      car.cooldownAt = track.project(this.position.x, this.position.z, undefined, this.at).s;
+      // Out of the race: a ghost to the cars still racing it, solid again once it is over.
+      this.setGroups(vehicle, this.race ? GHOST_GROUPS : DEFAULT_GROUPS);
+    }
+    car.toSlot = track.wrap(track.startGrid[car.index]!.s - car.cooldownAt);
+  }
+
+  private stepCooldowns(dt: number): void {
+    const field = this.field;
+    if (!field) return;
+    const track = field.track;
+    for (const car of field.cars) {
+      if (car.state !== 'cooldown') continue;
+      car.cooldownS += dt;
+      const vehicle = this.host.vehicle(car.id);
+      if (!vehicle) {
+        car.cooldown.setEngaged(false);
+        car.state = 'waiting';
+        continue;
+      }
+      vehicle.absoluteTranslation(this.position);
+      const s = track.project(this.position.x, this.position.z, car.cooldownAt, this.at).s;
+      car.cooldownAt = s;
+      const slot = track.startGrid[car.index]!;
+      car.toSlot = track.wrap(slot.s - s);
+      const parked = (car.toSlot < COOLDOWN_PARKED_M || car.toSlot > track.lengthM - COOLDOWN_PARKED_M) && vehicle.speedKmh < 1;
+      // Out of the player's view, and its box too: simply stood back in it.
+      const unseen =
+        !this.host.inView(this.position.x, this.position.y + 1, this.position.z, 3) && !this.host.inView(slot.x, slot.y + 1, slot.z, 3) && !this.slotTakenByOther(slot, car.id);
+      if (parked || unseen || car.cooldownS > COOLDOWN_MAX_S) {
+        if (!parked) this.standOnTrack(vehicle, car.driver.modelId, track, slot.s, slot.lateral);
+        car.cooldown.setEngaged(false);
+        car.state = 'waiting';
+      }
+    }
+  }
+
+  /** Another live car than `id`, or the player, stands in a box. */
+  private slotTakenByOther(slot: TrackPose, id: string): boolean {
+    const state = this.world.state;
+    for (const other in state.cars) {
+      if (other === id) continue;
+      const live = this.host.vehicle(other);
+      const at = live ? live.absoluteTranslation(this.other) : state.cars[other]!;
+      if (Math.hypot(slot.x - at.x, slot.z - at.z) < SLOT_TAKEN_M) return true;
+    }
+    return false;
+  }
+
+  /** The race over: the stake settled for the player's place, the round on, the results up, everybody on the cool-down. */
+  private finish(field: Field, race: LiveRace): void {
+    const session = race.session;
+    const out = session.end !== 'laps' && session.end !== 'dev';
+    const place = out ? 0 : session.position(0);
+    const paid = settleStake(this.world, place);
+    advanceRound(this.world, field.track.postIndex, field.round);
+    this.endRace(field, race);
+    const prize = racePrize(place);
+    const placeWord = ['', '1st', '2nd', '3rd', '4th', '5th'][place] ?? `${place}th`;
     const why: Record<RaceEnd, string> = {
-      laps: won ? `you win — ${formatPay(RACE_PRIZE)}` : 'the rival was first — the stake is his',
-      'off-track': 'too long off the track — race lost',
-      away: 'you left the track — race lost',
-      'left-car': 'you got out — race lost',
-      flipped: 'on the roof — race lost',
-      wrecked: 'the car is done — race lost',
-      dev: won ? 'race won (dev)' : 'race lost (dev)',
+      laps: place === 1 ? 'YOU WIN!' : `YOU ARE ${placeWord}`,
+      dev: place === 1 ? 'YOU WIN!' : `YOU ARE ${placeWord}`,
+      'off-track': 'OUT — too long off the track',
+      away: 'OUT — you left the track',
+      'left-car': 'OUT — you got out',
+      flipped: 'OUT — on the roof',
+      wrecked: 'OUT — the car is done',
     };
-    this.host.toast(why[race.session.end ?? 'laps']);
+    this.readout.results = {
+      headline: why[session.end ?? 'laps'],
+      won: place === 1,
+      rows: this.resultRows(field, race),
+      prize: paid < 0 ? 'no stake (dev race)' : prize > 0 ? `+${formatPay(prize)}${prize === RACE_STAKE ? ' — the stake back' : ''}` : 'no prize — the stake is gone',
+      hint: `[F] or [${this.host.keyLabel('raceRestart')}] race again — ${formatPay(RACE_STAKE)}`,
+    };
+    this.host.toast(place === 1 ? `you win — ${formatPay(prize)}` : place > 0 ? `${placeWord} place${prize > 0 ? ` — ${formatPay(prize)}` : ''}` : 'out of the race');
   }
 
-  /** The race called off undecided (the rival lost to the world): the stake back, the round as it was. */
-  private callOff(): void {
-    const race = this.race;
-    if (!race) return;
-    race.session.decide('rival', 'dev');
+  private resultRows(field: Field, race: LiveRace): RaceResultRow[] {
+    const session = race.session;
+    const order = session.standings();
+    const leader = order[0]!;
+    const leaderLaps = session.counters[leader]!.completed;
+    return order.map((i, k): RaceResultRow => {
+      const player = i === 0;
+      const name = player ? 'YOU' : carModel(field.cars[i - 1]!.driver.modelId).label;
+      let time: string;
+      if (session.finished(i)) time = clock(session.finishTimes[i]!);
+      else if (player && session.end !== null && session.end !== 'laps' && session.end !== 'dev') time = 'OUT';
+      else {
+        const down = leaderLaps - session.counters[i]!.completed;
+        time = down > 0 ? `+${down} LAP${down > 1 ? 'S' : ''}` : '—';
+      }
+      const best = session.bestLap(i);
+      return { place: k + 1, name, time, best: Number.isFinite(best) ? clock(best) : '—', player };
+    });
+  }
+
+  /** The race called off undecided (a rival lost to the world): the stake back, the round as it was. */
+  private callOff(race: LiveRace): void {
+    const field = this.field;
+    race.session.close('dev');
     const back = refundStake(this.world);
-    this.endRace(race);
-    this.showBanner('RACE OFF', false);
+    if (field) this.endRace(field, race);
+    else this.race = null;
     this.host.toast(back > 0 ? `race off — ${formatPay(back)} back` : 'race off');
   }
 
-  /** The race's leftovers: the player's trailer off, the rival on its cool-down. */
-  private endRace(race: LiveRace): void {
-    const trailerId = raceTrailerId(race.track.postIndex, 'player');
-    if (this.world.state.trailers[trailerId]) this.world.apply({ t: 'trailer_remove', trailerId });
-    race.autopilot.setEngaged(false);
+  /** The race's leftovers: the trailers off, every car solid as before, the field on its cool-down. */
+  private endRace(field: Field, race: LiveRace): void {
+    this.removeTrailers(field);
+    const playerVehicle = this.host.vehicle(race.playerCarId);
+    if (playerVehicle) this.setGroups(playerVehicle, DEFAULT_GROUPS);
+    this.devPilot?.setEngaged(false);
     this.race = null;
-    if (!this.rival) return;
-    const autopilot = new Autopilot(race.track.road, this.physics);
-    autopilot.setMode('sleeper');
-    autopilot.setPace(COOLDOWN_PACE);
-    const s = race.session.rival.s;
-    this.cooldown = { autopilot, seconds: 0, s, toSlot: race.track.wrap(race.track.startGrid[0].s - s) };
-    this.rivalState = 'cooldown';
-  }
-
-  private stepCooldown(dt: number): void {
-    const cooldown = this.cooldown!;
-    cooldown.seconds += dt;
-    const rival = this.rival;
-    const vehicle = rival ? this.host.vehicle(raceRivalId(rival.track.postIndex)) : null;
-    if (!rival || !vehicle) {
-      cooldown.autopilot.setEngaged(false);
-      this.cooldown = null;
-      if (rival) this.rivalState = 'waiting';
-      return;
-    }
-    vehicle.absoluteTranslation(this.rivalPosition);
-    const track = rival.track;
-    const s = track.project(this.rivalPosition.x, this.rivalPosition.z, cooldown.s, this.at).s;
-    cooldown.s = s;
-    cooldown.toSlot = track.wrap(track.startGrid[0].s - s);
-    const toSlot = cooldown.toSlot;
-    const parked = (toSlot < COOLDOWN_PARKED_M || toSlot > track.lengthM - COOLDOWN_PARKED_M) && vehicle.speedKmh < 1;
-    if (parked || cooldown.seconds > COOLDOWN_MAX_S) {
-      cooldown.autopilot.setEngaged(false);
-      this.cooldown = null;
-      // Parked (or given up): waiting again, stale until the scan swaps it unseen.
-      this.rivalState = 'waiting';
+    for (const car of field.cars) {
+      if (car.state === 'racing') this.toCooldown(field, car);
+      const vehicle = this.host.vehicle(car.id);
+      if (vehicle) this.setGroups(vehicle, DEFAULT_GROUPS);
     }
   }
 
-  private showBanner(text: string, won: boolean): void {
-    this.readout.banner = text;
-    this.readout.won = won;
-    this.bannerS = BANNER_S;
+  /** The results close once the player has driven away from the grid. */
+  private stepResults(): void {
+    const field = this.field;
+    if (this.readout.results === null || !field || this.race) return;
+    const carId = this.world.state.player.drivingCarId;
+    const vehicle = carId !== null ? this.host.vehicle(carId) : null;
+    if (!vehicle) return;
+    vehicle.absoluteTranslation(this.position);
+    const slot = field.track.startGrid[PLAYER_SLOT]!;
+    if (Math.hypot(this.position.x - slot.x, this.position.z - slot.z) > RESULTS_AWAY_M) this.readout.results = null;
   }
 
   private updateReadout(): void {
@@ -630,71 +1101,124 @@ export class RaceDirector {
       r.lights = 0;
       r.go = false;
       r.racing = false;
-      r.active = r.banner !== null;
+      r.hint = null;
+      r.active = r.results !== null;
       return;
     }
     const session = race.session;
     r.active = true;
     r.lights = session.lights;
     r.go = session.phase === 'racing' && session.raceTime < GO_S;
-    r.racing = session.phase === 'racing';
+    r.racing = session.phase === 'racing' && !session.playerDone;
     r.lap = session.playerLap;
     r.laps = RACE_LAPS;
-    r.position = session.playerPosition;
+    r.position = session.position(0);
+    r.racers = session.racers;
+    const counter = session.counters[0]!;
+    r.hint =
+      !r.racing ? (session.playerDone ? 'FINISHED — waiting for the field' : null)
+      : race.flippedS > 0.5 || counter.offTrackS > 2 ? `[${this.host.keyLabel('raceReturn')}] back to the track`
+      : null;
   }
 
   // -------------------------------------------------------------------------
   // Dev (app/devtools.ts `__bro.race`).
   // -------------------------------------------------------------------------
 
-  /** The next rival may be put down in view (the dev jump lands beside its slot). */
+  /** The next field may be put down in view (the dev jump lands beside its grid). */
   devAllowSeenSpawn(): void {
     this.seenSpawnOnce = true;
     this.scanIn = 0;
   }
 
-  /** Starts a race against the waiting rival from wherever the player's car is, with no stake. */
+  /** Starts a race of the waiting field from the grid with no stake. */
   devStart(): string {
     const carId = this.world.state.player.drivingCarId;
     if (this.race) return 'a race is on already';
-    if (!this.rival || this.rivalState !== 'waiting') return 'no rival waiting near by';
+    const field = this.field;
+    if (!field || field.cars.some((car) => car.state !== 'waiting')) return 'no field waiting near by';
     if (carId === null) return 'get in a car first';
-    return this.startRace(carId) ? `racing ${this.rival.plan.modelId} (${this.rival.plan.level}${this.rival.plan.trailer ? ', trailers' : ''})` : 'the cars are not live yet';
+    return this.startRace(carId)
+      ? `racing ${field.plan.rivals.map((d) => `${d.modelId} ${d.skill.toFixed(2)}`).join(', ')} (${field.plan.level}${field.plan.trailer ? ', trailers' : ''})`
+      : 'the cars are not live yet';
   }
 
-  /** Decides the race on now for `winner`. */
-  devFinish(winner: Racer): string {
+  /** Decides the race on now, the player first or last. */
+  devFinish(winner: 'player' | 'rival'): string {
     const race = this.race;
-    if (!race) return 'no race on';
-    if (race.session.decide(winner, 'dev')) this.finish(race);
+    const field = this.field;
+    if (!race || !field) return 'no race on';
+    race.session.devDecide(winner === 'player');
+    this.finish(field, race);
     return `${winner} wins`;
+  }
+
+  /** The race keys from the console: `restart` (or rematch) and `back` to the track. */
+  devKey(key: 'restart' | 'back'): string {
+    const f = emptyInput();
+    if (key === 'restart') f.raceRestart = true;
+    else f.raceReturn = true;
+    this.keys(f);
+    return key;
+  }
+
+  /** The player's car driven round the lap by the race's own racer (for a whole race from the console). */
+  devAutoDrive(on: boolean): string {
+    const track = this.field?.track ?? this.track;
+    if (!on || !track) {
+      this.devPilot?.setEngaged(false);
+      this.devPilot = null;
+      return 'off';
+    }
+    this.devPilot = new Autopilot(track.road, this.physics);
+    this.devPilot.setMode('frantic');
+    return 'on';
   }
 
   devState(): Record<string, unknown> {
     const race = this.race;
-    const rival = this.rival;
+    const field = this.field;
+    const session = race?.session;
     return {
-      track: this.track?.id ?? null,
-      rival: rival ? { id: raceRivalId(rival.track.postIndex), ...rival.plan, round: rival.round, state: this.rivalState } : null,
-      stake: this.world.state.raceStake,
-      race: race
+      track: this.track ? { id: this.track.id, lengthM: this.track.lengthM, stats: this.track.stats } : null,
+      field: field
         ? {
-            phase: race.session.phase,
-            lights: race.session.lights,
-            time: race.session.raceTime,
-            player: { lap: race.session.player.lap, checkpoint: race.session.player.next, s: race.session.player.s, offTrackS: race.session.player.offTrackS },
-            rival: { lap: race.session.rival.lap, checkpoint: race.session.rival.next, s: race.session.rival.s },
-            position: race.session.playerPosition,
-            playerLaps: [...race.session.playerLaps],
-            rivalLaps: [...race.session.rivalLaps],
+            level: field.plan.level,
+            trailer: field.plan.trailer,
+            round: field.round,
+            cars: field.cars.map((car) => ({ id: car.id, model: car.driver.modelId, skill: car.driver.skill, state: car.state, spawned: car.spawned, live: this.host.vehicle(car.id) !== null, ghost: car.ghostS > 0 })),
           }
         : null,
+      stake: this.world.state.raceStake,
+      race: session
+        ? {
+            phase: session.phase,
+            lights: session.lights,
+            time: session.raceTime,
+            end: session.end,
+            standings: [...session.standings()],
+            racers: session.counters.map((c, i) => ({ lap: c.lap, checkpoint: c.next, s: c.s, offTrackS: c.offTrackS, finished: session.finished(i) ? session.finishTimes[i] : null })),
+          }
+        : null,
+      results: this.readout.results,
     };
   }
 
   dispose(): void {
-    this.race?.autopilot.setEngaged(false);
-    this.cooldown?.autopilot.setEngaged(false);
+    const field = this.field;
+    if (field) for (const car of field.cars) {
+      car.autopilot.setEngaged(false);
+      car.cooldown.setEngaged(false);
+    }
+    this.devPilot?.setEngaged(false);
     this.visuals.dispose();
   }
+}
+
+/** Seconds as m:ss.s. */
+function clock(seconds: number): string {
+  const tenths = Math.round(seconds * 10);
+  const minutes = Math.floor(tenths / 600);
+  const rest = (tenths - minutes * 600) / 10;
+  return `${minutes}:${rest < 10 ? '0' : ''}${rest.toFixed(1)}`;
 }

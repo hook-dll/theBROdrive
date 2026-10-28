@@ -117,6 +117,13 @@ export interface InputFrame {
   toggleMouseDriving: boolean;
   /** Cycles autopilot: sleeper -> hurried -> frantic -> off; edge-triggered. */
   toggleAutopilot: boolean;
+  /**
+   * The races at the tracks (race/director.ts), taps: start the race again from the grid
+   * (and race again from the results), and put the car back on the track at its last
+   * checkpoint. Consumed by the race; nothing else reads them.
+   */
+  raceRestart: boolean;
+  raceReturn: boolean;
   /** How `steer` is to be read: see `SteerMode`. */
   steerMode: SteerMode;
   /**
@@ -164,6 +171,8 @@ export function emptyInput(): InputFrame {
     stickerReset: false,
     stickerMirror: false,
     toggleMouseDriving: false,
+    raceRestart: false,
+    raceReturn: false,
     // A synthetic frame is a computed command until a device says otherwise.
     steerMode: 'direct',
     steerBothHeld: false,
@@ -222,6 +231,9 @@ export const BINDABLE_ACTIONS: readonly {
   // else uses and which stay reachable from the movement hand.
   { id: 'itemNext', label: 'Next item', defaultKeys: ['BracketRight'] },
   { id: 'itemPrev', label: 'Previous item', defaultKeys: ['BracketLeft'] },
+  // The races at the tracks: keys nothing else uses, away from the driving hand's own.
+  { id: 'raceRestart', label: 'Race: restart from the grid / race again', defaultKeys: ['Backspace'] },
+  { id: 'raceReturn', label: 'Race: back to the track (last checkpoint)', defaultKeys: ['KeyT'] },
 ];
 
 /** Effective binding table with no overrides applied. Shared, never mutated. */
@@ -825,6 +837,9 @@ export class InputReader {
       || this.padPressed(PAD.DUp);
     f.radioCycle =
       this.anyPressed(this.keys.radio) || (this.driving && this.padPressed(PAD.DDown));
+    // The pad's right stick press is otherwise unused: back to the track.
+    f.raceRestart = this.driving && this.anyPressed(this.keys.raceRestart);
+    f.raceReturn = this.driving && (this.anyPressed(this.keys.raceReturn) || this.padPressed(PAD.RS));
     // X is the pad's F: it does whatever F does, exactly as the key does.
     f.interact = this.anyPressed(this.keys.interact) || taps?.interact === true || this.padPressed(PAD.X);
     f.interactDown = this.anyHeld(this.keys.interact) || pad.buttons[PAD.X] === true;

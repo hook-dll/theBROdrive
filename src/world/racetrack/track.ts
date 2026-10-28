@@ -19,12 +19,13 @@ import type { TrackPieceKind, TrackSector, TrackSurfaceKind } from './layout';
  *
  *   id            'track:<postIndex>'
  *   postIndex     the post stop (world/poststops.ts) whose settlement it stands beside
- *   lengthM       one lap, metres (1.8-3.5 km)
+ *   lengthM       one lap, metres (0.9-1.7 km)
  *   sampleAt(s)   { s, x, y, z, heading, curvature, bank, grade, surface, halfWidth }
  *                 `bank` is the cross-slope (road convention: y = centre - bank * lateral,
  *                 lateral positive LEFT), `surface` the tyre SurfaceType of that sector
  *   surfaceY(s,l) the drawn and collided surface height at a lateral offset
- *   startGrid     two poses side by side, `GRID_BEHIND_M` behind the line, facing the lap
+ *   startGrid     `GRID_SLOTS` staggered poses in rows of two, the front row
+ *                 `GRID_BEHIND_M` behind the line, facing the lap
  *   finishS       0
  *   checkpoints   arclengths a lap must pass in order before the line counts (part B)
  *   road          a `DriveRoad` (world/road.ts) the existing `Autopilot` drives as is
@@ -110,8 +111,9 @@ export interface TrackStats {
   readonly maxBank: number;
   readonly maxOffCamber: number;
   readonly maxGrade: number;
-  /** Total climb over one lap, metres. */
+  /** Total climb over one lap, and the lap's highest point over its lowest, metres. */
   readonly climbM: number;
+  readonly elevationM: number;
   /** Share of the lap on each surface kind, 0..1. */
   readonly surfaceShare: Readonly<Record<TrackSurfaceKind, number>>;
   readonly corners: Readonly<Partial<Record<TrackPieceKind, number>>>;
@@ -141,7 +143,15 @@ export interface RaceTrackInit {
 
 /** How far behind the finish line the grid's front row stands, metres. */
 export const GRID_BEHIND_M = 14;
-/** The two grid slots' laterals, as a share of the half width either side of the crown. */
+/**
+ * THE GRID: `GRID_SLOTS` boxes in rows of two, `GRID_ROW_M` apart, the left box of each
+ * row `GRID_STAGGER_M` behind the right one, as a staggered start is laid. Slot 0 is pole
+ * (front row, right of the crown), slot 1 beside and behind it, and so on back.
+ */
+export const GRID_SLOTS = 6;
+const GRID_ROW_M = 9;
+const GRID_STAGGER_M = 4.5;
+/** The slots' laterals, as a share of the half width either side of the crown. */
 const GRID_LATERAL_SHARE = 0.48;
 /** Checkpoints a lap must pass in order, evenly round it (the line itself is not one). */
 const CHECKPOINT_COUNT = 6;
@@ -165,7 +175,8 @@ export class RaceTrack {
   /** Graded sand beyond each edge before the ground leaves the track's plane, metres. */
   readonly runoffM: number;
   readonly finishS = 0;
-  readonly startGrid: readonly [TrackPose, TrackPose];
+  /** `GRID_SLOTS` poses, pole first; see `GRID_SLOTS`. */
+  readonly startGrid: readonly TrackPose[];
   readonly checkpoints: readonly number[];
   readonly sectors: readonly TrackSector[];
   readonly corners: readonly TrackCorner[];
@@ -212,8 +223,8 @@ export class RaceTrack {
     this.lengthM = init.sectors[init.sectors.length - 1]!.endS;
     this.step = this.lengthM / this.count;
 
-    const gridS = this.wrap(-GRID_BEHIND_M);
-    const pose = (lateral: number): TrackPose => {
+    const pose = (behind: number, lateral: number): TrackPose => {
+      const gridS = this.wrap(-behind);
       const at = this.sampleAt(gridS);
       return {
         x: at.x + Math.cos(at.heading) * lateral,
@@ -224,9 +235,13 @@ export class RaceTrack {
         lateral,
       };
     };
-    // Slot 0 on the right of the crown, as a driver on this road keeps right.
+    // Even slots on the right of the crown, as a driver on this road keeps right.
     const gridLateral = this.halfWidth * GRID_LATERAL_SHARE;
-    this.startGrid = [pose(-gridLateral), pose(gridLateral)];
+    this.startGrid = Array.from({ length: GRID_SLOTS }, (_, k) => {
+      const row = Math.floor(k / 2);
+      const left = k % 2 === 1;
+      return pose(GRID_BEHIND_M + row * GRID_ROW_M + (left ? GRID_STAGGER_M : 0), left ? gridLateral : -gridLateral);
+    });
     this.checkpoints = Array.from({ length: CHECKPOINT_COUNT }, (_, i) => ((i + 1) * this.lengthM) / (CHECKPOINT_COUNT + 1));
     this.road = new RaceTrackRoad(this);
     this.stats = this.measure();
@@ -388,7 +403,13 @@ export class RaceTrack {
     // A chicane or esses is four arcs: count the feature, not its arcs.
     if (corners.chicane) corners.chicane /= 4;
     if (corners.esses) corners.esses /= 4;
-    return { minRadiusM: minRadius, maxBank, maxOffCamber, maxGrade, climbM: climb, surfaceShare: share, corners };
+    let low = Infinity;
+    let high = -Infinity;
+    for (let i = 0; i < this.count; i++) {
+      low = Math.min(low, this.ys[i]!);
+      high = Math.max(high, this.ys[i]!);
+    }
+    return { minRadiusM: minRadius, maxBank, maxOffCamber, maxGrade, climbM: climb, elevationM: high - low, surfaceShare: share, corners };
   }
 }
 

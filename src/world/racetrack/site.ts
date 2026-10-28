@@ -18,8 +18,8 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
  * WHICH POSTS. `postHasTrack` is a pure roll per post stop, as `poiHasMachine` is for
  * the machines: never at posts 0 and 1, where the road teaches everything else, and
  * past them at `TRACK_CHANCE`. A roll is only a wish: the track must also find room
- * (below), and about one roll in eight does not, so a little under one settlement in
- * three has one (tools/racetrack-gen.ts counts it: 56 of 180 posts over three seeds).
+ * (below), and about one roll in sixteen does not, so about one settlement in three
+ * has one (tools/racetrack-gen.ts counts it: 60 of 180 posts over three seeds).
  *
  * WHERE BESIDE THE POST. Always on the LAY-BY's side, so the access lane leaves the
  * pad without crossing the road: from the pad's outer edge `LANE_ALONG_M` before the
@@ -46,13 +46,15 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
  *
  * THE HEIGHTS. The lap's profile is the ground under it smoothed along the loop over
  * `PROFILE_SIGMA_M` — so the track follows the land and the skirt has little to do —
- * plus an authored HILL section, one or two CRESTS on straights and a DIP. A crest is
- * a raised cosine whose vertical radius is held at `CREST_RADIUS_M` or more (a car at
- * 110 km/h keeps two thirds of its weight over it); the whole profile is held under
- * `MAX_GRADE`. Where two stretches of the loop pass near each other their heights are
- * held within `PAIR_SLOPE` of their gap, so the sand between them is a bank and not a
- * wall, and the plane stands within `FIT_MAX_M` of the desert at the run-off's edges.
- * Features that break any rule are scaled down until they do not.
+ * plus authored features sized to the lap: a HILL over a quarter to two fifths of it,
+ * often a shorter SWELL of the other sign, one or two CRESTS on straights and a DIP. A
+ * crest is a raised cosine whose vertical radius is held at `CREST_RADIUS_M` or more (a
+ * car at 100 km/h keeps half its weight over it, and the lap's straights are short
+ * enough that little arrives faster); the whole profile is held under `MAX_GRADE`.
+ * Where two stretches of the loop pass near each other their heights are held within
+ * `PAIR_SLOPE` of their gap, so the sand between them is a bank and not a wall, and the
+ * plane stands within `FIT_MAX_M` of the desert at the run-off's edges. Features that
+ * break any rule are scaled down until they do not.
  *
  * THE GROUND: A RASTER, BLENDED IN `Terrain.openBase`. Inside the CORE — the track,
  * its `RUNOFF_M` of sand either side, and the paddock — the ground IS the track's plane
@@ -61,7 +63,11 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
  * beyond it the ground smoothsteps back to the desert. The heights come from every
  * nearby stretch at once, weighted by `exp(-excess / SOFT_TAU_M)`, so where two
  * stretches' skirts meet (a hairpin's legs, the infield) the ground is a smooth average
- * and not a crease; inside a core the core's own plane outweighs any other by e^10.
+ * and not a crease; inside a core the core's own plane outweighs any other by e^10. A
+ * segment is charged `PAST_END_WEIGHT` per metre the point lies beyond its end, so a
+ * point takes its own stretch's banking and not an average over the next ten metres
+ * of a bank that is ramping up (a banked corner's run-off would otherwise miss its plane
+ * by decimetres).
  * The result is stored as `height * weight` and `weight` on a `RASTER_CELL_M` lattice
  * and read bilinearly, which keeps it continuous where the weight falls to zero.
  *
@@ -73,7 +79,7 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
 
 /** No track at the first posts: the road's start teaches the rest of the game first. */
 const TRACK_FIRST_POST = 2;
-/** Share of posts past the first that roll a track (about one in eight fails to place). */
+/** Share of posts past the first that roll a track (about one in sixteen fails to place). */
 const TRACK_CHANCE = 0.33;
 const TRACK_DOMAIN = 0x52434531; // 'RCE1'
 
@@ -114,9 +120,9 @@ const LANE_MIN_RADIUS_M = 14;
 const LANE_STEP_M = 3;
 
 /** Profile and its rules. */
-const PROFILE_SIGMA_M = 70;
-const MAX_GRADE = 0.12;
-const CREST_RADIUS_M = 260;
+const PROFILE_SIGMA_M = 55;
+const MAX_GRADE = 0.14;
+const CREST_RADIUS_M = 170;
 const PAIR_SLOPE = 0.3;
 /**
  * Most the track's plane may stand off the desert at the run-off's edge. Smoothstepped
@@ -124,9 +130,13 @@ const PAIR_SLOPE = 0.3;
  */
 const FIT_MAX_M = SKIRT_M * 0.2;
 
-/** Raster lattice and the soft-minimum's length. */
+/**
+ * Raster lattice and the soft-minimum's length, and the extra excess a segment is
+ * charged per metre a node lies beyond its end (see `buildRaster`).
+ */
 const RASTER_CELL_M = 4;
 const SOFT_TAU_M = 3;
+const PAST_END_WEIGHT = 1.5;
 /** The lane's keep-clear margin beyond its own half width (scatter, props). */
 const LANE_CLEAR_M = 5;
 
@@ -423,36 +433,42 @@ function profile(
     const d = Math.abs(a - b) % length;
     return Math.min(d, length - d);
   };
-  // The start straight and 30 m round it carry no feature: the grid stands level-ish.
+  // The start straight and 20 m round it carry no feature: the grid stands level-ish.
   const straightMid = (placed.straightStart + (placed.straightEnd + length - placed.straightStart) / 2) % length;
-  const straightHalf = (placed.straightEnd + length - placed.straightStart) / 2 + 30;
+  const straightHalf = (placed.straightEnd + length - placed.straightStart) / 2 + 20;
   const clearOfStart = (centre: number, width: number): boolean => wrapDistance(centre, straightMid) > straightHalf + width / 2;
-
   const features: Feature[] = [];
-  // The hill: a long rise (sometimes a long hollow) somewhere on the lap.
-  if (rand() < 0.85) {
-    const width = between(rand, 320, 620);
+  const placeFeature = (width: number, amplitude: number): void => {
     for (let tries = 0; tries < 8; tries++) {
       const centre = rand() * length;
       if (!clearOfStart(centre, width)) continue;
-      features.push({ centre, width, amplitude: (rand() < 0.8 ? 1 : -1) * between(rand, 2.5, 5.5) });
-      break;
+      features.push({ centre, width, amplitude });
+      return;
     }
+  };
+
+  // The hill: a long rise (sometimes a long hollow) over a third of the lap or so, and
+  // often a shorter swell of the other sign elsewhere.
+  let hillSign = 1;
+  if (rand() < 0.9) {
+    hillSign = rand() < 0.8 ? 1 : -1;
+    placeFeature(Math.max(260, length * between(rand, 0.25, 0.42)), hillSign * between(rand, 3, 7));
   }
+  if (rand() < 0.6) placeFeature(Math.max(160, length * between(rand, 0.14, 0.22)), -hillSign * between(rand, 2, 4));
   // Crests on the longer straights, a dip on one more.
-  const straights = placed.corners.filter((c) => c.kind === 'straight' && c.length >= 110);
+  const straights = placed.corners.filter((c) => c.kind === 'straight' && c.length >= 70);
   let crests = 0;
   let dips = 0;
   for (const straight of straights) {
-    const width = Math.min(straight.length - 20, 140);
+    const width = Math.min(straight.length - 16, 130);
     const centre = (straight.startS + straight.length / 2) % length;
     if (!clearOfStart(centre, width)) continue;
     const limit = (width * width) / (2 * Math.PI * Math.PI * CREST_RADIUS_M);
     if (crests < 2 && rand() < 0.7) {
-      features.push({ centre, width, amplitude: Math.min(2.6, limit) * between(rand, 0.7, 1) });
+      features.push({ centre, width, amplitude: Math.min(3, limit) * between(rand, 0.7, 1) });
       crests++;
     } else if (dips < 1 && rand() < 0.6) {
-      features.push({ centre, width, amplitude: -Math.min(2.2, limit) * between(rand, 0.7, 1) });
+      features.push({ centre, width, amplitude: -Math.min(2.6, limit) * between(rand, 0.7, 1) });
       dips++;
     }
   }
@@ -604,7 +620,10 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
             const spill = strip.core * inv;
             const y = strip.ys[a]! + (strip.ys[b]! - strip.ys[a]!) * Math.min(1 + spill, Math.max(-spill, along));
             const bank = strip.banks[a]! + (strip.banks[b]! - strip.banks[a]!) * t;
-            const k = Math.exp(-over / SOFT_TAU_M);
+            // Charged for lying past the segment's end (see the header): its own segment's
+            // banking, not an average over the ramp either side.
+            const past = Math.abs(along - t) * Math.sqrt(lengthSq);
+            const k = Math.exp(-(over + PAST_END_WEIGHT * past) / SOFT_TAU_M);
             sumK[node] += k;
             sumKH[node] += k * (y - bank * lateral);
           }
@@ -834,7 +853,9 @@ function tryLoop(
     }
     if (!clear) continue;
 
-    // The ground under the centreline and at the run-off's edges, then the heights.
+    // The ground under the centreline and at the run-off's edges, then the heights. The
+    // edges are held to the chunk spread too: where the road bends round a track, an edge
+    // can lie nearer another stretch of road than its centreline does.
     const ground = new Float64Array(samples);
     const edges = new Float64Array(samples * 2);
     for (let k = 0; k < samples; k++) {
@@ -845,9 +866,11 @@ function tryLoop(
         const x = xs[i]! + Math.cos(placed.headings[i]!) * lateral;
         const z = zs[i]! - Math.sin(placed.headings[i]!) * lateral;
         near.measure(x, z);
+        if (Math.abs(near.s - chunkS) > CHUNK_SPREAD_M) clear = false;
         edges[k * 2 + side] = world.natural(x, z, near.dist, near.s);
       }
     }
+    if (!clear) continue;
     const ys = profile(placed, rand, ground, edges, groundStep, halfWidth);
     if (!ys) continue;
 

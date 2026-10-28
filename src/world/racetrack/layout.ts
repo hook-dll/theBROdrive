@@ -10,25 +10,41 @@ import { SurfaceType } from '../../core/surfaces';
  * itself, and it is SMOOTH enough that the autopilot drives it like a road.
  *
  * A ROUNDED STAR POLYGON. Six to nine corners stand round an ellipse at increasing
- * angles, each pushed in or out a little, and one or two are pulled hard toward the
- * middle. Because every corner is at a larger angle round the centre than the one
- * before, the polygon is star-shaped about it and therefore SIMPLE whatever the rolls
- * were; a corner pulled inward turns the loop AGAINST its own direction there (a
- * `counter` corner), which is what stops a loop reading as an oval. Each corner is
- * then rounded by an arc tangent to both its edges, so the loop is straights and arcs
- * and closes exactly: an arc of turn θ and radius R takes `R tan(θ/2)` off each edge
- * and turns the heading by exactly θ, and the corners' turns sum to one revolution.
+ * angles, each pushed in or out a little; one or two are pulled hard toward the middle
+ * and, on most rolls, one is pushed far OUT into a spike. Because every corner is at a
+ * larger angle round the centre than the one before, the polygon is star-shaped about
+ * it and therefore SIMPLE whatever the rolls were; a corner pulled inward turns the loop
+ * AGAINST its own direction there (a `counter` corner), which is what stops a loop
+ * reading as an oval, and the spike's tip turns 115-150 degrees, which is a hairpin.
+ * Each corner is then rounded by an arc tangent to both its edges, so the loop is
+ * straights and arcs and closes exactly: an arc of turn θ and radius R takes
+ * `R tan(θ/2)` off each edge and turns the heading by exactly θ, and the corners' turns
+ * sum to one revolution.
  *
  * The corner's radius is rolled by how sharp the corner is, so the polygon decides the
- * character: a corner of 115° or more is a HAIRPIN (20-27 m), 70° a TIGHT one, 35° a
- * MEDIUM, and the shallow ones FAST bends and SWEEPERS up to 300 m. The sharpest corner
+ * character: a corner of 115° or more is a HAIRPIN (19-25 m), 70° a TIGHT one, 35° a
+ * MEDIUM, and the shallow ones FAST bends and SWEEPERS up to 180 m. The sharpest corner
  * is always tight, so every lap has its technical corner, and a loop with no corner
  * sharp enough to give one is thrown away and rolled again.
  *
- * Long straights other than the start straight may carry a DOUBLE S: turn a, back 2a,
- * and a again. That pattern leaves the heading AND the lateral offset where they were,
- * so it drops into a straight without disturbing the closure; only its along-road
- * length is taken off the straight. Tight radii make a CHICANE, wide ones ESSES.
+ * WHY SHORT AND DENSE. A lap is a race of a few laps against one rival, run in a minute
+ * or so: 0.9-1.7 km (about 1.3 km on average) with nine or more corner features, so a
+ * lap is always busy and a mistake is never far from the next chance to recover it.
+ *
+ * Straights other than the start straight carry up to three DOUBLE S inserts: turn a,
+ * back 2a, and a again. That pattern leaves the heading AND the lateral offset where
+ * they were, so it drops into a straight without disturbing the closure; only its
+ * along-road length is taken off the straight. Wide radii make ESSES; tight ones a
+ * CHICANE, rolled by its sideways DISPLACEMENT `2R(1 - cos a)`: 14.5 m or more, so the
+ * middle of the chicane stands wholly off the original straight's line — no straight
+ * line through it stays on the asphalt — and there is room under its middle for the
+ * rocks that stop a driver cutting it (world/racetrack/mesh.ts `chicaneBlockers`).
+ *
+ * BANKING. Fast corners and sweepers are mostly banked properly (7-14% cross-slope),
+ * some hairpins are laid as BOWLS (10-16%), everything else carries a mild camber into
+ * the bend, chicanes and esses lie flat for the quick changes of direction, and now and
+ * then one medium or fast corner is laid OFF-CAMBER. The cross-slope is ramped over
+ * `BANK_SMOOTH_M`, short enough that a 50 m corner reaches its bank.
  *
  * SMOOTHNESS, AND THE CLOSURE IT COSTS. Straight-into-arc is a step in curvature, which
  * a steering controller feels as a kick. The curvature table is box-filtered over
@@ -120,20 +136,42 @@ export interface TrackLoop {
 export const TRACK_STEP_M = 1;
 /** Length of the clothoid every curvature step is spread into, metres. */
 export const CURVATURE_SMOOTH_M = 12;
-/** Length a change of banking is spread over, metres. */
-const BANK_SMOOTH_M = 30;
+/** Length a change of banking is spread over, metres: short, so a 50 m hairpin reaches its bank. */
+const BANK_SMOOTH_M = 14;
 /** Shortest lap kept, and longest. */
-export const TRACK_MIN_LENGTH_M = 1800;
-export const TRACK_MAX_LENGTH_M = 3500;
+export const TRACK_MIN_LENGTH_M = 900;
+export const TRACK_MAX_LENGTH_M = 1700;
 /** Lap length the polygon is sized for, before rounding takes its share. */
-const TARGET_MIN_M = 2050;
-const TARGET_MAX_M = 3400;
+const TARGET_MIN_M = 900;
+const TARGET_MAX_M = 1550;
 /** Shortest straight left between two corners, metres. */
 const MIN_STRAIGHT_M = 22;
-/** The start straight holds the grid, the line and the paddock beside them. */
-export const START_STRAIGHT_MIN_M = 170;
+/**
+ * The start straight holds the grid (`GRID_SLOTS` boxes, the last 36.5 m behind the
+ * line, track.ts), the line 62% of the way along, and the paddock beside the grid.
+ */
+export const START_STRAIGHT_MIN_M = 120;
 /** No corner is rounded tighter than this, metres. */
 const MIN_RADIUS_M = 19;
+/** Corner features a lap must have; a double S counts as one. */
+const MIN_FEATURES = 9;
+/** Share of polygons that push one corner out into a hairpin spike, and how far. */
+const SPIKE_CHANCE = 0.85;
+const SPIKE_MIN = 1.85;
+const SPIKE_MAX = 2.25;
+/**
+ * A chicane's sideways displacement `2R(1 - cos a)`, metres: at least two asphalt widths
+ * and the blockers' margin, so the middle stands wholly off the straight's line and the
+ * rocks can close the whole of that line (mesh.ts `chicaneBlockers`). Its arcs' radius
+ * range and the steepest turn of one arc, radians.
+ */
+export const CHICANE_SHIFT_MIN_M = 14.5;
+const CHICANE_SHIFT_MAX_M = 17.5;
+const CHICANE_RADIUS_MIN_M = 19;
+const CHICANE_RADIUS_MAX_M = 26;
+const CHICANE_TURN_MAX = 0.95;
+/** Straight kept either side of a double S, metres. */
+const INSERT_MARGIN_M = 24;
 /**
  * THE SELF-CLEARANCE. Any two points of the centreline more than `NEIGHBOUR_S_M` apart
  * along the lap must be at least `TRACK_CLEAR_M` apart on the ground: two widths of
@@ -179,19 +217,22 @@ function cornerKind(corner: Corner, loopTurn: number): TrackPieceKind {
 }
 
 /**
- * Cross-slope for a corner by its kind: fast corners banked in (up to 8%, the steep end
- * of what a circuit lays), tight ones barely, and the counter-corners flat.
+ * Cross-slope for a corner by its kind (see the header): fast corners and sweepers mostly
+ * banked properly, some hairpins laid as bowls, the rest a mild camber into the bend.
  */
 function cornerBank(rand: Rand, kind: TrackPieceKind): number {
   switch (kind) {
     case 'sweeper':
     case 'fast':
-      return rand() < 0.75 ? between(rand, 0.04, 0.08) : between(rand, 0.015, 0.03);
+      return rand() < 0.7 ? between(rand, 0.07, 0.14) : between(rand, 0.02, 0.04);
     case 'medium':
-      return between(rand, 0.02, 0.045);
-    case 'tight':
+      return rand() < 0.35 ? between(rand, 0.06, 0.1) : between(rand, 0.025, 0.05);
     case 'hairpin':
-      return between(rand, 0, 0.03);
+      return rand() < 0.45 ? between(rand, 0.1, 0.16) : between(rand, 0.02, 0.05);
+    case 'tight':
+      return between(rand, 0.02, 0.05);
+    case 'counter':
+      return between(rand, 0.01, 0.03);
     default:
       return 0;
   }
@@ -218,10 +259,15 @@ function polygonPieces(rand: Rand): { pieces: TrackPiece[]; loopTurn: 1 | -1 } |
   const reflexRoll = rand();
   const reflexCount = reflexRoll < 0.6 ? 1 : reflexRoll < 0.85 ? 2 : 0;
   const first = Math.floor(rand() * n);
-  if (reflexCount >= 1) rho[first]! *= between(rand, 0.4, 0.62);
-  if (reflexCount >= 2) {
-    const second = (first + 2 + Math.floor(rand() * (n - 3))) % n;
-    rho[second]! *= between(rand, 0.4, 0.62);
+  const pulled = new Set<number>();
+  if (reflexCount >= 1) pulled.add(first);
+  if (reflexCount >= 2) pulled.add((first + 2 + Math.floor(rand() * (n - 3))) % n);
+  for (const i of pulled) rho[i]! *= between(rand, 0.4, 0.62);
+  // The spike: a corner pushed far out, whose tip turns sharply enough for a hairpin.
+  if (rand() < SPIKE_CHANCE) {
+    const free: number[] = [];
+    for (let i = 0; i < n; i++) if (!pulled.has(i)) free.push(i);
+    rho[free[Math.floor(rand() * free.length)]!]! *= between(rand, SPIKE_MIN, SPIKE_MAX);
   }
   for (let i = 0; i < n; i++) {
     const phi = (Math.PI * 2 * (i + (rand() - 0.5) * 0.55)) / n;
@@ -252,16 +298,16 @@ function polygonPieces(rand: Rand): { pieces: TrackPiece[]; loopTurn: 1 | -1 } |
   for (let i = 0; i < n; i++) {
     const corner = corners[i]!;
     const angle = Math.abs(corner.turn);
-    if (Math.sign(corner.turn) !== loopTurn) corner.radius = between(rand, 45, 100);
-    else if (angle >= 2.0) corner.radius = between(rand, 20, 27);
-    else if (angle >= 1.2) corner.radius = between(rand, 30, 60);
-    else if (angle >= 0.6) corner.radius = between(rand, 60, 140);
-    else corner.radius = between(rand, 130, 300);
+    if (Math.sign(corner.turn) !== loopTurn) corner.radius = between(rand, 35, 80);
+    else if (angle >= 2.0) corner.radius = between(rand, 19, 25);
+    else if (angle >= 1.2) corner.radius = between(rand, 25, 45);
+    else if (angle >= 0.6) corner.radius = between(rand, 40, 90);
+    else corner.radius = between(rand, 80, 180);
     if (Math.sign(corner.turn) === loopTurn && (sharpest < 0 || angle > Math.abs(corners[sharpest]!.turn))) sharpest = i;
   }
   // Every lap has its technical corner, and a roll too round to give one is rolled again.
   if (sharpest < 0 || Math.abs(corners[sharpest]!.turn) < 1.5) return null;
-  corners[sharpest]!.radius = Math.min(corners[sharpest]!.radius, between(rand, 20, 27));
+  corners[sharpest]!.radius = Math.min(corners[sharpest]!.radius, between(rand, 19, 25));
 
   // Fit the arcs on their edges, shrinking the hungrier end of an edge that is too short.
   const free = new Float64Array(n);
@@ -304,44 +350,54 @@ function polygonPieces(rand: Rand): { pieces: TrackPiece[]; loopTurn: 1 | -1 } |
   if (pieces[longest]!.length < START_STRAIGHT_MIN_M) return null;
   const ordered = [...pieces.slice(longest), ...pieces.slice(0, longest)];
 
-  // One corner laid slightly OFF-CAMBER: a medium or fast one, never the fastest.
-  if (rand() < 0.6) {
+  // Now and then one corner laid OFF-CAMBER: a medium or fast one, never the only one.
+  if (rand() < 0.4) {
     const candidates = ordered.filter((p) => p.kind === 'medium' || p.kind === 'fast');
     if (candidates.length >= 2) {
       const chosen = candidates[Math.floor(rand() * candidates.length)]!;
       const index = ordered.indexOf(chosen);
-      ordered[index] = { ...chosen, bank: -Math.sign(chosen.curvature) * between(rand, 0.015, 0.03) };
+      ordered[index] = { ...chosen, bank: -Math.sign(chosen.curvature) * between(rand, 0.025, 0.045) };
     }
   }
   return { pieces: ordered, loopTurn };
 }
 
 /**
- * Drops a double S into the longest straights after the start straight: turn a, back
- * 2a, a again, which returns both heading and lateral offset (see the header). Tight
- * radii make a chicane, wide ones esses; the straight keeps at least 40 m either side.
+ * Drops up to three double S inserts into the longest straights after the start
+ * straight: turn a, back 2a, a again, which returns both heading and lateral offset (see
+ * the header). At most two are chicanes, rolled by their displacement; the rest, and a
+ * chicane that does not fit its straight, are esses. Each straight keeps
+ * `INSERT_MARGIN_M` either side. Returns the pieces and how many inserts went in.
  */
-function insertDoubleS(rand: Rand, pieces: TrackPiece[]): TrackPiece[] {
+function insertDoubleS(rand: Rand, pieces: TrackPiece[]): { pieces: TrackPiece[]; inserts: number } {
   const straights = pieces
     .map((piece, index) => ({ piece, index }))
     .filter(({ piece, index }) => index > 0 && piece.kind === 'straight')
     .sort((p, q) => q.piece.length - p.piece.length);
   const replace = new Map<number, TrackPiece[]>();
+  const chances = [0.97, 0.85, 0.6];
   let placed = 0;
-  let chicane = false;
+  let chicanes = 0;
   for (const { piece, index } of straights) {
-    if (placed >= 2) break;
-    if (rand() >= (placed === 0 ? 0.85 : 0.45)) continue;
-    const wantChicane: boolean = !chicane && rand() < 0.65;
-    const radius = wantChicane ? between(rand, 26, 38) : between(rand, 60, 100);
-    const angle = wantChicane ? between(rand, 0.4, 0.6) : between(rand, 0.3, 0.48);
-    const along = 4 * radius * Math.sin(angle);
-    const spare = piece.length - along - 80;
+    if (placed >= chances.length) break;
+    if (rand() >= chances[placed]!) continue;
+    const chicaneRadius = between(rand, CHICANE_RADIUS_MIN_M, CHICANE_RADIUS_MAX_M);
+    const shiftMax = Math.min(CHICANE_SHIFT_MAX_M, 2 * chicaneRadius * (1 - Math.cos(CHICANE_TURN_MAX)));
+    const chicaneAngle = Math.acos(1 - between(rand, CHICANE_SHIFT_MIN_M, shiftMax) / (2 * chicaneRadius));
+    const essesRadius = between(rand, 38, 65);
+    const essesAngle = between(rand, 0.26, 0.4);
+    const wantChicane = chicanes < 2 && rand() < (chicanes === 0 ? 0.85 : 0.4);
+    const spareFor = (radius: number, angle: number): number => piece.length - 4 * radius * Math.sin(angle) - 2 * INSERT_MARGIN_M;
+    const chicane = wantChicane && spareFor(chicaneRadius, chicaneAngle) >= 0;
+    const radius = chicane ? chicaneRadius : essesRadius;
+    const angle = chicane ? chicaneAngle : essesAngle;
+    const spare = spareFor(radius, angle);
     if (spare < 0) continue;
-    const before = 40 + spare * between(rand, 0.25, 0.75);
+    const along = 4 * radius * Math.sin(angle);
+    const before = INSERT_MARGIN_M + spare * between(rand, 0.25, 0.75);
     const after = piece.length - along - before;
     const sign = rand() < 0.5 ? -1 : 1;
-    const kind: TrackPieceKind = wantChicane ? 'chicane' : 'esses';
+    const kind: TrackPieceKind = chicane ? 'chicane' : 'esses';
     const arc = (turn: number): TrackPiece => ({ kind, length: radius * angle, curvature: turn / radius, bank: 0 });
     replace.set(index, [
       { kind: 'straight', length: before, curvature: 0, bank: 0 },
@@ -352,11 +408,11 @@ function insertDoubleS(rand: Rand, pieces: TrackPiece[]): TrackPiece[] {
       { kind: 'straight', length: after, curvature: 0, bank: 0 },
     ]);
     placed++;
-    chicane ||= wantChicane;
+    if (chicane) chicanes++;
   }
   const out: TrackPiece[] = [];
   pieces.forEach((piece, index) => out.push(...(replace.get(index) ?? [piece])));
-  return out;
+  return { pieces: out, inserts: placed };
 }
 
 interface Walked {
@@ -568,14 +624,16 @@ function rollSectors(rand: Rand, pieces: readonly TrackPiece[], starts: Float64A
 
 /**
  * One loop from a stream of rolls, or null when this roll does not make one: too round
- * for a technical corner, arcs that do not fit, a closure that would shorten a
- * straight past its floor, a lap outside the length window, or a loop that crowds
- * itself. The caller rolls again from the same stream.
+ * for a technical corner, arcs that do not fit, fewer than `MIN_FEATURES` corner
+ * features, a closure that would shorten a straight past its floor, a lap outside the
+ * length window, or a loop that crowds itself. The caller rolls again from the same
+ * stream.
  */
 export function generateLoop(rand: Rand): TrackLoop | null {
   const polygon = polygonPieces(rand);
   if (!polygon) return null;
-  const pieces = insertDoubleS(rand, polygon.pieces);
+  const { pieces, inserts } = insertDoubleS(rand, polygon.pieces);
+  if (polygon.pieces.length / 2 + inserts < MIN_FEATURES) return null;
   const walked = close(pieces);
   if (!walked) return null;
   const length = walked.count * walked.step;

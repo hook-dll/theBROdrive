@@ -51,8 +51,7 @@ import type { Vehicle } from '../vehicle/vehicle';
 import type { Hud } from '../ui/hud';
 import type { DevSpawnItemRequest } from '../ui/menu';
 import type { Autopilot } from '../vehicle/autopilot';
-import type { RaceDirector } from '../race/director';
-import type { Racer } from '../race/session';
+import { PLAYER_SLOT, type RaceDirector } from '../race/director';
 import type { ChunkStreamer } from '../world/chunks';
 import type { FixtureField } from '../world/fixturefield';
 import { poisBetween } from '../world/poi';
@@ -700,8 +699,9 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   };
   /**
    * `jumpToTrack(n = 0)`: to the `n`th race track (world/racetrack/) from the post nearest
-   * the player on (0 is the nearest one at or past it), set down in grid slot 2 facing the
-   * lap, beside the rival's slot — in the driven car when there is one, on foot otherwise —
+   * the player on (0 is the nearest one at or past it), set down in the player's grid box
+   * (race/director.ts `PLAYER_SLOT`, the back of the grid) facing the lap — in the driven
+   * car when there is one, on foot otherwise —
    * and held there until the world under it has streamed, as `jumpTo` holds (poll
    * `settled()`). The rival is let stand in view this once. Returns the track (its `id`,
    * `lengthM`, `startGrid`, `road`…), or null when none lies within the next
@@ -715,7 +715,7 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
       if (!postHasTrack(seed, post)) continue;
       const track = ctx.terrain.raceTracks.track(post);
       if (!track || skip-- > 0) continue;
-      const slot = track.startGrid[1];
+      const slot = track.startGrid[PLAYER_SLOT]!;
       ctx.race.devAllowSeenSpawn();
       const s = ctx.road.project(slot.x, slot.z, track.postS).s;
       const grid = { x: slot.x, y: slot.y, z: slot.z, heading: slot.heading };
@@ -728,14 +728,19 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     return null;
   };
   /**
-   * `race`: the races at the tracks (race/director.ts). `start()` races the waiting rival
-   * from wherever the driven car stands, with no stake; `finish('player' | 'rival')`
-   * decides the race on now (a win pays the prize only when a stake was taken); `state()`
-   * is the track, the rival, the stake and the race's laps and checkpoints.
+   * `race`: the races at the tracks (race/director.ts). `start()` races the waiting field
+   * from the grid, with no stake; `finish('player' | 'rival')` decides the race on now,
+   * the player first or last (a place pays only when a stake was taken); `restart()` and
+   * `back()` are the race keys (Backspace, T); `autodrive(on)` has the race's own racer
+   * drive the player's car after the green; `state()` is the track, the field, the stake,
+   * every racer's laps and checkpoints, and the results.
    */
   dev['race'] = {
     start: (): string => ctx.race.devStart(),
-    finish: (winner: Racer = 'player'): string => ctx.race.devFinish(winner),
+    finish: (winner: 'player' | 'rival' = 'player'): string => ctx.race.devFinish(winner),
+    restart: (): string => ctx.race.devKey('restart'),
+    back: (): string => ctx.race.devKey('back'),
+    autodrive: (on = true): string => ctx.race.devAutoDrive(on),
     state: (): Record<string, unknown> => ctx.race.devState(),
   };
   /** Drops `items` on the ground in a row in front of the player. */

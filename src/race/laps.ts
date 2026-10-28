@@ -100,6 +100,19 @@ export class LapCounter {
   }
 
   /**
+   * The car was put back on the lap (race/director.ts: back to the track, a rival's
+   * recovery) at (`x`, `z`) near arclength `s`: the projection moves there, the laps and
+   * checkpoints stay as they were, and the jump itself crosses nothing.
+   */
+  relocate(x: number, z: number, s: number): void {
+    const at = this.track.project(x, z, s, this.at);
+    this.s = at.s;
+    this.lateral = at.lateral;
+    this.offTrackS = 0;
+    this.reacquireIn = 0;
+  }
+
+  /**
    * One step at (`x`, `z`), ABSOLUTE. Returns 1 when this step counted a lap, −1 when it
    * undid one, 0 otherwise.
    */
@@ -132,8 +145,12 @@ export class LapCounter {
     this.offTrackS = this.onTrack ? 0 : this.offTrackS + dt;
 
     let counted: -1 | 0 | 1 = 0;
-    if (!jumped && previous > length - LINE_WINDOW_M && s < LINE_WINDOW_M) counted = this.crossForward();
-    else if (!jumped && previous < LINE_WINDOW_M && s > length - LINE_WINDOW_M) counted = this.crossBackward();
+    // Only a car on the track area crosses the line: one far out in the sand projects
+    // onto whichever leg is nearest, and walking that projection over the line is not a
+    // lap (a rival thrown off beside the start straight undid its own lap this way).
+    const crossing = !jumped && this.onTrack;
+    if (crossing && previous > length - LINE_WINDOW_M && s < LINE_WINDOW_M) counted = this.crossForward();
+    else if (crossing && previous < LINE_WINDOW_M && s > length - LINE_WINDOW_M) counted = this.crossBackward();
 
     const checkpoints = track.checkpoints;
     if (this.behind === 0 && this.lap > 0 && this.next < checkpoints.length && this.onTrack) {

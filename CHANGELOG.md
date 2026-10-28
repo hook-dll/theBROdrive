@@ -4,6 +4,23 @@
 
 ### Added
 
+- The desert races are a mini-game. A FIELD of four rivals waits on the grid with the
+  player's box at the back, five cars in all. Each rival is the frantic racer on its own
+  skill (grip share 0.8–1 and pace, race/rival.ts `fieldPlan`) in a car near the
+  player's class, and the field differs from round to round. A rival knocked off,
+  flipped or stuck is put back on the lap out of view, or after 3 s, as a ghost to the
+  other racers (race/recovery.ts). `Backspace` restarts from the grid and `T` (the pad's
+  RS) puts the player back at his last checkpoint (CONTROLS.md). The results panel shows
+  each car's place, race time and best lap. The places pay 9/5/3 shells for a 3-shell
+  stake (race/stake.ts `RACE_PRIZES`); `F` or `Backspace` races the same field again.
+  Tracks are 0.9–1.7 km (were 1.8–3.5 km) with 9 or more corner features. 82% have a
+  hairpin, and chicanes are walled off with boulders and logs that have colliders.
+  Corners are banked up to 8.7°, laps climb 3–32 m, and checkpoint gates stand at every
+  checkpoint. Kerbs no longer z-fight the edge line: the line is cut where a kerb or the
+  chequers run. The race board is one material repainted per field. Build steps are
+  ≤ 2.8 ms. In game no program links and nothing hitches from approach to rematch.
+  Checked with tools/race-bench.ts, a full 5-car race with a shoved and a flipped rival,
+  and tools/racetrack-gen.ts.
 - Kit GAZelle (first generation, early face): the GAZ-3302 flatbed with steel drop boards
   and a dark olive tent on hoops (its rear flap rolls up), and the GAZ-3221 minibus with a
   sliding right door, two rear doors and eight passenger seats, on one cab-over cab (the

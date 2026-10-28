@@ -1,6 +1,6 @@
 /**
  * The races at the tracks (race/): do the rules count laps right, does the money move
- * right, and does a whole race between two real cars come out?
+ * right, and does a whole race of a full field of real cars come out, every car home?
  *
  *   nice -n 15 bun tools/race-bench.ts [races = 3] [seed = 1337]
  *
@@ -9,46 +9,59 @@
  *  - LAPS (race/laps.ts) on a track's own centreline, no physics: a clean run of three
  *    laps counts three; a lap that leaves the track area over a checkpoint's window does
  *    not count and is begun again; backing over the line after it undoes the lap; the
- *    grid's first crossing only starts lap 1. The forfeits (race/session.ts): 9 s off the
- *    track area is still a race, 11 s is lost, and so is 160 m away.
+ *    grid's first crossing only starts lap 1; a car relocated back onto the lap (the
+ *    return key, a rival's recovery) keeps its laps and crosses nothing. The player's
+ *    outs (race/session.ts): 19 s off the track area is still a race, 21 s is out, and so
+ *    is 160 m away.
  *  - THE STAKE (race/stake.ts) on a real `GameWorld`: refused with fewer than three
- *    shells; three taken and recorded, a second take refused; a win pays six once and a
- *    second settle nothing; a save written mid-race (`migrateState` of its JSON) keeps the
- *    stake and drops the race's cars, and the refund gives the same shells back once.
- *  - THE RIVAL (race/rival.ts): the matched class is the nearest by power to weight, the
- *    plan is a pure function of the seed, post and round, about a third of the rounds are
+ *    shells; three taken and recorded, a second take refused; a win pays nine once and a
+ *    second settle nothing; third place gets the stake back, fourth nothing; a save
+ *    written mid-race (`migrateState` of its JSON) keeps the stake and drops the race's
+ *    cars, and the refund gives the same shells back once.
+ *  - THE FIELD (race/rival.ts): the candidates are the nearest by power to weight, a plan
+ *    is a pure function of the seed, post and round, four rivals sorted quickest first,
+ *    as many different cars as the candidates allow, about a third of the rounds are
  *    trailer races.
- *  - WHOLE RACES: on the first `races` tracks of the seed, a stand-in for the player (the
- *    starting car, the `frantic` driver at 0.85 pace) races the rival drawn for round 0
- *    (its own level) from the grid, held through the lights, three laps on the real
- *    collider (tools/racelapworld.ts), both cars' laps counted by `RaceSession`; the
- *    second race is run as a trailer race whatever its round says, both cars towing the
- *    same loaded trailer. The stake is taken before and settled after, and the jar must
- *    show it. Lap times, the winner and the money are printed.
+ *  - THE SKILLS: the frantic racer alone in the player's car at skill 0, 0.5 and 1 (grip
+ *    share and pace, race/rival.ts `driverFor`), one flying lap after a standing one: the
+ *    lap times must come out in that order.
+ *  - WHOLE RACES: on the first `races` tracks of the seed, FIVE cars from the grid: a
+ *    stand-in for the player (the starting car, the frantic racer at skill 0.6) in the
+ *    back box and the field drawn for round 0 in front of it, held through the lights,
+ *    three laps on the real collider with the chicanes' rocks and logs
+ *    (tools/racelapworld.ts), every car's laps counted by `RaceSession`, the rivals'
+ *    recoveries as the director does them (race/recovery.ts; a put-back car is a ghost
+ *    to the other racers for 3 s). The second race is run as a trailer race, every car
+ *    towing the same load. Every car must take the flag; the stake is taken before and
+ *    settled for the stand-in's place after, and the jar must show it. The order, the
+ *    times, the recoveries, and the cost of a step of five drivers are printed.
  */
 
 import * as THREE from 'three';
-import { emptyInput } from '../src/core/input';
+import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { credit } from '../src/economy/economy';
 import { purseTotal } from '../src/economy/shells';
 import { createServiceableCarState } from '../src/game/spawn';
 import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
-import { preloadCarModels } from '../src/render/carmodel';
+import { carModelMeasure, carSpawnYAboveGround, preloadCarModels } from '../src/render/carmodel';
 import { preloadTrailerModel } from '../src/render/trailermodel';
+import { PLAYER_SLOT } from '../src/race/director';
 import { raceRivalId, raceTrailerId } from '../src/race/ids';
 import { LapCounter } from '../src/race/laps';
-import { carClassOf, classDistance, modelClassOf, nearestModels, RIVAL_MODES, rivalPlan } from '../src/race/rival';
+import { recoverAt, RecoveryWatch } from '../src/race/recovery';
+import { carClassOf, classDistance, driverFor, fieldPlan, FIELD_SIZE, modelClassOf, nearestModels } from '../src/race/rival';
 import { AWAY_FORFEIT_M, RACE_LAPS, RaceSession } from '../src/race/session';
-import { canStake, RACE_PRIZE, RACE_STAKE, refundStake, settleStake, takeStake } from '../src/race/stake';
+import { canStake, RACE_PRIZES, RACE_STAKE, racePrize, refundStake, settleStake, takeStake } from '../src/race/stake';
 import { migrateState } from '../src/save/save';
 import { Autopilot } from '../src/vehicle/autopilot';
-import { CAR_MODELS, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
+import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import { Trailer, TRAILER_MODEL_FIT, TRAILER_SPAWN_HEIGHT } from '../src/vehicle/trailer';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { WorldOrigin } from '../src/world/origin';
+import { TRACK_LIFT_M } from '../src/world/racetrack/mesh';
 import { postHasTrack } from '../src/world/racetrack/site';
-import type { RaceTrack } from '../src/world/racetrack/track';
+import type { RaceTrack, TrackPose } from '../src/world/racetrack/track';
 import { Road } from '../src/world/road';
 import { Terrain } from '../src/world/terrain';
 import { installAssetShim } from './assetshim';
@@ -72,12 +85,19 @@ installDocumentShim();
 
 const RACES = Math.max(1, Number(process.argv[2] ?? 3));
 const SEED = Number(process.argv[3] ?? 1337);
-/** The player's stand-in: the starting car, a racing driver a little off the pace. */
+/** The player's stand-in: the starting car, the frantic racer at this skill. */
 const PLAYER_MODEL = DEFAULT_CAR_MODEL_ID;
-const PLAYER_PACE = 0.85;
+const PLAYER_SKILL = 0.6;
 /** The whole race may take this long, simulated seconds. */
 const RACE_LIMIT_S = 900;
 const TRAILER_KG = 250;
+/** The director's ghost rules (race/director.ts). */
+const GHOST_S = 3;
+const GHOST_CLEAR_M = 5;
+const GHOST_MAX_S = 10;
+const RACER_BIT = 0x0004;
+const RACER_GROUPS = (RACER_BIT << 16) | 0xffff;
+const GHOST_GROUPS = (RACER_BIT << 16) | (0xffff & ~RACER_BIT);
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -103,7 +123,7 @@ console.log('\nlaps (race/laps.ts), driven along the centreline in 4 m steps');
 {
   const track = tracks[0]!;
   const point = { x: 0, y: 0, z: 0 };
-  const grid = track.startGrid[1];
+  const grid = track.startGrid[PLAYER_SLOT]!;
   const drive = (counter: LapCounter, fromS: number, toS: number, lateral: (s: number) => number): number => {
     let counted = 0;
     for (let s = fromS; s <= toS; s += 4) {
@@ -112,7 +132,7 @@ console.log('\nlaps (race/laps.ts), driven along the centreline in 4 m steps');
     }
     return counted;
   };
-  // The grid stands 14 m short of the line at `grid.s`, near the END of the lap's arclength:
+  // The grid stands short of the line at `grid.s`, near the END of the lap's arclength:
   // the first crossing (at `lengthM`) starts lap 1, each one after it ends a lap.
   const L = track.lengthM;
   const clean = new LapCounter(track);
@@ -155,32 +175,54 @@ console.log('\nlaps (race/laps.ts), driven along the centreline in 4 m steps');
   drive(grid1, grid.s, L + 30, () => 0);
   check('the first crossing from the grid starts lap 1 and counts nothing', grid1.lap === 1 && grid1.completed === 0, `lap ${grid1.lap}, ${grid1.completed} completed`);
 
-  // The forfeits: off the track area too long, and too far away. The rival stands still.
-  const forfeit = (lateral: number, seconds: number): RaceSession => {
-    const session = new RaceSession(track);
-    const rival = track.startGrid[0];
-    session.start(grid.x, grid.z, rival.x, rival.z);
-    for (let t = 0; t < 3.1; t += 0.1) session.step(0.1, grid.x, grid.z, rival.x, rival.z);
+  // Relocated back to its last checkpoint from far off the lap, mid-lap: nothing crossed, laps kept, the lap still counts.
+  const moved = new LapCounter(track);
+  moved.reset(grid.x, grid.z);
+  const fourth = track.checkpoints[3]!;
+  drive(moved, grid.s, L + fourth + 60, () => 0);
+  const lapBefore = moved.lap;
+  const nextBefore = moved.next;
+  track.offsetPoint(fourth + 2, 0, point);
+  moved.relocate(point.x, point.z, fourth + 2);
+  const relocatedCounted = drive(moved, L + fourth + 2, 2 * L + 10, () => 0);
+  check(
+    'a car put back at its last checkpoint keeps its lap and the lap counts',
+    moved.lap === lapBefore + 1 && nextBefore === 4 && relocatedCounted === 1,
+    `lap ${lapBefore} (next ${nextBefore}) → ${moved.lap}, counted ${relocatedCounted}`,
+  );
+
+  // The outs: off the track area too long, and too far away. The rival stands still.
+  const out = (lateral: number, seconds: number): RaceSession => {
+    const session = new RaceSession(track, 2);
+    const rival = track.startGrid[0]!;
+    const xs = new Float64Array([grid.x, rival.x]);
+    const zs = new Float64Array([grid.z, rival.z]);
+    session.start(xs, zs);
+    for (let t = 0; t < 3.1; t += 0.1) session.step(0.1, xs, zs);
     for (let s = grid.s, t = 0; t < 4; t += 0.1, s += 2) {
       track.offsetPoint(s, 0, point);
-      session.step(0.1, point.x, point.z, rival.x, rival.z);
+      xs[0] = point.x;
+      zs[0] = point.z;
+      session.step(0.1, xs, zs);
     }
     const at = track.wrap(grid.s + 80);
-    for (let t = 0; t < seconds && session.phase !== 'finished'; t += 0.1) {
+    for (let t = 0; t < seconds && session.end === null; t += 0.1) {
       track.offsetPoint(at, lateral, point);
-      session.step(0.1, point.x, point.z, rival.x, rival.z);
+      xs[0] = point.x;
+      zs[0] = point.z;
+      session.step(0.1, xs, zs);
     }
     return session;
   };
   // Outward, away from the infield (`turn` is the infield's side), so no other leg is nearer.
   const offRunoff = -track.turn * (track.halfWidth + track.runoffM + 5);
-  const nine = forfeit(offRunoff, 9);
-  const eleven = forfeit(offRunoff, 11);
-  const away = forfeit(-track.turn * (AWAY_FORFEIT_M + 10), 1);
+  const nineteen = out(offRunoff, 19);
+  const twentyOne = out(offRunoff, 21);
+  const away = out(-track.turn * (AWAY_FORFEIT_M + 10), 1);
   check(
-    'forfeits: 10 s off the track area, or 150 m away',
-    nine.phase === 'racing' && eleven.winner === 'rival' && eleven.end === 'off-track' && away.winner === 'rival' && away.end === 'away',
-    `9 s off: ${nine.phase}; 11 s off: ${eleven.winner} by ${eleven.end}; ${AWAY_FORFEIT_M + 10} m out: ${away.winner} by ${away.end}`,
+    'outs: 20 s off the track area, or 150 m away',
+    nineteen.end === null && twentyOne.end === 'off-track' && twentyOne.position(0) === 2 && away.end === 'away',
+    `19 s off: ${nineteen.end ?? 'racing'}; 21 s off: ${twentyOne.end} (place ${twentyOne.position(0)}); ${AWAY_FORFEIT_M + 10} m out: ${away.end}`,
   );
 }
 
@@ -201,29 +243,38 @@ console.log('\nthe stake (race/stake.ts)');
     took && !second && purseTotal(world.state.player.shells) === before - RACE_STAKE && world.state.raceStake?.shells.length === RACE_STAKE,
     `jar ${before} → ${purseTotal(world.state.player.shells)}, stake ${JSON.stringify(world.state.raceStake)}`,
   );
-  const won = settleStake(world, true);
-  const again = settleStake(world, true);
+  const won = settleStake(world, 1);
+  const again = settleStake(world, 1);
   check(
-    'a win pays six, once',
-    won === RACE_PRIZE && again === -1 && purseTotal(world.state.player.shells) === before - RACE_STAKE + RACE_PRIZE && world.state.raceStake === null,
+    `a win pays ${RACE_PRIZES[0]}, once`,
+    won === RACE_PRIZES[0] && again === -1 && purseTotal(world.state.player.shells) === before - RACE_STAKE + RACE_PRIZES[0]! && world.state.raceStake === null,
     `paid ${won}, then ${again}; jar ${purseTotal(world.state.player.shells)}`,
   );
+  const jarThird = purseTotal(world.state.player.shells);
   takeStake(world, 7, 1);
-  const lost = settleStake(world, false);
-  check('a loss pays nothing more', lost === 0 && world.state.raceStake === null, `jar ${purseTotal(world.state.player.shells)}`);
+  const third = settleStake(world, 3);
+  takeStake(world, 7, 1);
+  const fourth = settleStake(world, 4);
+  takeStake(world, 7, 1);
+  const outPaid = settleStake(world, 0);
+  check(
+    'third gets the stake back, fourth and out nothing',
+    third === RACE_STAKE && fourth === 0 && outPaid === 0 && racePrize(2) === RACE_PRIZES[1] && purseTotal(world.state.player.shells) === jarThird - 2 * RACE_STAKE,
+    `3rd ${third}, 4th ${fourth}, out ${outPaid}; jar ${jarThird} → ${purseTotal(world.state.player.shells)}`,
+  );
 
-  // A save mid-race: the rival and both trailers in state, the stake out.
+  // A save mid-race: two rivals and their trailers in state, the stake out.
   const jar = { ...world.state.player.shells };
   takeStake(world, 7, 2);
-  const rivalId = raceRivalId(7);
-  world.apply({ t: 'car_add', car: createServiceableCarState(rivalId, PLAYER_MODEL, 0, 1, 0, 0) });
-  const trailer: TrailerState = { id: raceTrailerId(7, 'rival'), hitchedTo: rivalId, cargoKg: 200, x: 0, y: 1, z: -4, qx: 0, qy: 0, qz: 0, qw: 1 };
+  const rivalIds = [raceRivalId(7, 0), raceRivalId(7, 1)];
+  for (const id of rivalIds) world.apply({ t: 'car_add', car: createServiceableCarState(id, PLAYER_MODEL, 0, 1, 0, 0) });
+  const trailer: TrailerState = { id: raceTrailerId(7, 1), hitchedTo: rivalIds[1]!, cargoKg: 200, x: 0, y: 1, z: -4, qx: 0, qy: 0, qz: 0, qw: 1 };
   world.apply({ t: 'trailer_add', trailer });
   const loaded = new GameWorld(migrateState(JSON.parse(JSON.stringify(world.state))));
   check(
     'a save mid-race keeps the stake and drops the race',
-    loaded.state.raceStake !== null && loaded.state.cars[rivalId] === undefined && loaded.state.trailers[trailer.id] === undefined,
-    `stake ${JSON.stringify(loaded.state.raceStake)}, rival ${loaded.state.cars[rivalId] ? 'kept' : 'dropped'}, trailer ${loaded.state.trailers[trailer.id] ? 'kept' : 'dropped'}`,
+    loaded.state.raceStake !== null && rivalIds.every((id) => loaded.state.cars[id] === undefined) && loaded.state.trailers[trailer.id] === undefined,
+    `stake ${JSON.stringify(loaded.state.raceStake)}, rivals ${rivalIds.some((id) => loaded.state.cars[id]) ? 'kept' : 'dropped'}, trailer ${loaded.state.trailers[trailer.id] ? 'kept' : 'dropped'}`,
   );
   const back = refundStake(loaded);
   const twice = refundStake(loaded);
@@ -232,11 +283,11 @@ console.log('\nthe stake (race/stake.ts)');
 }
 
 // ---------------------------------------------------------------------------
-// The rival.
+// The field.
 // ---------------------------------------------------------------------------
-console.log('\nthe rival (race/rival.ts)');
+console.log('\nthe field (race/rival.ts)');
+const playerClass = carClassOf(createServiceableCarState('p', PLAYER_MODEL, 0, 0, 0, 0));
 {
-  const playerClass = carClassOf(createServiceableCarState('p', PLAYER_MODEL, 0, 0, 0, 0));
   const near = nearestModels(playerClass);
   const sorted = [...CAR_MODELS].sort((a, b) => classDistance(modelClassOf(a), playerClass) - classDistance(modelClassOf(b), playerClass));
   check(
@@ -248,51 +299,79 @@ console.log('\nthe rival (race/rival.ts)');
   const levels = { steady: 0, fast: 0, wild: 0 };
   const rounds = 300;
   let pure = true;
+  let shaped = true;
+  let distinct = 0;
   for (let round = 0; round < rounds; round++) {
-    const plan = rivalPlan(SEED, 9, round, playerClass);
-    const again = rivalPlan(SEED, 9, round, playerClass);
-    pure &&= plan.modelId === again.modelId && plan.level === again.level && plan.trailer === again.trailer;
+    const plan = fieldPlan(SEED, 9, round, playerClass);
+    const again = fieldPlan(SEED, 9, round, playerClass);
+    pure &&= JSON.stringify(plan) === JSON.stringify(again);
+    shaped &&= plan.rivals.length === FIELD_SIZE && plan.rivals.every((r, i) => i === 0 || r.skill <= plan.rivals[i - 1]!.skill);
+    distinct += new Set(plan.rivals.map((r) => r.modelId)).size;
     if (plan.trailer) trailerRounds++;
     levels[plan.level]++;
   }
   check(
-    'plans are seeded, about a third are trailer races',
-    pure && trailerRounds > rounds * 0.25 && trailerRounds < rounds * 0.42,
+    'plans are seeded, four rivals quickest first, about a third trailer races',
+    pure && shaped && trailerRounds > rounds * 0.25 && trailerRounds < rounds * 0.42,
     `${trailerRounds} of ${rounds} trailer rounds; levels ${JSON.stringify(levels)}`,
+  );
+  check(
+    'a field is as varied as the candidates allow',
+    distinct / rounds >= Math.min(FIELD_SIZE, near.length) - 0.01,
+    `${(distinct / rounds).toFixed(2)} different cars per field of ${FIELD_SIZE} (${near.length} candidates)`,
   );
 }
 
 // ---------------------------------------------------------------------------
-// Whole races.
+// Racing in the physics.
 // ---------------------------------------------------------------------------
-const modelIds = new Set<string>([PLAYER_MODEL]);
-const playerClass = carClassOf(createServiceableCarState('p', PLAYER_MODEL, 0, 0, 0, 0));
 const plans = tracks.slice(0, RACES).map((track, i) => {
-  const plan = rivalPlan(SEED, track.postIndex, 0, playerClass);
-  modelIds.add(plan.modelId);
+  const plan = fieldPlan(SEED, track.postIndex, 0, playerClass);
   return { track, plan: i === 1 ? { ...plan, trailer: true } : plan };
 });
+const modelIds = new Set<string>([PLAYER_MODEL]);
+for (const { plan } of plans) for (const rival of plan.rivals) modelIds.add(rival.modelId);
 await Promise.all([preloadCarModels([...modelIds]), preloadTrailerModel(TRAILER_MODEL_FIT)]);
 
+/** A car standing still on the track at `s`, `lateral`, facing the lap: the director's `standOnTrack`, headless. */
+function standOnTrack(car: Vehicle, modelId: string, track: RaceTrack, s: number, lateral: number, point: { x: number; y: number; z: number }): void {
+  track.offsetPoint(s, lateral, point);
+  const sample = track.road.sampleAt(s);
+  const y = carSpawnYAboveGround(carModelMeasure(modelId), track.surfaceY(s, lateral) + TRACK_LIFT_M);
+  car.rescueTo(point.x, y, point.z, sample.heading, sample.grade);
+}
+
+function setGroups(car: Vehicle, groups: number): void {
+  for (const collider of car.collisionColliders) collider.setCollisionGroups(groups);
+}
+
+function upOf(car: Vehicle): number {
+  const q = car.chassis.rotation();
+  return 1 - 2 * (q.x * q.x + q.z * q.z);
+}
+
 // ---------------------------------------------------------------------------
-// The levels: each driver alone, one flying lap after a standing one, in the player's car.
+// The skills: the racer alone, in the player's car.
 // ---------------------------------------------------------------------------
-console.log(`\nthe levels alone in ${PLAYER_MODEL} (standing lap / flying lap, s)`);
-const levelTimes: Record<string, number[]> = { steady: [], fast: [], wild: [] };
+console.log(`\nthe skills alone in ${PLAYER_MODEL} (standing lap / flying lap, s)`);
+const skillTimes: Record<string, number[]> = { '0': [], '0.5': [], '1': [] };
 for (const { track } of plans) {
   const row: string[] = [];
-  for (const level of ['steady', 'fast', 'wild'] as const) {
+  for (const skill of [0, 0.5, 1]) {
     const physics = await PhysicsWorld.create();
     const origin = new WorldOrigin();
-    const slot = track.startGrid[0];
+    const slot = track.startGrid[0]!;
     origin.reset(slot.x, slot.z);
     buildLapGround(physics, origin, track);
     const world = new GameWorld(newWorldState(SEED));
     const state = createServiceableCarState('solo', PLAYER_MODEL, slot.x, slot.y + 1.2, slot.z, slot.heading);
     world.state.cars[state.id] = state;
     const car = new Vehicle(physics, world, state, new THREE.Scene(), origin);
+    const driver = driverFor(PLAYER_MODEL, skill);
     const pilot = new Autopilot(track.road, physics);
-    pilot.setMode(RIVAL_MODES[level]);
+    pilot.setMode('frantic');
+    pilot.setGripShare(driver.gripShare);
+    pilot.setPace(driver.pace);
     const input = emptyInput();
     const settle = emptyInput();
     settle.handbrake = true;
@@ -309,7 +388,7 @@ for (const { track } of plans) {
     const times: number[] = [];
     let t = 0;
     let lapStart = 0;
-    while (times.length < 2 && t < 2 * RACE_LIMIT_S / RACE_LAPS) {
+    while (times.length < 2 && t < (2 * RACE_LIMIT_S) / RACE_LAPS) {
       pilot.drive(FIXED_DT, car, input, origin.x, origin.z);
       car.fixedUpdate(FIXED_DT, input);
       physics.step();
@@ -322,50 +401,88 @@ for (const { track } of plans) {
       }
     }
     car.dispose();
-    row.push(`${level} ${times.map((x) => x.toFixed(1)).join(' / ') || '—'}`);
-    if (times.length === 2) levelTimes[level]!.push(times[1]!);
+    row.push(`skill ${skill} ${times.map((x) => x.toFixed(1)).join(' / ') || '—'}`);
+    if (times.length === 2) skillTimes[String(skill)]!.push(times[1]!);
   }
   console.log(`  ${track.id} ${track.lengthM.toFixed(0)} m: ${row.join(';  ')}`);
 }
 const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 check(
-  'the levels are distinct and in order (flying laps)',
-  mean(levelTimes.steady!) > mean(levelTimes.fast!) * 1.02 && mean(levelTimes.fast!) > mean(levelTimes.wild!) * 1.02,
-  `mean flying lap steady ${mean(levelTimes.steady!).toFixed(1)} s, fast ${mean(levelTimes.fast!).toFixed(1)} s, wild ${mean(levelTimes.wild!).toFixed(1)} s`,
+  'the skills are in order (flying laps)',
+  skillTimes['0']!.length === plans.length && mean(skillTimes['0']!) > mean(skillTimes['0.5']!) * 1.01 && mean(skillTimes['0.5']!) > mean(skillTimes['1']!) * 1.01,
+  `mean flying lap skill 0 ${mean(skillTimes['0']!).toFixed(1)} s, 0.5 ${mean(skillTimes['0.5']!).toFixed(1)} s, 1 ${mean(skillTimes['1']!).toFixed(1)} s`,
 );
-console.log(`\nwhole races (${RACE_LAPS} laps; player stand-in ${PLAYER_MODEL}, frantic at ${PLAYER_PACE})`);
 
-for (const { track, plan } of plans) {
+// ---------------------------------------------------------------------------
+// Whole races: five cars.
+// ---------------------------------------------------------------------------
+console.log(`\nwhole races (${RACE_LAPS} laps, ${FIELD_SIZE + 1} cars; player stand-in ${PLAYER_MODEL} at skill ${PLAYER_SKILL} in the back box)`);
+
+interface Racer {
+  readonly name: string;
+  readonly modelId: string;
+  readonly car: Vehicle;
+  readonly pilot: Autopilot;
+  readonly input: InputFrame;
+  readonly slot: TrackPose;
+  readonly watch: RecoveryWatch;
+  ghostS: number;
+  ghostFor: number;
+  recoveries: number;
+}
+
+for (const [raceIndex, { track, plan }] of plans.entries()) {
+  // The first race knocks two rivals out of it on purpose: rival 1 thrown 12 m out into
+  // the sand at 40 s, rival 2 put on its roof at 80 s. Both must come back and finish.
+  const shove = raceIndex === 0;
+  let shoved = false;
+  let flipped = false;
   const physics = await PhysicsWorld.create();
   const origin = new WorldOrigin();
-  origin.reset(track.startGrid[0].x, track.startGrid[0].z);
+  origin.reset(track.startGrid[0]!.x, track.startGrid[0]!.z);
   buildLapGround(physics, origin, track);
   const world = new GameWorld(newWorldState(SEED));
   const scene = new THREE.Scene();
   credit(world, 10);
   const jarBefore = purseTotal(world.state.player.shells);
-  const make = (id: string, modelId: string, slot: (typeof track.startGrid)[number]): Vehicle => {
-    const state = createServiceableCarState(id, modelId, slot.x, slot.y + 1.2, slot.z, slot.heading);
+  const drivers = [driverFor(PLAYER_MODEL, PLAYER_SKILL), ...plan.rivals];
+  const racers: Racer[] = drivers.map((driver, i) => {
+    const slot = track.startGrid[i === 0 ? PLAYER_SLOT : i - 1]!;
+    const id = i === 0 ? 'player' : raceRivalId(track.postIndex, i - 1);
+    const state = createServiceableCarState(id, driver.modelId, slot.x, slot.y + 1.2, slot.z, slot.heading);
     world.state.cars[id] = state;
-    return new Vehicle(physics, world, state, scene, origin);
-  };
-  const rivalId = raceRivalId(track.postIndex);
-  const player = make('player', PLAYER_MODEL, track.startGrid[1]);
-  const rival = make(rivalId, plan.modelId, track.startGrid[0]);
-  const cars = [player, rival];
+    const car = new Vehicle(physics, world, state, scene, origin);
+    setGroups(car, RACER_GROUPS);
+    const pilot = new Autopilot(track.road, physics);
+    pilot.setMode('frantic');
+    pilot.setGripShare(driver.gripShare);
+    pilot.setPace(driver.pace);
+    return {
+      name: i === 0 ? 'PLAYER' : `${driver.modelId} ${driver.skill.toFixed(2)}`,
+      modelId: driver.modelId,
+      car,
+      pilot,
+      input: emptyInput(),
+      slot,
+      watch: new RecoveryWatch(),
+      ghostS: 0,
+      ghostFor: 0,
+      recoveries: 0,
+    };
+  });
   const trailers: Trailer[] = [];
   const settle = emptyInput();
   settle.handbrake = true;
   for (let i = 0; i < 120; i++) {
-    for (const car of cars) car.fixedUpdate(FIXED_DT, settle);
+    for (const r of racers) r.car.fixedUpdate(FIXED_DT, settle);
     physics.step();
-    for (const car of cars) car.postStep();
+    for (const r of racers) r.car.postStep();
   }
   if (plan.trailer) {
-    for (const [who, car, carId] of [['player', player, 'player'], ['rival', rival, rivalId]] as const) {
-      const at = car.chassis.translation();
+    racers.forEach((r, i) => {
+      const at = r.car.chassis.translation();
       const state: TrailerState = {
-        id: raceTrailerId(track.postIndex, who),
+        id: raceTrailerId(track.postIndex, i === 0 ? 'player' : i - 1),
         hitchedTo: null,
         cargoKg: TRAILER_KG,
         cargoZ: 1,
@@ -379,85 +496,137 @@ for (const { track, plan } of plans) {
       };
       world.state.trailers[state.id] = state;
       const trailer = new Trailer(physics, world, state, scene, origin);
-      trailer.hitchTo(car, carId);
+      trailer.hitchTo(r.car, i === 0 ? 'player' : raceRivalId(track.postIndex, i - 1));
       trailers.push(trailer);
-    }
+    });
   }
   const staked = takeStake(world, track.postIndex, 0);
   const jarStaked = purseTotal(world.state.player.shells);
 
-  const rivalMode = RIVAL_MODES[plan.level];
-  const rivalPilot = new Autopilot(track.road, physics);
-  rivalPilot.setMode(rivalMode);
-  const playerPilot = new Autopilot(track.road, physics);
-  playerPilot.setMode('frantic');
-  playerPilot.setPace(PLAYER_PACE);
-  const playerInput = emptyInput();
-  const rivalInput = emptyInput();
-  const session = new RaceSession(track);
+  const session = new RaceSession(track, racers.length);
+  const xs = new Float64Array(racers.length);
+  const zs = new Float64Array(racers.length);
   const p = { x: 0, y: 0, z: 0 };
-  const r = { x: 0, y: 0, z: 0 };
-  player.absoluteTranslation(p);
-  rival.absoluteTranslation(r);
-  session.start(p.x, p.z, r.x, r.z);
+  const point = { x: 0, y: 0, z: 0 };
+  const back = { s: 0, lateral: 0 };
+  const positions = (): void => {
+    racers.forEach((r, i) => {
+      r.car.absoluteTranslation(p);
+      xs[i] = p.x;
+      zs[i] = p.z;
+    });
+  };
+  positions();
+  session.start(xs, zs);
   let lightsSeen = '';
   let movedInCountdown = 0;
-  let checkpointsTaken = 0;
-  let lastNext = 0;
+  let driveMs = 0;
+  let driveSteps = 0;
+  let worstStepMs = 0;
   const started = performance.now();
   while (session.phase !== 'finished' && session.clock < RACE_LIMIT_S) {
-    if (session.held) {
-      for (const car of cars) car.fixedUpdate(FIXED_DT, settle);
-    } else {
-      if (!playerPilot.engaged) {
-        playerPilot.setEngaged(true);
-        rivalPilot.setEngaged(true);
+    const t0 = performance.now();
+    racers.forEach((r, i) => {
+      if (session.held) {
+        r.car.fixedUpdate(FIXED_DT, settle);
+        return;
       }
-      playerPilot.drive(FIXED_DT, player, playerInput, origin.x, origin.z);
-      player.fixedUpdate(FIXED_DT, playerInput);
-      rivalPilot.drive(FIXED_DT, rival, rivalInput, origin.x, origin.z);
-      rival.fixedUpdate(FIXED_DT, rivalInput);
+      if (!r.pilot.engaged) r.pilot.setEngaged(true);
+      if (session.finished(i) && r.pilot.mode !== 'sleeper') {
+        // Home: the cool-down lap, a ghost to the cars still racing (the director's way).
+        r.pilot.setMode('sleeper');
+        r.pilot.setGripShare(1);
+        r.pilot.setPace(0.6);
+        r.pilot.setEngaged(true);
+        setGroups(r.car, GHOST_GROUPS);
+      }
+      r.pilot.drive(FIXED_DT, r.car, r.input, origin.x, origin.z);
+      r.car.fixedUpdate(FIXED_DT, r.input);
+    });
+    const stepMs = performance.now() - t0;
+    if (!session.held) {
+      driveMs += stepMs;
+      driveSteps++;
+      worstStepMs = Math.max(worstStepMs, stepMs);
     }
     for (const trailer of trailers) trailer.fixedUpdate(FIXED_DT);
     physics.step();
-    for (const car of cars) car.postStep();
+    for (const r of racers) r.car.postStep();
     for (const trailer of trailers) trailer.postStep();
-    player.absoluteTranslation(p);
-    rival.absoluteTranslation(r);
+    positions();
     const lights = String(session.lights);
     if (!lightsSeen.endsWith(lights)) lightsSeen += lights;
-    if (session.held) movedInCountdown = Math.max(movedInCountdown, player.speedKmh, rival.speedKmh);
-    session.step(FIXED_DT, p.x, p.z, r.x, r.z);
-    if (session.player.next > lastNext) checkpointsTaken += session.player.next - lastNext;
-    lastNext = session.player.next;
+    if (session.held) for (const r of racers) movedInCountdown = Math.max(movedInCountdown, r.car.speedKmh);
+    session.step(FIXED_DT, xs, zs);
+    if (session.held) continue;
+    if (shove && !shoved && session.raceTime > 40) {
+      shoved = true;
+      const c = session.counters[1]!;
+      standOnTrack(racers[1]!.car, racers[1]!.modelId, track, c.s, -track.turn * (track.halfWidth + 12), point);
+    }
+    if (shove && !flipped && session.raceTime > 80) {
+      flipped = true;
+      racers[2]!.car.flipOver();
+    }
+    // Recoveries and ghosts, as the director has them (the bench has no camera: no wait for the view).
+    racers.forEach((r, i) => {
+      if (session.finished(i)) return;
+      if (r.ghostS > 0) {
+        r.ghostFor += FIXED_DT;
+        r.ghostS -= FIXED_DT;
+        const crowded = racers.some((o, j) => j !== i && Math.hypot(xs[j]! - xs[i]!, zs[j]! - zs[i]!) < GHOST_CLEAR_M);
+        if (r.ghostS <= 0 && crowded && r.ghostFor < GHOST_MAX_S) r.ghostS = FIXED_DT;
+        else if (r.ghostS <= 0) setGroups(r.car, RACER_GROUPS);
+      }
+      const counter = session.counters[i]!;
+      if (!r.watch.step(FIXED_DT, counter, upOf(r.car))) return;
+      recoverAt(track, counter, r.slot, back);
+      standOnTrack(r.car, r.modelId, track, back.s, back.lateral, point);
+      session.relocate(i, point.x, point.z, back.s);
+      setGroups(r.car, GHOST_GROUPS);
+      r.ghostS = GHOST_S;
+      r.ghostFor = 0;
+      r.watch.reset();
+      r.pilot.setEngaged(true);
+      r.recoveries++;
+    });
   }
-  const won = session.winner === 'player';
-  const paid = settleStake(world, won);
+  const place = session.position(0);
+  const paid = settleStake(world, session.end === 'laps' ? place : 0);
   const jarAfter = purseTotal(world.state.player.shells);
-  const laps = (times: Float64Array): string => [...times].map((t) => (Number.isFinite(t) ? t.toFixed(1) : '—')).join(' / ');
   const wall = ((performance.now() - started) / 1000).toFixed(0);
+  const allHome = racers.every((_, i) => session.finished(i));
+  const laps = (i: number): string => Array.from({ length: RACE_LAPS }, (_, lap) => session.lapTime(i, lap)).map((t) => (Number.isFinite(t) ? t.toFixed(1) : '—')).join(' / ');
   console.log(
-    `  ${track.id} ${track.lengthM.toFixed(0)} m${plan.trailer ? `, TRAILERS ${TRAILER_KG} kg` : ''}: rival ${plan.modelId} ${plan.level} ` +
-      `(${rivalMode}) — ${session.winner ?? 'nobody'} wins by ${session.end ?? 'time-out'} at ${session.raceTime.toFixed(1)} s (${wall} s wall)`,
+    `  ${track.id} ${track.lengthM.toFixed(0)} m, ${plan.level}${plan.trailer ? `, TRAILERS ${TRAILER_KG} kg` : ''}: over at ${session.raceTime.toFixed(1)} s (${wall} s wall); ` +
+      `5 drivers + cars ${(driveMs / Math.max(1, driveSteps)).toFixed(2)} ms a step (worst ${worstStepMs.toFixed(1)} ms)`,
   );
-  console.log(`      player laps ${laps(session.playerLaps)} s; rival laps ${laps(session.rivalLaps)} s`);
+  for (const i of session.standings()) {
+    const r = racers[i]!;
+    console.log(
+      `      ${session.position(i)}. ${r.name.padEnd(24)} ${session.finished(i) ? session.finishTimes[i]!.toFixed(1).padStart(6) : '   DNF'} s  laps ${laps(i)}  best ${session.bestLap(i).toFixed(1)}  recoveries ${r.recoveries}  (${carModel(r.modelId).label})`,
+    );
+  }
   check(
-    `${track.id}: lights red, red, red, green, both held`,
+    `${track.id}: lights red, red, red, green, everybody held`,
     lightsSeen.startsWith('1234') && movedInCountdown < 3,
     `lights ${lightsSeen}, fastest in the countdown ${movedInCountdown.toFixed(1)} km/h`,
   );
+  check(`${track.id}: every car of the five takes the flag`, allHome, `${racers.filter((_, i) => session.finished(i)).length} of ${racers.length} home`);
+  if (shove) {
+    check(
+      `${track.id}: a rival thrown off and one on its roof are put back and finish`,
+      racers[1]!.recoveries >= 1 && racers[2]!.recoveries >= 1 && session.finished(1) && session.finished(2),
+      `thrown: ${racers[1]!.recoveries} recoveries, ${session.finished(1) ? 'home' : 'not home'}; roof: ${racers[2]!.recoveries} recoveries, ${session.finished(2) ? 'home' : 'not home'}`,
+    );
+  }
   check(
-    `${track.id}: decided on laps, every lap past all checkpoints`,
-    session.end === 'laps' && checkpointsTaken >= track.checkpoints.length * (session.player.completed),
-    `player ${session.player.completed} laps, rival ${session.rival.completed}; player took ${checkpointsTaken} checkpoints`,
-  );
-  check(
-    `${track.id}: the stake and the prize`,
-    staked && jarStaked === jarBefore - RACE_STAKE && paid === (won ? RACE_PRIZE : 0) && jarAfter === jarStaked + (won ? RACE_PRIZE : 0) && world.state.raceStake === null,
-    `jar ${jarBefore} → ${jarStaked} staked → ${jarAfter} (${won ? `won ${paid}` : 'lost'})`,
+    `${track.id}: the stake and the prize for place ${place}`,
+    staked && jarStaked === jarBefore - RACE_STAKE && paid === racePrize(place) && jarAfter === jarStaked + racePrize(place) && world.state.raceStake === null,
+    `jar ${jarBefore} → ${jarStaked} staked → ${jarAfter} (place ${place}, paid ${paid})`,
   );
   for (const trailer of trailers) trailer.dispose();
-  for (const car of cars) car.dispose();
+  for (const r of racers) r.car.dispose();
 }
 
 console.log(failures === 0 ? '\nall race checks passed' : `\n${failures} race check(s) FAILED`);

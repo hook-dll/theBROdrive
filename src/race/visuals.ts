@@ -7,22 +7,23 @@ import { drawPictogram } from '../world/haulsign';
 import { paintSign, SIGN_PLANE } from '../world/market';
 import { GANTRY_LAMPS, GANTRY_LENS_RADIUS_M, gantryLampPoint } from '../world/racetrack/mesh';
 import { TRACK_LIFT_M } from '../world/racetrack/mesh';
-import type { RaceTrack } from '../world/racetrack/track';
-import type { RivalPlan } from './rival';
-import { RACE_PRIZE, RACE_STAKE } from './stake';
+import type { RaceTrack, TrackPose } from '../world/racetrack/track';
+import type { FieldPlan } from './rival';
+import { RACE_PRIZES, RACE_STAKE } from './stake';
 
 /**
- * WHAT A RACE PUTS UP AT ITS TRACK while a rival waits there (race/director.ts): the
- * "RACE ME!" board beside the rival's grid slot, and the start lights' lenses on the
+ * WHAT A RACE PUTS UP AT ITS TRACK while its field waits there (race/director.ts): the
+ * "RACE ME!" board beside the player's grid box, and the start lights' lenses on the
  * gantry's housings (world/racetrack/mesh.ts draws the housings with the chunk).
  *
  * THE BOARD is for a boy who can barely read: pictures first, few words. "RACE ME!" across
- * the top; three shells, an arrow and six shells (the stake, and what the winner takes);
- * the rival's level as one, two or three chevrons in green, orange or red with its word
+ * the top; three shells, an arrow and nine shells (the stake, and what the winner takes);
+ * the field's level as one, two or three chevrons in green, orange or red with its word
  * under them; and the haul sign's car-and-trailer pictogram when this round is a trailer
- * race. It stands on a post outside the asphalt beside the rival's slot, a little ahead of
- * it, its face turned back down the lap to the cars coming onto the grid. Painted once per
- * rival (a new round is a new rival and a new board).
+ * race. It stands on a post outside the asphalt beside the player's box, a little ahead
+ * of it, its face turned back down the lap to the cars coming onto the grid. ONE board,
+ * built with the visuals and repainted on its own canvas for each field (a new round is
+ * a new field): a repaint is a texture upload, never a new material or program.
  *
  * THE LIGHTS are three discs over the housings, each one of three shared materials — off,
  * red, green — built exactly as `makeFlatMaterial` builds its own (the comic
@@ -79,7 +80,8 @@ export class RaceVisuals {
   private readonly lamps: THREE.Mesh[] = [];
   private readonly lampAt: { x: number; y: number; z: number }[] = [];
   private readonly sign = new THREE.Group();
-  private board: THREE.MeshStandardMaterial | null = null;
+  /** The one board's material, repainted per field; see THE BOARD. */
+  private readonly board: THREE.MeshStandardMaterial;
   private readonly signAt = { x: 0, y: 0, z: 0 };
   private track: RaceTrack | null = null;
   private lit = -1;
@@ -99,6 +101,11 @@ export class RaceVisuals {
       this.root.add(lamp);
     }
     const post = new THREE.Mesh(new THREE.BoxGeometry(POST_W, POST_TOP, POST_W), makeFlatMaterial(0x3a3d42));
+    this.board = paintSign([], BOARD_BG, BOARD_FG, CANVAS_W, CANVAS_H);
+    const board = new THREE.Mesh(SIGN_PLANE, this.board);
+    board.scale.set(BOARD_W, BOARD_H, 1);
+    board.position.set(0, BOARD_Y, POST_W / 2 + 0.01);
+    this.sign.add(board);
     post.position.y = POST_TOP / 2;
     post.castShadow = true;
     post.receiveShadow = true;
@@ -107,31 +114,22 @@ export class RaceVisuals {
     scene.add(this.root);
   }
 
-  /** Put up at `track` for `plan`'s rival, or taken down (null). */
-  show(track: RaceTrack | null, plan: RivalPlan | null): void {
-    this.disposeBoard();
+  /** Put up at `track` for `plan`'s field, the board beside grid box `slot`, or taken down (null). */
+  show(track: RaceTrack | null, plan: FieldPlan | null, slot: TrackPose | null): void {
     this.track = track;
     this.root.visible = track !== null;
     this.setLights(0);
-    if (!track || !plan) return;
-    const yaw = track.startGrid[0].heading + Math.PI;
+    if (!track || !plan || !slot) return;
+    const yaw = slot.heading + Math.PI;
     for (let k = 0; k < GANTRY_LAMPS; k++) {
       gantryLampPoint(track, k, this.lampAt[k]!);
       this.lamps[k]!.rotation.set(0, yaw, 0);
     }
-    const slot = track.startGrid[0];
     const lateral = Math.sign(slot.lateral) * (track.halfWidth + SIGN_OUT_M);
     track.offsetPoint(slot.s + SIGN_AHEAD_M, lateral, this.signAt);
     this.signAt.y = track.surfaceY(slot.s + SIGN_AHEAD_M, lateral) + TRACK_LIFT_M;
     this.sign.rotation.set(0, yaw, 0);
-    const material = paintSign([], BOARD_BG, BOARD_FG, CANVAS_W, CANVAS_H);
-    paintBoard(material, plan);
-    const board = new THREE.Mesh(SIGN_PLANE, material);
-    board.name = 'race-board';
-    board.scale.set(BOARD_W, BOARD_H, 1);
-    board.position.set(0, BOARD_Y, POST_W / 2 + 0.01);
-    this.sign.add(board);
-    this.board = material;
+    paintBoard(this.board, plan);
   }
 
   /** Lights shown: 0 none, 1-3 that many red, 4 all green. */
@@ -154,23 +152,15 @@ export class RaceVisuals {
     this.sign.position.set(this.signAt.x - originX, this.signAt.y, this.signAt.z - originZ);
   }
 
-  private disposeBoard(): void {
-    if (!this.board) return;
-    const board = this.sign.getObjectByName('race-board');
-    if (board) this.sign.remove(board);
+  dispose(): void {
     this.board.map?.dispose();
     this.board.dispose();
-    this.board = null;
-  }
-
-  dispose(): void {
-    this.disposeBoard();
     this.root.removeFromParent();
   }
 }
 
 /** Paints the board for `plan` on the canvas `paintSign` made. Headless, nothing to paint. */
-function paintBoard(material: THREE.MeshStandardMaterial, plan: RivalPlan): void {
+function paintBoard(material: THREE.MeshStandardMaterial, plan: FieldPlan): void {
   const texture = material.map;
   const canvas = texture?.image as HTMLCanvasElement | undefined;
   if (typeof document === 'undefined' || !texture || !(canvas instanceof HTMLCanvasElement)) return;
@@ -198,10 +188,11 @@ function paintBoard(material: THREE.MeshStandardMaterial, plan: RivalPlan): void
   }
   g.font = `bold ${Math.round(h * 0.14)}px sans-serif`;
   g.fillText('→', w * 0.42, row);
-  for (let i = 0; i < RACE_PRIZE; i++) {
+  // The winner's prize, in rows of three.
+  for (let i = 0; i < RACE_PRIZES[0]!; i++) {
     const col = i % 3;
     const line = Math.floor(i / 3);
-    g.drawImage(shellSprite(SHELL_KINDS[i % SHELL_KINDS.length]!), w * 0.55 + col * shell * 0.95, row - shell + line * shell * 0.95, shell, shell);
+    g.drawImage(shellSprite(SHELL_KINDS[i % SHELL_KINDS.length]!), w * 0.55 + col * shell * 0.95, row - shell * 1.4 + line * shell * 0.95, shell, shell);
   }
   g.font = `bold ${Math.round(h * 0.075)}px sans-serif`;
   g.fillText('WIN!', w * 0.9, row);

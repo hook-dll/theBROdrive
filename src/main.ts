@@ -3,7 +3,7 @@ import { watchLateLinks } from './render/programbudget';
 import { FrameProfiler } from './core/frameprofiler';
 import { PerfOverlay } from './ui/perfoverlay';
 import { activeBuildProfile, buildProfileFor, installBuildProfile } from './render/retro';
-import { InputReader, emptyInput, type InputFrame } from './core/input';
+import { BINDABLE_ACTIONS, formatKey, InputReader, emptyInput, type InputFrame } from './core/input';
 import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
@@ -949,6 +949,10 @@ async function boot(): Promise<void> {
     inView: inCameraView,
     groundUnder,
     toast: (text) => hud.setToast(text),
+    keyLabel: (id) => {
+      const keys = world.state.settings.keyBindings[id] ?? BINDABLE_ACTIONS.find((action) => action.id === id)?.defaultKeys ?? [];
+      return keys.length > 0 ? formatKey(keys[0]!) : '?';
+    },
   });
   /** A traffic car or the racing rival, offered for a voice; one visitor for every frame. */
   const hearCar = (id: string, vehicle: Vehicle): void => {

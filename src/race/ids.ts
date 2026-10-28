@@ -1,6 +1,6 @@
 /**
- * The names of a race's own things in world state: the rival car waiting at a track's
- * grid, and the two loaded trailers of a trailer race (race/director.ts).
+ * The names of a race's own things in world state: the rivals waiting at a track's grid,
+ * and the loaded trailers of a trailer race (race/director.ts).
  *
  * They live in `WorldState.cars` and `WorldState.trailers` like any other car or trailer,
  * so the streaming, the drawing, the couplings and the collisions are the world's own;
@@ -13,14 +13,17 @@
 const RIVAL_PREFIX = 'race-rival:';
 const TRAILER_PREFIX = 'race-trailer:';
 
-/** The rival car waiting at the grid of post `postIndex`'s track. */
-export function raceRivalId(postIndex: number): string {
-  return `${RIVAL_PREFIX}${postIndex}`;
+/** Rival `k` (0 is the first of the field) waiting at the grid of post `postIndex`'s track. */
+export function raceRivalId(postIndex: number, k: number): string {
+  return `${RIVAL_PREFIX}${postIndex}:${k}`;
 }
 
-/** The loaded trailer a trailer race at post `postIndex` hitches to the rival or the player. */
-export function raceTrailerId(postIndex: number, who: 'rival' | 'player'): string {
-  return `${TRAILER_PREFIX}${postIndex}:${who}`;
+/** Who a trailer race's trailer is hitched to: the player, or rival `k`. */
+export type RaceTrailerOwner = 'player' | number;
+
+/** The loaded trailer a trailer race at post `postIndex` hitches to the player or to rival `k`. */
+export function raceTrailerId(postIndex: number, who: RaceTrailerOwner): string {
+  return `${TRAILER_PREFIX}${postIndex}:${who === 'player' ? 'player' : `rival${who}`}`;
 }
 
 /** Any car or trailer a race put into the world. */

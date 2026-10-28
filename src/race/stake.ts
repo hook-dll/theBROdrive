@@ -7,7 +7,7 @@ import type { GameWorld } from '../game/state';
  * that nothing is ever paid twice and nothing is ever paid back twice.
  *
  * ONE FIELD CARRIES IT: `WorldState.raceStake`, set by `takeStake` and cleared by exactly
- * one of `settleStake` (won: the prize; lost or forfeited: nothing more) or `refundStake`
+ * one of `settleStake` (the prize for the place; out of the prizes: nothing more) or `refundStake`
  * (the race called off before it was decided: a reload, a rival lost to the streaming).
  * Each of them reads the field and does nothing when it is already null, and each writes
  * in the order that can only ever cost the PLAYER on a failure between two deltas, never
@@ -22,8 +22,19 @@ import type { GameWorld } from '../game/state';
 
 /** Shells a race costs: taken out of the jar on accepting, fine-style. */
 export const RACE_STAKE = 3;
-/** Shells a won race pays: the stake twice over, the winner takes all. */
-export const RACE_PRIZE = 2 * RACE_STAKE;
+/**
+ * Shells the places pay, 1st first; past the list nothing. A win pays the stake three
+ * times over (6 clear, what a won race against one rival paid before the field came),
+ * second place 5 (2 clear) and third the stake back. Five cars on the grid: a driver
+ * who places evenly at random comes out a shade ahead (17 paid for 15 staked over five
+ * races), one who wins half of them well ahead, and the back of the field pays for it.
+ */
+export const RACE_PRIZES: readonly number[] = [3 * RACE_STAKE, 5, RACE_STAKE];
+
+/** What place `place` (1-based) pays. */
+export function racePrize(place: number): number {
+  return RACE_PRIZES[place - 1] ?? 0;
+}
 
 /** Whether the jar holds a stake's worth of shells, whatever their kinds. */
 export function canStake(world: GameWorld): boolean {
@@ -45,16 +56,17 @@ export function takeStake(world: GameWorld, postIndex: number, round: number): b
 }
 
 /**
- * The race decided: the stake is spent, and a win pays `RACE_PRIZE` new shells into the
- * jar. Returns the shells paid (0 on a loss), or −1 with no stake out (already settled,
+ * The race decided with the player in place `place` (1-based; 0 or past the prizes for
+ * out): the stake is spent, and the place's prize goes into the jar as new shells.
+ * Returns the shells paid (0 for no prize), or −1 with no stake out (already settled,
  * refunded, or a dev race run without one).
  */
-export function settleStake(world: GameWorld, won: boolean): number {
+export function settleStake(world: GameWorld, place: number): number {
   if (world.state.raceStake === null) return -1;
   world.apply({ t: 'race_stake', stake: null });
-  if (!won) return 0;
-  credit(world, RACE_PRIZE);
-  return RACE_PRIZE;
+  const prize = place >= 1 ? racePrize(place) : 0;
+  if (prize > 0) credit(world, prize);
+  return prize;
 }
 
 /**

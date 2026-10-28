@@ -161,6 +161,24 @@ can do that". There is no key item and no ignition to find: every car starts on 
   with the car (`CarState.engineStopped`). Traffic and every car nobody has switched off
   run as before.
 
+## The races at the tracks: F, Backspace, T
+
+A race is offered at a track's grid (`src/race/director.ts`): stopped in the back grid
+box, behind the waiting field, in the driver's seat, `F` takes the stake and starts the
+lights. While a race is on, and only then, two more keys (both bindable in Settings →
+Controls; neither is used by anything else):
+
+- **`Backspace`** ("Race: restart from the grid / race again"): the whole field and the
+  player back in their grid boxes and the lights from red. Mid-race the stake already
+  out stays out; nothing is taken or paid twice. With the results up, `Backspace` (or
+  `F`) races the same field again for a new stake.
+- **`T`** ("Race: back to the track", the pad's right stick press): the player's car put
+  back on the centre of the lap at his last checkpoint (the line after a lap, his grid
+  box before the first crossing), standing, and for three seconds a ghost to the other
+  racers so it never lands in one. The laps and checkpoints already taken stand.
+
+Driving 300 m from the grid closes the results. The pad has no button for the restart.
+
 ## Gamepad (Xbox-style, W3C "standard" mapping)
 
 `src/core/gamepad.ts` owns the Gamepad API and hands out a plain snapshot; nothing
@@ -185,7 +203,7 @@ own layout would otherwise drive the car with its triggers as its steering.
 | Back | autopilot (`P`) | remove worn item (`G`) |
 | Start | pause (opens and closes) | same |
 | LS press | cycle headlights (`L`) | sprint (hold) |
-| RS press | — | — |
+| RS press | back to the track in a race (`T`) | — |
 | Right stick | look / camera orbit | look |
 
 There is no horn: the game has no horn sound or button, so nothing is bound to one.
