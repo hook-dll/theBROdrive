@@ -20,8 +20,8 @@ import type { PlayerSeat } from '../game/state';
  * the front passenger's or a half of the bench — upright and facing forward (`SIT_ON`).
  *
  * The boy's things (items/things.ts) keep to where they ride (`cabinRule`): the carpet
- * only across the whole rear bench, the cushions on any seat they fit like anything
- * else, and every other thing only in a boot.
+ * in the cabin only across the whole rear bench (or rolled up in the boot), the cushions
+ * on any seat they fit like anything else, and every other thing only in a boot.
  *
  * Pure: no three.js. The view is vehicle/cabincargo.ts.
  */

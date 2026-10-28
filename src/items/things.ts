@@ -8,7 +8,8 @@
  * WHERE IT RIDES (`place`):
  * - `cells`: in a boot, taking `boot` cells of its grid (vehicle/trunk.ts); `seat` things
  *   (the cushions) may also lie on a seat instead;
- * - `bench`: across the whole rear bench and nowhere else (the carpet);
+ * - `bench`: across the whole rear bench, or rolled up in a boot over `boot` cells (the
+ *   carpet);
  * - `seats`: passengers on the passenger seats (the teddies, contracts/kinds/teddyPassengers.ts);
  * - `trailer`, `tow`, `transfer`: a haul (contracts/world.ts) — the load on a contract
  *   trailer, a broken toy car pulled to the repair on the bar, a toy car driven to a
@@ -69,7 +70,7 @@ export interface ThingDef {
   /** Its own mass, kg: what the boot, the seat or the trailer's bed carries. 0 for a car. */
   readonly massKg: number;
   readonly place: ThingPlace;
-  /** Boot cells, for a `cells` thing. */
+  /** Boot cells, for a `cells` or `bench` thing. */
   readonly boot?: BootFootprint;
   /** A `cells` thing that may lie on a seat instead (the cushions). */
   readonly seat?: true;
@@ -96,7 +97,7 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'tool_box', name: "dad's tool box", tags: ['ordinary'], massKg: 30, place: 'cells', boot: TWO },
   { id: 'fishing_rods', name: 'fishing rods', tags: ['bulky'], massKg: 3, place: 'cells', boot: STRIP },
   { id: 'sledge', name: 'sledge', tags: ['bulky'], massKg: 5, place: 'cells', boot: STRIP },
-  { id: 'carpet', name: 'carpet', tags: ['bulky'], massKg: 12, place: 'bench' },
+  { id: 'carpet', name: 'carpet', tags: ['bulky'], massKg: 12, place: 'bench', boot: STRIP },
   { id: 'tv_set', name: 'old TV set', tags: ['bulky', 'fragile'], massKg: 25, place: 'cells', boot: SQUARE },
   { id: 'aquarium', name: 'aquarium', tags: ['bulky', 'fragile'], massKg: 18, place: 'cells', boot: SQUARE },
   { id: 'wardrobe', name: 'wardrobe', tags: ['bulky'], massKg: 110, place: 'trailer' },
@@ -181,9 +182,13 @@ export function thingKind(def: ThingDef): ContractKind {
   }
 }
 
-/** The boot cells the thing's item takes, or null when it never rides in a boot. */
+/**
+ * The boot cells the thing's item takes, or null when it never rides in a boot. The grid
+ * cuts a footprint wider than itself (vehicle/trunk.ts `bootFootprint`).
+ */
 export function thingBootFootprint(def: ThingDef): BootFootprint | null {
-  return def.place === 'cells' ? def.boot ?? ONE : null;
+  if (def.place === 'cells') return def.boot ?? ONE;
+  return def.place === 'bench' ? def.boot ?? null : null;
 }
 
 /**

@@ -14,11 +14,15 @@ export interface TrunkGrid {
 
 /** The largest boot any body has (the UAZ-2206's 4×4): the renderer's panel pool. */
 export const TRUNK_MAX_CELL_COUNT = 16;
+/**
+ * Every boot cell's size, metres, on every car: the cell of a 4×2 boot (the 2109's,
+ * 1.65 m wide) as it was drawn when the grid was stretched to the body. A car's grid
+ * is as many of these as its boot holds, centred behind it, never stretched.
+ */
+export const TRUNK_CELL_WIDTH = 0.34;
 export const TRUNK_CELL_HEIGHT = 0.26;
 export const TRUNK_GRID_DEPTH = 0.06;
 
-const TRUNK_GRID_MAX_WIDTH = 1.6;
-const TRUNK_GRID_BODY_FRACTION = 1.65;
 /** Raised from bumper height to just below an on-foot player's eye line. */
 const STORAGE_GRID_CENTRE_Y_FRACTION = 0.55;
 /** The grid's top edge stays this far down the body's half height: below the roof. */
@@ -38,13 +42,23 @@ export function trunkCellCount(grid: TrunkGrid): number {
 // sees the grid — and every other cell it covers holds null. What covers a cell is
 // derived from the anchors (`bootOwner`), never stored, so a save holds the boot as it
 // always did and nothing can disagree with it. Nothing is turned.
+//
+// Every thing rides in every boot: a footprint wider or taller than the car's grid is
+// cut to the grid (`bootFootprint`) — the sledge takes the Oka's whole bottom row and is
+// drawn across it — so the only refusal left is cells already taken.
 // ---------------------------------------------------------------------------
 
 const ONE_CELL: BootFootprint = { columns: 1, rows: 1 };
 
-/** The cells `item` takes in a boot, or null when it never rides in one (a teddy, the carpet). */
-export function bootFootprint(item: Item): BootFootprint | null {
-  return item.type === 'contract_cargo' ? thingBootFootprint(contractThing(item)) : ONE_CELL;
+/**
+ * The cells `item` takes in `grid`: its thing's footprint cut to the grid, or null when
+ * it never rides in a boot (a teddy passenger).
+ */
+export function bootFootprint(item: Item, grid: TrunkGrid): BootFootprint | null {
+  if (item.type !== 'contract_cargo') return ONE_CELL;
+  const own = thingBootFootprint(contractThing(item));
+  if (!own || (own.columns <= grid.columns && own.rows <= grid.rows)) return own;
+  return { columns: Math.min(own.columns, grid.columns), rows: Math.min(own.rows, grid.rows) };
 }
 
 /** True when `footprint` anchored at `anchor` lies inside the grid. */
@@ -65,7 +79,7 @@ function covers(grid: TrunkGrid, anchor: number, footprint: BootFootprint, cell:
 export function bootOwner(storage: readonly (Item | null)[], grid: TrunkGrid, cell: number): number {
   for (let anchor = 0; anchor < storage.length; anchor++) {
     const item = storage[anchor];
-    if (item && covers(grid, anchor, bootFootprint(item) ?? ONE_CELL, cell)) return anchor;
+    if (item && covers(grid, anchor, bootFootprint(item, grid) ?? ONE_CELL, cell)) return anchor;
   }
   return -1;
 }
@@ -117,23 +131,21 @@ export function bootFreeAnchor(storage: readonly (Item | null)[], grid: TrunkGri
   return -1;
 }
 
-/** True when a grid is big enough for `footprint` at all, empty. */
-export function bootHolds(grid: TrunkGrid, footprint: BootFootprint): boolean {
-  return footprint.columns <= grid.columns && footprint.rows <= grid.rows;
-}
-
 /**
- * A boot read from a save, made sound: an item that does not fit at its anchor (out of
- * the grid, over another, or a thing that never rides in a boot) is dropped, earlier
- * anchors first. Cells are kept in place, not moved.
+ * A boot read from a save, made sound: each thing stays at its anchor where its cells
+ * there are free and inside the grid, else it moves to the first anchor that has room
+ * (`bootFreeAnchor`); only a thing that never rides in a boot, or one the full boot has
+ * no room left for, is dropped. Earlier anchors first.
  */
 export function normalizeBoot(storage: (Item | null)[], grid: TrunkGrid): void {
   const kept = storage.slice();
   storage.fill(null);
   for (let anchor = 0; anchor < kept.length; anchor++) {
     const item = kept[anchor];
-    const footprint = item ? bootFootprint(item) : null;
-    if (item && footprint && bootFits(storage, grid, anchor, footprint)) storage[anchor] = item;
+    const footprint = item ? bootFootprint(item, grid) : null;
+    if (!item || !footprint) continue;
+    const at = bootFits(storage, grid, anchor, footprint) ? anchor : bootFreeAnchor(storage, grid, footprint);
+    if (at >= 0) storage[at] = item;
   }
 }
 
@@ -235,11 +247,6 @@ export function storageLidSide(channel: string): StorageSide | null {
   return null;
 }
 
-/** Width follows the body, capped so bus and truck cells stay small and readable. */
-function trunkGridWidth(halfWidth: number): number {
-  return Math.min(TRUNK_GRID_MAX_WIDTH, halfWidth * TRUNK_GRID_BODY_FRACTION);
-}
-
 export function storageCellCount(shape: StorageGridShape, side: StorageSide): number {
   return side === 'bonnet' ? BONNET_SLOT_COUNT : trunkCellCount(shape.trunkGrid);
 }
@@ -277,13 +284,14 @@ function cellBounds(cell: number, shape: StorageGridShape, side: StorageSide, ou
   const { columns, rows } = shape.trunkGrid;
   if (cell < 0 || cell >= columns * rows) return false;
   const half = shape.halfExtents;
-  const cellWidth = trunkGridWidth(half[0]) / columns;
-  // Tall grids shrink their cells to stay between the sill and the roof line.
+  // The grid stands at its height on the body, kept between the sill and the roof line
+  // where it can be; the cells keep their size.
   const top = half[1] * STORAGE_GRID_TOP_Y_FRACTION;
   const bottom = half[1] * STORAGE_GRID_BOTTOM_Y_FRACTION;
-  const cellHeight = Math.min(TRUNK_CELL_HEIGHT, (top - bottom) / rows);
+  const cellWidth = TRUNK_CELL_WIDTH;
+  const cellHeight = TRUNK_CELL_HEIGHT;
   const gridHalf = rows * cellHeight * 0.5;
-  const centreY = Math.min(Math.max(half[1] * STORAGE_GRID_CENTRE_Y_FRACTION, bottom + gridHalf), top - gridHalf);
+  const centreY = Math.max(Math.min(Math.max(half[1] * STORAGE_GRID_CENTRE_Y_FRACTION, bottom + gridHalf), top - gridHalf), bottom + gridHalf);
   const column = cell % columns;
   const row = Math.floor(cell / columns);
   const x = -(column - (columns - 1) * 0.5) * cellWidth;

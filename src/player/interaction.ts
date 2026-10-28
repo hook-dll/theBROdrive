@@ -38,7 +38,6 @@ import {
   bootAnchorAt,
   bootFootprint,
   bootFreeAnchor,
-  bootHolds,
   bootOwner,
   intersectStorageGrid,
   STORAGE_LID_CHANNELS,
@@ -543,41 +542,30 @@ function isGlassHit(hit: THREE.Intersection): boolean {
   return material instanceof THREE.Material && /glass/.test(material.name);
 }
 
-/**
- * Longest ordinary thing (not one of the boy's, which take cells by their footprint) a
- * boot's cell takes, metres.
- */
-const BOOT_ITEM_MAX_M = 0.8;
 /** A teddy passenger offered to the boot or the bonnet (contracts/kinds/teddyPassengers.ts). */
 const PASSENGER_SEAT_ONLY = 'passengers ride on a seat';
 
 /**
- * Why `item` does not go in this boot at the aimed `cell`, or null. A passenger rides
- * only on a seat and the carpet across the rear bench; one of the boy's things takes
- * its footprint's cells (vehicle/trunk.ts `bootAnchorAt`), all free, round the aimed
- * one; anything else one cell, if it is not too long for it. `model` names the car.
+ * Why `item` does not go in this boot at the aimed `cell`, or null. Everything rides in
+ * every boot but a passenger, who rides only on a seat: one of the boy's things takes
+ * its footprint's cells, cut to the grid (vehicle/trunk.ts `bootFootprint`), all free,
+ * round the aimed one (`bootAnchorAt`); anything else one free cell.
  */
 function bootRefusal(
   storage: readonly (Item | null)[],
   grid: TrunkGrid,
   cell: number,
   item: Item,
-  model: string,
 ): string | null {
   if (isPassenger(item)) return PASSENGER_SEAT_ONLY;
-  if (item.type === 'contract_cargo') {
-    const name = contractThing(item).name;
-    const footprint = bootFootprint(item);
-    if (!footprint) return `the ${name} goes across the whole rear bench`;
-    if (bootAnchorAt(storage, grid, cell, footprint) >= 0) return null;
-    const size = `${footprint.columns}×${footprint.rows} cells`;
-    if (!bootHolds(grid, footprint)) return `the ${name} takes ${size} — it won't fit the ${model}'s boot`;
-    if (bootFreeAnchor(storage, grid, footprint) >= 0) return `the ${name} takes ${size} — aim where they are free`;
-    return `no room for the ${name}: it takes ${size}`;
-  }
-  if (bootOwner(storage, grid, cell) >= 0) return 'that cell is taken';
-  const size = cabinItemBounds(item);
-  return Math.max(size.x, size.z) > BOOT_ITEM_MAX_M ? `the ${itemLabel(item)} is too long for the boot — lay it across the back seat` : null;
+  const footprint = bootFootprint(item, grid);
+  if (!footprint) return PASSENGER_SEAT_ONLY;
+  if (bootAnchorAt(storage, grid, cell, footprint) >= 0) return null;
+  if (footprint.columns === 1 && footprint.rows === 1) return 'that cell is taken';
+  const name = item.type === 'contract_cargo' ? contractThing(item).name : itemLabel(item);
+  const size = `${footprint.columns}×${footprint.rows} cells`;
+  if (bootFreeAnchor(storage, grid, footprint) >= 0) return `the ${name} takes ${size} — aim where they are free`;
+  return `no room for the ${name}: it takes ${size}`;
 }
 
 export type TrunkCellAction = 'none' | 'refused' | 'stored' | 'retrieved';
@@ -605,7 +593,7 @@ export function operateTrunkCell(
     return { action: 'retrieved', item: null, cell: at };
   }
   if (!held) return { action: 'none', item: null, cell };
-  const footprint = grid ? bootFootprint(held) : null;
+  const footprint = grid ? bootFootprint(held, grid) : null;
   const anchor = !grid ? cell : footprint ? bootAnchorAt(storage, grid, cell, footprint) : -1;
   if (anchor < 0) return { action: 'refused', item: null, cell };
   const removed = inventory.remove(held.id);
@@ -2384,7 +2372,7 @@ export class Interaction {
         return `[F] install ${itemLabel(held)}`;
       }
       if (held && boot) {
-        const why = bootRefusal(cells, boot.trunkGrid, t.cell, held, boot.label);
+        const why = bootRefusal(cells, boot.trunkGrid, t.cell, held);
         if (why) return why;
       }
       if (held) return `[F] stow ${itemLabel(held)}`;
@@ -2887,7 +2875,7 @@ export class Interaction {
       // (`bonnetAccepts` above), and an engine is longer than any boot cell.
       const car = this.world.state.cars[t.id];
       const boot = t.side === 'trunk' && car ? carModel(car.modelId) : null;
-      if (boot && held && bootOwner(cells, boot.trunkGrid, t.cell) < 0 && bootRefusal(cells, boot.trunkGrid, t.cell, held, boot.label)) {
+      if (boot && held && bootOwner(cells, boot.trunkGrid, t.cell) < 0 && bootRefusal(cells, boot.trunkGrid, t.cell, held)) {
         this.sound = 'refused';
         return;
       }
@@ -3102,7 +3090,7 @@ export class Interaction {
           case 'passenger':
             return `seat the ${itemLabel(item)} through a passenger door first`;
           case 'bench':
-            return `lay the ${name} across the rear bench first`;
+            return `lay the ${name} across the rear bench or stow it in the boot first`;
           case 'lay':
             return `stow the ${itemLabel(item)} in the boot or lay it on a seat first`;
           case null:

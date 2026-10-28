@@ -260,7 +260,7 @@ export class TrunkView {
       // A thing of several boot cells is drawn once, across all of them: its anchor cell
       // (the top-left) joined with the far corner of its footprint. A grid without that
       // corner (a card machine's one cell) draws it in its one cell.
-      const footprint = grid ? bootFootprint(item) : null;
+      const footprint = grid ? bootFootprint(item, grid) : null;
       const far = grid !== null && footprint !== null && (footprint.columns > 1 || footprint.rows > 1)
         ? cell + (footprint.rows - 1) * grid.columns + footprint.columns - 1
         : -1;

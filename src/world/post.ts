@@ -5,13 +5,10 @@ import { nextOffer, offerDestinationIndex, POST_OFFER_COUNT, postStock } from '.
 import { ACTIVE_CONTRACT_LIMIT, activeContracts, contractAcceptRefusal, isContractClosed } from '../contracts/registry';
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { formatClock, urgentRemainingS, type ContractKind, type DeliveryProbe } from '../contracts/types';
-import { isContractCarId } from '../contracts/world';
 import { contractPay, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
-import type { GameWorld, WorldState } from '../game/state';
+import type { GameWorld } from '../game/state';
 import { contractIdOf, contractKindOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
-import { thingBootFootprint, thingCard, type PostCard, type ThingDef } from '../items/things';
-import { carModel, hasCarModel, type CarModelDef } from '../vehicle/carmodels';
-import { bootHolds } from '../vehicle/trunk';
+import { thingCard, type PostCard, type ThingDef } from '../items/things';
 import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, thingName, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
@@ -27,20 +24,15 @@ import { box, mergeKitStatics } from './poi/kit';
  *
  * A card machine (world/cardmachine.ts): its three cards are the post's three offers, one
  * per property of a thing (§7.2) — ordinary, fragile, bulky. A card prints the thing,
- * where it goes and how far, the pay, its tags, and says when the thing will not fit the
- * lay-by car. The wheel turns through them for as long as the player likes; TAKE gives
- * the one showing, always, fitting or not: the car can be changed. Its thing appears in
- * the machine's GRID, its one cell, and
+ * where it goes and how far, the pay and its tags: every thing rides in every car
+ * (vehicle/trunk.ts `bootFootprint`). The wheel turns through them for as long as the
+ * player likes; TAKE gives the one showing. Its thing appears in the machine's GRID, its
+ * one cell, and
  * he takes it from there into his hands or pack as from a boot; with something lying
  * there already, TAKE refuses and says so. The card it was on falls away and the slot's
  * next offer is under it (`nextOffer`): the machine never runs dry. No card offers a
  * HAUL: the post's haul waits in the first slot of its parking row by itself, and is
  * taken by hitching, towing or driving it (contracts/hauls.ts).
- *
- * THE LAY-BY CAR is the player's car standing within `LAYBY_CAR_RANGE_M` of the post's
- * hand-in slot, the middle of its parking row: the one he last drove
- * (`PlayerState.lastDrivenCarId`) when it is there, else the nearest. The cards read only
- * its boot from it; its stickers are its own and change nothing here (§12).
  *
  * The GRID takes things in too: a thing bound here, put into the empty cell, lies there a
  * moment while the machine draws it in, and the pay goes into the player's jar as
@@ -87,8 +79,6 @@ const HAND_IN_BAND: Readonly<Record<HandInCard['mode'], string>> = {
 const LIMIT_TEXT = 'three jobs already out — hand one in or return it';
 registerCardMachineSigns(POST_LOOK);
 
-/** A car counts as standing on the post's lay-by inside this radius of its hand-in slot, m. */
-const LAYBY_CAR_RANGE_M = 20;
 /** A thing this heavy or more says its mass on the card, kg. */
 const HEAVY_KG = 20;
 
@@ -104,17 +94,6 @@ function bandText(offer: ContractCargoItem, thing: ThingDef): string {
 function tagText(thing: ThingDef): string {
   const tags = thing.tags.join(', ');
   return thing.massKg >= HEAVY_KG ? `${tags}, ${thing.massKg} kg` : tags;
-}
-
-/**
- * True when `thing` can never ride in `model` (§7.2): a thing of the boot whose cells
- * the car's grid has not, or a seat thing that can lie on a seat instead never. The
- * carpet fits every car: each has a rear bench.
- */
-function wontFit(thing: ThingDef, model: CarModelDef): boolean {
-  if (thing.place !== 'cells' || thing.seat) return false;
-  const footprint = thingBootFootprint(thing);
-  return footprint !== null && !bootHolds(model.trunkGrid, footprint);
 }
 
 /** What the hand-in card calls the thing to put in the grid, with its article: none before a possessive ("dad's tool box"). */
@@ -134,34 +113,6 @@ interface HandInCard {
   readonly headline: string;
   readonly lines: readonly string[];
   readonly footer: string;
-}
-
-/**
- * The LAY-BY CAR of the post whose hand-in slot's middle is (`haulX`, `haulZ`), ABSOLUTE: the
- * player's car standing within `LAYBY_CAR_RANGE_M` of it, the one he last drove when it
- * is there, else the nearest; none, null. A haul's own car is not one to load, and a car
- * for sale is nobody's. `position`: where a car stands, absolute.
- */
-function laybyCarId(
-  state: WorldState,
-  haulX: number,
-  haulZ: number,
-  position: (carId: string) => { readonly x: number; readonly z: number } | null,
-): string | null {
-  let best: string | null = null;
-  let bestD2 = LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M;
-  for (const [carId, car] of Object.entries(state.cars)) {
-    if (isContractCarId(carId) || car.lotPrice !== undefined || !hasCarModel(car.modelId)) continue;
-    const at = position(carId);
-    if (!at) continue;
-    const d2 = (at.x - haulX) ** 2 + (at.z - haulZ) ** 2;
-    if (d2 > LAYBY_CAR_RANGE_M * LAYBY_CAR_RANGE_M) continue;
-    if (carId === state.player.lastDrivenCarId) return carId;
-    if (d2 > bestD2) continue;
-    bestD2 = d2;
-    best = carId;
-  }
-  return best;
 }
 
 /**
@@ -213,8 +164,6 @@ class PostMachine extends CardMachine {
   private readonly strays: Item[];
   /** The hand-in card, standing first among the cards while the machine is worked. */
   private handIn: HandInCard | null = null;
-  /** The model of the car standing on the lay-by when the cards were last painted, or null. */
-  private laybyModel: CarModelDef | null = null;
   /** The player has `ACTIVE_CONTRACT_LIMIT` contracts out: TAKE refuses (`refreshLimit`). */
   private atLimit = false;
 
@@ -227,7 +176,6 @@ class PostMachine extends CardMachine {
     parts: CardMachineParts,
   ) {
     super(`post:${stop.index}`, parts, world);
-    this.findLaybyCar((carId) => world.state.cars[carId] ?? null);
     const stock = postStock(world.state, world.seed, stop.index);
     this.offers = stock.offers.slice();
     this.strays = stock.strays.slice();
@@ -257,24 +205,6 @@ class PostMachine extends CardMachine {
   protected override gridTaken(): void {
     this.settleStrays();
     this.save();
-  }
-
-  /**
-   * Finds the lay-by car (`laybyCarId`; `position`: where a car stands, absolute). True
-   * when what the cards print of it, its model, changed.
-   */
-  private findLaybyCar(position: (carId: string) => { readonly x: number; readonly z: number } | null): boolean {
-    const best = laybyCarId(this.world.state, this.haulX, this.haulZ, position);
-    const model = best ? carModel(this.world.state.cars[best]!.modelId) : null;
-    const changed = model !== this.laybyModel;
-    this.laybyModel = model;
-    return changed;
-  }
-
-  /** The lay-by car from the live bodies; on a change the cards repaint. */
-  private refreshLayby(ctx: FixtureContext): void {
-    const probe = this.probe(ctx);
-    if (this.findLaybyCar((carId) => probe.carPosition(carId))) this.cardsChanged();
   }
 
   /** Cards before the offers: the hand-in card, while there is one. */
@@ -311,7 +241,6 @@ class PostMachine extends CardMachine {
     ];
     // At the limit the card says so before any note: TAKE will refuse it.
     if (this.atLimit) lines.push('three jobs out: hand one in or return it');
-    if (this.laybyModel && wontFit(thing, this.laybyModel)) lines.push(`won't fit your ${this.laybyModel.label}`);
     paintCardFace(g, w, h, {
       band: CARD_BAND[thingCard(thing) ?? 'ordinary'],
       bandText: bandText(offer, thing),
@@ -357,8 +286,6 @@ class PostMachine extends CardMachine {
 
   protected override onEngaged(ctx: FixtureContext, first: boolean): void {
     if (first) {
-      // The car on the lay-by now, from its live body: the cards repaint when it changed.
-      this.refreshLayby(ctx);
       this.refreshLimit();
     }
     // The hand-in card follows what is in hand while he stands there.

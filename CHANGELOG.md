@@ -4,6 +4,18 @@
 
 ### Changed
 
+- EVERY THING RIDES IN EVERY CAR; BOOT CELLS ONE SIZE (`vehicle/trunk.ts`). A boot cell is
+  0.34 × 0.26 m on every car (`TRUNK_CELL_WIDTH`, `TRUNK_CELL_HEIGHT`: the 2109-wide 4×2
+  boot's cell), and a car's grid is its cells at that size, centred, no longer stretched
+  to the body: the Oka's 2×2 is 0.68 m across, not four big cells. A thing whose
+  footprint is wider or taller than the grid is cut to it (`bootFootprint(item, grid)`):
+  the sledge, the fishing rods and the carpet take the Oka's whole bottom row, so nothing
+  is refused for size and only taken cells refuse. The carpet rides in a boot too (4×1,
+  `ThingDef.boot` on a `bench` thing) as well as across the rear bench. Gone: `bootHolds`,
+  the post card's "won't fit your …" and its lay-by car lookup, the "too long for the
+  boot" rule for ordinary items. A saved boot keeps each thing at its anchor, and a thing
+  whose cells there are taken moves to the first free place instead of being dropped.
+
 - TRAFFIC DEFAULTS FROM THE OWNER'S SLIDER TUNING (`game/settings.ts` `TRAFFIC_CAPS`,
   `world/traffic.ts`). High traffic is 30 cars (was 40; the other levels unchanged), and
   the stream holds its cap: the density no longer floats, re-rolled every 36-72 s
