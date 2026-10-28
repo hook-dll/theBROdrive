@@ -11,11 +11,38 @@
   tail and side boards drop, a dark beam along the platform, toolbox and tank on the left
   rail; twin rear tyres drawn on each rear wheel (one wide tyre in physics, 0.552 m,
   `FactoryGeometry.rearTyreWidth`). ZIL-508.10 V8 (110 kW, 402 N·m) and its five-speed box
-  (`engine_zil_508`, `gearbox_zil130_5`, trucks only). In the car lab, the spawn menu and
+  (`engine_zil_508`, `gearbox_zil130_5`). In the car lab, the spawn menu and
   traffic like every car. Getting in: the bench's left half is the driver's seat, its
   right half the passenger's (`kitFrontBench`); the bonnet and the boards open from
   outside, a long vehicle's reach grows with its length. Its payload sits 0.32 m ahead of
-  the rear axle, from the factory's axle loads (`holdAheadOfRearAxle`).
+  the rear axle, from the factory's axle loads (`holdAheadOfRearAxle`). Under the bonnet
+  the cars' four service cells (`TruckSpec.bay`, bay.ts `cellMarker`): engine between the
+  rails, radiator behind the grille, air filter on the left, turbine on the right, each
+  part swapped as in a car. Fuel goes in at the tank's cap: crouch by the left rail under
+  the side board, open the cap (channel `flap`, as a car's fuel flap) and pour into the
+  `kit_filler` box over the neck.
+  The platform is steel whatever the cab's paint, like a trailer's: bare grey drop boards
+  (`BOARD_STEEL`), a dark floor (`FLOOR_DARK`).
+  The late face shaped as the photos and the owner's references show it (owner,
+  2026-10-28): a nose between two cheeks. The nose carries the grille, one arc in plan
+  from cheek to cheek (6 cm out at the middle, its top and bottom rolled back), the two
+  rows of slots on a block swelling 2 cm more, the slots recesses following the surface
+  (`TruckSpec.face.nose`, `face.grille`); the cheeks at the drawing's 0.246, the nose 8 cm
+  ahead of them (first built 8 cm further back: the face sat in under the bonnet and behind
+  the bumper). Each cheek holds its lamps in a white sunken pocket filling it inside a
+  narrow rim, the lamp and the indicator centred in it (±0.858); its top outer corner
+  rounds down past the indicator under the painted wing,
+  its white runs on round the wing's rounded nose. The bonnet's front corners round in
+  plan, its middle raised, its lower edge rolling down over the face at the nose. The
+  bumper slimmed to 0.72-0.83, its front corners rounded in plan and its front edges
+  rolled.
+
+- EVERY ENGINE, GEARBOX AND BONNET PART FITS CARS AND TRUCKS (`parts/registry.ts` `fits`;
+  owner: full interchangeability with the ZIL). The car-only engines and boxes now list
+  `'truck'` too and the truck-only ones (the ZIL's V8 and box, the UZAM-412DE, the IZH
+  four-speed) `'car'`; `BodyClass` stays for parts made for trucks alone. So the vending
+  machines also sell the ZIL's V8 and box, and a frantic driver's lorry or van gets the
+  M30 like a saloon (`franticEngine`).
 
 - KIT CARS ARE CHEAPER: 7 % FEWER TRIANGLES, THE SAME SHAPES (`carkit/body.ts` `deckColumns`,
   `simplify.ts`, `exterior.ts`, `interior.ts`, `tools/kit-surface.ts`). The bonnet and boot

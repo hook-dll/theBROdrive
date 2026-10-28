@@ -907,11 +907,16 @@ export interface TruckSpec {
     readonly repeater: readonly [s: number, y: number, r: number];
   };
   /**
-   * The face between the wings: a flat panel at `s`, `half` wide from `y[0]` to `y[1]`,
-   * its top corners cut `corner`, in its own `colour` (the late ZIL's white); slots
-   * through it (each row: heights, half width of the row, count and the gap between
-   * slots, or one opening `count` 1); round head lamps and indicators in black rings at
-   * (x, height, lens radius).
+   * The face between the wings [P; owner, 2026-10-28]: a rounded nose between two flat
+   * cheeks. The cheeks stand at `s`, out to `half`, from `y[0]` to `y[1]`, their top outer
+   * corners rounded `corner`, in the face's `colour` (the late ZIL's white); each holds a
+   * round head lamp and the indicator over it (x, height, lens radius) in black rings, in
+   * one sunken pocket filling the cheek. The nose (`nose`: half width, how far its middle
+   * stands out, the radius its top and bottom roll back on) is one arc in plan from cheek
+   * to cheek; on it the `grille` block (heights, half width) swells as a rounded box by its
+   * `proud`. The `slots` (each row: heights, half width of the row, count and the gap
+   * between slots, or one opening `count` 1) are recesses in the nose. The cheeks' white
+   * runs on round the wings' rounded noses to their flanks (`wrap`).
    */
   readonly face: {
     readonly s: number;
@@ -920,10 +925,16 @@ export interface TruckSpec {
     readonly corner: number;
     readonly colour: number;
     readonly slots: readonly { readonly y: readonly [number, number]; readonly half: number; readonly count: number; readonly gap: number }[];
+    readonly nose: { readonly half: number; readonly proud: number; readonly round: number };
+    readonly grille: { readonly y: readonly [number, number]; readonly half: number; readonly proud: number };
     readonly head: readonly [x: number, y: number, r: number];
     readonly blinker: readonly [x: number, y: number, r: number];
   };
-  /** A black steel channel across the front: its face at s 0, `depth` deep, `half` wide, heights `y`; tow hooks on its top at ±`hooks`. */
+  /**
+   * A black steel channel across the front: its face at s 0, `depth` deep, `half` wide,
+   * heights `y`, its front corners rounded in plan and its front edges rolled (truck.ts
+   * `BUMPER_CORNER`, `BUMPER_ROLL`); tow hooks on its top at ±`hooks`.
+   */
   readonly bumper: { readonly depth: number; readonly half: number; readonly y: readonly [number, number]; readonly hooks: number };
   /**
    * On the cab: three amber marker lamps on the roof's front (`markers`: s, x of the outer
@@ -933,8 +944,12 @@ export interface TruckSpec {
     readonly markers: readonly [s: number, x: number];
     readonly step: { readonly s: readonly [number, number]; readonly y: number; readonly out: number };
   };
-  /** The fuel tank outside the left rail: s range, heights, outer half width. */
-  readonly tank: { readonly s: readonly [number, number]; readonly y: readonly [number, number]; readonly out: number };
+  /**
+   * The fuel tank outside the left rail: s range, heights, outer half width; its filler
+   * on the top at `cap` (s, x): a neck with a cap hinged at its outer edge, opened as a
+   * car's flap (channel `flap`), over the `KIT_FILLER_NODE` box a can pours into.
+   */
+  readonly tank: { readonly s: readonly [number, number]; readonly y: readonly [number, number]; readonly out: number; readonly cap: readonly [s: number, x: number] };
   /**
    * A toolbox under the platform's front on the left, between the frame and the side
    * beam: s range, heights (its top sunk into the floor), inner half width; its face
@@ -957,11 +972,17 @@ export interface TruckSpec {
   /** Mud flaps behind the rear wheels: s, half widths [inner, outer], heights. */
   readonly flaps: { readonly s: number; readonly x: readonly [number, number]; readonly y: readonly [number, number] };
   /**
-   * Under the bonnet (`kit_bay`): the V8's block (s range, half width, heights) and the
-   * radiator behind the face (s, half width, heights).
+   * Under the bonnet: the four service cells the bonnet's grid draws its parts in
+   * (bay.ts `KIT_BONNET_CELL_NODE`), as a car's. Each an x range across, an s range along
+   * and the floor it stands on; its top is the closed bonnet's inner skin over it. The
+   * engine's s range also routes the gearbox and the exhaust.
    */
-  readonly bay: {
-    readonly engine: { readonly s: readonly [number, number]; readonly half: number; readonly y: readonly [number, number] };
-    readonly radiator: { readonly s: number; readonly half: number; readonly y: readonly [number, number] };
-  };
+  readonly bay: Readonly<Record<'engine' | 'turbine' | 'radiator' | 'air_filter', TruckCell>>;
+}
+
+/** A truck's bonnet cell (`TruckSpec.bay`): across, along, and the floor it stands on. */
+export interface TruckCell {
+  readonly x: readonly [number, number];
+  readonly s: readonly [number, number];
+  readonly floor: number;
 }

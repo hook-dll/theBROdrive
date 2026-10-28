@@ -43,7 +43,7 @@ function clearance(frame: BodyFrame): number {
   return frame.spec.platform === 'niva' || frame.spec.platform === 'van' ? NIVA_CLEARANCE : CLEARANCE;
 }
 /** Room under a lid's deck line: its 0.035 inner skin plus a hair, so nothing shows through. */
-const LID_ROOM = 0.045;
+export const LID_ROOM = 0.045;
 /** Inner panels stand this far inside the wheel wells' walls. */
 const WELL_GAP = 0.02;
 /** Inner wings stand this far outboard of the lid's edge, under the body's jamb flange. */
@@ -334,11 +334,11 @@ function battery(b: PartBuilder, frame: BodyFrame, side: number, inner: number, 
 export const KIT_BONNET_CELL_NODE = 'kit_bonnet_cell';
 
 /** The bonnet's part kinds, as vehicle/bonnet.ts names its cells. */
-const CELL_KINDS = ['engine', 'turbine', 'radiator', 'air_filter'] as const;
-type CellKind = (typeof CELL_KINDS)[number];
+export const CELL_KINDS = ['engine', 'turbine', 'radiator', 'air_filter'] as const;
+export type CellKind = (typeof CELL_KINDS)[number];
 
 /** A cell: its floor rectangle (x across, s along the car), the floor's height and the clear room's top. */
-interface Cell {
+export interface Cell {
   readonly x0: number;
   readonly x1: number;
   readonly s0: number;
@@ -485,7 +485,8 @@ function cell(room: BayRoom, x0: number, x1: number, s0: number, s1: number, flo
   return { x0, x1, s0, s1, floor, top };
 }
 
-function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
+/** The empty node marking one bonnet cell (`KIT_BONNET_CELL_NODE`); a truck's too (truck.ts). */
+export function cellMarker(frame: BodyFrame, kind: CellKind, c: Cell): THREE.Object3D {
   const node = new THREE.Object3D();
   node.name = `${KIT_BONNET_CELL_NODE}:${kind}`;
   node.position.set((c.x0 + c.x1) / 2, c.floor, frame.z((c.s0 + c.s1) / 2));

@@ -170,9 +170,9 @@ export const DRIVER_MIX: readonly [number, number, number] = [1 / 3, 1 / 3, 1 / 
  * everybody else — measured on the real road as a frantic median pace level with the
  * hurried drivers'.
  *
- * A body the M30 does not physically fit (`fits: ['car']`) gets the strongest engine
- * that does instead — the 5.7 Chevrolet 350 V8 for a truck — so a lorry or a van can
- * still be the one in a hurry. Those are the only two body classes in the pool.
+ * A body class the M30 does not physically fit gets the strongest engine that does
+ * instead. Every engine fits cars and trucks today (registry.ts `fits`), the only two
+ * body classes in the pool, so the M30 goes into a lorry or a van as into a saloon.
  */
 const FRANTIC_ENGINE_ID = 'engine_bmw_m30';
 /**

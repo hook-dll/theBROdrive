@@ -66,7 +66,7 @@ type Ware =
 
 const SHADE_TINTS: readonly ShadeTint[] = ['green', 'yellow', 'red'];
 const CAN_WARES: readonly Ware[] = ['can5', 'can5', 'can10', 'can10', 'can20'];
-/** The engines and gearboxes a machine may hold: those a car is built with, no import. */
+/** The engines and gearboxes a machine may hold: every one a car takes (the ZIL's V8 too), no import. */
 const ENGINE_IDS: readonly string[] = variantsOfKind('engine', 'car')
   .filter((v) => !IMPORT_ENGINE_IDS.includes(v.id))
   .map((v) => v.id);

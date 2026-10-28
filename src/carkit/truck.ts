@@ -5,16 +5,19 @@
  *
  *  - chassis, on the root, drawn at every distance (a truck's frame is half its side
  *    view): the two channel rails and their cross members, the front beam axle and the
- *    rear axle's housing, leaf springs, the steps, the fuel tank, the exhaust's silencer
- *    and tail pipe, mud flaps, the rear lamps on brackets at the frame's end;
+ *    rear axle's housing, leaf springs, the steps, the fuel tank with its filler neck, the
+ *    exhaust's silencer and tail pipe, mud flaps, the rear lamps on brackets at the frame's end;
+ *  - the tank's cap, hinged at its outer edge (`flap`, the car's fuel flap channel), and
+ *    the `KIT_FILLER_NODE` box over the neck a can pours into;
  *  - the front: a black channel bumper with two tow hooks, the face panel between the
  *    wings with its slots and round lamps, the wings with their round arches;
  *  - `bonnet`, hinged at its rear edge (kit.ts `shellMotion`'s bonnet motion);
  *  - the platform: the floor on two sills over the rails, a dark steel beam round its
  *    edge under it, a toolbox under its front on the left, the fixed front board and three
  *    drop boards hinged at their bottom edges (`board_l`, `board_r`, `board_tail`);
- *  - `kit_bay` under the bonnet (the V8, the radiator) and `kit_under` (gearbox and
- *    propeller shaft), drawn near only (rig.ts `KIT_DETAIL_GROUPS`);
+ *  - under the bonnet the four `KIT_BONNET_CELL_NODE` cells (bay.ts), as a car's: the
+ *    bonnet's grid draws the fitted engine, turbine, radiator and air filter in them;
+ *    `kit_under` (gearbox and propeller shaft), drawn near only (rig.ts `KIT_DETAIL_GROUPS`);
  *  - three amber marker lamps on the cab's roof.
  *
  * Everything is plain boxes, prisms and lofts: "a schematic parody" (README). Shapes stand
@@ -23,7 +26,9 @@
 
 import * as THREE from 'three';
 import { PartBuilder, lerp, newell, type KitSlot, type Vec3 } from './builder';
+import { CELL_KINDS, LID_ROOM, cellMarker } from './bay';
 import { addBuilt, pivotGroup, type KitContext } from './context';
+import { KIT_FILLER_NODE } from './exterior';
 import type { KitMotion } from './rig';
 import type { TruckSpec } from './spec';
 
@@ -35,9 +40,57 @@ const DARK = 0x0d0e0f;
 const RUBBER = 0x19191a;
 /** Bare steel: the exhaust, the propeller shaft. */
 const STEEL = 0x5a5c5e;
-/** The engine's paint, a grey-green [E]. */
-const ENGINE = 0x4a564b;
-const RADIATOR = 0x2a2c2e;
+/** The bonnet's top falls this much from the centre line out to its roll (`bonnet`'s section). */
+const BONNET_CROWN = 0.014;
+/** The bonnet's front corners in plan: a quarter round this big [P F34, F34w; E]. */
+const BONNET_NOSE_R = 0.2;
+/** Extra loft stations over that round, as fractions of it. */
+const BONNET_ROUND_COLS = [0.04, 0.12, 0.25, 0.45, 0.7];
+/** Segments round each rounded corner of the face panel and its grille block. */
+const CORNER_STEPS = 6;
+/** The front bumper's front corners in plan, and the roll of its front edges [P F34; owner's refs; E]. */
+const BUMPER_CORNER = 0.14;
+const BUMPER_ROLL = 0.03;
+/**
+ * The lamps' sunken pocket in each cheek [P F34, F34w; owner's refs]: it fills the cheek
+ * inside a rim this wide (round the nose, top and bottom; at the outer edge), its other
+ * corners rounded this much, its wall sloping in this much to a floor this deep; the
+ * lamps' rings stand `LAMP_PROUD` out of the cheek.
+ */
+const POCKET_RIM = 0.035;
+const POCKET_RIM_OUT = 0.02;
+const POCKET_CORNER = 0.06;
+const POCKET_SLOPE = 0.01;
+const POCKET_DEPTH = 0.022;
+const LAMP_PROUD = 0.02;
+/** The nose's grid lines at most this far apart, between those its rounds and slots add. */
+const NOSE_STEP = 0.15;
+/**
+ * The bonnet's lower edge drops this much at the nose, over the face panel's top, and
+ * rises back to `edge` over `NOSE_DROP_RUN` [P F34w: the nose rolls down onto the panel].
+ */
+const NOSE_DROP = 0.05;
+const NOSE_DROP_RUN = 0.2;
+/**
+ * The bonnet's raised middle [P F34w, F34r; E]: its top breaks `RIDGE_HALF` either side of
+ * the centre line (narrowing to the front), the middle standing `RIDGE_RISE` over the
+ * crown, the sides falling away from the break; it fades out over `RIDGE_FADE` at the nose.
+ * No crease under it: the surface stays convex (kit-surface counts a concave fold a dent).
+ */
+const RIDGE_HALF: readonly [front: number, rear: number] = [0.17, 0.3];
+const RIDGE_RISE = 0.015;
+const RIDGE_FADE = 0.2;
+
+/** The tank's filler: the neck's radius and height over the tank, the cap's radius and half thickness. */
+const NECK_R = 0.035;
+const NECK_H = 0.035;
+const CAP_R = 0.045;
+const CAP_HALF = 0.012;
+/** How far the cap swings up and out about its hinge, radians. */
+const CAP_OPEN = 1.9;
+/** The filler's aim box over the neck: half width and height. */
+const FILLER_HALF = 0.06;
+const FILLER_H = 0.08;
 /** The roof's marker lenses, amber, never lit [P F34]. */
 const MARKER = 0xd4891e;
 
@@ -48,6 +101,12 @@ const FLANGE_T = 0.008;
 const SILL = 0x3a2f26;
 /** The toolbox's face, a shade lighter than the beam it stands out of [O]. */
 const TOOLBOX = 0x2c2e30;
+/**
+ * The platform's steel, whatever the cab's paint (owner, 2026-10-28: like a trailer's):
+ * the drop boards bare grey steel, the floor dark worn plate.
+ */
+const BOARD_STEEL = 0x6c706e;
+const FLOOR_DARK = 0x2a2b2a;
 /** The wings' lip round the arch: how far it stands off the flank and how wide it rolls back onto it. */
 const LIP_OUT = 0.03;
 const LIP_WIDE = 0.06;
@@ -128,10 +187,15 @@ class Truck {
     return lerp(f.top[0], f.top[1], (s - f.s0) / (f.s1 - f.s0));
   }
 
-  /** The bonnet's half width at s (its sides lean in towards the nose in plan). */
+  /**
+   * The bonnet's half width at s: its sides lean in towards the nose in plan, and its front
+   * corners turn in on a quarter round `BONNET_NOSE_R` [P F34, F34w: no square corner].
+   */
   private bonnetHalf(s: number): number {
     const b = this.t.bonnet;
-    return lerp(b.half[0], b.half[1], Math.min(1, Math.max(0, (s - b.s0) / (b.s1 - b.s0))));
+    const d = Math.min(BONNET_NOSE_R, Math.max(0, s - b.s0));
+    const round = BONNET_NOSE_R - Math.sqrt(BONNET_NOSE_R * BONNET_NOSE_R - (BONNET_NOSE_R - d) ** 2);
+    return lerp(b.half[0], b.half[1], Math.min(1, Math.max(0, (s - b.s0) / (b.s1 - b.s0)))) - round;
   }
 
   /** The bonnet's top on the centre line at s. */
@@ -235,7 +299,10 @@ class Truck {
     }
   }
 
-  /** The fuel tank outside the left rail on two straps, its filler cap on top. */
+  /**
+   * The fuel tank outside the left rail on two straps; on its top the filler neck, its
+   * cap hinged at its outer edge (`flap`), and the filler's aim box over the neck.
+   */
   private tank(): void {
     const k = this.t.tank;
     const f = this.t.frame;
@@ -251,7 +318,22 @@ class Truck {
       // No face against the rail's web.
       b.boxFrom('trim', this.P(f.half, k.y[0] - 0.006, sx + 0.02), this.P(k.out + 0.006, k.y[1] + 0.006, sx - 0.02), 0b111101);
     }
-    b.cylinderY('trim', this.P(cx + hx * 0.4, k.y[1] + 0.02, k.s[0] + 0.2), 0.045, 0.025, 8);
+    // The neck 5 mm down in the tank's top; the cap on it, its hinge at its outer edge.
+    const [capS, capX] = k.cap;
+    const neckTop = k.y[1] + NECK_H;
+    b.cylinderY('trim', this.P(capX, (k.y[1] - 0.005 + neckTop) / 2, capS), NECK_R, (NECK_H + 0.005) / 2, 8);
+    const hinge = this.P(capX + CAP_R, neckTop, capS);
+    const cap = new PartBuilder().color(BLACK);
+    cap.cylinderY('trim', this.P(capX, neckTop + 0.002 + CAP_HALF, capS), CAP_R, CAP_HALF, 10);
+    const motion: KitMotion = { channel: 'flap', kind: 'rot', axis: [0, 0, 1], amount: -CAP_OPEN };
+    const node = pivotGroup('flap', hinge, motion, { id: 'flap', label: 'Крышка бензобака' });
+    addBuilt(node, cap, hinge, 'flap');
+    this.ctx.root.add(node);
+    const marker = new THREE.Object3D();
+    marker.name = KIT_FILLER_NODE;
+    marker.position.set(capX, neckTop + FILLER_H / 2, this.frame.z(capS));
+    marker.scale.set(2 * FILLER_HALF, FILLER_H, 2 * FILLER_HALF);
+    this.ctx.root.add(marker);
   }
 
   /** The silencer inside the right rail and the tail pipe turned out ahead of the rear wheels. */
@@ -312,12 +394,45 @@ class Truck {
 
   // ---- the front ----
 
-  /** The black channel bumper and the two tow hooks on its top. */
+  /**
+   * The black channel bumper, its front corners rounded in plan (`BUMPER_CORNER`) and its
+   * front edges rolled (`BUMPER_ROLL`) [P F34, owner's refs: no sharp corner], lofted
+   * from plan outlines at heights up it; the two tow hooks on its top.
+   */
   private bumper(): void {
     const k = this.t.bumper;
     const b = this.front.color(BLACK);
     const [y0, y1] = k.y;
-    b.bevelBox('trim', this.P(0, (y0 + y1) / 2, k.depth / 2), [k.half, (y1 - y0) / 2, k.depth / 2], 0.012);
+    const rr = Math.min(BUMPER_ROLL, (y1 - y0) / 2);
+    /** The plan outline `e` in from the front and the ends, its back straight across at `depth`. */
+    const plan = (e: number, y: number): Vec3[] => {
+      const hx = k.half - e;
+      const rc = BUMPER_CORNER - e;
+      const arc = (side: number): [number, number][] =>
+        Array.from({ length: CORNER_STEPS + 1 }, (_, i): [number, number] => {
+          const a = (i / CORNER_STEPS) * (Math.PI / 2);
+          // From the end's side round to the front, or back the other way.
+          const t = side < 0 ? a : Math.PI / 2 - a;
+          return [side * (k.half - BUMPER_CORNER + Math.cos(t) * rc), BUMPER_CORNER - Math.sin(t) * rc];
+        });
+      const pts: [number, number][] = [[-hx, k.depth], ...arc(-1), ...arc(1), [hx, k.depth]];
+      return pts.map(([x, s]) => this.P(x, y, s));
+    };
+    // Heights: quarter rounds at the bottom and the top, the inset following each.
+    const quarter = Array.from({ length: CORNER_STEPS + 1 }, (_, i) => (i / CORNER_STEPS) * (Math.PI / 2));
+    const levels: [number, number][] = [
+      ...quarter.map((a): [number, number] => [y0 + rr * (1 - Math.sin(a)), rr * (1 - Math.cos(a))]).reverse(),
+      ...quarter.map((a): [number, number] => [y1 - rr * (1 - Math.sin(a)), rr * (1 - Math.cos(a))]),
+    ];
+    const rings = levels.map(([y, e]) => plan(e, y));
+    for (let i = 0; i + 1 < rings.length; i++) b.bridge('trim', rings[i]!, rings[i + 1]!, true);
+    for (const [ring, up] of [[rings[0]!, false], [rings[rings.length - 1]!, true]] as const) {
+      const tris = THREE.ShapeUtils.triangulateShape(ring.map((p) => new THREE.Vector2(p[0], p[2])), []);
+      for (const [i, j, l] of tris) {
+        if (up) b.tri('trim', ring[i!]!, ring[l!]!, ring[j!]!);
+        else b.tri('trim', ring[i!]!, ring[j!]!, ring[l!]!);
+      }
+    }
     for (const side of [1, -1]) {
       const x = side * k.hooks;
       const path: Vec3[] = [
@@ -333,75 +448,143 @@ class Truck {
   }
 
   /**
-   * The face panel: a plate across between the wings, its slots cut through it (each a
-   * dark-backed recess) and round holes for the lamps, which stand in black rings.
+   * The face [P F34, F34w, F34r; owner's refs 2026-10-28]: a rounded nose between two
+   * cheeks. The nose (`face.nose`) carries the grille: in plan one arc from cheek to cheek,
+   * like the bonnet's nose over it, its top and bottom rolling back into the cheeks' plane
+   * on quarter rounds; on it the grille block swells as a rounded box (`face.grille`), and
+   * the slots are recesses following the surface. Each cheek is flat at `face.s`, its top
+   * outer corner rounded down past the indicator (the painted wing over it), its outer
+   * edge running on round the wing's nose (`wing`); a sunken pocket fills it inside a
+   * narrow rim, the head lamp and the indicator over it standing in its floor.
    */
   private facePanel(): void {
     const p = this.t.face;
+    const n = p.nose;
+    const g = p.grille;
     const b = this.front;
-    const z = this.frame.z(p.s);
-    const zBack = this.frame.z(p.s + 0.03);
     const [y0, y1] = p.y;
     const h = p.half;
-    const c = p.corner;
-    const outline: [number, number][] = [[-h, y0], [h, y0], [h, y1 - c], [h - c, y1], [-(h - c), y1], [-h, y1 - c]];
-    const holes: [number, number][][] = [];
-    const recess = (x0: number, x1: number, ya: number, yb: number): void => {
-      holes.push([[x0, ya], [x1, ya], [x1, yb], [x0, yb]]);
+    const z = this.frame.z(p.s);
+    const zBack = this.frame.z(p.s + 0.03);
+    const at = (pts: readonly (readonly [number, number])[], zz: number): Vec3[] => pts.map(([px, py]): Vec3 => [px, py, zz]);
+
+    // ---- the nose: a height field over a grid that runs along every slot's edges ----
+    // In plan one arc from cheek to cheek, `proud` at the middle; its top and bottom roll
+    // back into the cheeks' plane on quarter rounds `round`; the grille block swells on it.
+    const arcR = (n.half * n.half + n.proud * n.proud) / (2 * n.proud);
+    const offset = (x: number, y: number): number => {
+      if (Math.abs(x) >= n.half || y <= y0 || y >= y1) return 0;
+      const arc = Math.sqrt(arcR * arcR - x * x) - (arcR - n.proud);
+      const d = Math.min(1, Math.min(y - y0, y1 - y) / n.round);
+      return arc * Math.sqrt(1 - (1 - d) ** 2) + roundBox(x, y, g.half, g.y[0], g.y[1], g.proud);
     };
+    const surf = (x: number, y: number): Vec3 => this.P(x, y, p.s - offset(x, y));
+    const slots: [number, number, number, number][] = [];
     for (const row of p.slots) {
       const width = (2 * row.half - (row.count - 1) * row.gap) / row.count;
       for (let i = 0; i < row.count; i++) {
         const x0 = -row.half + i * (width + row.gap);
-        recess(x0, x0 + width, row.y[0], row.y[1]);
+        slots.push([x0, x0 + width, row.y[0], row.y[1]]);
       }
     }
-    const lamps: [number, number, number, KitSlot][] = [];
-    for (const side of [1, -1]) {
-      lamps.push([side * p.head[0], p.head[1], p.head[2], 'lamp_head']);
-      lamps.push([side * p.blinker[0], p.blinker[1], p.blinker[2], side > 0 ? 'lamp_blinker_l' : 'lamp_blinker_r']);
+    const xs = stops([
+      ...steps(-n.half, n.half, NOSE_STEP),
+      ...[g.half, -g.half].flatMap((e) => roundStops(e, Math.sign(e) * g.proud)),
+      ...slots.flatMap(([a, c]) => [a, c]),
+    ], -n.half, n.half);
+    const ys = stops([
+      ...steps(y0, y1, NOSE_STEP),
+      ...roundStops(y0, -n.round), ...roundStops(y1, n.round),
+      ...roundStops(g.y[0], -g.proud), ...roundStops(g.y[1], g.proud),
+      ...slots.flatMap(([, , a, c]) => [a, c]),
+    ], y0, y1);
+    const inSlot = (x: number, y: number): boolean => slots.some(([a, c, d, e]) => x > a && x < c && y > d && y < e);
+    b.color(p.colour);
+    for (let i = 0; i + 1 < xs.length; i++) {
+      for (let j = 0; j + 1 < ys.length; j++) {
+        const [xa, xb, ya, yb] = [xs[i]!, xs[i + 1]!, ys[j]!, ys[j + 1]!];
+        if (inSlot((xa + xb) / 2, (ya + yb) / 2)) continue;
+        b.quad('trim', surf(xa, ya), surf(xb, ya), surf(xb, yb), surf(xa, yb));
+      }
     }
+    // Its top and bottom edges (in the cheeks' plane there) back under the bonnet and the bumper.
+    for (const [ya, dir] of [[y0, 1], [y1, -1]] as const) {
+      for (let i = 0; i + 1 < xs.length; i++) {
+        const [xa, xb] = dir > 0 ? [xs[i]!, xs[i + 1]!] : [xs[i + 1]!, xs[i]!];
+        b.quad('trim', [xa, ya, z], [xb, ya, z], [xb, ya, zBack], [xa, ya, zBack]);
+      }
+    }
+    // Each slot a recess round its edge, following the surface, to a dark back 3.5 cm
+    // behind its deepest edge.
+    for (const [sx0, sx1, sy0, sy1] of slots) {
+      const along = (v: readonly number[], lo: number, hi: number): number[] => v.filter((u) => u >= lo - 1e-9 && u <= hi + 1e-9);
+      const bx = along(xs, sx0, sx1);
+      const by = along(ys, sy0, sy1);
+      const edge: [number, number][] = [
+        ...bx.map((x): [number, number] => [x, sy0]),
+        ...by.slice(1).map((y): [number, number] => [sx1, y]),
+        ...bx.slice().reverse().slice(1).map((x): [number, number] => [x, sy1]),
+        ...by.slice().reverse().slice(1, -1).map((y): [number, number] => [sx0, y]),
+      ];
+      const back = this.frame.z(p.s - Math.min(...edge.map(([x, y]) => offset(x, y))) + 0.035);
+      b.color(p.colour);
+      for (let i = 0; i < edge.length; i++) {
+        const [ax, ay] = edge[i]!;
+        const [cx, cy] = edge[(i + 1) % edge.length]!;
+        b.quad('trim', surf(ax, ay), surf(cx, cy), [cx, cy, back], [ax, ay, back]);
+      }
+      b.color(DARK).poly('trim', at([[sx0, sy0], [sx1, sy0], [sx1, sy1], [sx0, sy1]], back));
+    }
+
+    // ---- the cheeks, each with its lamps' pocket ----
     const ring = (x: number, y: number, r: number): [number, number][] =>
       Array.from({ length: LAMP_STEPS }, (_, i) => {
         const a = (i / LAMP_STEPS) * Math.PI * 2;
         return [x + Math.cos(a) * r, y + Math.sin(a) * r] as [number, number];
       });
-    for (const [x, y, r] of lamps) holes.push(ring(x, y, r + RING));
-    // The panel's face with its holes, and its edges back to its depth.
-    b.color(p.colour);
-    const v2 = (pts: readonly [number, number][]): THREE.Vector2[] => pts.map(([x, y]) => new THREE.Vector2(x, y));
-    const tris = THREE.ShapeUtils.triangulateShape(v2(outline), holes.map(v2));
-    const all = [...outline, ...holes.flat()];
-    for (const [i, j, k] of tris) b.tri('trim', [all[i!]![0], all[i!]![1], z], [all[j!]![0], all[j!]![1], z], [all[k!]![0], all[k!]![1], z]);
-    for (let i = 0; i < outline.length; i++) {
-      const [ax, ay] = outline[i]!;
-      const [bx, by] = outline[(i + 1) % outline.length]!;
-      b.quad('trim', [ax, ay, z], [bx, by, z], [bx, by, zBack], [ax, ay, zBack]);
-    }
-    // Each slot a recess: its walls in the panel's colour, a dark back 4 cm in.
-    const depth = this.frame.z(p.s + 0.04);
-    for (const hole of holes.slice(0, holes.length - lamps.length)) {
+    const c = p.corner;
+    const mirror = (pts: [number, number][], side: number): [number, number][] => (side > 0 ? pts : pts.map(([x, y]): [number, number] => [-x, y]).reverse());
+    // The pocket fills the cheek inside a rim (`POCKET_RIM` round the nose, top and
+    // bottom, `POCKET_RIM_OUT` at the outer edge), its top outer corner concentric with
+    // the cheek's; its floor `POCKET_SLOPE` further in all round [P F34, F34w; owner's refs].
+    const pocket = (inset: number): [number, number][] =>
+      roundRect4(n.half + POCKET_RIM + inset, h - POCKET_RIM_OUT - inset, y0 + POCKET_RIM + inset, y1 - POCKET_RIM - inset, [POCKET_CORNER - inset, POCKET_CORNER - inset, c - POCKET_RIM_OUT - inset, POCKET_CORNER - inset]);
+    for (const side of [1, -1]) {
+      const corner = Array.from({ length: CORNER_STEPS + 1 }, (_, i): [number, number] => {
+        const a = (i / CORNER_STEPS) * (Math.PI / 2);
+        return [h - c + Math.cos(a) * c, y1 - c + Math.sin(a) * c];
+      });
+      const outline = mirror([[n.half, y0], [h, y0], ...corner, [n.half, y1]], side);
+      const [hx, hy, hr] = [side * p.head[0], p.head[1], p.head[2]];
+      const [kx, ky, kr] = [side * p.blinker[0], p.blinker[1], p.blinker[2]];
+      const rim = mirror(pocket(0), side);
+      const floor = mirror(pocket(POCKET_SLOPE), side);
       b.color(p.colour);
-      for (let i = 0; i < 4; i++) {
-        const [ax, ay] = hole[i]!;
-        const [bx, by] = hole[(i + 1) % 4]!;
-        b.quad('trim', [ax, ay, z], [bx, by, z], [bx, by, depth], [ax, ay, depth]);
+      flatFace(b, outline, [rim], z);
+      for (let i = 0; i < outline.length; i++) {
+        const [ax, ay] = outline[i]!;
+        const [bx2, by2] = outline[(i + 1) % outline.length]!;
+        // No edge at the nose (it meets the nose there) nor at the outer side (the wrap runs on).
+        if (Math.abs(ax - bx2) < 1e-9 && (Math.abs(Math.abs(ax) - h) < 1e-9 || Math.abs(Math.abs(ax) - n.half) < 1e-9)) continue;
+        b.quad('trim', [ax, ay, z], [bx2, by2, z], [bx2, by2, zBack], [ax, ay, zBack]);
       }
-      b.color(DARK).poly('trim', hole.map(([x, y]): Vec3 => [x, y, depth]));
-    }
-    // Lamps: a black ring from inside the panel to 3 cm out, its front a flat annulus,
-    // the lens 6 mm behind the ring's front; the ring's throat in the dark.
-    for (const [x, y, r, slot] of lamps) {
-      const outer = ring(x, y, r + RING);
-      const inner = ring(x, y, r);
-      const zf = this.frame.z(p.s - 0.03);
-      const zl = this.frame.z(p.s - 0.024);
-      const at = (pts: [number, number][], zz: number): Vec3[] => pts.map(([px, py]): Vec3 => [px, py, zz]);
-      b.color(BLACK);
-      b.bridge('trim', at(outer, this.frame.z(p.s + 0.01)), at(outer, zf), true);
-      b.bridge('trim', at(outer, zf), at(inner, zf), true);
-      b.color(DARK).bridge('trim', at(inner, zf), at(inner, zl), true);
-      b.color(0xffffff).poly(slot, at(inner, zl));
+      // The pocket: its wall sloping in from the rim to its floor, the floor with the lamps' holes.
+      const zFloor = this.frame.z(p.s + POCKET_DEPTH);
+      b.bridge('trim', at(rim, z), at(floor, zFloor), true);
+      flatFace(b, floor, [ring(hx, hy, hr + RING), ring(kx, ky, kr + RING)], zFloor);
+      // Lamps: a black ring from behind the floor to `LAMP_PROUD` out of the cheek, its
+      // front a flat annulus, the lens 6 mm behind it; the ring's throat in the dark.
+      for (const [x, y, r, slot] of [[hx, hy, hr, 'lamp_head'], [kx, ky, kr, side > 0 ? 'lamp_blinker_l' : 'lamp_blinker_r']] as const) {
+        const outer = ring(x, y, r + RING);
+        const inner = ring(x, y, r);
+        const zf = this.frame.z(p.s - LAMP_PROUD);
+        const zl = this.frame.z(p.s - LAMP_PROUD + 0.006);
+        b.color(BLACK);
+        b.bridge('trim', at(outer, this.frame.z(p.s + POCKET_DEPTH + 0.01)), at(outer, zf), true);
+        b.bridge('trim', at(outer, zf), at(inner, zf), true);
+        b.color(DARK).bridge('trim', at(inner, zf), at(inner, zl), true);
+        b.color(0xffffff).poly(slot as KitSlot, at(inner, zl));
+      }
     }
   }
 
@@ -409,7 +592,8 @@ class Truck {
    * One front wing (+1 left, -1 right): its top from the bonnet's lower edge out and
    * rolling down at the brow, the flank down to its bottom with the arch cut out of it, the
    * arch's dark liner, an inner wall under the bonnet's edge, and its ends; the amber
-   * repeater on its flank.
+   * repeater on its flank. Its nose turns out to the flank on a quarter round in plan, and
+   * the face panel's white runs round that turn back to the flank (`wrap`) [P F34w, F34r].
    */
   private wing(side: number): void {
     const wg = this.t.wings;
@@ -418,7 +602,8 @@ class Truck {
     const b = this.front;
     const edge = bn.edge - 0.005;
     const xIn = (s: number): number => (s <= bn.s1 ? this.bonnetHalf(s) - 0.012 : lerp(this.bonnetHalf(bn.s1) - 0.012, wg.cab, Math.min(1, (s - bn.s1) / 0.1)));
-    const xOut = (s: number): number => lerp(wg.nose, wg.outer, Math.min(1, (s - wg.s0) / wg.taper));
+    // A quarter round in plan from the nose out to the flank over `taper`.
+    const xOut = (s: number): number => lerp(wg.nose, wg.outer, Math.sin((Math.PI / 2) * Math.min(1, Math.max(0, (s - wg.s0) / wg.taper))));
     const bottom = (s: number): number => lerp(wg.bottom[0], wg.bottom[1], (s - wg.s0) / (wg.s1 - wg.s0));
     /** The top's line across at s, inner edge to the brow: [x, y]. */
     const top = (s: number): [number, number][] => {
@@ -441,8 +626,10 @@ class Truck {
     }
     // arch runs rear foot -> front foot. Columns along s for the top and inner wall.
     const sT = wg.s0 + wg.taper;
-    const cols = [wg.s0, sT, ...[0.35, 0.65].map((f) => lerp(sT, bn.s1, f)), bn.s1, Math.min(wg.s1, bn.s1 + 0.1), wg.s1]
-      .filter((s, i, all) => i === 0 || s > all[i - 1]! + 1e-4);
+    const nose = [0.2, 0.4, 0.6, 0.8].map((f) => lerp(wg.s0, sT, f));
+    const cols = [wg.s0, ...nose, ...BONNET_ROUND_COLS.map((f) => bn.s0 + f * BONNET_NOSE_R), sT, ...[0.35, 0.65].map((f) => lerp(sT, bn.s1, f)), bn.s1, Math.min(wg.s1, bn.s1 + 0.1), wg.s1]
+      .sort((p, q) => p - q)
+      .filter((s, i, all) => s >= wg.s0 && (i === 0 || s > all[i - 1]! + 1e-4));
     const X = (x: number): number => side * x;
     // Top: three strips along the columns.
     b.color(0xffffff);
@@ -453,8 +640,27 @@ class Truck {
         b.quad('paint', this.P(X(p[k]![0]), p[k]![1], cols[i]!), this.P(X(q[k]![0]), q[k]![1], cols[i + 1]!), this.P(X(q[k + 1]![0]), q[k + 1]![1], cols[i + 1]!), this.P(X(p[k + 1]![0]), p[k + 1]![1], cols[i]!));
       }
     }
-    // The flank's tapered nose, then the flat flank behind it with the arch cut out.
-    b.quad('paint', this.P(X(xOut(wg.s0)), bottom(wg.s0), wg.s0), this.P(X(xOut(sT)), bottom(sT), sT), this.P(X(xOut(sT)), wg.brow, sT), this.P(X(xOut(wg.s0)), wg.brow, wg.s0));
+    // The flank's rounded nose, then the flat flank behind it with the arch cut out. Over
+    // the nose the face panel's white is the skin itself, from the panel's foot up to where
+    // its top corner starts to round (its edge, where the nose stands, back to where the
+    // flank runs straight); the paint under it, behind the bumper, and over it to the brow.
+    const face = this.t.face;
+    const wrapTop = face.y[1] - face.corner;
+    const turn = [wg.s0, ...nose, sT];
+    for (let i = 0; i + 1 < turn.length; i++) {
+      const [s0, s1] = [turn[i]!, turn[i + 1]!];
+      for (const [ya, yb] of [[bottom(s0), face.y[0]], [wrapTop, wg.brow]] as const) {
+        b.quad('paint', this.P(X(xOut(s0)), ya, s0), this.P(X(xOut(s1)), ya, s1), this.P(X(xOut(s1)), yb, s1), this.P(X(xOut(s0)), yb, s0));
+      }
+    }
+    b.color(face.colour);
+    const wrap = [face.s, ...turn.filter((s) => s > face.s)];
+    for (let i = 0; i + 1 < wrap.length; i++) {
+      const [s0, s1] = [wrap[i]!, wrap[i + 1]!];
+      const [x0, x1] = [s0 <= wg.s0 ? face.half : xOut(s0), xOut(s1)];
+      b.quad('trim', this.P(X(x0), face.y[0], s0), this.P(X(x1), face.y[0], s1), this.P(X(x1), wrapTop, s1), this.P(X(x0), wrapTop, s0));
+    }
+    b.color(0xffffff);
     // Round the arch from its front foot to its rear one.
     const flank: [number, number][] = [[sT, bottom(sT)], ...arch.slice().reverse(), [wg.s1, bottom(wg.s1)], [wg.s1, wg.brow], [sT, wg.brow]];
     const flankTris = THREE.ShapeUtils.triangulateShape(flank.map(([s, y]) => new THREE.Vector2(s, y)), []);
@@ -472,9 +678,12 @@ class Truck {
     // bonnet's edge, the arch's liner (dark, facing down at the wheel).
     const front = arch[arch.length - 1]![0];
     const rear = arch[0]![0];
-    for (const [s0, s1] of [[wg.s0, front], [rear, wg.s1]] as const) {
+    const under = [...turn, front];
+    for (let i = 0; i + 1 < under.length; i++) {
+      const [s0, s1] = [under[i]!, under[i + 1]!];
       b.quad('paint', this.P(X(xIn(s0)), bottom(s0), s0), this.P(X(xIn(s1)), bottom(s1), s1), this.P(X(xOut(s1)), bottom(s1), s1), this.P(X(xOut(s0)), bottom(s0), s0));
     }
+    b.quad('paint', this.P(X(xIn(rear)), bottom(rear), rear), this.P(X(xIn(wg.s1)), bottom(wg.s1), wg.s1), this.P(X(xOut(wg.s1)), bottom(wg.s1), wg.s1), this.P(X(xOut(rear)), bottom(rear), rear));
     const archY = (s: number): number => {
       const d = (s - centre) / a;
       return Math.abs(d) >= 1 ? -Infinity : r + rise * Math.sqrt(1 - d * d);
@@ -534,13 +743,22 @@ class Truck {
   private bonnet(): void {
     const bn = this.t.bonnet;
     const b = new PartBuilder();
-    const ss = bn.top.map(([s]) => s);
+    // The profile's stations and more over the nose's rounded corners.
+    const ss = [...bn.top.map(([s]) => s), ...BONNET_ROUND_COLS.map((f) => bn.s0 + f * BONNET_NOSE_R)]
+      .sort((p, q) => p - q)
+      .filter((s, i, all) => i === 0 || s > all[i - 1]! + 1e-4);
     const section = (s: number): Vec3[] => {
       const h = this.bonnetHalf(s);
       const top = this.bonnetTop(s);
       const shoulder = Math.max(bn.edge + 0.01, top - bn.roll[1]);
-      const half: [number, number][] = [[h, bn.edge], [h, shoulder], [h - bn.roll[0], Math.max(shoulder, top - 0.014)], [(h - bn.roll[0]) * 0.5, top - 0.004]];
-      const pts = [...half, [0, top] as [number, number], ...half.slice().reverse().map(([x, y]) => [-x, y] as [number, number])];
+      const along = Math.min(1, Math.max(0, (s - bn.s0) / (bn.s1 - bn.s0)));
+      const rise = RIDGE_RISE * Math.min(1, (s - bn.s0) / RIDGE_FADE);
+      const rw = lerp(RIDGE_HALF[0], RIDGE_HALF[1], along);
+      // The lower edge rolls down over the face panel's top at the nose (quarter round).
+      const run = Math.min(1, (s - bn.s0) / NOSE_DROP_RUN);
+      const edge = bn.edge - NOSE_DROP * (1 - Math.sqrt(1 - (1 - run) ** 2));
+      const half: [number, number][] = [[h, edge], [h, Math.max(edge + 0.01, shoulder)], [h - bn.roll[0], Math.max(shoulder, top - 0.014)], [rw, top + rise * 0.8]];
+      const pts = [...half, [0, top + rise] as [number, number], ...half.slice().reverse().map(([x, y]) => [-x, y] as [number, number])];
       return pts.map(([x, y]) => this.P(x, y, s));
     };
     b.color(0xffffff);
@@ -592,8 +810,8 @@ class Truck {
     // The floor plate reaches to 3 cm inside the beam's face and 2 cm inside its ends; its
     // long sides are left open, closed by the beam's lip.
     const fx = bx1 - 0.03;
-    b.color(0xffffff);
-    sweep(b, 'paint', [[-fx, under], [fx, under], [fx, y], [-fx, y]], (s, [x, py]) => this.P(x, py, s), pl.s0 + 0.02, pl.s1 - 0.02, true, [1, 3]);
+    b.color(FLOOR_DARK);
+    sweep(b, 'trim', [[-fx, under], [fx, under], [fx, y], [-fx, y]], (s, [x, py]) => this.P(x, py, s), pl.s0 + 0.02, pl.s1 - 0.02, true, [1, 3]);
     b.color(BLACK);
     for (const side of [1, -1]) {
       // Its body 1 cm up into the plate; outside the plate a lip up to 4 mm under the
@@ -626,7 +844,7 @@ class Truck {
     }
     for (const x of [-(pl.half * 0.5), pl.half * 0.5]) b.cylinderX('trim', this.P(x, y - HINGE_DROP, pl.s1 - 0.012), 0.014, 0.04, 6);
     // The fixed front board, its ribs facing the cab.
-    b.color(0xffffff);
+    b.color(BOARD_STEEL);
     board(b, (u, v, w) => this.P(u, y + GAP + v * (pl.side - GAP), pl.s0 + BOARD - w * BOARD), -pl.half, pl.half, pl.ribs);
   }
 
@@ -640,7 +858,7 @@ class Truck {
       const name = side > 0 ? 'board_l' : 'board_r';
       const pivot = this.P(side * pl.half, hy, (pl.s0 + pl.s1) / 2);
       const node = pivotGroup(name, pivot, { channel: name, kind: 'rot', axis: [0, 0, 1], amount: -side * BOARD_DROP }, { id: name, label: LABELS[name]! });
-      const b = new PartBuilder().color(0xffffff);
+      const b = new PartBuilder().color(BOARD_STEEL);
       // Along the board u runs s, w out from its inner face.
       board(b, (u, v, w) => this.P(side * (pl.inside + w * (pl.half - pl.inside - GAP)), y + GAP + v * (pl.side - GAP), u), pl.s0 + BOARD + GAP, tailIn - GAP, pl.ribs);
       addBuilt(node, b, pivot, name);
@@ -648,7 +866,7 @@ class Truck {
     }
     const pivot = this.P(0, hy, pl.s1);
     const node = pivotGroup('board_tail', pivot, { channel: 'board_tail', kind: 'rot', axis: [1, 0, 0], amount: -BOARD_DROP }, { id: 'board_tail', label: LABELS.board_tail! });
-    const b = new PartBuilder().color(0xffffff);
+    const b = new PartBuilder().color(BOARD_STEEL);
     board(b, (u, v, w) => this.P(u, y + GAP + v * (pl.side - GAP), tailIn + w * (BOARD - GAP)), -(pl.half - GAP), pl.half - GAP, pl.ribs);
     addBuilt(node, b, pivot, 'board_tail');
     this.ctx.root.add(node);
@@ -656,34 +874,20 @@ class Truck {
 
   // ---- under the bonnet ----
 
-  /** The V8 (block, two banks, the intake and the air filter), the fan and the radiator (`kit_bay`). */
+  /** The bonnet's four service cells (`TruckSpec.bay`), each up to the closed bonnet over it. */
   private bay(): void {
-    const { engine: e, radiator: rd } = this.t.bay;
-    const b = new PartBuilder();
-    const [s0, s1] = e.s;
-    const sm = (s0 + s1) / 2;
-    const half = (s1 - s0) / 2;
-    b.color(ENGINE);
-    b.bevelBox('trim', this.P(0, (e.y[0] + e.y[1] - 0.1) / 2, sm), [e.half, (e.y[1] - 0.1 - e.y[0]) / 2, half], 0.04);
-    for (const side of [1, -1]) {
-      // Each bank leans out 45° from the vee, its head at the top.
-      const bank: [number, number][] = [[0.04, e.y[1] - 0.12], [0.22, e.y[1] - 0.12], [0.36, e.y[1] + 0.08], [0.16, e.y[1] + 0.16]];
-      const ring = (s: number): Vec3[] => bank.map(([x, y]) => this.P(side * x, y, s));
-      const a = ring(s0 + 0.03);
-      const c = ring(s1 - 0.03);
-      b.bridge('trim', a, c, true);
-      b.poly('trim', a);
-      b.poly('trim', c);
+    for (const kind of CELL_KINDS) {
+      const c = this.t.bay[kind];
+      const [s0, s1] = c.s;
+      this.ctx.root.add(cellMarker(this.frame, kind, { x0: c.x[0], x1: c.x[1], s0, s1, floor: c.floor, top: this.underBonnet(s0, s1) }));
     }
-    b.box('trim', this.P(0, e.y[1] + 0.06, sm), [0.1, 0.1, half - 0.08]);
-    b.color(BLACK).cylinderY('trim', this.P(0, e.y[1] + 0.24, sm - 0.05), 0.16, 0.05, 12);
-    b.color(RADIATOR);
-    b.boxFrom('trim', this.P(-rd.half, rd.y[0], rd.s + 0.07), this.P(rd.half, rd.y[1], rd.s));
-    b.color(BLACK).cylinderZ('trim', this.P(0, (rd.y[0] + rd.y[1]) / 2 - 0.02, rd.s + 0.12), 0.24, 0.01, 12);
-    const group = new THREE.Group();
-    group.name = 'kit_bay';
-    addBuilt(group, b, ORIGIN, 'bay', true);
-    this.ctx.root.add(group);
+  }
+
+  /** The highest a part may stand over s0..s1 under the closed bonnet: its lowest top there, less its crown and `LID_ROOM`. */
+  private underBonnet(s0: number, s1: number): number {
+    let y = Math.min(this.bonnetTop(s0), this.bonnetTop(s1));
+    for (const [s, top] of this.t.bonnet.top) if (s > s0 && s < s1) y = Math.min(y, top);
+    return y - BONNET_CROWN - LID_ROOM;
   }
 }
 
@@ -701,6 +905,65 @@ function tableAt(points: readonly (readonly [number, number])[], s: number): num
     }
   }
   return points[points.length - 1]![1];
+}
+
+/**
+ * How far a rounded box stands out at (x, y): `proud` over its middle, rolling back to 0
+ * on quarter rounds of radius `proud` at its sides (±`half`) and at `y0`, `y1`; 0 outside.
+ */
+function roundBox(x: number, y: number, half: number, y0: number, y1: number, proud: number): number {
+  if (Math.abs(x) >= half || y <= y0 || y >= y1) return 0;
+  const ex = Math.max(0, Math.abs(x) - (half - proud));
+  const ey = Math.max(0, y0 + proud - y, y - (y1 - proud));
+  const e2 = ex * ex + ey * ey;
+  return e2 >= proud * proud ? 0 : Math.sqrt(proud * proud - e2);
+}
+
+/** `from`, `to` and every `step` between. */
+function steps(from: number, to: number, step: number): number[] {
+  const count = Math.max(1, Math.round((to - from) / step));
+  return Array.from({ length: count + 1 }, (_, i) => lerp(from, to, i / count));
+}
+
+/** Grid lines across a quarter round of radius |r| ending at `edge`, `r` pointing out of the round. */
+function roundStops(edge: number, r: number): number[] {
+  return [1, 0.6, 0.3, 0.1, 0].map((f) => edge - r * f);
+}
+
+/** Grid lines sorted, within lo..hi, none closer than 1 mm. */
+function stops(values: readonly number[], lo: number, hi: number): number[] {
+  return values
+    .filter((v) => v >= lo - 1e-9 && v <= hi + 1e-9)
+    .sort((a, c) => a - c)
+    .filter((v, i, all) => i === 0 || v > all[i - 1]! + 1e-3);
+}
+
+/**
+ * A rectangle x0..x1, y0..y1 counter-clockwise from its bottom left, each corner rounded
+ * (radii bottom left, bottom right, top right, top left) in `CORNER_STEPS` segments: two
+ * with the same corner count line up point for point.
+ */
+function roundRect4(x0: number, x1: number, y0: number, y1: number, r: readonly [number, number, number, number]): [number, number][] {
+  const corners: [number, number, number, number][] = [
+    [x0 + r[0], y0 + r[0], r[0], Math.PI],
+    [x1 - r[1], y0 + r[1], r[1], -Math.PI / 2],
+    [x1 - r[2], y1 - r[2], r[2], 0],
+    [x0 + r[3], y1 - r[3], r[3], Math.PI / 2],
+  ];
+  return corners.flatMap(([cx, cy, cr, from]) =>
+    Array.from({ length: CORNER_STEPS + 1 }, (_, i): [number, number] => {
+      const a = from + (i / CORNER_STEPS) * (Math.PI / 2);
+      return [cx + Math.cos(a) * cr, cy + Math.sin(a) * cr];
+    }),
+  );
+}
+
+/** A flat face across the car at z: `outline` with `holes` cut out of it. */
+function flatFace(b: PartBuilder, outline: readonly [number, number][], holes: readonly (readonly [number, number][])[], z: number): void {
+  const v2 = (pts: readonly [number, number][]): THREE.Vector2[] => pts.map(([x, y]) => new THREE.Vector2(x, y));
+  const tris = THREE.ShapeUtils.triangulateShape(v2(outline), holes.map(v2));
+  const all = [...outline, ...holes.flat()];
+  for (const [i, j, k] of tris) b.tri('trim', [all[i!]![0], all[i!]![1], z], [all[j!]![0], all[j!]![1], z], [all[k!]![0], all[k!]![1], z]);
 }
 
 /** A closed ring's cap, cut into triangles that keep to its outline (it may be concave). */
@@ -778,7 +1041,7 @@ function sub3(a: Vec3, c: Vec3): Vec3 {
 }
 
 /**
- * A pressed steel board in paint, one section swept along it (`sweep`): the inner face (w
+ * A pressed steel board in bare grey steel (`BOARD_STEEL`, not the cab's paint), one section swept along it (`sweep`): the inner face (w
  * 0) up to a top rail the board's full thickness, the outer skin at w 0.6 with `ribs`
  * pressed ribs standing out to w 1. `at(u, v, w)`: u along the board (u0..u1), v up its
  * height (0 the bottom, 1 the top), w through it.
@@ -792,5 +1055,5 @@ function board(b: PartBuilder, at: (u: number, v: number, w: number) => Vec3, u0
     section.push([v + 0.035, skin], [v + 0.035, 1], [v - 0.035, 1], [v - 0.035, skin]);
   }
   section.push([0, skin]);
-  sweep(b, 'paint', section, (u, [v, w]) => at(u, v, w), u0, u1);
+  sweep(b, 'trim', section, (u, [v, w]) => at(u, v, w), u0, u1);
 }

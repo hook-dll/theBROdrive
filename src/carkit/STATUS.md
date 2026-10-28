@@ -67,7 +67,8 @@ on any car are still fixed.
    cab tilts forward; the GAZ-66 also has the engine cover between the seats). ZIL-130:
    first draft 2026-10-28, in the game (`kit_zil130`); reworked on the owner's side photo
    (no spare, a beam under the platform, the floor at 1.30, the screen wrapping to the
-   door): **draft, awaiting his next look**.
+   door): **draft, awaiting his next look**. The bonnet holds the cars' four cells and the
+   tank takes fuel at its cap, crouching (owner, 2026-10-28; measurements-zil130.md §7).
 5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
    see "Foreign cars: the owner's list" below. First batch, the GM cars on Opel running
    gear: the **Daewoo Nexia** drafted 2026-10-18, and with it the foreign running-gear

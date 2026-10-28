@@ -144,14 +144,14 @@ export const BODY_ZIL130: KitBody = {
       louvres: { s: [0.94, 1.19], y: [1.5, 1.58], count: 5 },
     },
     wings: {
-      // From behind the face panel to the door's front edge [D side x 103-470]; 1.08 off
-      // the centre line [D front 1.095, plan 1.077], rounding in to 0.98 at the face [D
-      // plan]; the brow over the arch 1.34-1.38 [D side y 265]; the bottom 0.74 ahead of
-      // the arch, 0.78 behind it [D side y 420].
-      s0: 0.26,
+      // From behind the face's cheeks and their lamp pockets (`face.s` + 3.4 cm) to the
+      // door's front edge [D side x 103-470]; 1.08 off the centre line [D front 1.095, plan
+      // 1.077], rounding in to the cheeks' edge 1.04 at the face; the brow over the arch
+      // 1.34-1.38 [D side y 265]; the bottom 0.74 ahead of the arch, 0.78 behind it [D side y 420].
+      s0: 0.28,
       s1: 1.77,
       outer: 1.08,
-      nose: 0.98,
+      nose: 1.04, // the cheeks' edge: their white runs on round the nose from there (`face`)
       taper: 0.19,
       brow: 1.34,
       bottom: [0.74, 0.78],
@@ -159,13 +159,15 @@ export const BODY_ZIL130: KitBody = {
       repeater: [1.56, 1.22, 0.025], // a small round lamp on the flank behind the arch [P F34w]
     },
     face: {
-      // The panel 0.246 [D side x 103], from the bumper's top up under the bonnet's nose,
-      // ±1.0 [D front: the lamp pods' outer edge 1.08, the wings' front 0.98]; white
-      // [owner, §6 F1; P F34w].
+      // The cheeks at 0.246 [D side x 103: the face's silhouette is the cheeks'], from the
+      // bumper's top up under the bonnet's nose, the nose 8 cm ahead of them; ±1.04 [D
+      // front: the lamp pods' outer edge 1.08, the wings' front 0.98]; white [owner, §6 F1;
+      // P F34w]. Moved forward from 0.326 (owner, 2026-10-28: the face sat in, the bonnet
+      // hanging over it like a peak and the bumper standing out).
       s: 0.246,
-      half: 1.0,
+      half: 1.04,
       y: [0.84, 1.42],
-      corner: 0.08,
+      corner: 0.17, // the top corners round down past the indicators, the painted wings over them [P F34w; owner 2026-10-28]
       colour: 0xe2dfd4,
       // A long slot under the top, two rows of five, two wide intakes over the bumper [P
       // F34w; D front's rows y 352-365, 385-395, 415-445].
@@ -175,22 +177,32 @@ export const BODY_ZIL130: KitBody = {
         { y: [1.12, 1.155], half: 0.54, count: 5, gap: 0.025 },
         { y: [0.96, 1.05], half: 0.44, count: 2, gap: 0.04 },
       ],
-      // Head lamps ±0.884, 1.139, 7-inch [D front: rings x 170-245, y 365-435]; the late
-      // amber indicators over them [P F34w].
-      head: [0.884, 1.139, 0.09],
-      blinker: [0.884, 1.31, 0.035],
+      // The nose ±0.66 between the cheeks, one arc in plan from cheek to cheek 6 cm out at
+      // its middle, its top and bottom rolling back on 5 cm rounds; the two rows of five on
+      // a block swelling 2 cm more [owner's refs 2026-10-28; P F34w, F34r; E]: 8 cm at the
+      // middle, its front at 0.166.
+      nose: { half: 0.66, proud: 0.06, round: 0.05 },
+      grille: { y: [1.085, 1.26], half: 0.58, proud: 0.02 },
+      // Head lamps 7-inch, the amber indicators over them [D front: rings x 170-245, y
+      // 365-435 read ±0.884, 1.139; P F34w]: the pair centred in the cheek's pocket (owner,
+      // 2026-10-28: not near the edges), ±0.858, 1.09 and 1.26.
+      head: [0.858, 1.09, 0.09],
+      blinker: [0.858, 1.26, 0.035],
     },
     // 0.68-0.84 [D side y 398-433: 0.671-0.817; front 0.693-0.855], ±1.055 [D front],
     // reaching back to just ahead of the face [D side x 44-95: 0.21; P F34: a deep
-    // channel]; hooks ±0.43 [D front].
-    bumper: { depth: 0.21, half: 1.055, y: [0.68, 0.84], hooks: 0.43 },
+    // channel]; hooks ±0.43 [D front]. Slimmed to 0.72-0.83 (owner, 2026-10-28: too heavy
+    // from the front).
+    bumper: { depth: 0.21, half: 1.055, y: [0.72, 0.83], hooks: 0.43 },
     cab: {
       markers: [1.86, 0.25], // [P F34: three amber lamps over the screen]
       step: { s: [1.86, 2.46], y: 0.58, out: 0.98 }, // [D side y 415-455 under the door]
     },
     // On the left rail behind the cab step, under the toolbox [P S, O; F34 shows the right
-    // side bare behind its step]; ~170 l [F], its size [E; O s 2.98-3.93, 0.60-0.96].
-    tank: { s: [2.95, 3.75], y: [0.5, 0.9], out: 0.95 },
+    // side bare behind its step]; ~170 l [F], its size [E; O s 2.98-3.93, 0.60-0.96]. The
+    // filler on its top at the front outer corner, ahead of the toolbox and under the
+    // platform's beam [E]: reached crouching, under the side board.
+    tank: { s: [2.95, 3.75], y: [0.5, 0.9], out: 0.95, cap: [3.05, 0.85] },
     // Under the platform's front on the left, its face standing out of the beam [O x
     // 430-505, y 156-190: s 3.12-3.67, 1.03-1.28]; its top 2.5 cm up in the floor plate.
     toolbox: { s: [3.12, 3.67], y: [1.03, 1.285], inner: 0.9 },
@@ -215,9 +227,17 @@ export const BODY_ZIL130: KitBody = {
     rearLamps: [6.42, 0.78, 1.0], // [P R34: under the platform's tail, near its sides]
     // [P R34]; hanging from a bar under the platform's beam [O].
     flaps: { s: 5.47, x: [0.62, 1.2], y: [0.32, 1.04] },
+    // The four bonnet cells, as a car's [E]. The engine's between the rails' flanges
+    // (±0.3575) over the front axle's beam, where the V8 stood (s 0.62-1.25, 0.58 up); the
+    // radiator's behind the face, standing on the cross member at s 0.45 (its top 0.83);
+    // the air filter's on the left rail and the turbine's on the right, inside the wheel
+    // wells' aprons (±0.58), the turbine's by the exhaust's down-pipe at the engine's rear
+    // and short of the cab's front wall (s 1.36).
     bay: {
-      engine: { s: [0.62, 1.25], half: 0.3, y: [0.58, 1.0] }, // [E: the ZIL-130 V8]
-      radiator: { s: 0.36, half: 0.42, y: [0.82, 1.36] }, // [E]
+      engine: { x: [-0.345, 0.345], s: [0.62, 1.25], floor: 0.58 },
+      turbine: { x: [-0.56, -0.36], s: [0.98, 1.33], floor: 0.87 },
+      radiator: { x: [-0.42, 0.42], s: [0.365, 0.505], floor: 0.84 },
+      air_filter: { x: [0.36, 0.56], s: [0.72, 1.02], floor: 0.87 },
     },
   },
 };

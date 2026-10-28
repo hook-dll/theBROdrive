@@ -152,7 +152,11 @@ export interface PartVariant {
   readonly gearbox?: GearboxSpec;
   /** Water capacity, on the radiator only. */
   readonly radiator?: RadiatorSpec;
-  /** Which body classes this variant physically fits. */
+  /**
+   * Which body classes this variant physically fits. Every engine, gearbox and bonnet
+   * part fits both cars and trucks (owner, 2026-10-28: a car's part goes into the ZIL and
+   * the ZIL's into a car); a part made for trucks alone would list `'truck'` only.
+   */
   readonly fits: readonly BodyClass[];
 }
 
@@ -335,7 +339,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 VAZ-2106-70 inline-four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 56.3,
       powerPeakRpm: 5400,
@@ -357,7 +361,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     label: '1.5 UZAM-412DE inline-four',
     // Factory aggregate: engine with equipment and gearbox 166 kg, gearbox 22 kg.
     mass: 144,
-    fits: ['truck'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 49,
       powerPeakRpm: 5800,
@@ -380,7 +384,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '6.0 ZIL-508 V8',
     mass: 500,
-    fits: ['truck'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 110,
       powerPeakRpm: 3200,
@@ -467,7 +471,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '3.0 BMW M30 inline-six',
     mass: 195,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 132,
       powerPeakRpm: 6000,
@@ -488,7 +492,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.8 Ford Cologne V6',
     mass: 172,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 118,
       powerPeakRpm: 5700,
@@ -552,7 +556,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.0 BMW M10 tii inline-four',
     mass: 140,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 96,
       powerPeakRpm: 5800,
@@ -573,7 +577,7 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 Cosworth BDA twin-cam four',
     mass: 112,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 88,
       powerPeakRpm: 6500,
@@ -643,7 +647,7 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '3-speed automatic',
     mass: 68,
-    fits: ['car', 'bus'],
+    fits: ['car', 'truck', 'bus'],
     gearbox: {
       ratios: [2.72, 1.5, 1.0],
       reverse: 2.1,
@@ -660,7 +664,7 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '6-speed crashbox',
     mass: 132,
-    fits: ['truck', 'bus'],
+    fits: ['car', 'truck', 'bus'],
     gearbox: {
       ratios: [7.2, 4.1, 2.5, 1.6, 1.0, 0.78],
       reverse: 6.8,
@@ -678,7 +682,7 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'ZIL-130 five-speed',
     mass: 105,
-    fits: ['truck'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [7.44, 4.10, 2.29, 1.47, 1.0],
       reverse: 7.09,
@@ -737,7 +741,7 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.2 inline-four',
     mass: 114,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 47,
       powerPeakRpm: 5600,
@@ -758,7 +762,7 @@ const LADA_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2101 four-speed',
     mass: 33,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.75, 2.3, 1.49, 1.0],
       reverse: 3.87,
@@ -815,7 +819,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.4 Volga four',
     mass: 165,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 51.5,
       powerPeakRpm: 4000,
@@ -837,7 +841,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.4 Volga four (24)',
     mass: 170,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 69.9,
       powerPeakRpm: 4500,
@@ -860,7 +864,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.4 ZMZ-402 four',
     mass: 170,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 73.5,
       powerPeakRpm: 4500,
@@ -881,7 +885,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.3 inline-four',
     mass: 116,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 47,
       powerPeakRpm: 5600,
@@ -902,7 +906,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.5 inline-four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 53.3,
       powerPeakRpm: 5600,
@@ -922,7 +926,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 inline-four (VAZ)',
     mass: 121,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 55.5,
       powerPeakRpm: 5400,
@@ -943,7 +947,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.3 Samara four',
     mass: 116,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 47,
       powerPeakRpm: 5600,
@@ -963,7 +967,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.5 Samara four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 51.5,
       powerPeakRpm: 5600,
@@ -987,7 +991,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.5i VAZ-2111 four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 57.2,
       powerPeakRpm: 5400,
@@ -1010,7 +1014,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '0.65 VAZ-1111 twin',
     mass: 66.5,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 21.5,
       powerPeakRpm: 5600,
@@ -1032,7 +1036,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 Niva four',
     mass: 125,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 53.7,
       powerPeakRpm: 5400,
@@ -1053,7 +1057,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.7 Niva four',
     mass: 128,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 58,
       powerPeakRpm: 5200,
@@ -1075,7 +1079,7 @@ const SOVIET_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 rally four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 73.5,
       powerPeakRpm: 6400,
@@ -1114,7 +1118,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '3-speed column shift',
     mass: 43,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.115, 1.772, 1.0],
       reverse: 3.738,
@@ -1131,7 +1135,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'IZH/Moskvich four-speed',
     mass: 22,
-    fits: ['truck'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.49, 2.04, 1.33, 1.0],
       reverse: 3.39,
@@ -1148,7 +1152,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '4-speed Volga',
     mass: 46,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.5, 2.26, 1.45, 1.0],
       reverse: 3.54,
@@ -1166,7 +1170,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '4-speed Volga (3.9 axle)',
     mass: 46,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.5, 2.26, 1.45, 1.0],
       reverse: 3.54,
@@ -1183,7 +1187,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2102 four-speed',
     mass: 33,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.75, 2.3, 1.49, 1.0],
       reverse: 3.87,
@@ -1200,7 +1204,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2105 four-speed',
     mass: 33,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0],
       reverse: 3.53,
@@ -1217,7 +1221,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2103 four-speed',
     mass: 33,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.75, 2.3, 1.49, 1.0],
       reverse: 3.87,
@@ -1234,7 +1238,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2106 four-speed',
     mass: 33,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0],
       reverse: 3.53,
@@ -1251,7 +1255,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2107 five-speed',
     mass: 40,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0, 0.82],
       reverse: 3.53,
@@ -1269,7 +1273,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '2108 five-speed',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.636, 1.95, 1.357, 0.941, 0.784],
       reverse: 3.53,
@@ -1286,7 +1290,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '21083 five-speed',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.636, 1.95, 1.357, 0.941, 0.784],
       reverse: 3.53,
@@ -1304,7 +1308,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: '1111 four-speed',
     mass: 24.5,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.7, 2.06, 1.27, 0.9],
       reverse: 3.67,
@@ -1321,7 +1325,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Niva four-speed',
     mass: 62,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0],
       reverse: 3.53,
@@ -1338,7 +1342,7 @@ const SOVIET_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Niva five-speed',
     mass: 68,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.67, 2.1, 1.36, 1.0, 0.82],
       reverse: 3.53,
@@ -1373,7 +1377,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.5 Daewoo G15MF four',
     mass: 118,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 55,
       powerPeakRpm: 5400,
@@ -1396,7 +1400,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.0 Daewoo C20LE four',
     mass: 135,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 77,
       powerPeakRpm: 5000,
@@ -1419,7 +1423,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '1.6 Opel C16NZ four',
     mass: 120,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 55,
       powerPeakRpm: 5200,
@@ -1442,7 +1446,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.0 Opel C20NE four',
     mass: 135,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 85,
       powerPeakRpm: 5200,
@@ -1465,7 +1469,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.3 Mercedes-Benz M102 four',
     mass: 145,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 97,
       powerPeakRpm: 5100,
@@ -1489,7 +1493,7 @@ const FOREIGN_ENGINE_VARIANTS: readonly PartVariant[] = [
     kind: 'engine',
     label: '2.0 BMW M50 straight six',
     mass: 175,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     engine: {
       peakPowerKw: 110,
       powerPeakRpm: 5900,
@@ -1518,7 +1522,7 @@ const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'ZF S5D 310Z five-speed (3.46)',
     mass: 39,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [4.21, 2.49, 1.67, 1.24, 1.0],
       reverse: 3.85,
@@ -1537,7 +1541,7 @@ const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Mercedes-Benz five-speed (3.46)',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.91, 2.17, 1.37, 1.0, 0.81],
       reverse: 4.27,
@@ -1558,7 +1562,7 @@ const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Opel F16 WR five-speed (3.55)',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.545, 1.952, 1.276, 0.892, 0.707],
       reverse: 3.333,
@@ -1578,7 +1582,7 @@ const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Opel F13 WR five-speed',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.55, 1.96, 1.3, 0.89, 0.71],
       reverse: 3.31,
@@ -1598,7 +1602,7 @@ const FOREIGN_GEARBOX_VARIANTS: readonly PartVariant[] = [
     kind: 'gearbox',
     label: 'Opel F16 five-speed (Nexia)',
     mass: 45,
-    fits: ['car'],
+    fits: ['car', 'truck'],
     gearbox: {
       ratios: [3.545, 1.952, 1.276, 0.892, 0.707],
       reverse: 3.333,

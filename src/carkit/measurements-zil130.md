@@ -162,6 +162,33 @@ Behind the cab nothing is the flatbed's on D: boards 0.575 [F], 2.5 wide [F], in
 height, beam, toolbox and the tank's side from the owner's photo **O** (below). The wings'
 arches carry a 6 cm lip standing 3 cm proud [D: the arch's double line].
 
+Under the bonnet the cars' four service cells (2026-10-28, owner: the bay as a car's, every
+part interchangeable), all [E]: the engine's between the rails' flanges, s 0.62–1.25,
+±0.345, from 0.58 (over the front axle's beam); the radiator's behind the face, s
+0.365–0.505, ±0.42, on the cross member at 0.84; the air filter's on the left rail, s
+0.72–1.02, x 0.36–0.56, and the turbine's on the right, s 0.98–1.33, inside the wheel
+wells' aprons (±0.58) and short of the cab's front wall (1.36); every top under the closed
+bonnet. The tank's filler [E]: a neck on its top at s 3.05, x 0.85, ahead of the toolbox,
+its cap hinged at its outer edge; reached crouching under the side board.
+
+The late face in relief (owner, 2026-10-28, on F34, F34w, F34r and his references
+`owner_ref1-3.jpg`; the early bar grille of his model render `owner_front.jpg` declined),
+all [E]: a nose between two cheeks. The nose ±0.66, one arc in plan from cheek to cheek
+6 cm out at its middle, its top and bottom rolling back on 5 cm rounds; the two rows of
+five on a block ±0.58, 1.085–1.26, swelling 2 cm more; the cheeks at D's 0.246 (the
+face's silhouette in D's side view), the nose's front 8 cm ahead at 0.166 (first built
+with the nose at 0.246 and the cheeks at 0.326: the face sat in under the bonnet and
+behind the bumper, owner); ±1.04 [D front: the lamp pods' outer edge 1.08]. Each cheek's
+top outer corner rounds r 0.17 down past the indicator; a sunken pocket fills it inside a
+rim of 3.5 cm (2 cm at the outer edge), 2.2 cm deep, its wall sloping 1 cm; the head lamp
+and the indicator centred in it (±0.858; at 1.09 and 1.26), not at D's ±0.884, 1.139,
+which stood near the pocket's outer edge (owner). The wings' noses from s 0.28 (behind
+the pockets), a quarter round out to the flank over 0.19. The bonnet's front
+corners round in plan (r 0.2); its top breaks ±0.17 (nose) to ±0.30 (rear), its middle
+1.5 cm over the crown (no concave crease: kit-surface's dent gate); its lower edge rolls
+5 cm down over the face at the nose. The bumper 0.72–0.83 (slimmed), its front corners
+r 0.14 in plan, its front edges rolled 3 cm.
+
 **The owner's side photo O** (2026-10-28 review; 904 × 339). Registered on the wheel
 hubs, as the owner asked: the rims' outer rings centre at (151.9, 261.0) and (669.8,
 260.4), 517.9 px for the 3800 wheelbase, **7.337 mm/px**; s = 1.083 + (x − 151.9) ×
