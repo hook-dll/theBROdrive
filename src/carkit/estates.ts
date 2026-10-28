@@ -29,11 +29,11 @@ export const BODY_2102: KitBody = {
   cabin: {
     columns: [
       { s: 1.2, top: 1.445, upper: 'body' }, // BODY_124 from here to 2.19
-      // No black insert up the A pillar (owner, 2026-10-19): the strip ahead of the vent is
-      // the body's above the belt, so the door's frame (and its 3 cm rubber edge, which
-      // showed black where the pillar turns in) starts at the vent's front; below the belt
-      // the door is unchanged. Same paint and lines: the pillar is not wider.
-      { s: 1.235, top: 1.475, upper: 'body', lower: 'door1' },
+      // The door's frame up the A pillar ahead of the vent, as on the 2101 (owner, 2026-10-28:
+      // the open door had no front post, the vent's glass standing bare at its front). The
+      // 2026-10-19 cut gave that strip to the body to hide a black insert; the 2101 keeps it
+      // and reads right.
+      { s: 1.235, top: 1.475, upper: 'door1' },
       { s: 1.26, top: 1.5, upper: 'door1', glass: 'vent' },
       { s: 1.55, top: 1.6, upper: 'door1', glass: 'drop' },
       { s: 2.095, top: 2.095, upper: 'door1' },

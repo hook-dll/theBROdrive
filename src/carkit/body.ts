@@ -1200,10 +1200,13 @@ export function buildShell(frame: BodyFrame): ShellResult {
         else if (kind === 'vent') glass = upper === 'body' ? 'body' : upper.replace('door', 'vent');
         finish = column.finish;
       }
+      // `frameCut`: the door's frame over the glass is that wide, the body's above it.
+      const cut = a.kind === 'side' && b.kind === 'side' && upper !== 'body' ? a.column!.frameCut : undefined;
+      const over = (r: Ring): Vec3 => along(r.q, r.t, Math.min(r.t[1], r.q[1] + (cut ?? 0)));
       const bands: [Vec3, Vec3, Vec3, Vec3, number][] = [
         [a.b, b.b, b.k, a.k, 0],
         [a.k, b.k, b.q, a.q, 1],
-        [a.q, b.q, b.t, a.t, 2],
+        ...(cut === undefined ? [[a.q, b.q, b.t, a.t, 2] as [Vec3, Vec3, Vec3, Vec3, number]] : [[a.q, b.q, over(b), over(a), 2] as [Vec3, Vec3, Vec3, Vec3, number], [over(a), over(b), b.t, a.t, 4] as [Vec3, Vec3, Vec3, Vec3, number]]),
       ];
       const bend = cabin.railBend;
       if (bend) {
@@ -1234,6 +1237,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
       for (const [p0, p1, p2, p3, band] of bands) {
         if (band === 3) {
           quad([p0, p1, p2, p3], 'body', top, true);
+        } else if (band === 4) {
+          quad([p0, p1, p2, p3], 'body', 'paint', true);
         } else if (panes) {
           const poly = [p0, p1, p2, p3];
           const over = clipPolygon(poly, (p) => p[1] - panes.top, 1);

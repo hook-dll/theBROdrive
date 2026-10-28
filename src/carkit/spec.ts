@@ -121,6 +121,13 @@ export interface CabinColumn {
    */
   readonly glassRise?: number;
   /**
+   * The door's frame over the glass is this wide on the strip from this column to the
+   * next; the rest up to the rail is the body's. A door cut along its glass's chamfered
+   * top (the E34's rear door round the Hofmeister kink), where the painted corner above
+   * the chamfer is the C pillar. Absent: the door's up to the rail.
+   */
+  readonly frameCut?: number;
+  /**
    * The strip's door owner (`upper` / `lower`) on this side only; on the other side the
    * strip is the body's, with the same glass (the UAZ-2206's side door, on its right
    * alone). Absent: both sides.

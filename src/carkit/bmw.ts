@@ -119,7 +119,7 @@ export const BODY_E34: KitBody = {
       // The black bar between the drop glass and the fixed quarter, upright [D side x
       // 575–580: 3.17–3.2; P S: 3.15–3.17 at the rail, 3.19–3.21 at the belt].
       { s: 3.165, top: 3.165, upper: 'door2', finish: 'black' },
-      { s: 3.195, top: 3.195, upper: 'door2', glass: 'fixed' },
+      { s: 3.195, top: 3.195, upper: 'door2', glass: 'fixed', frameCut: 0.02 },
       // The quarter's rear edge, the Hofmeister kink: from the bar's top it sweeps down and
       // back in a long curve, falls nearly upright to just over the belt and hooks forward
       // to its foot [D side: 3.32 at 1.22, 3.43 at 1.14, 3.49 at 1.10, 3.52 at 1.03, 3.50 at
@@ -127,15 +127,23 @@ export const BODY_E34: KitBody = {
       // 1.125, 3.545 at 1.03, the foot 3.52 at 0.96]. Drawn as the glass's top chamfered
       // inside the door's painted frame (`glassDrop`) in two straight runs, 1.305 at the bar
       // to 1.165 at 3.41 to 1.09 at 3.48, its edge down the door's rear edge to 1.0 at 3.50
-      // and its foot cut forward to the belt at 3.44 (`glassRise`). The frame above the curve
-      // is the door's, body colour [P S, R34]. The door's frame meets the rail at 3.405–3.41,
+      // and its foot cut forward to the belt at 3.44 (`glassRise`). The door is cut along
+      // the curve, its frame 2 cm over the glass (`frameCut`, the rail's `glassTop`); the
+      // painted corner above is the C pillar's and stays on the car with the door open
+      // (owner, 2026-10-28: «в реальном e34 дверь обрезается по кромке стекла»; the door's
+      // silhouette as on photos of the E34's rear door off the car). The rail meets the
+      // columns' tops at 3.405–3.41,
       // no further back than the roof's edge over the back light (its top 3.45 less
       // `railInset`, 3.41): at 3.443 / 3.447 the roof's last row ran forward from them to 3.41
       // and the roof and the rail's chamfer folded back over themselves at both rear corners,
       // the headliner showing through (owner, 2026-10-28: «сзади над задним стеклом артефакты
       // крыши»). The glass's rear edge 4 mm further back at the belt for it (3.51).
-      { s: 3.44, top: 3.4, upper: 'door2', glass: 'fixed', glassDrop: 0.105 },
-      { s: 3.51, top: 3.405, upper: 'door2', glassRise: 0.045, glassDrop: 0.17 },
+      // Two more glass columns round the run into the curve the photos show: its top eases
+      // off the rail at 3.30 (0.045 under the straight run) and the corner rounds at 3.48.
+      { s: 3.32, top: 3.3, upper: 'door2', glass: 'fixed', glassDrop: 0.045, frameCut: 0.02 },
+      { s: 3.44, top: 3.4, upper: 'door2', glass: 'fixed', glassDrop: 0.105, frameCut: 0.02 },
+      { s: 3.48, top: 3.403, upper: 'door2', glass: 'fixed', glassRise: 0.02, glassDrop: 0.13, frameCut: 0.02 },
+      { s: 3.51, top: 3.405, upper: 'door2', glassRise: 0.045, glassDrop: 0.17, frameCut: 0.02 },
       // The rear door's rear edge, the door's frame 1 cm wide behind the glass [D side: 3.49
       // at the belt, 3.48 at 0.857, 3.474 at 0.816, 3.457 at 0.774, forward round the rear
       // arch's front to the sill at 3.22; P S: 3.51 at the belt]. (The glass on the shut line

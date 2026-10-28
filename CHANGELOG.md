@@ -4,6 +4,13 @@
 
 ### Changed
 
+- THE VAZ-2102'S OPEN FRONT DOOR HAS ITS FRONT POST AGAIN, AND THE E34'S REAR DOOR IS CUT
+  ALONG ITS GLASS'S KINK (owner; `carkit/estates.ts`, `carkit/bmw.ts`, `body.ts`). The 2102
+  door's frame ahead of the vent is the door's again, as on the 2101. The E34's quarter
+  glass top runs through two more columns (3.32, 3.48), and the rear door ends 2 cm over
+  it (`CabinColumn.frameCut`, new): the painted corner above the kink is the C pillar's and
+  stays on the car when the door opens.
+
 - THE BMW E34'S HEAD LAMPS SIT FLUSH IN THEIR BLACK BAND UNDER A ROUNDED BONNET LIP, ITS
   TAIL IS LIGHTER AND ITS TAIL LAMPS ONE CLEAN BAND (owner's second review; `carkit/bmw.ts`,
   `measurements-e34.md` §9). The lamps' black rings stood 26 mm out of the face like stalks

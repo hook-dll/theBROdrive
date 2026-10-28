@@ -109,12 +109,12 @@
     }
   },
   "vaz2102": {
-    "triangles": 11413,
+    "triangles": 11427,
     "zones": {
       "bay": "3f810fb537c9c968",
       "boot": "8f44ed64794b58d5",
-      "cabin": "c90ab26a3d914c61",
-      "exterior": "ad87731228be58e5",
+      "cabin": "4cfbd4b6c4cac8f1",
+      "exterior": "929b9c3c1c53c79d",
       "under": "ee5a703f649d96b3",
       "wheel": "ed914172be0e50fc"
     }
