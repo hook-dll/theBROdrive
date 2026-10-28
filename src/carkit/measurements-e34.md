@@ -276,7 +276,9 @@ mirrors L90 % R88 %, dents 0, 13 979 triangles, drawing 21/21, dash 9/9; tsc cle
 cabin-places pass; kit-fingerprint: every other car identical (the W124 moved by its own
 tail work in the tree).
 
-## 9. The roof's rear corners (2026-10-28)
+## 9. The owner's second review (2026-10-28)
+
+### 9.1 The roof's rear corners
 
 `owner_kit_roofrear.png`: «сзади над задним стеклом артефакты крыши». On the built mesh the
 rear door's frame met the rail at 3.443 / 3.447, the roof's edge over the back light
@@ -285,3 +287,86 @@ forward and folded, the headliner showing through. Now the glass column 3.51 →
 the door's rear edge 3.519 → top 3.41, the back light's column without `cornerDrop`.
 Unchanged on the drawing rows: `sideGlassBelt` rear 3.484 (real 3.523, ±0.04), `doorRear`.
 kit-check passes, 13 952 triangles, drawing 21/21.
+
+Readings for 9.2–9.6 (working crops and overlays in `/tmp/e34r/`, not kept): [S] `side.jpg`
+on its hubs (2.566 mm/px; its ends stand 0.875 m further from the camera than the hubs,
+so the nose and tail read about 6 % small and the car 4.43 m long: S is used for the
+nose's shape relative to the bumper's front, never for the overhangs); [F] `front.jpg`
+(the same Thai car straight from the front; 1.246 mm/px on the bumper's 1405 px for the
+1751 width, centre x 943, heights from the lamps' centre); [R] `rear.jpg` (1.164 mm/px on
+the rear bumper's 1495 px, centre x 945, heights from the bumper's black band's middle
+put at D's 0.4725); [D] the drawing as in §7.
+
+### 9.2 «фары явно утоплены внутрь передка и не выдаются вперёд перед капотом»
+
+`owner_r2_nose.png`. The built nose (section through the outer lamp, x 0.59): the face at
+s 0.07 leaning 3 cm forward to its square top at 0.755, the bonnet's front edge there
+(0.049 after the lean); the rings 26 mm and the glass 34 mm out of the face, the glass's
+front 1.5 cm ahead of the bonnet's edge and 3 cm ahead of the black band; the rings' tops
+0.755, over the band (0.735) into the bonnet; the indicators wrapped to s 0.15 along a 45°
+corner (±0.80 at 0.07 to ±0.865 at 0.2).
+
+| | Real | Was | Now |
+|---|---|---|---|
+| Face behind the bumper's front | S: 10 cm at the bumper's top (0.55), 7.5 at the lamps' middle, 8 at the band's top; D: 0.07–0.075 at 0.57–0.69 | 0.07 at 0.55 → 0.039 at 0.735 | 0.09 at 0.55 → 0.0715 at 0.735 (`frontLean.lean` −0.10) |
+| Bonnet's lip | S: 9 cm at 0.745, 12 at 0.767, 16 at 0.788; D: 0.10 at 0.735, 0.195 at 0.804 | square top at 0.049 / 0.755, 0.80 at 0.2 | the face's top 0.0815 / 0.755, a lip station 0.134 / 0.778, 0.209 / 0.80 |
+| Lamps | F: centres ±0.477 / ±0.664 at 0.664, rings 0.078 in radius, their tops under the bonnet's edge; D front: ±0.42 / ±0.59, 0.065 | ±0.40 / ±0.59 at 0.677, glass 0.066, ring 0.078, 26 / 34 mm out | ±0.472 / ±0.655 at 0.66, glass 0.062, ring 0.073 (0.587–0.733 in the band 0.585–0.735); the ring in the band's plane, the glass 7 mm out (`round.standOut` 0.004) |
+| Kidneys | F: the chrome surround ±0.22, openings ±0.012–0.185 | ±0.184, 10 bars | ±0.214, 11 bars (the middle one in the bridge) |
+| Face's corner | F: the wing's edge ±0.82 at the lamps; indicators ±0.745–0.81, a short wrap | ±0.80 / 0.815 at 0.07 → ±0.865 at 0.2 | ±0.795–0.815 at 0.09, ±0.825–0.85 at 0.13; indicators from ±0.745, 0.59–0.73, to s 0.125 |
+
+`round.standOut` is new (exterior.ts; absent, the rings 26 mm out as before). At 2 mm out
+of the band with the glass 4 mm ahead of the ring, the ring's face behind the glass fought
+it from afar (kit-zfight `far`, 4 mm): the ring now lies in the band's plane and the glass
+7 mm ahead of it. The band ends 8 mm short of the indicators (meeting them at ±0.745 its
+end fought theirs).
+
+### 9.3 «не слишком ли длинный капот?»
+
+Measured, not long. The bonnet from its front edge (built 0.0815 at the top; D 0.07–0.10)
+to the screen's foot on the centre line (D (258, 175): 1.33) is 1.25 m; the cowl (the A
+pillar's foot) 1.53 against S 1.61 and D 1.54; the front overhang 0.848 against F 0.848 and
+D 0.838. The draft's square top 3 cm ahead of the lip (above) made it read longer: the
+bonnet's top now starts 3.3 cm further back. No length changed.
+
+### 9.4 «корма какая-то чересчур массивная, задние фары выполнены неаккуратно»
+
+`owner_r2_tail.png`. Built: the rear bumper upright 0.235–0.565 with a 13 cm black valance
+inlaid flush in its face (four bands: body, black band, body, black), its face 5.5 cm
+behind the tail; the lid's lamps (six cells on a black housing, hung on the bumper's top)
+at 0.664–0.812, 3.4 cm over the wing units' red (0.63–0.778).
+
+| | R | D rear | Now |
+|---|---|---|---|
+| Bumper's top | 0.557 | 0.526 | 0.546 |
+| Black band | 0.44–0.504 | 0.44–0.51 | 0.445–0.50 (unchanged) |
+| Bumper's foot (body colour) | 0.353 | 0.35 | 0.36 (`foot.y`) |
+| Valance | a dark line under the bumper; S: black, receding from 0.36 to 0.25 | black 0.19–0.35 | black, drawn back 8 cm from 0.36 to 0.24 (`foot.finish`, new) |
+| Lamps' red | 0.665–0.81 (the wing's and the lid's alike) | 0.632–0.78 | 0.63–0.778 on both, the lid's hung on `belt` (0.85) |
+| Wing's top cell | 0.81–0.875 | 0.78–0.85 | 0.785–0.845 (unchanged) |
+| Lid's lamp | ±0.19 (the plate) to the cut ±0.66 (R's scale; D ±0.60): two rows, a light reversing cell in the upper row ±0.47–0.62 (±0.43–0.56 on the cut at ±0.60) | ±0.33–0.65 | one red lens ±0.17–0.588, the reversing cell ±0.44–0.55 in its upper half, 2 mm prouder |
+
+The wing units lost their rib: plain amber over plain red, as the lid's lens.
+
+### 9.5 «в зеркалах торчит какая-то конструкция»
+
+`owner_r2_mirror.png`. The `'base'` mount drew a neck box from the base's outer face out to
+1 cm past the head's centre, ±3 cm deep; the head is ±2.5 cm deep and turned to the
+driver, so the box came out through the glass (and the back). The head spans the base's x
+already and sits on its top (head's underside belt + 0.058, base's top belt + 0.065): the
+neck is gone (exterior.ts, `mirrorMount: 'base'`, the E34 only).
+
+### 9.6 «когда открываешь — лента видна целиком»
+
+`owner_r2_glovebox.png`. `CABIN_E34.wood` (−0.16 to −0.125) lies inside the glovebox lid's
+height (−0.207 to −0.097): the strip, one box across the fascia, crossed the opening in
+front of its dark back. Now a `wood` strip that crosses the lid breaks at the lid's ends
+and the lid carries that piece (interior.ts `woodOnGlovebox`). The W124's strip (−0.095 to
+−0.062) runs over its lid (to −0.097), so it never crossed the opening: unchanged.
+
+### 9.7 Checks
+
+`npm run kit-check -- e34`: zfight (closed and every channel open, the glovebox among
+them), proportions, reality, mirrors L100 % R100 %, 0 dents, 13 289 triangles, drawing
+21/21, dash 9/9; tsc clean. kit-fingerprint with only these changes on HEAD: every frozen
+car identical but the W124, which already differs from its record at HEAD (its draft tail
+work).

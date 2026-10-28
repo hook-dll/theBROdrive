@@ -4,6 +4,20 @@
 
 ### Changed
 
+- THE BMW E34'S HEAD LAMPS SIT FLUSH IN THEIR BLACK BAND UNDER A ROUNDED BONNET LIP, ITS
+  TAIL IS LIGHTER AND ITS TAIL LAMPS ONE CLEAN BAND (owner's second review; `carkit/bmw.ts`,
+  `measurements-e34.md` §9). The lamps' black rings stood 26 mm out of the face like stalks
+  and the bonnet's square top over them: the rings now lie in the band (`round.standOut`,
+  new), the lamps placed on the straight front photo, the face leans 2 cm and the lip rounds
+  back as on the drawing and the side photo, the indicators turn a short corner. The rear
+  bumper is 0.36–0.546 with its black valance drawn back under it (moulded `foot.finish`,
+  new) instead of a 13 cm black stripe in its face; the lid's lamp is one red lens at the
+  wing units' height (it stood 3.4 cm higher, in six cells) with a small reversing cell.
+  The door mirrors' neck no longer comes out through the glass (`mirrorMount: 'base'`), and
+  the dash's wood strip rides on the glovebox lid instead of crossing the opening when it
+  is open (`interior.ts`). The bonnet was measured: not long (1.25 m to the screen's foot,
+  as drawn). Every other car unchanged.
+
 - THE 2101, 2103 AND 2106 FUEL FLAP NO LONGER FLICKERS AGAINST ITS FILLER CUP
   (`carkit/exterior.ts` `buildFiller`, `flap.cup`). The cup's back lay 35 mm inside the
   skin, the flap's own thickness: on the 124 shell's upright flank that is where the

@@ -446,7 +446,7 @@ cabin: … }`) share everything not overridden. Current families:
 | `tone?` | The grey (0..1, display terms) the paint is multiplied by on parts in the `'tone'` finish: a darker tone of the car's own colour (the W124's cladding and bumpers, 0.78). Required when anything is in `'tone'` (`finishKitSurfaces` throws otherwise). |
 | `mirrors?` | `'left'`: only the driver's door mirror (the base Oka). Absent: both. |
 | `mirrorStalk?` | Door mirrors on an upright stalk (the UAZ-469): the head this much higher than on the short arm at the door's top (centre belt + 0.08) and 3.5 cm further back, on a rod 2 cm off the skin from a bracket under the belt at the door's front edge, an arm out and back into the head's ball. Absent: the short arm. |
-| `mirrorMount?` | `'base'`: the head on a short thick neck straight out of a black base on the door's skin at the glass's front foot, straddling the belt, its centre 7 cm over the belt (the E34's; no arm). Absent: the short arm (or `mirrorStalk`). |
+| `mirrorMount?` | `'base'`: the head sitting on a black base on the door's skin at the glass's front foot, straddling the belt, its top 7 mm into the head's underside, the head's centre 11 cm over the belt with the E34's `mirrorHeightOffset` (no arm, no neck). Absent: the short arm (or `mirrorStalk`). |
 | `mirrorHead?` | `[half width, half height]` of the head, when measured (the E34's 0.085 × 0.052). Absent: 0.06 × 0.045. |
 | `sill` | `Finish` of a strip along the sill between the arches, or `null`. |
 | `waist` | `{ y, height, finish, span? }`: a moulding along the flank (from `span[0]` to `span[1]` when given, the Opels' strips arch to arch; else nose to tail), broken at every cabin column's shut line, a raked `foot` line followed at its slant, each piece owned by the panel whose skin it lies on (`BodyFrame.flankOwner`, the same owners `buildShell` cuts) and ending 5 mm short of that panel's seam, and stopping `MOULDING_ARCH_GAP` (30 mm) short of a wheel arch it would run into (the 2115's low door mouldings; the classics' strips sit above their arches and are not cut); or `null`. |
@@ -479,7 +479,7 @@ meshes keep the lamp names, so lamps still work.
 | Kind | Fields | Use |
 |---|---|---|
 | `panel` | `x: FaceX \| Span<FaceX>`, `y: Span<FaceY>`, `finish`, `proud` | A flat surround: from side to side when `x` is a `FaceX` (black lamp band, the 2108's slotted body-colour panel with `finish: 'paint'`), or one block on each side when `x` is a span (the 2115's fog-lamp housings). |
-| `round` | `role`, `x`, `y: FaceY`, `radius`, `ring?` | A round lamp in a ring: chrome (the classics), or the `ring` finish (the E34's black rings in its black lamp band). |
+| `round` | `role`, `x`, `y: FaceY`, `radius`, `ring?`, `standOut?` | A round lamp in a ring: chrome (the classics), or the `ring` finish (the E34's black rings in its black lamp band). The ring stands 26 mm out of the face, the glass 8 mm ahead of it; `standOut` sets the ring's front, the glass then 7 mm ahead of it (the E34's 4 mm: the rings in the band's plane, the lamps flush in it). |
 | `lens` | `role`, `x: Span<FaceX>`, `y: Span<FaceY>`, `depth`, `proud`, `slant?` | A lamp lens; one centred on the centre line (`x: { at: { centre: 0 }, half }`) is built once across it (the 2110's lid reflector). `slant: { outer, inner }` moves the top edge's outer/inner ends inboard of the bottom's: a trapezoid (2108 headlamps) or a parallelogram; negative values lean out. A lamp that wraps round the body's corner is a `cornerLamps` unit, not a face lens. |
 | `grille` | `x: FaceX` (half width), `y`, `standOut?`, `slant?`, `frame?: { finish, margin }`, `back`, `bars: { dir, count, finish, margin, width, depth, proud }` | Grille or slot; `standOut` lifts the whole grille out of the face (the 2107's; the 2115's lower intake). `slant` (a number) moves the top edge's ends that far inboard of the bottom's, negative to lean out: a trapezoid grille (the Nexia's, narrowing to its foot, `slant` −0.055), its bars standing on the dark back 5 mm proud of it up to just under the frame's front, `proud`/`depth` aside; `dir: 'diamond'` (two crossed sets) is for a slanted grille only and needs a `frame` over the bar ends. |
 | `cluster` | `x: Span<FaceX>`, `y: Span<FaceY>`, `columns: LampRole[][]` | Tail-lamp cluster straight on the body, its cells tiling the span (no housing; add a `frame` for a chrome surround): columns from the outer edge in, each column's roles top to bottom. |
@@ -513,8 +513,9 @@ new material or program: the paint's vertex colour is white, so every other car 
   station between; the tens' and the 2115's bumpers run to their wheel arches; `'arch'`:
   back to the arch's edge at every height, so the bumper's end is the arch's edge, its
   points beyond the edge's nearest stopping on it low down; the Oka's),
-  `foot?` (`{ y, back }`: the face upright down to `y`, then straight back by `back` to its
-  bottom edge, the W124's aprons under their black band),
+  `foot?` (`{ y, back, finish? }`: the face upright down to `y`, then straight back by `back`
+  to its bottom edge, the W124's aprons under their black band; `finish`: that apron in its
+  own finish, the E34's black valance tucked under its rear bumper),
   `flush?` (its top grows out of the body's surface in its top 60 mm instead of a flat
   shelf: the tens' and the 2115's bumpers, integrated in the body's lines), `inlays?`
   (`{ x: [inner, outer], y: [bottom, top], finish }[]`: pieces laid on the bumper's own
@@ -534,7 +535,8 @@ firewall lining's outer edges lean in with the side to the scuttle instead of st
 upright: the tens', whose door fronts stand at the firewall), `tunnel`, `console`,
 the `dash` and `fascia` sections, `dashLoft` (sections across the width where one cannot
 serve it: the 2110's driver's half up to the knee panel and shallow end caps at the
-doors), `wood` band, `binnacle` and `cluster`, `gauges` (round or
+doors), `wood` band (where it crosses the glovebox's lid it breaks at the lid's ends and
+the lid carries that piece, so it falls open with the lid: the E34's), `binnacle` and `cluster`, `gauges` (round or
 ribbon), steering `wheel` (position, rake, radius, spokes, hub), `pedals`, `gear`,
 `handbrake`, `glovebox` (`lid: false`: an open shelf, the Oka's), `radio`, `ashtray`, `hazard`, `frontDoor` (the front cards' inner
 handle and crank), `lights` switch, `vents` (each with
@@ -886,7 +888,7 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   and vent `half`, rear `cornerLamps` (`end`), `frontLean` (and its `full`), moulded
   `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`,
   `notchWall`, moulded `foot`, `handles.grip`, column `finish: 'chrome'`, `wrapTo: 'arch'`,
-  `rearArchSquare`, the lean's `peak`, `round` `ring`, `mirrorMount` and `mirrorHead`,
+  `rearArchSquare`, the lean's `peak`, `round` `ring` and `standOut`, `mirrorMount` and `mirrorHead`,
   `bootTank`, stack `yaw`.
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).

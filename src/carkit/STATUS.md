@@ -91,7 +91,11 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
    alloys, no fog lamps) built and the first draft made 2026-10-27 (`bmw.ts`, `CABIN_E34`,
    its own running gear `GEAR_BMW_E34`); the mirrors on a black base without an arm after
    his first look at the front view; the roof's rear corners over the back light without
-   their fold (2026-10-28). kit-check passes, 13 952 triangles: **draft, awaiting his
+   their fold (2026-10-28); his second review the same day (`measurements-e34.md` §9): the
+   head lamps flush in their band under a rounded bonnet lip, the bonnet measured (not
+   long), a slimmer rear bumper with its black valance tucked under, the tail lamps one
+   clean band, the mirrors without the neck through their glass, the dash's wood strip
+   riding on the glovebox lid. kit-check passes, 13 289 triangles: **draft, awaiting his
    next look**.
 
 Off the roadmap: the **AZLK-2141** (Moskvich) drafted 2026-10-16 on the pack's `sa_azlk2141`

@@ -1476,6 +1476,55 @@ kit-fingerprint (the W124 moved by its own tail work, not this).
 Checks: `npm run kit-check -- e34` passes (zfight, proportions, reality, mirrors L90 % R88 %,
 0 dents, 13 952 triangles, drawing 21/21, dash 9/9). A spec change in bmw.ts alone.
 
+## BMW E34, second review: nose, bonnet, tail, mirrors, glovebox (2026-10-28)
+
+His lab shots `build/carshape/_refs/photos/e34/owner_r2_*.png`; readings in
+measurements-e34.md §9.
+
+- **«фары явно утоплены внутрь передка и не выдаются вперёд перед капотом»** (the nose
+  from above: black blocks behind each lamp, the bonnet a slab over them, the indicator a
+  big amber panel). → `round` lamps stood 26 mm (ring) and 34 mm (glass) out of the face,
+  3 cm ahead of their band, the rings' tops over it into the bonnet; the face at s 0.07
+  leaned 3 cm forward to a square top whose bonnet edge stood 3–5 cm ahead of the real
+  lip; the face's corner was a 45° chamfer to s 0.2 that the indicators wrapped along. →
+  `round.standOut` (new; absent as before): the E34's rings in the band's plane, the glass
+  7 mm out (at 2 mm / 4 mm the ring's face behind the glass fought it from afar); the lamps
+  measured on the straight front photo (±0.472 / ±0.655 at 0.66, inside the band); the face
+  at 0.09 leaning 2 cm to the band's top, a lip station at 0.13 rounding the bonnet back
+  over it (the drawing's and the side photo's profile); the corner turned in 4 cm, the
+  indicators to s 0.125; the kidneys ±0.214 (11 bars: with an even count a bar's side lay
+  0.9 mm off the bridge's). *bmw.ts `BODY_E34` stations, `frontLean`, `bonnetFront`,
+  `LOOK_E34.front`, `cornerLamps`; exterior.ts `round`*.
+- **«не слишком ли длинный капот? у нас не e39, а e34»** → Measured: 1.25 m from the
+  bonnet's edge to the screen's foot on the centre line, the cowl at 1.53 (side photo 1.61,
+  drawing 1.54), the overhang the factory 0.848: not long. The square front top read as
+  extra length; with the lip rounded the bonnet's top starts 3.3 cm further back. No
+  length changed.
+- **«корма какая-то чересчур массивная, задние фары выполнены неаккуратно»** → The rear
+  bumper stood upright 0.235–0.565 with its 13 cm black valance inlaid flush in its face
+  (four bands stacked); the lid's six cells on a black housing hung on the bumper's top
+  and sat 3.4 cm over the wing units' red. → The bumper 0.36–0.546 (the photo's 0.353–0.557)
+  and the valance drawn back 8 cm under it in black (moulded `foot.finish`, new; absent as
+  before); the lid's lamp one red lens at the wing units' heights (hung on `belt`) with
+  the reversing lamp a light cell in its upper half; the wing units without their rib.
+  *bmw.ts `LOOK_E34.rear`, `cornerLamps`; exterior.ts `buildBumpers`*.
+- **«в зеркалах торчит какая-то конструкция»** (a body-colour block in the middle of the
+  glass). → The `'base'` mount's neck box ran from the base out to 1 cm past the head's
+  centre, 6 cm deep in a head 5 cm deep and turned to the driver: it came out through the
+  glass and the back. It lay wholly in the head otherwise, which sits on the base's top
+  (7 mm into it): the neck is gone. *exterior.ts `buildDoorHardware`, `mirrorMount`*.
+- **«закрытый бардачок скрывает декоративную ленту, когда открываешь — лента видна
+  целиком»** → `CABIN_E34.wood` lies within the lid's height; the strip was one box across
+  the fascia, and the opening's cut (2 mm about the fascia's plane) left its front face
+  over the opening. → A `wood` strip that crosses the glovebox's lid breaks at the lid's
+  ends and the lid carries that piece (`woodOnGlovebox`). The W124's strip passes over its
+  lid, never crossed the opening: unchanged. *interior.ts `dash`, `glovebox`*.
+
+Checks: `npm run kit-check -- e34` passes (zfight closed and open, proportions, reality,
+mirrors L100 % R100 %, 0 dents, 13 289 triangles, drawing 21/21, dash 9/9); tsc clean;
+kit-fingerprint of HEAD with only these changes: every frozen car identical but the W124,
+which differs from its record at HEAD already.
+
 ## Every car its own interior trim (2026-10-28)
 
 - **«почему у нас mercedes синий салон, а 2101 — красный? почему бы не сделать несколько
