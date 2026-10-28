@@ -1531,14 +1531,20 @@ const WIPER_SWEEP = 1.75;
 const WIPER_SWEEP_MIN = Math.PI / 2;
 /**
  * A parked arm lies at most this steep, low along the screen's foot: the longest arm that
- * parks so. Where a screen curved in plan lifts its foot towards the pillar too far for
- * that (the tens'), at most the second, and then the arm that parks lowest, shortened as
- * far as that takes: the longest one there stood up to 45° across the driver's view.
+ * parks so. Where the foot lifts towards the pillar too far for that (on the first fit,
+ * before the axis is tilted, the Oka's single long blade), at most the second, and then
+ * the arm that parks lowest, shortened as far as that takes.
  */
 const WIPER_PARKS = [(20 * Math.PI) / 180, (45 * Math.PI) / 180];
 /** The blade keeps this far inside the pane's sides and top: the pillars and header stand proud. */
 const WIPER_EDGE = 0.015;
-/** And this far inside its edge on the spindles' side: half the blade's width and a little. */
+/**
+ * And this far inside its edge on the spindles' side: half the blade's width and a little.
+ * Only the blade's outer half keeps it; its inner half may lie down to the spindles' level,
+ * over the frame strip under the glass's edge, as a real parked blade rests on the seal.
+ * (A blade held wholly on the glass parked 10-26° up the screen: its inner end, a few cm
+ * from the spindle on the short arm the screen's height allows, had to clear the edge.)
+ */
 const WIPER_FOOT = 0.006;
 /** The blade's rubber edge clears the glass by this much where it rests: 6 mm avoids z-fighting. */
 const WIPER_GAP = 0.006;
@@ -1549,14 +1555,16 @@ const WIPER_STEP = Math.PI / 90;
 /**
  * Two wiper arms parked along the screen's foot, both lying to the left, sweeping up on
  * `wiper_sweep` (or, top-mounted, along its header lying to the right and sweeping down).
- * Each arm is the longest whose blade, square across the screen, stays on the pane and
- * that parks low and still sweeps 90-100° between the pillars. The screen is faceted
- * and curved, so each arm turns about its own axis: the one that keeps the glass under
- * every point of its blade the most level over its sweep (one plane normal for both
- * left a blade 2-7 cm off the glass). The blade is then bent as a frame blade is, at each
- * station just clear of the highest glass it passes over. A rigid blade cannot follow a
- * screen curved in plan: over the sweep it lifts off by up to 6 mm on the 2101's screen,
- * 11 on the 2107's, 16 on the Samaras' and 21 on the tens'.
+ * Each arm is the longest whose blade stays on the pane and that parks low and still
+ * sweeps 90-100° between the pillars. Parked, the blade lies along the glass's edge, its
+ * inner half down to the spindle's level over the frame strip (`WIPER_FOOT`). The screen
+ * is faceted and curved, so each arm turns about its own axis: the one that keeps the
+ * glass under every point of its blade the most level over its sweep (one plane normal
+ * for both left a blade 2-7 cm off the glass). The blade is then bent as a frame blade
+ * is, at each station just clear of what lies under it parked: the glass, or under the
+ * glass's edge the frame strip and the bonnet. A rigid blade cannot follow a screen
+ * curved in plan: over the sweep it lifts off by up to 6 mm on the 2101's screen, 11 on
+ * the 2107's, 16 on the Samaras' and 21 on the tens'.
  */
 function buildWipers(ctx: KitContext): void {
   const { frame, root } = ctx;
@@ -1597,11 +1605,18 @@ function buildWipers(ctx: KitContext): void {
   const blade = cabin.wiperBlade;
   const q = new THREE.Vector3();
   const m = new THREE.Vector3();
-  const onPane = (point: THREE.Vector3, n: THREE.Vector3): boolean =>
-    !!glassUnder(m.copy(point).addScaledVector(inward, WIPER_EDGE), n)
-    && !!glassUnder(m.copy(point).addScaledVector(inward, -WIPER_FOOT), n)
-    && !!glassUnder(m.copy(point).addScaledVector(across, WIPER_EDGE), n)
-    && !!glassUnder(m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
+  /**
+   * Whether the blade may stand at `point`: on the pane, inside its sides and top; inside
+   * its edge on the spindles' side too, unless `low`: then down to the spindles' level,
+   * the sides then judged where it meets the glass.
+   */
+  const onPane = (point: THREE.Vector3, n: THREE.Vector3, low = false): boolean => {
+    const raise = low ? WIPER_PIVOT_BELOW : 0;
+    return !!glassUnder(m.copy(point).addScaledVector(inward, WIPER_EDGE), n)
+      && (low || !!glassUnder(m.copy(point).addScaledVector(inward, -WIPER_FOOT), n))
+      && !!glassUnder(m.copy(point).addScaledVector(inward, raise).addScaledVector(across, WIPER_EDGE), n)
+      && !!glassUnder(m.copy(point).addScaledVector(inward, raise).addScaledVector(across, -WIPER_EDGE), n);
+  };
 
   // A single wiper (`CabinSpec.wipers`) on the driver's spindle.
   for (const [i, pivotX] of (cabin.wipers === 1 ? WIPER_PIVOTS.slice(0, 1) : WIPER_PIVOTS).entries()) {
@@ -1632,7 +1647,8 @@ function buildWipers(ctx: KitContext): void {
     };
     const radii = (arm: number, count: number): number[] =>
       Array.from({ length: count + 1 }, (_, k) => arm - blade / 2 + (blade * k) / count);
-    const bladeOn = (phi: number, arm: number): boolean => radii(arm, 4).every((r) => onPane(point(phi, r, q), n));
+    /** The blade at `phi` on the pane, its inner half (short of the arm's end) allowed down to the spindle's level. */
+    const bladeOn = (phi: number, arm: number): boolean => radii(arm, 4).every((r) => onPane(point(phi, r, q), n, r < arm));
 
     let arm = 0;
     let rest = 0;
@@ -1673,14 +1689,15 @@ function buildWipers(ctx: KitContext): void {
       }
       throw new Error(`Kit car "${spec.id}": wiper ${i} cannot sweep 90° on the glass`);
     };
-    /** How far the glass under the blade rises and falls over the sweep, worst station. */
+    /** How far the glass under the blade rises and falls over the sweep, worst station (where it is over the glass). */
     const unevenness = (): number => {
       let worst = 0;
       for (const r of radii(arm, 6)) {
         let lo = Infinity;
         let hi = -Infinity;
         for (let k = 0; k <= 10; k++) {
-          const h = glassAt(rest + (sweep * k) / 10, r) ?? Infinity;
+          const h = glassAt(rest + (sweep * k) / 10, r);
+          if (h === undefined) continue;
           lo = Math.min(lo, h);
           hi = Math.max(hi, h);
         }
@@ -1722,8 +1739,16 @@ function buildWipers(ctx: KitContext): void {
     const fine = radii(arm, WIPER_STATIONS * 2);
     // Park the blade against the glass at rest.  The old mesh used the highest glass
     // point over the entire sweep, which made a curved screen lift the parked blade
-    // visibly away from its lower edge (notably on the UAZ-469).
-    const high = fine.map((r) => glassAt(rest, r) ?? -Infinity);
+    // visibly away from its lower edge (notably on the UAZ-469). Where its inner half
+    // lies under the glass's edge, it clears the frame strip and the bonnet there.
+    const shell = ['body_paint', 'body_trim', 'exterior_trim', 'bonnet'].flatMap((name) => root.getObjectByName(name) ?? []);
+    const high = fine.map((r) => {
+      const h = glassAt(rest, r);
+      if (h !== undefined) return h;
+      ray.set(origin.copy(point(rest, r, q)).addScaledVector(n, 0.3), down.copy(n).negate());
+      const hit = ray.intersectObjects(shell, true)[0];
+      return hit ? hit.point.sub(at).dot(n) : -Infinity;
+    });
     const lift = stations.map((_, k) => Math.max(high[2 * k]!, high[2 * k - 1] ?? -Infinity, high[2 * k + 1] ?? -Infinity) + WIPER_GAP);
     // The spindle stands out of the frame strip.
     const strip = under(panel, at, n);

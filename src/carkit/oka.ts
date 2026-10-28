@@ -113,9 +113,11 @@ export const BODY_1111: KitBody = {
     glassTop: 0.04, // door glass top 1.235, quarter glass top 1.268 [D side]
     screenBottom: 0.025, // [E as the classics]
     screenHeader: 0.04, // [E]
-    // One wiper on the real car (arm and blade ~0.57 on the top view [D]); the kit builds
-    // a pair, which fits the small screen only with the classics' short blades.
-    wiperBlade: 0.33, // [E]
+    // One wiper on the driver's spindle (arm and blade ~0.57 on the top view [D]); the real
+    // blade is 500 mm (parts catalogues: Bosch ECO 50C, Denso DUR-050L for the 1111), here
+    // the longest that parks low along the screen's foot (`buildWipers`; 0.5 parked 25° up).
+    wiperBlade: 0.48,
+    wipers: 1,
     rearBottom: 0.025, // unused with a knee
     rearHeader: 0.04, // tailgate glass top 1.277 [D rear] under a rail at 1.29 [E]
     // The tailgate's glass ends at 0.865 [D rear y 987.5], on the raked line at s 3.112 [D side

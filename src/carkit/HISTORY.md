@@ -1526,6 +1526,31 @@ Checks: `npm run kit-check -- w124`: zfight, proportions, reality, mirrors L100 
 record predates the tail work; not re-recorded, awaiting the owner). Every other car
 identical in kit-fingerprint; tsc clean.
 
+## Every car's wipers parked low along the screen's foot (2026-10-28)
+
+- **The E34's wipers lie flat along the bottom of the windscreen; on many other cars the
+  parked wipers stand at an angle, visible up the glass.** → The whole blade had to stay
+  on the pane, 6 mm inside its foot. Centred on its arm's end, the blade's inner end is a
+  few cm from the spindle on the short arm the screen's height allows (it must sweep 90°
+  upright), so it cleared the foot only at 10–26° (tips 10–25 cm up the glass: the
+  classics, Volgas, 2141, Nexia, Espero, Astra, Vectra, the W124's monowiper). The E34
+  only looked right because its foot climbs towards the pillars with the blade. → The
+  blade's inner half (short of the arm's end) may lie down to the spindle's level over
+  the frame strip, as a real parked blade rests on the seal; its outer half keeps the
+  old margins, and the parked blade clears the strip and the bonnet there. Every car's
+  tips now 1–6 cm up the glass (E34 1.6 / 1.2, was 7 / 8); the UAZ-469's along its
+  header. The Oka gets its single wiper (`wipers: 1`; blade 0.48, the longest that parks
+  low, the car's own 500 mm parking 25° up). The sweep still covers the glass (90–100°).
+  *exterior.ts `buildWipers` (`onPane` `low`, `bladeOn`, `unevenness`, the parked lift),
+  oka.ts*.
+
+Checks: tsc clean; with the wipers left out, every car's geometry identical to HEAD (all
+zones); kit-fingerprint: every accepted car moved in exterior only, re-recorded (the W124,
+moving at HEAD with its own tail work, and the E34 left unrecorded); `npm run kit-check`:
+surface, mirrors, proportions pass on all 28; zfight fails on the 2101/2103/2106 (the
+fuel flap against its filler, as at HEAD) and drawing on the same three (`backLightFoot`,
+as at HEAD), neither touched by the wipers.
+
 ## Failed approaches (do not retry)
 
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent

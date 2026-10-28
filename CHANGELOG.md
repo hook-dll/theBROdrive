@@ -4,6 +4,15 @@
 
 ### Changed
 
+- EVERY KIT CAR PARKS ITS WIPERS LOW ALONG THE SCREEN'S FOOT, AS THE E34 DOES
+  (`carkit/exterior.ts` `buildWipers`). The blade had to lie wholly on the glass, so on
+  the short arms the screens allow its inner end cleared the foot only 10–26° up: tips
+  10–25 cm up the glass on the classics, Volgas, 2141, Nexia, Espero, Astra, Vectra and
+  the W124. The blade's inner half may now rest down to the spindle's level on the frame
+  strip, as a real one rests on the seal: every car's tips 1–6 cm up the glass, the
+  UAZ-469's along its header; the sweep unchanged in reach (90–100° over the glass). The
+  Oka gets its single wiper (`wipers: 1`, blade 0.48). Nothing else on any car moved.
+
 - A NEW TRAFFIC MODEL NO LONGER HITCHES THE DRIVE (`render/kitbuild.ts`,
   `render/kitbuildworker.ts`, `carkit/wire.ts`). The first time the stream drew a kit
   model, `loadModel` built it on the main thread in one task: 75-195 ms in bun on the M2

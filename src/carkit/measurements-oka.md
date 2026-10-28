@@ -142,7 +142,7 @@ The drawing agrees where it shows them: its front bumper's top band ends at x 10
 
 - **Tailgate between the lamps** (§1.1): the real tailgate comes down to 0.562 between the corner lamps; the kit's ends at 0.79 (the lamps' top), so 0.23 m of it is fixed tail face. A tailgate whose lower panel comes down between two lamp corners (the boot lid's `notch` / `lidFace`, for a tailgate) is not in the spec language.
 - **The D pillar's belt**: real 0.857 to s 3.11, kit 0.85 at 3.04 falling to 0.78 at 3.125 (≤ 0.07 low over the last 0.085 m).
-- **One wiper**: the car has a single central wiper [D front, top; P]; the kit builds a pair. `wiperBlade` 0.5 is an estimate.
+- **One wiper**: the car has a single wiper [D front, top; P], blade 500 mm (parts catalogues). The kit builds it on the driver's spindle (`wipers: 1`, 2026-10-28) with `wiperBlade` 0.48, the longest that parks low along the screen's foot (0.5 parked 25° up the glass).
 - **Screen's foot vs the A pillar**: the pillar's outer line reaches the belt at s 0.79; the kit's first column stands at the screen's foot (0.89), so the pillar is 0.10 shorter at its foot.
 - **Rear fog lamp**: one, at the bumper's left end [P]; face items are built on both sides, so both ends carry a red unlit lens (the drawing shows a rectangle at each end).
 - **Filler cap**: round on the car; the flap is a rectangle 0.1 × 0.1. Its position is read off a 3/4 photo, not measured.
