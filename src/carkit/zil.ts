@@ -84,10 +84,14 @@ export const BODY_ZIL130: KitBody = {
     screenWrap: true,
     wiperBlade: 0.4, // [E]
     rearBottom: 0.06,
-    rearHeader: 0.1,
+    // The back wall's header thin, so the glass reaches nearly to the roof's roll and the
+    // rail's chamfer no longer folds across the wall above it (owner, 2026-10-29).
+    rearHeader: 0.03,
     pillar: 0.04,
-    // The back window ±0.485, 1.76-2.00, its corners round [D rear x 305-545, y 825-887].
-    rearPanes: { x0: -0.1, x1: 0.485, y0: 1.76, y1: 2.0, r: 0.07, top: 2.4 },
+    // The back window ±0.55, 1.73-2.06, its corners round: drawn ±0.485, 1.76-2.00 [D
+    // rear x 305-545, y 825-887], made taller and a little wider so the inside mirror
+    // sees out (owner, 2026-10-29).
+    rearPanes: { x0: -0.1, x1: 0.55, y0: 1.73, y1: 2.06, r: 0.07, top: 2.4 },
   },
   wheels: {
     front: FRONT,
@@ -225,8 +229,10 @@ export const BODY_ZIL130: KitBody = {
       ribs: 2,
     },
     rearLamps: [6.42, 0.78, 1.0], // [P R34: under the platform's tail, near its sides]
-    // [P R34]; hanging from a bar under the platform's beam [O].
-    flaps: { s: 5.47, x: [0.62, 1.2], y: [0.32, 1.04] },
+    // [P R34]; hanging from a bar under the platform's beam [O]. Shorter than the wheel's
+    // hub height off the ground, leaning out at the foot, one behind the wheel and its
+    // mirror ahead of it about the axle (s 4.883) [owner's photo, 2026-10-29].
+    flaps: { s: [4.3, 5.466], x: [0.62, 1.2], y: [0.5, 1.04], lean: 0.16 },
     // The four bonnet cells, as a car's [E]. The engine's between the rails' flanges
     // (±0.3575) over the front axle's beam, where the V8 stood (s 0.62-1.25, 0.58 up); the
     // radiator's behind the face, standing on the cross member at s 0.45 (its top 0.83);

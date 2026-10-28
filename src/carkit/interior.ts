@@ -1807,9 +1807,10 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
 
 /**
  * ZIL-130: a flat steel dash in the body's colour under the screen, a short level top;
- * before the driver a black plate with the speedometer in its middle and two small dials
- * either side (ammeter and oil pressure left, temperature and fuel right), a row of four
- * warning lamps under the speedometer; a knob or two on the face; a small lid before the
+ * before the driver a black plate with the speedometer and a tachometer side by side in
+ * its upper row, where the wheel's rim leaves them in view (owner, 2026-10-29), and the
+ * four small dials under them (ammeter, oil pressure, temperature, fuel), a row of four
+ * warning lamps at the bottom; a knob or two on the face; a small lid before the
  * passenger; a big thin three-spoke wheel on a steep column.
  */
 export const CABIN_ZIL130: CabinLayoutOverride = {
@@ -1826,18 +1827,19 @@ export const CABIN_ZIL130: CabinLayoutOverride = {
   heater: undefined,
   console: undefined,
   // The plate 3 cm proud of the face, centred on the column.
-  binnacle: [[0.24, 0.005], [0.29, 0.005], [0.29, -0.15], [0.24, -0.15]],
+  binnacle: [[0.24, 0.045], [0.29, 0.045], [0.29, -0.15], [0.24, -0.15]],
   binnacleHalf: 0.17,
   cluster: 0.29,
-  clusterFace: { right: 0, up: -0.072, half: [0.16, 0.07], colour: COLOURS.cluster, frame: 'black' },
+  clusterFace: { right: 0, up: -0.055, half: [0.16, 0.092], colour: COLOURS.cluster, frame: 'black' },
   gauges: [
-    { channel: 'speed', right: 0, up: -0.06, radius: 0.045, full: 100, ...BIG },
-    { channel: 'volts', right: -0.105, up: -0.035, radius: 0.022, ...SMALL, min: 12, full: 16 },
-    { channel: 'oil', right: -0.105, up: -0.095, radius: 0.022, ...SMALL, full: 6, ticks: 4 },
-    { channel: 'temp', right: 0.105, up: -0.035, radius: 0.022, ...SMALL },
-    { channel: 'fuel', right: 0.105, up: -0.095, radius: 0.022, ...SMALL },
+    { channel: 'speed', right: -0.1, up: -0.002, radius: 0.036, full: 100, ...BIG },
+    { channel: 'rpm', right: 0.1, up: -0.002, radius: 0.036, full: 4000, ...BIG },
+    { channel: 'volts', right: -0.105, up: -0.1, radius: 0.019, ...SMALL, min: 12, full: 16 },
+    { channel: 'oil', right: -0.035, up: -0.1, radius: 0.019, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'temp', right: 0.035, up: -0.1, radius: 0.019, ...SMALL },
+    { channel: 'fuel', right: 0.105, up: -0.1, radius: 0.019, ...SMALL },
   ],
-  lamps: { right: 0, up: -0.125, cols: 4, pitch: 0.028, show: ['turn', 'beam', 'oil', 'charge'] },
+  lamps: { right: 0, up: -0.132, cols: 4, pitch: 0.028, show: ['turn', 'beam', 'oil', 'charge'] },
   lights: { right: 0.24, dy: -0.12, kind: 'knob' },
   rockers: { on: 'fascia', at: [[0.2, -0.17]] },
   hazard: [0.12, -0.18],

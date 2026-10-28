@@ -23,8 +23,11 @@ import { SurfaceType } from '../core/surfaces';
  * outer lane has to merge, and it has the whole taper to do it in.
  */
 
-/** Width of one lane, metres. Two of them are the narrow road's whole asphalt. */
-export const LANE_WIDTH = 2.9;
+/**
+ * Width of one lane, metres. Two of them are the narrow road's whole asphalt. 3.2 (was
+ * 2.9) so a 2.5 m truck meets and passes traffic with room to spare (owner, 2026-10-29).
+ */
+export const LANE_WIDTH = 3.2;
 /** Half-width of the narrow (one lane each way) carriageway. */
 export const NARROW_HALF_WIDTH = LANE_WIDTH;
 /** Half-width where the road is fully open: two lanes each way. */

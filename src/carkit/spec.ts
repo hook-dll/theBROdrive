@@ -969,8 +969,11 @@ export interface TruckSpec {
   readonly platform: { readonly s0: number; readonly s1: number; readonly floor: number; readonly beam: number; readonly half: number; readonly inside: number; readonly side: number; readonly ribs: number };
   /** Rear lamp units on brackets at the frame's end: s, half width out, height. */
   readonly rearLamps: readonly [s: number, x: number, y: number];
-  /** Mud flaps behind the rear wheels: s, half widths [inner, outer], heights. */
-  readonly flaps: { readonly s: number; readonly x: readonly [number, number]; readonly y: readonly [number, number] };
+  /**
+   * Mud flaps either side of the rear wheels: the tops' s [ahead, behind], half widths
+   * [inner, outer], heights [foot, top], and how far each foot leans away from the wheel.
+   */
+  readonly flaps: { readonly s: readonly [number, number]; readonly x: readonly [number, number]; readonly y: readonly [number, number]; readonly lean: number };
   /**
    * Under the bonnet: the four service cells the bonnet's grid draws its parts in
    * (bay.ts `KIT_BONNET_CELL_NODE`), as a car's. Each an x range across, an s range along

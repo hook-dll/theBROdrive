@@ -36,6 +36,22 @@
   plan, its middle raised, its lower edge rolling down over the face at the nose. The
   bumper slimmed to 0.72-0.83, its front corners rounded in plan and its front edges
   rolled.
+- ZIL-130: the right rear lamp's bracket is black like the left one (it was drawn in the
+  left unit's white lens colour).
+- ZIL-130 cab: the speedometer and a new tachometer side by side in the cluster's raised
+  upper row, either side of the wheel's boss where the rim leaves them in view; the four
+  small dials and the warning lamps under them. The back window ±0.55, 1.73-2.06 (was
+  ±0.485, 1.76-2.00) under a 3 cm header, so the inside mirror sees out and the rail's
+  chamfer no longer folds across the back wall.
+- ZIL-130 mud flaps: one either side of each rear wheel (`TruckSpec.flaps.s` ahead and
+  behind), shorter (from 0.50 up) and leaning 16 cm away from the wheel at the foot, as
+  on the factory photo.
+- THE ROAD'S LANES ARE 3.2 M WIDE (was 2.9; `LANE_WIDTH`, world/roadprofile.ts): the
+  narrow road 6.4 m of asphalt, the wide one 12.8, so the ZIL-130's 2.5 m platform
+  leaves 0.35 m each side of its lane. The shoulder keeps its own 2.5 m.
+- EVERY CAR IS BUILT BEFORE THE WORLD IS SHOWN: after the boot has built every
+  `CAR_MODELS` entry it seals the set (`sealCarModels`, render/carmodel.ts), and any
+  model still built during play logs an error naming it.
 
 - EVERY ENGINE, GEARBOX AND BONNET PART FITS CARS AND TRUCKS (`parts/registry.ts` `fits`;
   owner: full interchangeability with the ZIL). The car-only engines and boxes now list

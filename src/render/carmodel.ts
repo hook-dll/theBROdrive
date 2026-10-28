@@ -1753,6 +1753,19 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
 }
 
 /**
+ * Set by the boot once every model in `CAR_MODELS` is built (app/bootwarmup.ts). The rule
+ * for every car, kit or pack: it is built before the world is shown, never during play.
+ * A model that is not ready after that is a bug in the boot's list, so it is reported
+ * loudly rather than built on the drive's frames.
+ */
+let carModelsSealed = false;
+
+/** Called once by the boot after `loadCarModel` resolved for every `CAR_MODELS` entry. */
+export function sealCarModels(): void {
+  carModelsSealed = true;
+}
+
+/**
  * Lazy-loading entry point used by runtime consumers that need one model. Resolves
  * once the model is resident AND its program anchor is compiled, so its first instance
  * draws without linking a program.
@@ -1760,6 +1773,7 @@ export async function preloadCarModels(ids?: readonly string[]): Promise<void> {
 export function loadCarModel(id: string): Promise<void> {
   let ready = modelReadiness.get(id);
   if (!ready) {
+    if (carModelsSealed) console.error(`car model "${id}" built during play: every model must be built at boot (CAR_MODELS)`);
     ready = (async () => {
       await preloadCarModels([id]);
       // Before the anchor, so it holds the mid paint as every car of the model draws it.

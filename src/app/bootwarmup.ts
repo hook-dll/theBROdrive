@@ -22,7 +22,7 @@ import {
   withQualityPreset,
 } from '../game/settings';
 import type { GameWorld } from '../game/state';
-import { compileCarProgramsWith, loadCarModel } from '../render/carmodel';
+import { compileCarProgramsWith, loadCarModel, sealCarModels } from '../render/carmodel';
 import { CAR_MODELS } from '../vehicle/carmodels';
 import type { Sky } from '../render/sky';
 import type { VistaMesh } from '../render/vista';
@@ -316,6 +316,7 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
   // ms body build plus its template and anchor in the first minute of the drive: a
   // dozen hitches, and on ANGLE a program link each. The cover waits for them.
   await Promise.all(CAR_MODELS.map((def) => loadCarModel(def.id)));
+  sealCarModels();
   ctx.renderer.drawHiddenOnce();
   render(0, 0);
   await ctx.renderer.waitForSubmittedFrame();

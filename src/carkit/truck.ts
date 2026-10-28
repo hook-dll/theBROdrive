@@ -352,13 +352,23 @@ class Truck {
     bar(b, 'trim', this.P(x, y, e.tail), this.P(out, y - 0.08, e.tail + 0.06), 0.025, 0.025);
   }
 
-  /** Rubber mud flaps behind the rear wheels, on a bar from the platform's beam. */
+  /**
+   * Rubber mud flaps either side of each rear wheel, hung from a bar under the platform's
+   * beam, each leaning away from the wheel at its foot (`flaps.lean`) [owner's photo of
+   * the 130, 2026-10-29].
+   */
   private flaps(): void {
     const m = this.t.flaps;
     const b = this.chassis;
+    const mid = (m.x[0] + m.x[1]) / 2;
+    const hw = (m.x[1] - m.x[0]) / 2;
     for (const side of [1, -1]) {
-      b.color(RUBBER).boxFrom('tyre', this.P(side * m.x[0], m.y[0], m.s + 0.006), this.P(side * m.x[1], m.y[1], m.s - 0.006));
-      b.color(BLACK).boxFrom('trim', this.P(side * m.x[0], m.y[1], m.s + 0.02), this.P(side * m.x[1], m.y[1] + 0.03, m.s - 0.02));
+      for (const [s, away] of [[m.s[0], -1], [m.s[1], 1]] as const) {
+        const top = this.P(side * mid, m.y[1], s);
+        const foot = this.P(side * mid, m.y[0], s + away * m.lean);
+        bar(b.color(RUBBER), 'tyre', top, foot, hw, 0.006, [0, 0, 1]);
+        b.color(BLACK).boxFrom('trim', this.P(side * m.x[0], m.y[1], s + 0.02), this.P(side * m.x[1], m.y[1] + 0.03, s - 0.02));
+      }
     }
   }
 
@@ -372,7 +382,8 @@ class Truck {
     b.boxFrom('trim', this.P(-(f.half + 0.03), top - f.depth, f.s1 + 0.06), this.P(f.half + 0.03, top, f.s1 - 0.01));
     b.cylinderZ('trim', this.P(0, top - f.depth / 2, f.s1 + 0.1), 0.04, 0.05, 8);
     for (const side of [1, -1]) {
-      bar(b, 'trim', this.P(side * f.half, top - f.depth / 2, f.s1 + 0.03), this.P(side * (x - 0.1), y, s + 0.02), 0.015, 0.02);
+      // Black on both sides: the left unit's lenses leave the builder white.
+      bar(b.color(BLACK), 'trim', this.P(side * f.half, top - f.depth / 2, f.s1 + 0.03), this.P(side * (x - 0.1), y, s + 0.02), 0.015, 0.02);
       // Housing, its back to the rear; lenses on it from the outer end: indicator, brake,
       // tail, and a reversing lamp on the left unit only [P R34].
       const hz = 0.035;

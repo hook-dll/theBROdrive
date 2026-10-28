@@ -41,6 +41,10 @@ Soviet scale models: clean, plainly cut panels, never dented, creased or chewed.
   The door glass starts right behind the pillar; no black or painted sail, triangle or
   wedge between them, whatever a drawing's mirror line or a check suggests. Mirrors sit
   on the door at the glass's front foot.
+- *Every car is built before the world is shown, never during play.* The boot builds every
+  `CAR_MODELS` entry (app/bootwarmup.ts) and then calls `sealCarModels`; a model that
+  `loadCarModel` still has to build after that logs `built during play` as an error. A new
+  car joins `CAR_MODELS` and nothing else; no consumer builds a car on its own.
 
 **Workflow: features first, screenshots next, docs at acceptance.**
 1. *Feature inventory before geometry* (owner, 2026-10-27). Before the first draft, list
