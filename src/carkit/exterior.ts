@@ -902,7 +902,15 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
         : [[0, y0 + 0.02], [0.7, y0], [0.92, y0 + 0.03], [1, y0 + 0.08], ...top];
       const moulded = new PartBuilder().color(shell.color);
       // No back: it lies against the end face and the flanks.
-      sweep(moulded, shell.slot, path, section, [section.length - 1]);
+      if (foot?.finish) {
+        // The apron in its own finish: the bumper above `foot.y` and the apron under it,
+        // split along a line straight in from the face to the back, open there and behind.
+        const apron = finishSlot(foot.finish);
+        sweep(moulded, shell.slot, path, [[0, foot.y], ...section.slice(2)], [0, section.length - 2]);
+        sweep(moulded.color(apron.color), apron.slot, path, [...section.slice(0, 3), [0, foot.y]], [2, 3]);
+      } else {
+        sweep(moulded, shell.slot, path, section, [section.length - 1]);
+      }
       // The moulding band, or else the groove's ridge, 6 mm proud of the face and rooted 7 mm
       // in it, a centimetre short of the bumper's ends. It goes on among the face's items
       // (`buildFace`), cutting the bumper's face and whatever else lies inside it.

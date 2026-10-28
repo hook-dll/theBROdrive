@@ -252,10 +252,10 @@ export const LOOK_E34: KitLook = {
     },
     // The wing's tail lamps outside the lid: the amber indicator band over the red tail and
     // brake lamp, wrapping round onto the flank [D rear: ±0.62–0.80, amber 0.785–0.845, red
-    // 0.63–0.78; D side: to s 4.53; P R, R34]; the red in two rows, one seam across [P R].
-    // Their inner edge 6 mm outside the lid's cut (±0.594 at 0.63, ±0.605 at the top), so
-    // the band runs on across the lid's lamps with only the cut between [P R: the units meet
-    // at the cut].
+    // 0.63–0.78; D side: to s 4.53; P R, R34]. Their inner edge 6 mm outside the lid's cut
+    // (±0.594 at 0.63, ±0.605 at the top), so the band runs on across the lid's lamp with
+    // only the cut between [P R: the units meet at the cut]. Plain red, as the lid's (review
+    // 2026-10-28: a rib here and cells on the lid read as a patchwork).
     {
       end: 'rear',
       points: [
@@ -266,7 +266,6 @@ export const LOOK_E34: KitLook = {
     },
     {
       end: 'rear',
-      ribs: 1,
       points: [
         { x: [0.6, 0.607], y: [0.63, 0.778], role: 'brake' },
         { y: [0.63, 0.778], role: 'brake' },
@@ -313,31 +312,27 @@ export const LOOK_E34: KitLook = {
     ],
   },
   rear: {
-    // Body colour 0.20–0.53 [D side x 790–842], the black band 0.445–0.50 [D side, D rear], a
-    // black valance from the foot to 0.33 [D rear; P R]; forward along the wings to the rear
-    // arch [D side x 718: s 3.97].
-    bumper: { kind: 'moulded', drop: 0.14, height: 0.33, finish: 'paint', moulding: { y: 0.4725, height: 0.055, finish: 'black' }, corner: 0.15, wrapTo: 3.97, inlays: [{ x: [0, 0.8], y: [0, 0.13], finish: 'black' }] },
+    // Body colour 0.36–0.545 with the black band 0.445–0.50 across it [P R on the bumper's
+    // width (1.164 mm/px), the band's middle at D's 0.4725: the top 0.557, the band
+    // 0.44–0.504, the foot 0.353; D rear: 0.35–0.526; P S: the foot drawn in under the band],
+    // and under it a black valance tucked back 8 cm to 0.24 [P S: 0.36 → 0.25, receding; P R:
+    // only a dark line shows under the bumper]; forward along the wings to the rear arch [D
+    // side x 718: s 3.97]. Review 2026-10-28 («корма какая-то чересчур массивная»): 0.235–0.565
+    // upright, the valance a 13 cm black stripe in its face, read as a stack of four bands.
+    bumper: { kind: 'moulded', drop: 0.133, height: 0.305, finish: 'paint', moulding: { y: 0.4725, height: 0.055, finish: 'black' }, corner: 0.15, wrapTo: 3.97, foot: { y: 0.36, back: 0.08, finish: 'black' } },
     items: [],
-    // The lid's part of the band, from the wing units in to the plate, one band with the wing
-    // units' red [D rear: the lamps ±0.355–0.59, 0.63–0.78; P R, scaled on the lid's cut at
-    // ±0.60: the lamp ±0.36–0.60 in two rows split by a dark seam, the upper row red, the
-    // lighter reversing cell ±0.41–0.53, red; inboard a panel ±0.27–0.36 in two rows (the
-    // lock in it, right), and next to the plate a single tall red reflector ±0.175–0.265; P
-    // R34: the same band to the plate]. Owner, 2026-10-27 («выпуклые фары на крышке
-    // багажника»): bevelled lenses 1.5 cm out of the lid read as a proud panel beside the
-    // flush wing units. Now as the wing units: flat cells 4 mm out of the lid (`slant` 0:
-    // square, unbevelled), on a black housing 2 mm out that shows as the seams, the row seam
-    // where the wing units' rib is (0.693–0.715); the outer edge 7 mm inside the lid's cut
-    // (as the Espero's band).
+    // The lid's part of the band, from the wing units in to the plate, the wing units' red
+    // at their heights: one red lens 4 mm out of the lid with the reversing lamp a light cell
+    // in its upper half [P R, scaled on the lid's cut at ±0.60: the lamp to the plate
+    // (±0.175), the light cell ±0.43–0.56 in the upper row; D rear: the lamps 0.63–0.78; P
+    // R34]. Owner, 2026-10-27 («выпуклые фары на крышке багажника»): flat, square, unbevelled
+    // (`slant` 0) as the wing units; the outer edge 7 mm inside the lid's cut (as the
+    // Espero's band). Review 2026-10-28 («задние фары выполнены неаккуратно»): six cells on a
+    // black housing, hung on the bumper's top, stood 3.4 cm over the wing units' red; now
+    // hung on the wing lamps' top (`belt`, 0.85) at their heights, two pieces.
     lid: [
-      { kind: 'panel', x: { from: { centre: 0.172 }, to: { centre: 0.587 } }, y: { from: ['bumperTop', 0.102], to: ['bumperTop', 0.246] }, finish: 'black', proud: 0.002 },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.17 }, to: { centre: 0.264 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.354 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.163] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'inert', x: { from: { centre: 0.27 }, to: { centre: 0.354 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.589 } }, y: { from: ['bumperTop', 0.1], to: ['bumperTop', 0.163] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'tail', x: { from: { centre: 0.36 }, to: { centre: 0.405 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.411 }, to: { centre: 0.529 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'tail', x: { from: { centre: 0.535 }, to: { centre: 0.589 } }, y: { from: ['bumperTop', 0.185], to: ['bumperTop', 0.248] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'tail', x: { from: { centre: 0.17 }, to: { centre: 0.588 } }, y: { from: ['belt', -0.22], to: ['belt', -0.072] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
+      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.44 }, to: { centre: 0.55 } }, y: { from: ['belt', -0.138], to: ['belt', -0.078] }, depth: 0.002, proud: 0.004, slant: { outer: 0, inner: 0 } },
     ],
   },
 };

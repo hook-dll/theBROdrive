@@ -663,10 +663,11 @@ export type BumperLook =
       readonly wrapTo?: number | 'arch';
       /**
        * Its face upright down to height `y`, then straight back by `back` m to its bottom
-       * edge (the W124's apron under its band), at most to the end face. Absent: the
-       * face drawn in only at its foot's bevel.
+       * edge (the W124's apron under its band), at most to the end face; that drawn-back
+       * apron in `finish` (the E34's black valance tucked under its rear bumper), absent the
+       * bumper's own. Absent: the face drawn in only at its foot's bevel.
        */
-      readonly foot?: { readonly y: number; readonly back: number };
+      readonly foot?: { readonly y: number; readonly back: number; readonly finish?: Finish };
       /**
        * The bumper continues the body: its top runs out of the end face and the flanks
        * with no ledge, rounding out to its face below (the 2110's and 2112's). Absent: a
