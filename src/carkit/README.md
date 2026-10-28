@@ -146,6 +146,11 @@ from the angle he complained about; changes are judged there, not in code.
 | `oka.ts` | The VAZ-1111: `BODY_1111` / `LOOK_1111` (platform `samara`). |
 | `volgas.ts` | The Volgas: `BODY_GAZ24` / `LOOK_GAZ24` (platform `classic`) and the GAZ-31029 on the 24's doors and greenhouse with its own nose and tail. |
 | `azlk.ts` | The AZLK-2141 Moskvich: `BODY_2141` / `LOOK_2141` (platform `samara`). |
+| `truck.ts` | The generic truck round its shell (`platform: 'truck'`, `TruckSpec`): ladder frame, beam axles, leaf springs, steps, tank with its cap, exhaust, mud flaps, rear lamps on brackets, the platform and its drop boards, the tent on hoops (`tent_flap`), the service cells; a bonneted front from its own module. |
+| `zilfront.ts` | The ZIL-130's bonneted front (`TruckSpec.front`, every size in zil.ts): bumper, face panel with its nose, slots and lamp pockets, wings, bonnet, roof markers; `underTruckBonnet` for the cells' tops. |
+| `truckparts.ts` | The truck builders' palette and shapes: `bar`, `cap`, `sweep`, `tableAt`, `steps`, `stops`. |
+| `zil.ts` | The ZIL-130: `BODY_ZIL130` / `LOOK_ZIL130` (measurements-zil130.md). |
+| `gazelle.ts` | The first GAZelles on one cab-over cab: `BODY_GAZ3302` (tented flatbed) and `BODY_GAZ3221` (minibus, sliding door), their looks (measurements-gazelle.md). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
 | `mercedes.ts` | The Mercedes-Benz W124 230 E saloon (1989–92 facelift): `BODY_W124` / `LOOK_W124` (platform `classic`, rear drive). Draft, awaiting the owner. |
@@ -895,7 +900,11 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   `flush`, `screenFoot`, column `drop`, the spoiler on a tailgate, column `finish`, waist `span`,
   `notchWall`, moulded `foot`, `handles.grip`, column `finish: 'chrome'`, `wrapTo: 'arch'`,
   `rearArchSquare`, the lean's `peak`, `round` `ring` and `standOut`, `mirrorMount` and `mirrorHead`,
-  `bootTank`, stack `yaw`.
+  `bootTank`, stack `yaw`; for trucks `TruckSpec.front` (a bonneted front, zilfront.ts;
+  absent on a cab-over), `tent`, `TruckCell.top`, the optional `platform` / `toolbox` /
+  `step` / `rearLamps` / `flaps`, the tank's optional `cap`, `wheels.outside: 'rear'`
+  (front arch in the shell, rear wheels under the platform), `slidingDoor`, and the
+  layout's `frontSeats` and `saloon` (the GAZelles).
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 
@@ -1158,6 +1167,8 @@ within `KIT_FINE_M`; "Far" = everything except the four detail groups.
 | Astra F | 13 578 | – | – | – | – | – | – | 1 344 | – |
 | Vectra A | 13 509 | – | – | – | – | – | – | 1 344 | – |
 | UAZ-469 | 11 152 | 4 860 | 3 810 | 1 507 | 418 | 32 | 688 | 1 344 | 6 204 |
+| GAZ-3302 (draft) | 10 582 | – | – | – | – | – | – | – | – |
+| GAZ-3221 (draft) | 11 749 | – | – | – | – | – | – | – | – |
 
 The owner set the budget aside for the 2110 and 2112 (the rounded rear shut line adds side
 rows to every tub column).

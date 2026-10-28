@@ -381,6 +381,19 @@ interface Layout {
   readonly visor?: { readonly half: number; readonly depth: number };
   /** A padded engine cover on the centre line between the front seats (the van's): ds range, half width, height over the floor; in the dash's colour. */
   readonly engineCover?: { readonly ds0: number; readonly ds1: number; readonly half: number; readonly height: number };
+  /**
+   * A truck's front seats: the driver's and the passenger's seat either side of the engine
+   * cover (`engineCover`) instead of the bench across the cab (the GAZelle's). Absent:
+   * the bench (the ZIL-130's).
+   */
+  readonly frontSeats?: true;
+  /**
+   * A van body behind a truck's cab (the GAZelle minibus): its saloon's fixed single seats
+   * facing forward, each at [ds behind the cowl, x], and the rear bench at `bench`; the
+   * floor and the lining run on to the rear doors and the rear wheel houses are covered.
+   * Absent: the cab alone.
+   */
+  readonly saloon?: { readonly seats: readonly (readonly [ds: number, x: number])[] };
 }
 
 /** A car's changes to its platform's layout (`KitCarSpec.cabinLayout`). */
@@ -1851,6 +1864,84 @@ export const CABIN_ZIL130: CabinLayoutOverride = {
   wheel: { ds: 0.46, dy: 0.06, rake: 40 * (Math.PI / 180), radius: 0.24, rim: 0.011, spokes: [-20, 200, 270], hub: 'round', toFloor: true },
 };
 
+// The GAZelles on the truck's furniture, with the cab-over's front seats and engine cover.
+// The cluster from the photo of the first cars' combination 384.3801 (drive2.ru, refs
+// DASH: the tachometer and the speedometer side by side, a column of warning lamps between
+// them, oil pressure over temperature at the left end, fuel over the voltmeter at the
+// right); the dash, the wheel and the seats [E], measurements-gazelle.md §5.
+
+/**
+ * GAZelle (1994-2003): a deep black plastic dash under the steep screen, a hooded cluster
+ * before the driver; the engine's cover between the two front seats, from the dash back
+ * to the seats' fronts; the gear lever out of the floor behind it; a large two-spoke
+ * wheel on a steep column.
+ */
+export const CABIN_GAZELLE: CabinLayoutOverride = {
+  frontSeats: true,
+  // The driver's hip 0.80 behind the A pillar's foot, behind the front wheel [E]; the
+  // seats ±0.52, either side of the cover [E].
+  hip: 0.8,
+  seatX: 0.52,
+  // The cab's floor 0.65 over the ground, 0.22 over its bottom, clear over the frame [E: the door's step].
+  floorRise: 0.22,
+  tunnel: { heights: [0, 0, 0], base: [0.2, 0.2], top: [0.17, 0.17] },
+  // From the dash's foot back to 0.15 short of the seats' fronts, ±0.22, 0.42 high [E].
+  engineCover: { ds0: 0.05, ds1: 0.6, half: 0.22, height: 0.42 },
+  gear: { ds: 0.7, height: 0.42, lean: 0.06 },
+  handbrake: { rear: -0.5, length: 0.12 },
+  // A deep shelf under the screen to an upright face over the knees [E].
+  dash: [
+    [0.0, 0.06], [0.26, 0.06], [0.29, 0.04], [0.29, -0.2],
+    [0.26, -0.23], [0.1, -0.25], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.29, 0.04], [0.29, -0.2]],
+  wood: undefined,
+  stack: undefined,
+  heater: undefined,
+  console: undefined,
+  vents: [{ dy: -0.05 }],
+  // The cluster's black housing standing 4 cm out of the face on the column [P DASH: about
+  // 2.6 times as wide as tall].
+  binnacle: [[0.25, 0.04], [0.33, 0.04], [0.33, -0.12], [0.25, -0.12]],
+  binnacleHalf: 0.2,
+  cluster: 0.33,
+  clusterFace: { right: 0, up: -0.045, half: [0.19, 0.072], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    { channel: 'rpm', right: -0.07, up: -0.045, radius: 0.043, full: 5000, ...BIG },
+    { channel: 'speed', right: 0.07, up: -0.045, radius: 0.043, full: 180, ...BIG },
+    { channel: 'oil', right: -0.155, up: -0.01, radius: 0.019, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'temp', right: -0.155, up: -0.08, radius: 0.019, ...SMALL },
+    { channel: 'fuel', right: 0.155, up: -0.01, radius: 0.019, ...SMALL },
+    { channel: 'volts', right: 0.155, up: -0.08, radius: 0.019, ...VOLT_DIAL },
+  ],
+  lamps: { right: 0, up: -0.045, cols: 1, pitch: 0.014, show: ['turn', 'beam', 'oil', 'charge', 'brake'] },
+  lights: { right: 0.25, dy: -0.12, kind: 'rocker' },
+  rockers: { on: 'fascia', at: [[0.22, -0.16], [-0.05, -0.12]] },
+  hazard: [0.0, -0.08],
+  glovebox: { x: -0.5, dy: -0.08, half: [0.16, 0.06] },
+  radio: [-0.16, -0.1],
+  ashtray: [-0.16, -0.17],
+  // Rim 0.42 across, two spokes [E]; the column steep down to the floor.
+  wheel: { ds: 0.5, dy: 0.08, rake: 40 * (Math.PI / 180), radius: 0.21, rim: 0.012, spokes: [-15, 195], hub: 'round', toFloor: true },
+  carpet: 0x232425,
+  headliner: 0xb8b4aa,
+};
+
+/**
+ * GAZ-3221: the cab's, and the saloon behind it: single seats facing forward, two on the
+ * left behind the driver, then two on the left and one on the right at the sliding door's
+ * rear, and the rear bench across the back for three [F: eight passenger seats; E the
+ * layout].
+ */
+export const CABIN_GAZ3221: CabinLayoutOverride = {
+  ...CABIN_GAZELLE,
+  saloon: { seats: [[1.45, 0.25], [1.45, 0.62], [2.3, 0.25], [2.3, 0.62], [2.3, -0.62]] },
+  // The bench's hip 0.55 ahead of the rear doors' opening (s 4.80) [E].
+  bench: { from: 'rearBase', offset: -0.55 },
+  benchCushion: 0.42,
+  benchRecline: 0.2,
+};
+
 /**
  * Name of an empty node at the driver's eye, in the kit frame. render/carmodel.ts reads
  * it after the body fit as the default cabin camera (`CarModelMeasure.cabinEye`) and
@@ -2202,10 +2293,18 @@ class Cabin {
   /** A forward-control van (`platform: 'van'`): its floor runs over both axles to the rear doors. */
   private readonly van: boolean;
   /**
-   * A bonneted truck's cab (`platform: 'truck'`): its floor runs to the back wall, no
-   * arch covers or shelf, the bench across the cab is the only seat.
+   * A truck's cab (`platform: 'truck'`): its floor runs to the back wall, no arch covers
+   * or shelf.
    */
   private readonly truck: boolean;
+  /** A truck whose bench across the cab is its only seat (no `Layout.frontSeats`; the ZIL-130). */
+  private readonly truckBench: boolean;
+  /**
+   * A truck with a van's body behind its cab (`Layout.saloon`, the GAZelle minibus): the
+   * floor and the lining run to the rear doors, over covered rear wheel houses, with the
+   * saloon's seats and the rear bench.
+   */
+  private readonly saloon: boolean;
   /** Firewall lining, floor height, the floor's rear end (the rear arch's front). */
   private readonly fw: number;
   private readonly floorY: number;
@@ -2237,16 +2336,20 @@ class Cabin {
     this.hatch = this.spec.bootEnd === undefined;
     this.van = this.spec.platform === 'van';
     this.truck = this.spec.platform === 'truck';
+    this.truckBench = this.truck && !this.lay.frontSeats;
+    this.saloon = this.truck && this.lay.saloon !== undefined;
     const f = this.frame;
     const w = this.spec.wheels;
     this.fw = f.cowl + FIREWALL;
     this.floorY = cabinFloor(f);
     this.standY = this.van || this.truck ? this.floorY - VAN_FOOT_SINK : this.floorY;
-    this.floorEnd = this.van ? f.rearBase - VAN_FLOOR_CLEAR : this.truck ? f.rearBase - 0.01 : w.rear - w.radius * f.archFactor(w.rear) - 0.01;
+    this.floorEnd = this.van || this.saloon ? f.rearBase - VAN_FLOOR_CLEAR : this.truck ? f.rearBase - 0.01 : w.rear - w.radius * f.archFactor(w.rear) - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
     this.benchS = benchHip(f, this.lay);
-    this.lowerEnd = this.van ? f.rearBase - VAN_TRIM_CLEAR : this.hatch ? this.benchS + BENCH_BACK : f.rearBase - 0.005;
+    this.lowerEnd = this.van || this.saloon
+      ? f.rearBase - VAN_TRIM_CLEAR
+      : this.truck && !this.truckBench ? f.rearBase - 0.005 : this.hatch ? this.benchS + BENCH_BACK : f.rearBase - 0.005;
     this.x0 = this.lay.seatX;
     const t = this.lay.tunnel;
     const y = this.floorY;
@@ -2261,8 +2364,9 @@ class Cabin {
     this.group.name = 'kit_cabin';
     this.floor();
     this.sidePanels();
-    // A van's floor stands over its wheel arches, a truck's cab between them: no covers inside.
-    if (!this.van && !this.truck) this.humps();
+    // A van's floor stands over its wheel arches, a truck's cab between them: no covers
+    // inside; a truck's saloon covers its rear wheel houses.
+    if ((!this.van && !this.truck) || this.saloon) this.humps();
     this.sills();
     this.lining();
     this.headliner();
@@ -2272,9 +2376,11 @@ class Cabin {
     this.pedals();
     this.levers();
     this.engineCover();
-    // A truck's bench is its front seat.
-    if (!this.truck) for (const side of [1, -1]) this.frontSeat(side);
-    this.bench();
+    // A truck's bench across the cab is its front seat; a truck with front seats has a
+    // rear bench only in its saloon.
+    if (!this.truckBench) for (const side of [1, -1]) this.frontSeat(side);
+    if (!this.truck || this.truckBench || this.saloon) this.bench();
+    if (this.saloon) this.saloonSeats();
     if (!this.van && !this.truck) this.floorPlaces();
     this.driverEye();
     this.rearEye();
@@ -2488,7 +2594,7 @@ class Cabin {
   /** Sill trims along the door openings, inside the door's inner skin; a truck's stop at its bench's base. */
   private sills(): void {
     const s0 = this.fw;
-    const s1 = this.truck ? this.benchS - BENCH_FRONT - 0.01 : this.floorEnd;
+    const s1 = this.truckBench || this.saloon ? this.benchS - BENCH_FRONT - 0.01 : this.floorEnd;
     let out = Infinity;
     for (let i = 0; i <= 4; i++) out = Math.min(out, this.frame.sideX(lerp(s0, s1, i / 4), this.spec.doorBottom) - DOOR_CARD - 0.01);
     const y0 = this.floorY - 0.01;
@@ -3372,11 +3478,12 @@ class Cabin {
     const b = new PartBuilder();
     const H = this.benchS;
     const top = this.floorY + L.benchCushion;
+    // A truck's bench stands against its sides, clear of the wheel houses.
     const wall = this.truck
       ? this.sideRoom(H - 0.36, H + BENCH_BACK, this.standY, top)
       : this.frame.wellX(this.spec.wheels.rear) - (L.bench.clear ?? 0.022);
     const half = wall - 0.013;
-    const seats = this.truck ? [-L.seatX, 0, L.seatX] : [-BENCH_SEAT_X, BENCH_SEAT_X];
+    const seats = this.truckBench ? [-L.seatX, 0, L.seatX] : [-BENCH_SEAT_X, BENCH_SEAT_X];
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const skirtTop = top - 0.12;
@@ -3412,7 +3519,7 @@ class Cabin {
     const edge = Math.min(half - 0.045, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT));
     const room = (halfX: number): PlaceRoom => ({ halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
     // A truck's bench is the passenger's seat: the place on his third of it.
-    if (this.truck) {
+    if (this.truckBench) {
       group.userData.kitFrontBench = true;
       this.place(group, ORIGIN, 'seat', add(at, [-L.seatX, 0, 0]), -0.06, room(Math.min(0.21, edge - L.seatX)));
       return;
@@ -3422,6 +3529,32 @@ class Cabin {
     this.place(group, ORIGIN, 'bench', at, -0.06, room(edge));
     this.place(group, ORIGIN, 'bench_l', add(at, [inner + halfWidth, 0, 0]), -0.06, room(halfWidth));
     this.place(group, ORIGIN, 'bench_r', add(at, [-(inner + halfWidth), 0, 0]), -0.06, room(halfWidth));
+  }
+
+  /**
+   * The saloon's single seats (`Layout.saloon`), fixed and facing forward: a closed base,
+   * the cushion and the back in the upholstery with their inlays, at the rear bench's
+   * cushion height and recline. No channel and no place: they are the saloon's furniture.
+   */
+  private saloonSeats(): void {
+    const L = this.lay;
+    const uph = this.spec.look.upholstery;
+    const insert = shade(uph, 1.35);
+    const top = this.floorY + L.benchCushion;
+    const b = this.fixed;
+    for (const [ds, x] of L.saloon?.seats ?? []) {
+      const hip = this.frame.cowl + ds;
+      b.color(shade(uph, 0.85), 'upholstery');
+      pad(b, 'trim', this.P(x, (this.standY + top - 0.12) / 2, hip - 0.15), [0.19, (top - 0.12 - this.standY) / 2, 0.18], 0.015);
+      b.pushAt(this.P(x, top - 0.065, hip - 0.15), [-0.06, 0, 0]).color(uph, 'upholstery');
+      pad(b, 'trim', ORIGIN, [0.22, 0.065, 0.23], 0.04);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.1, 0.065, -0.17], [0.1, 0.065, -0.17], [0.1, 0.065, 0.17], [-0.1, 0.065, 0.17]]);
+      b.pop();
+      b.pushAt(this.P(x, top - 0.035, hip + 0.07), [-L.benchRecline, 0, 0]).color(uph, 'upholstery');
+      pad(b, 'trim', [0, 0.3, -0.05], [0.22, 0.3, 0.06], 0.04, 0.9);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.09, 0.08, 0.01], [0.09, 0.08, 0.01], [0.09, 0.5, 0.01], [-0.09, 0.5, 0.01]]);
+      b.pop();
+    }
   }
 
   /**

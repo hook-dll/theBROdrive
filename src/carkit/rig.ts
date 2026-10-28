@@ -417,6 +417,12 @@ export class KitRig {
     return this.channels.get(name)?.value ?? 0;
   }
 
+  /** A driven node's pose with its channel at 0 (shut, at rest), or null for a node no channel moves. */
+  restOf(node: THREE.Object3D): { readonly position: THREE.Vector3; readonly quaternion: THREE.Quaternion } | null {
+    const d = this.driven.find((driven) => driven.node === node);
+    return d ? { position: d.restPosition, quaternion: d.restQuaternion } : null;
+  }
+
   set(name: string, value: number, immediate = false): void {
     const c = this.channel(name);
     c.target = value;

@@ -692,6 +692,24 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
       efficiency: 0.9,
     },
   },
+  {
+    // GAZ-3302 five-speed, fully synchronised: 4.05 / 2.34 / 1.395 / 1.0 / 0.849, R 3.51,
+    // on the 5.125 hypoid axle (autoopt.ru GAZ-3302 and GAZ-3221 catalogue pages; drom.ru
+    // catalogue 272196 prints the same). Box, propshaft and a hypoid axle: 0.90. Mass [E].
+    id: 'gearbox_gaz3302_5',
+    kind: 'gearbox',
+    label: 'GAZelle five-speed',
+    mass: 50,
+    fits: ['car', 'truck'],
+    gearbox: {
+      ratios: [4.05, 2.34, 1.395, 1.0, 0.849],
+      reverse: 3.51,
+      finalDrive: 5.125,
+      shiftTime: 0.45,
+      automatic: false,
+      efficiency: 0.9,
+    },
+  },
 ];
 
 /**

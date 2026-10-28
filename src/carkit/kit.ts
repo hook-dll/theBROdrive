@@ -46,6 +46,9 @@ const PART_LABELS: Readonly<Record<string, string>> = {
   vent_fr: 'Правая форточка',
 };
 
+/** A sliding door's share of its channel spent moving out from the skin before it runs back (`KitCarSpec.slidingDoor`). */
+const SLIDE_OUT = 0.12;
+
 function shellMotion(owner: string, frame: BodyFrame): KitMotion | undefined {
   const left = owner.endsWith('l');
   if (owner.startsWith('door_')) return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: left ? -1.15 : 1.15 };
@@ -78,10 +81,23 @@ export function buildKitCar(id: string): THREE.Group {
       addBuilt(root, part.builder, [0, 0, 0], 'body');
       continue;
     }
+    const slide = spec.slidingDoor && /^door_r[lr]$/.test(part.owner) ? spec.slidingDoor : undefined;
+    const control = { id: part.owner, label: slide ? 'Сдвижная дверь' : (PART_LABELS[part.owner] ?? part.owner) };
+    if (slide) {
+      // A sliding door: its track moves it out over the channel's first `SLIDE_OUT`, then
+      // the door runs back along the flank on the track over the rest.
+      const out = part.owner.endsWith('l') ? 1 : -1;
+      const track = pivotGroup(`${part.owner}_track`, part.pivot, { channel: part.owner, kind: 'pos', axis: [out, 0, 0], amount: slide.out / SLIDE_OUT, stops: [0, SLIDE_OUT] });
+      const node = pivotGroup(part.owner, [0, 0, 0], { channel: part.owner, kind: 'pos', axis: [0, 0, -1], amount: slide.travel / (1 - SLIDE_OUT), stops: [SLIDE_OUT, 1] }, control);
+      track.add(node);
+      root.add(track);
+      addBuilt(node, part.builder, part.pivot, part.owner);
+      nodes.set(part.owner, { node, pivot: part.pivot });
+      continue;
+    }
     const motion = shellMotion(part.owner, frame);
     // A part that does not move (a door's fixed quarter pane) is not a control.
-    const control = motion ? { id: part.owner, label: PART_LABELS[part.owner] ?? part.owner } : undefined;
-    const node = pivotGroup(part.owner, part.pivot, motion, control);
+    const node = pivotGroup(part.owner, part.pivot, motion, motion ? control : undefined);
     addBuilt(node, part.builder, part.pivot, part.owner);
     nodes.set(part.owner, { node, pivot: part.pivot });
   }

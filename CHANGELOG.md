@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- Kit GAZelle (first generation, early face): the GAZ-3302 flatbed with steel drop boards
+  and a dark olive tent on hoops (its rear flap rolls up), and the GAZ-3221 minibus with a
+  sliding right door, two rear doors and eight passenger seats, on one cab-over cab (the
+  engine under a cover between the front seats, the cells there and under the short
+  bonnet); ZMZ-402 and the GAZelle five-speed on 5.125; in the lab, spawn and traffic
+  (`kit_gaz3302`, `kit_gaz3221`; src/carkit/gazelle.ts, measurements-gazelle.md).
+- Kit trucks: truck.ts is now a generic truck generator (frame, axles, springs, tank,
+  exhaust, steps, flaps, rear lamps, platform, tent, cells); the ZIL-130's bonneted front
+  moved to zilfront.ts with all its sizes as data in zil.ts (the ZIL identical).
+
 ### Changed
 
 - THE ZIL-130 FLATBED, THE FIRST TRUCK (`carkit/truck.ts`, `zil.ts`, platform `'truck'`;
@@ -40,12 +52,28 @@
   left unit's white lens colour).
 - ZIL-130 cab: the speedometer and a new tachometer side by side in the cluster's raised
   upper row, either side of the wheel's boss where the rim leaves them in view; the four
-  small dials and the warning lamps under them. The back window ±0.55, 1.73-2.06 (was
-  ±0.485, 1.76-2.00) under a 3 cm header, so the inside mirror sees out and the rail's
-  chamfer no longer folds across the back wall.
+  small dials and the warning lamps under them. The back window ±0.55, 1.73-2.12 (was
+  ±0.485, 1.76-2.00), its top 2 cm under the roof's roll, so the inside mirror sees out.
+  The cab's back wall is in the body's colour again: it was wound facing forward (a truck
+  cab's back stands ahead of the truck's centre, which `cutShell` took as the shell's
+  middle), so the cabin's lining stood outside the paint.
 - ZIL-130 mud flaps: one either side of each rear wheel (`TruckSpec.flaps.s` ahead and
   behind), shorter (from 0.50 up) and leaning 16 cm away from the wheel at the foot, as
   on the factory photo.
+- F ON AN OPEN DOOR SHUTS IT, ON EVERY KIT CAR: what the eye is on first is what F
+  works. Looking at an open door with the cabin behind it shut the door only when the
+  ray missed the cabin; otherwise it got you in. Now the door wins when the ray meets it
+  before the doorway (`resolve`, player/interaction.ts); looking into the doorway with no
+  door in between still gets you in, and the far door across the cabin still does too.
+- WINDOW CRANKS ARE EASIER TO AIM AT, ON EVERY KIT CAR: from a seat, the door card within
+  11 cm of a crank's shaft works the crank (`CRANK_AIM_RADIUS`, player/interaction.ts),
+  instead of only the crank's own few faces; a near miss no longer opens the door. The
+  inner handle, about 25 cm away, keeps its own aim.
+- A CAR RIDES ON THE ZIL-130'S BED: an open truck platform (`TruckSpec.platform`, no
+  tent) collides as its floor (1.30 m) and its four boards (to 1.875 m), and only the cab
+  stands to the roof (`openBedOf`, vehicle/vehicle.ts). Before, the whole truck was one box
+  to the cab's roof and a car dropped on the bed floated 0.6 m over the boards. The
+  GAZelle's tented bed stays one box. Impacts with the bed hurt the driver as the cab's do.
 - THE ROAD'S LANES ARE 3.2 M WIDE (was 2.9; `LANE_WIDTH`, world/roadprofile.ts): the
   narrow road 6.4 m of asphalt, the wide one 12.8, so the ZIL-130's 2.5 m platform
   leaves 0.35 m each side of its lane. The shoulder keeps its own 2.5 m.

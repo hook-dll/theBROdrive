@@ -1,0 +1,129 @@
+{
+  "car": "gaz3221",
+  "measurements": "measurements-gazelle.md",
+  "sources": {
+    "D": {
+      "what": "getoutlines.com 13570 '2006 GAZ-3221 bus' side view, 815 x 233 (the left side): 10.10 mm/px from the 2900 wheelbase (hubs x 104.3 / 391.3), ground y 228.2, s = 1.0 + (x - 104.3) * 0.0101 (the 2003 face; measurements-gazelle.md §3)",
+      "url": "https://getoutlines.com/blueprints/car/gaz/gaz-3221-2006.gif",
+      "image": "build/carshape/_refs/bp/img/outlines_gaz-3221-2006.png"
+    },
+    "F": {
+      "what": "drom.ru catalogue (catalog/lcv/gaz/gazelle/272196: 3302 2.4 MT, 5480 x 2066 x 2120, 2900, 1700/1560, 990/1580 overhangs, 170 clearance; 272273: 3221, 5470 x 2075 x 2200, 1030/1540); autoopt.ru encyclopedia gaz-3302 / gaz-3221 (ZMZ-4026.10, the five-speed, 5.125, 175R16C, 1850 / 2000 kg, 115 km/h, 5.5 m) (measurements-gazelle.md §2)"
+    },
+    "D96": {
+      "what": "getoutlines.com 13593 '1996 GAZ-3221 Gazelle bus' four-view, 356 x 205: the early face; front 22.7 mm/px from the 2200 height, centre x 58, ground y 102; right side 23.2 mm/px from the 2900 wheelbase (measurements-gazelle.md §3)",
+      "url": "https://getoutlines.com/blueprints/car/gaz/gaz-gazelle.gif",
+      "image": "build/carshape/_refs/bp/img/outlines_gaz-gazelle.png"
+    },
+    "P": {
+      "what": "Wikimedia Commons: '1995 GAZ 330210 front.jpg' and 'rear' (CC0), 'GAZ-3302 GAZ museum.jpg' (CC0), 'GAZ-3302 (1994 - 2003) Moscow ...JPG' (CC BY 4.0), 'GAZ 3221 Sheki.png' (CC BY 4.0), 'Маршрутная ГАЗель.JPG' (CC BY-SA 3.0), 'Gazel na m10.JPG' (CC BY-SA 3.0), 'Kolpashevsky minibus.jpg' (CC BY-SA 3.0); drom.ru catalogue press photos (measurements-gazelle.md §3)",
+      "image": "build/carshape/_refs/photos/gazelle/1995_GAZ_330210_front.jpg"
+    },
+    "DASH": {
+      "what": "drive2.ru logbook 5107007 (GAZelle 1999): the first cars' instrument combination 384.3801 out of its dash, face on: tachometer and speedometer side by side, a column of lamps between, oil over temperature at the left end, fuel over the voltmeter at the right",
+      "url": "https://www.drive2.ru/l/5107007/",
+      "image": "build/carshape/_refs/photos/gazelle/25107007_418f39cs-960.jpg"
+    }
+  },
+  "body": {
+    "length": {
+      "v": 5.47,
+      "src": "F 5470"
+    },
+    "width": {
+      "v": 1.98,
+      "src": "D front 1.98 over the body (the passport's 2075 is not drawn)"
+    },
+    "height": {
+      "v": 2.2,
+      "src": "F 2200"
+    },
+    "wheelbase": {
+      "v": 2.9,
+      "src": "F 2900"
+    },
+    "overhangFront": {
+      "v": 1.0,
+      "src": "F 1030 (990 on the 3302: the same cab)",
+      "tol": 0.04
+    },
+    "overhangRear": {
+      "v": 1.54,
+      "src": "F 1540",
+      "tol": 0.04
+    },
+    "beltY": {
+      "v": 1.27,
+      "src": "D (3302's): the door glass's foot"
+    },
+    "doorFront": {
+      "v": [
+        0.935,
+        1.955
+      ],
+      "src": "D (3302's cab): the front door's edges"
+    },
+    "doorBottomY": {
+      "v": 0.47,
+      "src": "D side y 182: 0.467"
+    },
+    "beltHalfWidth": {
+      "v": 0.96,
+      "src": "D front (3302's cab), ±0.96"
+    },
+    "roofHalfWidth": {
+      "v": 0.84,
+      "src": "D front (3302's cab), ±0.84"
+    }
+  },
+  "dash": {
+    "photo": {
+      "src": "DASH",
+      "view": "cluster"
+    },
+    "gauges": {
+      "v": 6,
+      "src": "DASH tachometer, speedometer, oil pressure, coolant temperature, fuel, voltmeter"
+    },
+    "dialRows": {
+      "v": [
+        2,
+        2,
+        2
+      ],
+      "src": "DASH the small pair at the top of each end, the two big dials, the small pair under them"
+    },
+    "clusterAt": {
+      "v": "wheel",
+      "src": "DASH the combination's housing sits in the hood before the driver (measurements-gazelle.md §5)"
+    }
+  },
+  "gaps": [
+    "archFront/archRear: the body's bottom (0.40-0.46) stands above the hub's height (0.34), so the opening's reach at the hub's height is not on the drawing (the arches' sizes are in measurements-gazelle.md §3 and the spec)",
+    "The drawing carries the 2003 face: the early face from D96 and the photos, not judged here",
+    "No rear view of the 3221 sourced: the rear doors' glass, hinges and handle and the tail lamps' cells are estimates",
+    "The sliding door's run from D96's coarse right side (23 mm/px)",
+    "The saloon's seat layout: eight seats [F], their places an estimate",
+    "Dash: only the instrument combination is sourced (DASH)"
+  ],
+  "overlay": {
+    "side": {
+      "src": "D",
+      "image": "build/carshape/_refs/bp/img/outlines_gaz-3221-2006.png",
+      "crop": [
+        0,
+        0,
+        550,
+        233
+      ],
+      "s": [
+        5.29,
+        0.0101
+      ],
+      "y": [
+        228.2,
+        0.0101
+      ]
+    }
+  }
+}

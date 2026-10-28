@@ -100,6 +100,7 @@ import { SPOT_REACH_ALL } from '../render/lightshader';
 import { SWING_REACH_M } from '../render/kitdraw';
 import { KitRig } from '../carkit/rig';
 import { KIT_DOME_LAMP_NODE } from '../carkit/interior';
+import { KIT_SPECS } from '../carkit/specs';
 
 import {
   AIR_DENSITY,
@@ -279,6 +280,30 @@ const CROSSFLOW_CD = 0.85;
 const AERO_CENTRE_HEIGHT_FRACTION = 0.45;
 /** Read-only zero for Rapier setters; never written. */
 const ZERO_VECTOR: Readonly<{ x: number; y: number; z: number }> = { x: 0, y: 0, z: 0 };
+
+/**
+ * A kit truck's open platform (`TruckSpec.platform`, no tent over it) in the chassis
+ * frame: `front` the platform's front edge (z), `floor` its floor's top, `top` its boards'
+ * top (y), `half`/`inside` its outer and inner half widths. The kit frame (s from the nose,
+ * heights from the ground) maps onto the chassis box: the nose at +half z, the ground the
+ * factory height under the box's top. Null for every other body.
+ */
+function openBedOf(
+  model: CarModelDef,
+  half: readonly [number, number, number],
+): { front: number; floor: number; top: number; half: number; inside: number } | null {
+  const truck = model.kit ? KIT_SPECS[model.kit]?.truck : undefined;
+  const p = truck?.platform;
+  if (!p || truck.tent) return null;
+  const ground = half[1] - model.factory.height;
+  return {
+    front: half[2] - p.s0,
+    floor: ground + p.floor,
+    top: ground + p.floor + p.side,
+    half: Math.min(p.half, half[0]),
+    inside: p.inside,
+  };
+}
 
 /**
  * The rear axle's share of the foot brake at equal line pressure: FOOT_BRAKE_REAR_BIAS
@@ -1123,6 +1148,8 @@ export class Vehicle implements Rebasable {
 
   private readonly chassisBody: RAPIER.RigidBody;
   private readonly chassisCollider: RAPIER.Collider;
+  /** An open bed's floor and board walls behind the cab (`openBedOf`); empty for every other body. */
+  private readonly bedColliders: RAPIER.Collider[] = [];
   private tyres: TyreContacts | null = null;
   private readonly drivetrain: Drivetrain;
 
@@ -1692,15 +1719,34 @@ export class Vehicle implements Rebasable {
     // chassis up, and the ray-cast wheels kept reaching for terrain that was now
     // above their contact point. On screen that is a car whose wheels sink into the
     const floor = Math.max(-half[1], this.measure.wheels[0].pos[1]);
-    const colliderHalfY = (half[1] - floor) / 2;
-    this.chassisCollider = physics.world.createCollider(
-      RAPIER.ColliderDesc.cuboid(half[0], colliderHalfY, half[2])
-        .setTranslation(0, floor + colliderHalfY, 0)
-        .setDensity(0)
-        .setFriction(0.4)
-        .setRestitution(0.05),
-      this.chassisBody,
-    );
+    /** A box ±`hx` across about `x`, `y0`..`y1` up, `z0`..`z1` along, in the chassis frame. */
+    const box = (x: number, hx: number, y0: number, y1: number, z0: number, z1: number): RAPIER.Collider =>
+      physics.world.createCollider(
+        RAPIER.ColliderDesc.cuboid(hx, (y1 - y0) / 2, (z1 - z0) / 2)
+          .setTranslation(x, (y0 + y1) / 2, (z0 + z1) / 2)
+          .setDensity(0)
+          .setFriction(0.4)
+          .setRestitution(0.05),
+        this.chassisBody,
+      );
+    // AN OPEN BED (`openBedOf`): the box stands to the cab's roof only over the cab; behind
+    // it the platform is its floor and four low walls of its boards, so a car can ride on
+    // it (owner, 2026-10-29: the ZIL's bed). Else one box the body's size.
+    const bed = openBedOf(this.model, half);
+    if (bed) {
+      this.chassisCollider = box(0, half[0], floor, half[1], bed.front, half[2]);
+      const wall = (bed.half - bed.inside) / 2;
+      const sideX = bed.inside + wall;
+      this.bedColliders.push(
+        box(0, bed.half, floor, bed.floor, -half[2], bed.front),
+        box(sideX, wall, bed.floor, bed.top, -half[2], bed.front),
+        box(-sideX, wall, bed.floor, bed.top, -half[2], bed.front),
+        box(0, bed.inside, bed.floor, bed.top, bed.front - 2 * wall, bed.front),
+        box(0, bed.inside, bed.floor, bed.top, -half[2], -half[2] + 2 * wall),
+      );
+    } else {
+      this.chassisCollider = box(0, half[0], floor, half[1], -half[2], half[2]);
+    }
 
     this.scene.add(this.rootGroup);
     this.primeTransform();
@@ -1747,9 +1793,9 @@ export class Vehicle implements Rebasable {
     return this.chassisBody;
   }
 
-  /** Chassis collider used to enumerate actual post-solver impacts for the driver. */
-  get collisionCollider(): RAPIER.Collider {
-    return this.chassisCollider;
+  /** The chassis colliders, used to enumerate actual post-solver impacts for the driver: the box, and an open bed's parts. */
+  get collisionColliders(): readonly RAPIER.Collider[] {
+    return this.bedColliders.length > 0 ? [this.chassisCollider, ...this.bedColliders] : [this.chassisCollider];
   }
 
   /** Non-null only during the fixed step that classified the previous solve as a collision. */
@@ -1833,9 +1879,9 @@ export class Vehicle implements Rebasable {
   get modelMeasure(): CarModelMeasure {
     return this.measure;
   }
-  /** True when a world ray hit this vehicle's cheap interaction collider. */
+  /** True when a world ray hit this vehicle's cheap interaction collider (its box, or an open bed's part). */
   isChassisCollider(colliderHandle: number): boolean {
-    return this.chassisCollider.handle === colliderHandle;
+    return this.chassisCollider.handle === colliderHandle || this.bedColliders.some((c) => c.handle === colliderHandle);
   }
 
 

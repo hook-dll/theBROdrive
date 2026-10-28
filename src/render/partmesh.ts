@@ -261,6 +261,8 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
     case 'gearbox_truck6': scale = 1.5; manual = true; fins = true; break;
     case 'gearbox_zil130_5': scale = 1.4; manual = true; fins = true; break;
+    // The GAZelle's box behind the ZMZ four: the Volga's layout, a size up.
+    case 'gearbox_gaz3302_5': scale = 1.15; manual = true; fins = false; break;
     default: throw new Error(`unhandled gearbox variant: ${v.id}`);
   }
   const id = v.id;

@@ -477,8 +477,8 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
   temp: true,
 };
 
-/** The shell's own panels (doors, lids, flap, a truck's drop boards): outside parts, not cabin fittings. */
-const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$|board_(l|r|tail)$)/;
+/** The shell's own panels (doors, lids, flap, a truck's drop boards and tent flap): outside parts, not cabin fittings. */
+const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$|board_(l|r|tail)$|tent_flap$)/;
 /** A side door, which a seat is got into through. */
 const KIT_SIDE_DOOR = /^door_[fr][lr]$/;
 /**
@@ -490,7 +490,7 @@ const KIT_SIDE_DOOR = /^door_[fr][lr]$/;
 const KIT_DOOR_REACH_PART = /^engine_cover$/;
 
 /** Lids opened only from outside: from a seat they are not offered. */
-const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?|board_(l|r|tail))$/;
+const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?|board_(l|r|tail)|tent_flap)$/;
 
 /**
  * Parts worked only through their own control: a door's pane by its crank
@@ -501,6 +501,14 @@ const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?|board_(l|r|tail))$/;
  */
 const KIT_PANE_PART = /^window_/;
 const KIT_WIPER_ARM = /^wiper_\d+$/;
+/** A door's window crank (carkit/interior.ts `crank_<pos>`). */
+const KIT_CRANK = /^crank_/;
+/**
+ * From a seat, the door card this close to a window crank's shaft is the crank's: the arm
+ * is 7.5 cm long, so this takes in the knob and a hand's width round it. The inner door
+ * handle stands about 25 cm away on every car.
+ */
+const CRANK_AIM_RADIUS = 0.11;
 /** The door mirrors' heads (carkit/exterior.ts `sideMirrorControl`): a front seat's, through any glass. */
 const KIT_SIDE_MIRROR = /^mirror_[lr]$/;
 
@@ -516,7 +524,7 @@ const KIT_SEAT_PART = /^(?:seat|seatback|headrest)_/;
 const KIT_PANEL_SOUND: readonly (readonly [RegExp, FoleyEvent, FoleyEvent])[] = [
   [/^door_/, 'door-open', 'door-close'],
   [/^bonnet$/, 'bonnet-open', 'bonnet-shut'],
-  [/^(boot|tailgate(_[lr])?|board_(l|r|tail))$/, 'boot-open', 'boot-shut'],
+  [/^(boot|tailgate(_[lr])?|board_(l|r|tail)|tent_flap)$/, 'boot-open', 'boot-shut'],
 ];
 /** A shutting panel is heard landing once its pose is this close to closed (0..1). */
 const PANEL_SHUT_AT = 0.02;
@@ -535,7 +543,12 @@ interface KitDoor {
   readonly front: boolean;
   /** On the car's +X side, which is its LEFT, the driver's, in the kit frame. */
   readonly left: boolean;
-  /** The SHUT door's outline in the car frame (the door node's parent), from its rest pose. */
+  /**
+   * The car frame the outline is in: the door's nearest ancestor no channel moves (its
+   * parent, or above a sliding door's track).
+   */
+  readonly frame: THREE.Object3D;
+  /** The SHUT door's outline in `frame`, from every moving node's rest pose. */
   readonly box: THREE.Box3;
 }
 
@@ -694,6 +707,9 @@ export class Interaction {
     place: -1,
     throughGlass: false,
   };
+  /** The window cranks on each door node, found once (`crankNear`). */
+  private readonly crankCache = new WeakMap<THREE.Object3D, readonly KitPicked[]>();
+  private readonly crankScratch = new THREE.Vector3();
   /** Side doors per rig, found once; a rebuilt car has a new rig and new nodes. */
   private readonly kitDoorCache = new WeakMap<KitRig, readonly KitDoor[]>();
   /** Per rig, the meshes under its `door_*` parts, found once: the chase view's prefilter. */
@@ -1053,10 +1069,11 @@ export class Interaction {
     //     prompted (an open bonnet's empty cell in front of its lid: F shuts the lid);
     //  2. the seat the eye gets in at through an open side door (`kitSeat`: the seat
     //     looked at, or the one that doorway serves), when F can do something there (sit,
-    //     take what lies on it, lay the load on it); this wins over an open door in the
-    //     same ray, the near one's edge or the far one across the cabin;
+    //     take what lies on it, lay the load on it); the opening must come first in the
+    //     ray: an open door met before it is shut instead, the far one across the cabin
+    //     is not;
     //  3. the kit car's part (a shut door is opened, from its panel or its window; an open
-    //     one shut when no seat is got into past it; a lid, the flap);
+    //     one shut; a lid, the flap);
     //  4. boarding the plane;
     //  5. getting in otherwise (a car's body; a refused seat, or a kit car's bare body
     //     beside a door, knocks).
@@ -1722,7 +1739,8 @@ export class Interaction {
     // Getting in through the doorway itself: the ray crosses an open side door's opening on
     // the player's side within reach and meets no seat or thing beyond it, only the cabin
     // (the dash, the tunnel, the far door, the far window): the seat that door serves. A
-    // shut door met before the opening, a cabin part in the aim (`KIT_DOOR_REACH_PART`)
+    // door met before the opening, open or shut (F works it: what the eye is on is what
+    // the hand reaches; owner, 2026-10-29), a cabin part in the aim (`KIT_DOOR_REACH_PART`)
     // and anything of the world nearer than the car keep the press.
     if (kitSeat === null && rig && vehicle && !locked && vehicleDist <= vehicleRange) {
       const t = target as Target;
@@ -1734,9 +1752,9 @@ export class Interaction {
       if (
         door
         && this.kitOpeningDistance <= RAY_RANGE
-        // The door in the aim stands open (its edge in the opening) or lies past the
-        // opening (the far door, across the cabin).
-        && (part === null || rig.get(part) > 0.5 || this.kitAimed.distance > this.kitOpeningDistance)
+        // No part in the aim, or the one aimed at lies past the opening (the far door,
+        // across the cabin).
+        && (part === null || this.kitAimed.distance > this.kitOpeningDistance)
       ) {
         kitSeat = door.front ? (door.left ? 'driver' : 'passenger') : door.left ? 'rear-left' : 'rear-right';
       }
@@ -1923,27 +1941,60 @@ export class Interaction {
       found = true;
       aim.distance = hit.distance;
       aim.seat = seat;
+      // From a seat, the door card round a window crank is the crank's (`CRANK_AIM_RADIUS`):
+      // the handle is small, and a near miss opened the door instead.
+      const chosen = seated && picked ? (this.crankNear(picked, hit.point) ?? picked) : picked;
       if (
-        picked
+        chosen
         && !pane
-        && !KIT_WIPER_ARM.test(picked.node.name)
-        && !KIT_VEHICLE_CHANNELS[kitAction(picked.control).channel]
-        && !KIT_SEAT_PART.test(picked.control.id)
-        && (frontSeat || !KIT_SIDE_MIRROR.test(picked.control.id))
+        && !KIT_WIPER_ARM.test(chosen.node.name)
+        && !KIT_VEHICLE_CHANNELS[kitAction(chosen.control).channel]
+        && !KIT_SEAT_PART.test(chosen.control.id)
+        && (frontSeat || !KIT_SIDE_MIRROR.test(chosen.control.id))
         && (seated
-          ? !KIT_LID_PART.test(picked.control.id)
+          ? !KIT_LID_PART.test(chosen.control.id)
           // On foot nothing is worked through glass: a panel seen through a window is the
           // far side of the car.
           : !aim.throughGlass
-            && (KIT_SHELL_PART.test(picked.control.id)
-              || (KIT_DOOR_REACH_PART.test(picked.control.id) && vehicle.kit !== null && this.kitOpenDoorDistance(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity)))
+            && (KIT_SHELL_PART.test(chosen.control.id)
+              || (KIT_DOOR_REACH_PART.test(chosen.control.id) && vehicle.kit !== null && this.kitOpenDoorDistance(vehicle.kit, vehicle, eyeX, eyeY, eyeZ, dx, dy, dz) < Infinity)))
       ) {
-        aim.part = picked;
+        aim.part = chosen;
       }
       break;
     }
     this.hits.length = 0;
     return found;
+  }
+
+  /**
+   * The window crank on the side door `picked` belongs to (the door, or a fitting on it)
+   * whose shaft lies within `CRANK_AIM_RADIUS` of `point`, or null.
+   */
+  private crankNear(picked: KitPicked, point: THREE.Vector3): KitPicked | null {
+    let door: THREE.Object3D | null = null;
+    for (let node: THREE.Object3D | null = picked.node; node; node = node.parent) {
+      const id = (node.userData.kitControl as KitControl | undefined)?.id;
+      if (id !== undefined && KIT_SIDE_DOOR.test(id)) {
+        door = node;
+        break;
+      }
+    }
+    if (!door) return null;
+    let cranks = this.crankCache.get(door);
+    if (!cranks) {
+      const found: KitPicked[] = [];
+      door.traverse((node) => {
+        const control = node.userData.kitControl as KitControl | undefined;
+        if (control && KIT_CRANK.test(control.id)) found.push({ node, control });
+      });
+      cranks = found;
+      this.crankCache.set(door, cranks);
+    }
+    for (const crank of cranks) {
+      if (crank.node.getWorldPosition(this.crankScratch).distanceTo(point) <= CRANK_AIM_RADIUS) return crank;
+    }
+    return null;
   }
 
   /**
@@ -2047,16 +2098,17 @@ export class Interaction {
 
   /**
    * A kit car's side doors, found once per rig: the `door_*` control nodes and the shut
-   * door's outline in the car frame. A door turns about its hinge from an unrotated rest
-   * pose, so its node position plus its own meshes' bounds is the opening it fills,
-   * whatever it is doing now. Its side is read off that outline (+X is the car's left).
+   * door's outline in the car frame. The outline is taken in the rest pose of the door and
+   * of every moving node between it and the frame (a sliding door's track), so it is the
+   * opening the door fills whatever it is doing now. Its side is read off that outline
+   * (+X is the car's left).
    */
   private kitDoors(rig: KitRig, vehicle: Vehicle): readonly KitDoor[] {
     const cached = this.kitDoorCache.get(rig);
     if (cached) return cached;
     const doors: KitDoor[] = [];
     vehicle.root.traverse((node) => {
-      const door = this.kitDoorOf(node);
+      const door = this.kitDoorOf(rig, node);
       if (door) doors.push(door);
     });
     this.kitDoorCache.set(rig, doors);
@@ -2064,7 +2116,7 @@ export class Interaction {
   }
 
   /** `node` as a side door, if it is one with meshes to outline it. */
-  private kitDoorOf(node: THREE.Object3D): KitDoor | null {
+  private kitDoorOf(rig: KitRig, node: THREE.Object3D): KitDoor | null {
     const id = (node.userData.kitControl as KitControl | undefined)?.id;
     if (!id || !KIT_SIDE_DOOR.test(id) || !node.parent) return null;
     const box = new THREE.Box3();
@@ -2075,8 +2127,21 @@ export class Interaction {
       box.union(this.kitBox.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrix));
     }
     if (box.isEmpty()) return null;
-    box.translate(node.position);
-    return { id, node, front: id.charAt(5) === 'f', left: box.max.x + box.min.x > 0, box };
+    // Up to the first node no channel moves, each step in its rest pose.
+    const rest = new THREE.Matrix4();
+    const step = new THREE.Matrix4();
+    let frame: THREE.Object3D = node;
+    for (;;) {
+      const pose = rig.restOf(frame);
+      step.compose(pose?.position ?? frame.position, pose?.quaternion ?? frame.quaternion, frame.scale);
+      rest.premultiply(step);
+      const parent: THREE.Object3D | null = frame.parent;
+      if (!parent) return null;
+      frame = parent;
+      if (!frame.userData.kitMotion) break;
+    }
+    box.applyMatrix4(rest);
+    return { id, node, front: id.charAt(5) === 'f', left: box.max.x + box.min.x > 0, frame, box };
   }
 
   /**
@@ -2086,7 +2151,7 @@ export class Interaction {
    */
   private kitEntryDoor(rig: KitRig, vehicle: Vehicle, eyeX: number, eyeY: number, eyeZ: number): KitDoor | null {
     const doors = this.kitDoors(rig, vehicle);
-    const frame = doors[0]?.node.parent;
+    const frame = doors[0]?.frame;
     if (!frame) return null;
     const eye = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ));
     let nearest: KitDoor | null = null;
@@ -2134,7 +2199,7 @@ export class Interaction {
   ): KitDoor | null {
     const doors = this.kitDoors(rig, vehicle);
     this.kitOpeningDistance = Infinity;
-    const frame = doors[0]?.node.parent;
+    const frame = doors[0]?.frame;
     if (!frame) return null;
     const left = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ)).x > 0;
     let nearest: KitDoor | null = null;
@@ -2167,7 +2232,7 @@ export class Interaction {
     dy: number,
     dz: number,
   ): number {
-    const frame = door.node.parent!;
+    const frame = door.frame;
     const o = frame.worldToLocal(this.kitEye.set(eyeX, eyeY, eyeZ));
     const ahead = frame.worldToLocal(this.kitAhead.set(eyeX + dx, eyeY + dy, eyeZ + dz)).sub(o);
     const box = door.box;
@@ -3185,7 +3250,7 @@ export class Interaction {
       // from the measured flank.
       const box = door.box;
       this.kitCentre.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z * 0.75 + box.max.z * 0.25);
-      door.node.parent!.localToWorld(this.kitCentre);
+      door.frame.localToWorld(this.kitCentre);
       this.kitCentre.x -= t.x;
       this.kitCentre.y -= t.y;
       this.kitCentre.z -= t.z;

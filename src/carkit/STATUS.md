@@ -69,6 +69,11 @@ on any car are still fixed.
    (no spare, a beam under the platform, the floor at 1.30, the screen wrapping to the
    door): **draft, awaiting his next look**. The bonnet holds the cars' four cells and the
    tank takes fuel at its cap, crouching (owner, 2026-10-28; measurements-zil130.md §7).
+   GAZelle (first generation, early face): the GAZ-3302 flatbed with its tent and the
+   GAZ-3221 minibus on one cab-over cab, drafted 2026-10-29 (`kit_gaz3302`, `kit_gaz3221`;
+   gazelle.ts, measurements-gazelle.md), on the generic truck generator (truck.ts; the
+   ZIL's bonneted front moved to zilfront.ts, the ZIL identical): **draft, awaiting the
+   owner's first look**.
 5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
    see "Foreign cars: the owner's list" below. First batch, the GM cars on Opel running
    gear: the **Daewoo Nexia** drafted 2026-10-18, and with it the foreign running-gear
@@ -432,6 +437,8 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | AZLK-2141 | pass | pass | pass | L100 R100 | 0 | 12 133 | 14/16: front glass edge, mirror s | 3/5: Samara dash (3 spokes vs 2) |
 | UAZ-469 | pass | pass | no target | L100 R100 | 0 | 11 152 | 9/9 | 7/7 |
 | UAZ-2206 | pass | pass | no target | L100 R94 | 0 | 10 979 | 6/11 | 1/3 |
+| GAZ-3302 (draft) | pass | pass | pass | L100 R80 | 0 | 10 582 | 7/7 | 3/3 (the combination's photo) |
+| GAZ-3221 (draft) | pass | pass | pass | L100 R80 | 0 | 11 749 | 8/8 | 3/3 (the combination's photo) |
 | Nexia | pass | pass | pass | L100 R96 | 0 | 13 475 | 9/10: belt half width | 6/6 |
 | Espero | pass | pass | pass | L100 R100 | 0 | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |

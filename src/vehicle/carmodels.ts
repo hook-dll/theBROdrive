@@ -921,6 +921,13 @@ const AERO_UAZ_330364: AeroSpec = { frontalArea: 3.8, liftFront: 0.25, liftRear:
  * 0.275 clearance and the gaps between the wheels: about 5.0 m² [E].
  */
 const AERO_ZIL_130: AeroSpec = { frontalArea: 5.0, liftFront: 0.25, liftRear: 0, sideSlope: 1.9, yawSlope: 0.2 };
+/**
+ * GAZelle GAZ-3302 with its tent: a cab-over cab with a sloping nose ahead of the tent's
+ * flat front, 2.07 m wide over 2.55 m less the 0.17 clearance: about 4.6 m² [E].
+ */
+const AERO_GAZ_3302: AeroSpec = { frontalArea: 4.6, liftFront: 0.2, liftRear: 0, sideSlope: 1.9, yawSlope: 0.2 };
+/** GAZelle GAZ-3221: the same nose on a box van body, 1.98 m by 2.2 m less the clearance: 3.9 m² [E]. */
+const AERO_GAZ_3221: AeroSpec = { frontalArea: 3.9, liftFront: 0.2, liftRear: 0.02, sideSlope: 1.8, yawSlope: 0.27 };
 /** IZH-2715: a Moskvich nose on a square van box. */
 const AERO_IZH_2715: AeroSpec = { frontalArea: 2.35, liftFront: 0.2, liftRear: 0.02, sideSlope: 1.8, yawSlope: 0.27 };
 /** VAZ-2110: a nineties saloon shaped in the tunnel, Cd 0.33. */
@@ -1285,6 +1292,16 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // apart on 0.24 tyres: 0.552 outer to outer (`rearTyreWidth`). The passport's 2400
   // against the kit's 2.31 is the loader's usual growth (src/carkit/measurements-zil130.md §7).
   kit_zil130:     { length: 6.675, width: 2.500, height: 2.400, clearance: 0.275, wheelbase: 3.800, frontTrack: 1.800, rearTrack: 1.790, wheelRadius: 0.490, tyreWidth: 0.240, rearTyreWidth: 0.552, frontOverhang: 1.083 },
+  // The GAZelle GAZ-3302 flatbed (1994-2002): 5480 long, 2066 over the platform, 2900
+  // wheelbase, 1700/1560 tracks, 170 clearance, 990 front overhang (drom.ru catalogue
+  // 272196); 175R16C on 5.5J x 16 [F], rolling 0.34 [D 0.337]. The height is the tent's,
+  // 2.55 [D: the getoutlines 2006 side view's dotted tent]; the passport's 2120 is the cab
+  // (src/carkit/measurements-gazelle.md §2).
+  kit_gaz3302:    { length: 5.480, width: 2.066, height: 2.550, clearance: 0.170, wheelbase: 2.900, frontTrack: 1.700, rearTrack: 1.560, wheelRadius: 0.340, tyreWidth: 0.175, frontOverhang: 1.000 },
+  // The GAZ-3221 minibus (1996-2002): 5470 x 2200, the rest the 3302's (drom.ru 272273).
+  // Width 1.98, the body over its sides [D front view; the passport's 2075 is not drawn],
+  // front overhang 1.0, the shared cab's (F 1030; measurements-gazelle.md §2).
+  kit_gaz3221:    { length: 5.470, width: 1.980, height: 2.200, clearance: 0.170, wheelbase: 2.900, frontTrack: 1.700, rearTrack: 1.560, wheelRadius: 0.340, tyreWidth: 0.175, frontOverhang: 1.000 },
   // The Daewoo Nexia N100 saloon: 4482 × 1662 × 1393, 2520 wheelbase, 1400/1406 tracks,
   // 175/70 R13 (drom.ru catalogue, Nexia 1.5 MT SOHC GL; 3dcar.ru drawing: 2520, 1400,
   // 1406, 1663); 160 clearance (the Nexia repair manual, 3ruk.ru; drom.ru prints 158).
@@ -2930,6 +2947,66 @@ const GEAR_ZIL_130: KitOwnGear = {
   holdAheadOfRearAxle: (505 / 6000) * 3.8,
 };
 
+/**
+ * GAZelle GAZ-3302 (1994-2002), per autoopt.ru's GAZ-3302 catalogue page and drom.ru's
+ * (catalog/lcv/gaz/gazelle/272196): kerb 1850 kg with 1050 on the front axle, gross 3500
+ * with 1200 on the front, the ZMZ-4026.10 (2445 cc, 100 hp at 4500, 18.6 kgf·m at 2500:
+ * the 402 family's, `engine_zmz_402`), the five-speed 4.05 / 2.34 / 1.395 / 1.0 / 0.849 on
+ * the 5.125 hypoid axle, 175R16C, a 70 l tank, 115 km/h, 5.5 m turning radius at the outer
+ * wheel, hydraulic brakes with a vacuum servo (discs front, drums rear), beam axles on
+ * leaf springs at both ends. No 0-100 or braking figure is printed for the 4026.
+ *
+ * Tyre a light-truck radial of about 0.82 aspect; grip 0.6 [E: between the UAZ's 0.59 and
+ * a car's]. Lock from the 5.5 m radius, the E34's derivation: asin(2.9 / (5.5 − 1.7 / 2))
+ * = 0.673. Springs the UAZ-330364's beam-and-leaf set (`SUSP_TRUCK` with a front beam).
+ * Cd·A 2.6 [E: no Cd published; it puts the top near the passport's 115 on the bench].
+ * Shod with the kit's own generated wheels (an empty `wheelSetPool`): no pack set has the
+ * GAZelle's six-stud 16-inch disc.
+ */
+const GEAR_GAZ_3302: KitOwnGear = {
+  bodyClass: 'truck',
+  mass: 1850,
+  tyre: { construction: 'radial', aspect: 0.82 },
+  engineId: 'engine_zmz_402',
+  gearboxId: 'gearbox_gaz3302_5',
+  tankLitres: 70,
+  wheelGrip: 0.6,
+  brakeDecelG: BRAKES_SERVO_G,
+  suspension: {
+    ...SUSP_TRUCK,
+    frontAxle: 'beam',
+    ackermann: 0.8,
+    frontCamberDeg: 1,
+    frontPitchCentre: LEAF_PITCH,
+    frontRollSteer: 0.06,
+  },
+  rollCentre: { front: 0.45, rear: 0.48 },
+  antiRoll: { front: -0.25, rear: -0.25 },
+  steerLock: 0.673,
+  rearDriveBias: 1,
+  handlingProfile: 'utility',
+  frontWeightShare: 1050 / 1850,
+  dragArea: 2.6,
+  aero: AERO_GAZ_3302,
+  wheelSetPool: [],
+  // The payload's centre from the factory's axle loads: 1650 kg adding 150 to the front
+  // (1050 → 1200) over the 2.9 m wheelbase puts it 0.26 ahead of the rear axle [autoopt.ru].
+  holdAheadOfRearAxle: (150 / 1650) * 2.9,
+};
+
+/**
+ * GAZelle GAZ-3221 minibus (1996-2002): the 3302's running gear, kerb 2000 kg with 1050 on
+ * the front axle (autoopt.ru's GAZ-3221 page; drom.ru prints 2500), its own box body's
+ * aero; the same 115 km/h and 5.5 m.
+ */
+const GEAR_GAZ_3221: KitOwnGear = {
+  ...GEAR_GAZ_3302,
+  mass: 2000,
+  frontWeightShare: 1050 / 2000,
+  aero: AERO_GAZ_3221,
+  holdAheadOfRearAxle: undefined,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2986,6 +3063,8 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_w124', GEAR_MERCEDES_W124, 'w124', 'Mercedes-Benz W124'],
     ['kit_e34', GEAR_BMW_E34, 'e34', 'BMW 520i (E34)'],
     ['kit_zil130', GEAR_ZIL_130, 'zil130', 'ZIL-130'],
+    ['kit_gaz3302', GEAR_GAZ_3302, 'gaz3302', 'GAZ-3302'],
+    ['kit_gaz3221', GEAR_GAZ_3221, 'gaz3221', 'GAZ-3221'],
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
@@ -3087,6 +3166,10 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   // The platform is 3.75 × 2.33 m; 4×4 is the largest grid the trunk renderer pools
   // (`TRUNK_MAX_CELL_COUNT`). Leaf springs at both ends, unladen: the hardest ride.
   kit_zil130: { trunkGrid: G4x4, comfort: 1 },
+  // The platform 3.06 x 1.94 m; leaf springs at both ends, unladen.
+  kit_gaz3302: { trunkGrid: G4x4, comfort: 1 },
+  // Eight passengers behind the cab; the saloon's floor is the hold.
+  kit_gaz3221: { trunkGrid: G4x3, comfort: 2 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };

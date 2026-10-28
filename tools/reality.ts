@@ -607,6 +607,20 @@ const TARGETS: Readonly<Record<string, Target>> = {
     brake80: null, grossKg: 10400,
     source: 'ZIL-431410 (130): autoopt.ru encyclopedia/truck/zil/mark/zil-130 (90 km/h, 8.3 m at the outer wheel, gross 10400; 0-60 37 s and 25 m from 50 not judged here); geometry kit_zil130 row',
   },
+  // The GAZelles at gross mass (3500), the condition the GAZ catalogue prints. No 0-100 or
+  // braking figure is printed for the 4026 engine (autoopt.ru's 0-60 of 17 s has no column here).
+  kit_gaz3302: {
+    wheelbase: 2.9, track: 1.7, radius: 0.34, top: 115, to100: null,
+    loadKg: 1650, load: 'gross mass (payload 1500 + crew), the GAZ catalogue\'s condition', turn: 5.5, lat: null, hz: 1.3,
+    brake80: null, grossKg: 3500,
+    source: 'GAZ-3302: autoopt.ru encyclopedia/car/gaz/mark/gaz-3302 (115 km/h, 5.5 m at the outer wheel, gross 3500); drom.ru catalog/lcv/gaz/gazelle/272196; geometry kit_gaz3302 row',
+  },
+  kit_gaz3221: {
+    wheelbase: 2.9, track: 1.7, radius: 0.34, top: 115, to100: null,
+    loadKg: 1500, load: 'gross mass (eight passengers, driver and luggage), the GAZ catalogue\'s condition', turn: 5.5, lat: null, hz: 1.3,
+    brake80: null, grossKg: 3500,
+    source: 'GAZ-3221: autoopt.ru encyclopedia/car/gaz/mark/gaz-3221 (115 km/h, 5.5 m, gross 3500); drom.ru catalog/lcv/gaz/gazelle/272273; geometry kit_gaz3221 row',
+  },
 
 
 };

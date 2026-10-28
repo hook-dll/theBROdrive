@@ -88,10 +88,10 @@ export const BODY_ZIL130: KitBody = {
     // rail's chamfer no longer folds across the wall above it (owner, 2026-10-29).
     rearHeader: 0.03,
     pillar: 0.04,
-    // The back window ±0.55, 1.73-2.06, its corners round: drawn ±0.485, 1.76-2.00 [D
-    // rear x 305-545, y 825-887], made taller and a little wider so the inside mirror
-    // sees out (owner, 2026-10-29).
-    rearPanes: { x0: -0.1, x1: 0.55, y0: 1.73, y1: 2.06, r: 0.07, top: 2.4 },
+    // The back window ±0.55, 1.73-2.12, its corners round: drawn ±0.485, 1.76-2.00 [D
+    // rear x 305-545, y 825-887], made a little wider and taller, its top 2 cm under the
+    // roof's roll (2.14), so the inside mirror sees out (owner, 2026-10-29).
+    rearPanes: { x0: -0.1, x1: 0.55, y0: 1.73, y1: 2.12, r: 0.07, top: 2.4 },
   },
   wheels: {
     front: FRONT,
@@ -113,8 +113,8 @@ export const BODY_ZIL130: KitBody = {
     rimRadius: 0.254, // 20-inch rims [F]
   },
   doorBottom: 0.775,
-  // No bonnet or boot in the shell: the bonnet is the truck's own (`truck.bonnet`); the
-  // back wall's glass is a saloon's back light.
+  // No bonnet or boot in the shell: the bonnet is the truck's own (`truck.front.bonnet`);
+  // the back wall's glass is a saloon's back light.
   bonnetFront: 1.554,
   bootEnd: 2.732,
   truck: {
@@ -133,75 +133,102 @@ export const BODY_ZIL130: KitBody = {
       cross: [0.22, 0.45, 1.7, 2.75, 3.65, 4.4, 5.4],
     },
     springs: { front: [0.4, 1.76], rear: [4.1, 5.66] }, // [E: about 1.4 and 1.55 long]
-    bonnet: {
-      // The nose's tip 0.233 [D side x 100], the rear edge 1.358 [D x 370]; the top on the
-      // centre line 1.47 at the tip rounding up to 1.592 at 0.317, 1.659 at 1.07, 1.688 at
-      // the rear [D side]; the lower edge on the wings' top 1.435-1.45 [D side y 250];
-      // 0.70 off the centre line at the nose [D front 0.692], 0.865 at the rear [D plan].
-      s0: 0.235,
-      s1: 1.355,
-      top: [[0.235, 1.47], [0.25, 1.53], [0.29, 1.575], [0.35, 1.598], [0.7, 1.632], [1.07, 1.659], [1.355, 1.688]],
-      edge: 1.44,
-      half: [0.7, 0.865],
-      roll: [0.07, 0.06],
-      // Five slats at the side's rear top [D side x 270-330, y 210-230; P F34].
-      louvres: { s: [0.94, 1.19], y: [1.5, 1.58], count: 5 },
+    // The bonneted front (zilfront.ts): bonnet, wings, face, bumper and the roof's markers.
+    front: {
+      bonnet: {
+        // The nose's tip 0.233 [D side x 100], the rear edge 1.358 [D x 370]; the top on the
+        // centre line 1.47 at the tip rounding up to 1.592 at 0.317, 1.659 at 1.07, 1.688 at
+        // the rear [D side]; the lower edge on the wings' top 1.435-1.45 [D side y 250];
+        // 0.70 off the centre line at the nose [D front 0.692], 0.865 at the rear [D plan].
+        s0: 0.235,
+        s1: 1.355,
+        top: [[0.235, 1.47], [0.25, 1.53], [0.29, 1.575], [0.35, 1.598], [0.7, 1.632], [1.07, 1.659], [1.355, 1.688]],
+        edge: 1.44,
+        half: [0.7, 0.865],
+        roll: [0.07, 0.06],
+        // Five slats at the side's rear top [D side x 270-330, y 210-230; P F34].
+        louvres: { s: [0.94, 1.19], y: [1.5, 1.58], count: 5 },
+        // Its front corners a quarter round 0.2 in plan [P F34, F34w; E], lofted at five
+        // extra stations over it; the top falling 14 mm from the centre line to the roll.
+        noseRound: 0.2,
+        roundCols: [0.04, 0.12, 0.25, 0.45, 0.7],
+        crown: 0.014,
+        // The lower edge rolls 5 cm down onto the face panel at the nose, back to `edge`
+        // over 0.2 [P F34w].
+        noseDrop: { drop: 0.05, run: 0.2 },
+        // The raised middle [P F34w, F34r; E]: its top breaking 0.17 (front) to 0.30 (rear)
+        // either side of the centre line, 15 mm over the crown, fading out over 0.2 at the
+        // nose. No crease under it: the surface stays convex (kit-surface counts a concave
+        // fold a dent).
+        ridge: { half: [0.17, 0.3], rise: 0.015, fade: 0.2 },
+      },
+      wings: {
+        // From behind the face's cheeks and their lamp pockets (`face.s` + 3.4 cm) to the
+        // door's front edge [D side x 103-470]; 1.08 off the centre line [D front 1.095, plan
+        // 1.077], rounding in to the cheeks' edge 1.04 at the face; the brow over the arch
+        // 1.34-1.38 [D side y 265]; the bottom 0.74 ahead of the arch, 0.78 behind it [D side y 420].
+        s0: 0.28,
+        s1: 1.77,
+        outer: 1.08,
+        nose: 1.04, // the cheeks' edge: their white runs on round the nose from there (`face`)
+        taper: 0.19,
+        brow: 1.34,
+        bottom: [0.74, 0.78],
+        cab: 0.89,
+        repeater: [1.56, 1.22, 0.025], // a small round lamp on the flank behind the arch [P F34w]
+        // The arch's lip 3 cm proud, rolling 6 cm back onto the flank [D side: the arch's double line; P].
+        lip: { out: 0.03, wide: 0.06 },
+      },
+      face: {
+        // The cheeks at 0.246 [D side x 103: the face's silhouette is the cheeks'], from the
+        // bumper's top up under the bonnet's nose, the nose 8 cm ahead of them; ±1.04 [D
+        // front: the lamp pods' outer edge 1.08, the wings' front 0.98]; white [owner, §6 F1;
+        // P F34w]. Moved forward from 0.326 (owner, 2026-10-28: the face sat in, the bonnet
+        // hanging over it like a peak and the bumper standing out).
+        s: 0.246,
+        half: 1.04,
+        y: [0.84, 1.42],
+        corner: 0.17, // the top corners round down past the indicators, the painted wings over them [P F34w; owner 2026-10-28]
+        colour: 0xe2dfd4,
+        // A long slot under the top, two rows of five, two wide intakes over the bumper [P
+        // F34w; D front's rows y 352-365, 385-395, 415-445].
+        slots: [
+          { y: [1.285, 1.33], half: 0.44, count: 1, gap: 0 },
+          { y: [1.19, 1.225], half: 0.54, count: 5, gap: 0.025 },
+          { y: [1.12, 1.155], half: 0.54, count: 5, gap: 0.025 },
+          { y: [0.96, 1.05], half: 0.44, count: 2, gap: 0.04 },
+        ],
+        // The nose ±0.66 between the cheeks, one arc in plan from cheek to cheek 6 cm out at
+        // its middle, its top and bottom rolling back on 5 cm rounds; the two rows of five on
+        // a block swelling 2 cm more [owner's refs 2026-10-28; P F34w, F34r; E]: 8 cm at the
+        // middle, its front at 0.166. Its grid lines at most 0.15 apart.
+        nose: { half: 0.66, proud: 0.06, round: 0.05 },
+        noseStep: 0.15,
+        grille: { y: [1.085, 1.26], half: 0.58, proud: 0.02 },
+        // Head lamps 7-inch, the amber indicators over them [D front: rings x 170-245, y
+        // 365-435 read ±0.884, 1.139; P F34w]: the pair centred in the cheek's pocket (owner,
+        // 2026-10-28: not near the edges), ±0.858, 1.09 and 1.26; black rings 18 mm wide
+        // standing 2 cm out of the cheek.
+        head: [0.858, 1.09, 0.09],
+        blinker: [0.858, 1.26, 0.035],
+        ring: 0.018,
+        lampProud: 0.02,
+        // The lamps' sunken pocket filling each cheek [P F34, F34w; owner's refs]: inside a
+        // rim 3.5 cm round the nose, top and bottom and 2 cm at the outer edge, its other
+        // corners rounded 6 cm, its wall sloping in 1 cm to a floor 22 mm deep.
+        pocket: { rim: 0.035, rimOut: 0.02, corner: 0.06, slope: 0.01, depth: 0.022 },
+      },
+      // 0.68-0.84 [D side y 398-433: 0.671-0.817; front 0.693-0.855], ±1.055 [D front],
+      // reaching back to just ahead of the face [D side x 44-95: 0.21; P F34: a deep
+      // channel]; hooks ±0.43 [D front]. Slimmed to 0.72-0.83 (owner, 2026-10-28: too heavy
+      // from the front). Its front corners 0.14 round in plan, its front edges rolled 3 cm
+      // [P F34; owner's refs; E].
+      bumper: { depth: 0.21, half: 1.055, y: [0.72, 0.83], hooks: 0.43, corner: 0.14, roll: 0.03 },
+      markers: { at: [1.86, 0.25], colour: 0xd4891e }, // [P F34: three amber lamps over the screen]
+      // Six segments round every rounded corner, twelve round the arches, sixteen round a lamp.
+      steps: { round: 6, arch: 12, lamp: 16 },
     },
-    wings: {
-      // From behind the face's cheeks and their lamp pockets (`face.s` + 3.4 cm) to the
-      // door's front edge [D side x 103-470]; 1.08 off the centre line [D front 1.095, plan
-      // 1.077], rounding in to the cheeks' edge 1.04 at the face; the brow over the arch
-      // 1.34-1.38 [D side y 265]; the bottom 0.74 ahead of the arch, 0.78 behind it [D side y 420].
-      s0: 0.28,
-      s1: 1.77,
-      outer: 1.08,
-      nose: 1.04, // the cheeks' edge: their white runs on round the nose from there (`face`)
-      taper: 0.19,
-      brow: 1.34,
-      bottom: [0.74, 0.78],
-      cab: 0.89,
-      repeater: [1.56, 1.22, 0.025], // a small round lamp on the flank behind the arch [P F34w]
-    },
-    face: {
-      // The cheeks at 0.246 [D side x 103: the face's silhouette is the cheeks'], from the
-      // bumper's top up under the bonnet's nose, the nose 8 cm ahead of them; ±1.04 [D
-      // front: the lamp pods' outer edge 1.08, the wings' front 0.98]; white [owner, §6 F1;
-      // P F34w]. Moved forward from 0.326 (owner, 2026-10-28: the face sat in, the bonnet
-      // hanging over it like a peak and the bumper standing out).
-      s: 0.246,
-      half: 1.04,
-      y: [0.84, 1.42],
-      corner: 0.17, // the top corners round down past the indicators, the painted wings over them [P F34w; owner 2026-10-28]
-      colour: 0xe2dfd4,
-      // A long slot under the top, two rows of five, two wide intakes over the bumper [P
-      // F34w; D front's rows y 352-365, 385-395, 415-445].
-      slots: [
-        { y: [1.285, 1.33], half: 0.44, count: 1, gap: 0 },
-        { y: [1.19, 1.225], half: 0.54, count: 5, gap: 0.025 },
-        { y: [1.12, 1.155], half: 0.54, count: 5, gap: 0.025 },
-        { y: [0.96, 1.05], half: 0.44, count: 2, gap: 0.04 },
-      ],
-      // The nose ±0.66 between the cheeks, one arc in plan from cheek to cheek 6 cm out at
-      // its middle, its top and bottom rolling back on 5 cm rounds; the two rows of five on
-      // a block swelling 2 cm more [owner's refs 2026-10-28; P F34w, F34r; E]: 8 cm at the
-      // middle, its front at 0.166.
-      nose: { half: 0.66, proud: 0.06, round: 0.05 },
-      grille: { y: [1.085, 1.26], half: 0.58, proud: 0.02 },
-      // Head lamps 7-inch, the amber indicators over them [D front: rings x 170-245, y
-      // 365-435 read ±0.884, 1.139; P F34w]: the pair centred in the cheek's pocket (owner,
-      // 2026-10-28: not near the edges), ±0.858, 1.09 and 1.26.
-      head: [0.858, 1.09, 0.09],
-      blinker: [0.858, 1.26, 0.035],
-    },
-    // 0.68-0.84 [D side y 398-433: 0.671-0.817; front 0.693-0.855], ±1.055 [D front],
-    // reaching back to just ahead of the face [D side x 44-95: 0.21; P F34: a deep
-    // channel]; hooks ±0.43 [D front]. Slimmed to 0.72-0.83 (owner, 2026-10-28: too heavy
-    // from the front).
-    bumper: { depth: 0.21, half: 1.055, y: [0.72, 0.83], hooks: 0.43 },
-    cab: {
-      markers: [1.86, 0.25], // [P F34: three amber lamps over the screen]
-      step: { s: [1.86, 2.46], y: 0.58, out: 0.98 }, // [D side y 415-455 under the door]
-    },
+    step: { s: [1.86, 2.46], y: 0.58, out: 0.98 }, // [D side y 415-455 under the door]
     // On the left rail behind the cab step, under the toolbox [P S, O; F34 shows the right
     // side bare behind its step]; ~170 l [F], its size [E; O s 2.98-3.93, 0.60-0.96]. The
     // filler on its top at the front outer corner, ahead of the toolbox and under the
@@ -210,7 +237,9 @@ export const BODY_ZIL130: KitBody = {
     // Under the platform's front on the left, its face standing out of the beam [O x
     // 430-505, y 156-190: s 3.12-3.67, 1.03-1.28]; its top 2.5 cm up in the floor plate.
     toolbox: { s: [3.12, 3.67], y: [1.03, 1.285], inner: 0.9 },
-    exhaust: { silencer: [3.0, 3.8], tail: 4.15 }, // [E]
+    // Inside the right rail at 0.55, from the engine's rear down from 0.8 [E].
+    exhaust: { x: -0.24, y: 0.55, top: 0.8, silencer: [3.0, 3.8], tail: 4.15 }, // [E]
+    driveline: { y: 0.76 }, // the gearbox under the cab's floor [E]
     platform: {
       // From 0.07 behind the cab to the truck's tail (6675 [F]); 2.50 over the boards [F
       // width], 2.326 inside [F]; boards 575 over the floor [F: the late cars', one plank
@@ -228,7 +257,15 @@ export const BODY_ZIL130: KitBody = {
       side: 0.575,
       ribs: 2,
     },
-    rearLamps: [6.42, 0.78, 1.0], // [P R34: under the platform's tail, near its sides]
+    // Under the platform's tail, near its sides [P R34]: each a black housing ±0.13 x
+    // ±0.05, the lenses from the outer end indicator 7 cm, brake and tail 6, and the
+    // reversing lamp 5 on the left unit only [P R34].
+    rearLamps: {
+      at: [6.42, 0.78, 1.0],
+      half: [0.13, 0.05],
+      cells: [['blinker', 0.07], ['brake', 0.06], ['tail', 0.06], ['reverse', 0.05]],
+      reverse: 'left',
+    },
     // [P R34]; hanging from a bar under the platform's beam [O]. Shorter than the wheel's
     // hub height off the ground, leaning out at the foot, one behind the wheel and its
     // mirror ahead of it about the axle (s 4.883) [owner's photo, 2026-10-29].

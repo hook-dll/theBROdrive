@@ -66,15 +66,15 @@ export function createPlayerImpacts(ctx: PlayerImpactsContext): PlayerImpacts {
    * along the road is not a high-speed collision with the road.
    */
   const resolvePlayerImpacts = (driving: Vehicle | null): number => {
-    const collider = driving?.collisionCollider ?? ctx.player.collisionCollider;
-    const targetBody = collider.parent();
+    const colliders = driving?.collisionColliders ?? [ctx.player.collisionCollider];
+    const targetBody = colliders[0]!.parent();
     if (targetBody === null) return 0;
     const targetVelocity =
       (driving ? impactVelocityByBody.get(targetBody.handle) : impactPlayerVelocity)
       ?? impactPlayerVelocity;
     ctx.vitals.beginCollisionFrame(driving ? 'car' : 'foot');
 
-    ctx.physics.world.contactPairsWith(collider, (otherCollider) => {
+    for (const collider of colliders) ctx.physics.world.contactPairsWith(collider, (otherCollider) => {
       const otherBody = otherCollider.parent();
       if (otherBody === null) return;
       const otherVehicleVelocity = impactVelocityByBody.get(otherBody.handle);

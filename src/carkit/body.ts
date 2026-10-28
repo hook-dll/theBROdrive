@@ -456,12 +456,17 @@ export class BodyFrame {
     return axle + (axle === this.spec.wheels.rear ? shift[1] : shift[0]);
   }
 
+  /** The axles whose arches the shell cuts: none, or only the front, with wheels standing clear of it (`WheelSpec.outside`). */
+  shellAxles(): number[] {
+    const w = this.spec.wheels;
+    return w.outside === true ? [] : w.outside === 'rear' ? [w.front] : [w.front, w.rear];
+  }
+
   /** Arch top at s for either axle, or -Infinity outside both arches. */
   archY(s: number): number {
     const w = this.spec.wheels;
     let best = -Infinity;
-    if (w.outside) return best;
-    for (const axle of [w.front, w.rear]) {
+    for (const axle of this.shellAxles()) {
       const r = w.radius * this.archFactor(axle);
       const d = s - this.archCentre(axle);
       if (Math.abs(d) > r) continue;
@@ -687,7 +692,7 @@ export function tubColumns(frame: BodyFrame): number[] {
   }
   const w = spec.wheels;
   // Wheels standing clear of the shell (`WheelSpec.outside`) add no arch columns.
-  for (const axle of w.outside ? [] : [w.front, w.rear]) {
+  for (const axle of frame.shellAxles()) {
     const r = w.radius * frame.archFactor(axle);
     const c = frame.archCentre(axle);
     const n = w.archSegments ?? 12;
@@ -977,7 +982,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
 
     // ---- wheel wells ----
     const w = spec.wheels;
-    for (const hub of w.outside ? [] : [w.front, w.rear]) {
+    for (const hub of frame.shellAxles()) {
       const r = w.radius * frame.archFactor(hub);
       const axle = frame.archCentre(hub);
       const archCols = cols.filter((s) => Math.abs(s - axle) <= r);
@@ -1115,7 +1120,8 @@ export function buildShell(frame: BodyFrame): ShellResult {
     // the last corner standing out of the first three's plane, the 0–2 fold would be
     // concave: cut on 1–3.
     const c = centroid(q);
-    const out: Vec3 = Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1]) ? [0, 0, c[2]] : [c[0], c[1] - 0.62, 0];
+    const zEnds = frame.spec.platform === 'truck' ? frame.z((frame.spec.stations[0]!.s + (frame.spec.bootEnd ?? frame.spec.length)) / 2) : 0;
+    const out: Vec3 = Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1]) ? [0, 0, c[2] - zEnds] : [c[0], c[1] - 0.62, 0];
     const lastOut = twist * Math.sign(dot(n, out)) > 0;
     const halves = lastOut ? [[q[0]!, q[1]!, q[3]!], [q[1]!, q[2]!, q[3]!]] : [[q[0]!, q[1]!, q[2]!], [q[0]!, q[2]!, q[3]!]];
     for (const h of halves) shell.face(h, owner, mat, false, lined, knee);
@@ -1399,14 +1405,18 @@ function cutShell(frame: BodyFrame, shell: Shell): ShellResult {
   const { positions, faces } = shell;
   // Outward winding: away from a line along the car at mid height.
   const ref = (p: Vec3): Vec3 => [0, 0.62, p[2]];
+  // Nose and tail plates face along the car, away from the shell's middle: the car's
+  // centre, or a truck cab's own (its back wall stands ahead of the truck's centre, and
+  // faced forward it lined the cab outside the paint: owner, 2026-10-29).
+  const spec = frame.spec;
+  const zEnds = spec.platform === 'truck' ? frame.z((spec.stations[0]!.s + (spec.bootEnd ?? spec.length)) / 2) : 0;
   for (const f of faces) {
     if (f.fixed) continue;
     const pts = f.v.map((i) => positions[i]!);
     const n = newell(pts);
     const c = centroid(pts);
     let out = sub(c, ref(c));
-    // Nose and tail plates face along the car.
-    if (Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1])) out = [0, 0, c[2]];
+    if (Math.abs(n[2]) > Math.abs(n[0]) + Math.abs(n[1])) out = [0, 0, c[2] - zEnds];
     if (dot(n, out) < 0) f.v.reverse();
   }
 
