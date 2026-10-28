@@ -1390,14 +1390,14 @@ function buildDoorHardware(ctx: KitContext): void {
     const m = new PartBuilder().color(mirrorFinish.color);
     if (base) {
       // A black base on the door's skin at the glass's front foot, straddling the belt,
-      // sunk 12 mm into the panel, and a short thick neck from it straight out into the
-      // head beside the glass: no arm (the E34's, owner 2026-10-27).
+      // sunk 12 mm into the panel, its top 7 mm into the head's underside: the head sits on
+      // it, no arm (the E34's, owner 2026-10-27). No neck: the head already spans the base's
+      // x, and a neck box out to the head's centre lay wholly in the head and came out
+      // through its glass and back (owner, 2026-10-28: «в зеркалах торчит какая-то
+      // конструкция»).
       const mountX = skinX(frame, ms, belt - 0.02);
       const black = finishSlot('black');
       m.color(black.color).box(black.slot, [side * (mountX + 0.008), belt + 0.015, hz], [0.02, 0.05, 0.05]);
-      const nx0 = mountX + 0.02;
-      const nx1 = Math.abs(hx);
-      m.color(mirrorFinish.color).box(mirrorFinish.slot, [side * (nx0 + nx1) / 2, hy - 0.01, hz], [(nx1 - nx0) / 2 + 0.01, 0.022, 0.03]);
     } else if (stalk === undefined) {
       // The short arm must start on the actual body surface. `frame.sideX(ms, belt)` is
       // the belt edge, but the shoulder turns in above it; using that point left some
