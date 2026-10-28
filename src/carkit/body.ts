@@ -120,6 +120,9 @@ export interface Section {
   readonly r4: [number, number];
 }
 
+/** The per-station values `BodyFrame` interpolates along the car. */
+type StationKey = 'sill' | 'crease' | 'belt' | 'deck' | 'wSill' | 'wCrease' | 'wBelt' | 'flat' | 'inset' | 'rise' | 'lid' | 'notch' | 'notchWall';
+
 /** Lookups the interior, trim and bay builders share with the shell. */
 export class BodyFrame {
   readonly spec: KitCarSpec;
@@ -128,6 +131,17 @@ export class BodyFrame {
   readonly rearBase: number;
   /** Some station carries a `notch`: the lid's cut line and the deck's rows follow it. */
   private readonly notched: boolean;
+  /**
+   * The stations' lookup tables, [s, value] per station (`station`, `lidX`, `notchWeight`,
+   * `notchWall`), built once: a car's build asks for them tens of thousands of times.
+   */
+  private readonly tables: Readonly<Record<StationKey, readonly (readonly [number, number])[]>>;
+  /**
+   * `station` and `section` by s, frozen: a build asks for the same s again and again
+   * (every row of a column, every point of a strip). Both are pure in s and the spec.
+   */
+  private readonly stationAt = new Map<number, TubStation>();
+  private readonly sectionAt = new Map<number, Section>();
 
   constructor(spec: KitCarSpec) {
     this.spec = spec;
@@ -136,6 +150,25 @@ export class BodyFrame {
     this.cowl = cols[0]!.s;
     this.rearBase = cols[cols.length - 1]!.s;
     this.notched = spec.stations.some((st) => st.notch !== undefined);
+    const st = spec.stations;
+    const car = spec.shoulder;
+    const pillar = spec.cabin.pillar;
+    const of = (value: (x: TubStation) => number): readonly (readonly [number, number])[] => st.map((x) => [x.s, value(x)] as const);
+    this.tables = {
+      sill: of((x) => x.sill),
+      crease: of((x) => x.crease),
+      belt: of((x) => x.belt),
+      deck: of((x) => x.deck),
+      wSill: of((x) => x.wSill),
+      wCrease: of((x) => x.wCrease),
+      wBelt: of((x) => x.wBelt),
+      flat: of((x) => x.flat ?? 0),
+      inset: of((x) => (x.shoulder ?? car).inset),
+      rise: of((x) => (x.shoulder ?? car).rise),
+      lid: of((x) => x.notch ?? x.wBelt - (x.shoulder ?? car).inset - pillar),
+      notch: of((x) => (x.notch === undefined ? 0 : 1)),
+      notchWall: of((x) => x.notchWall ?? NOTCH_WALL),
+    };
   }
 
   /** Car-frame Z of a position along the car. */
@@ -144,37 +177,41 @@ export class BodyFrame {
   }
 
   station(s: number): TubStation {
-    const st = this.spec.stations;
-    const pick = (key: Exclude<keyof TubStation, 'flat' | 'notch' | 'notchWall' | 'corner' | 'shoulder'>): number => table(st.map((x) => [x.s, x[key]] as const), s);
-    const car = this.spec.shoulder;
-    return {
+    const known = this.stationAt.get(s);
+    // The map takes -0 for 0; the station keeps the s it was asked for.
+    if (known && Object.is(known.s, s)) return known;
+    const t = this.tables;
+    const shoulder = Object.freeze({ inset: table(t.inset, s), rise: table(t.rise, s) });
+    const st: TubStation = Object.freeze({
       s,
-      sill: pick('sill'),
-      crease: pick('crease'),
-      belt: pick('belt'),
-      deck: pick('deck'),
-      wSill: pick('wSill'),
-      wCrease: pick('wCrease'),
-      wBelt: pick('wBelt'),
-      flat: table(st.map((x) => [x.s, x.flat ?? 0] as const), s),
-      shoulder: {
-        inset: table(st.map((x) => [x.s, (x.shoulder ?? car).inset] as const), s),
-        rise: table(st.map((x) => [x.s, (x.shoulder ?? car).rise] as const), s),
-      },
-    };
+      sill: table(t.sill, s),
+      crease: table(t.crease, s),
+      belt: table(t.belt, s),
+      deck: table(t.deck, s),
+      wSill: table(t.wSill, s),
+      wCrease: table(t.wCrease, s),
+      wBelt: table(t.wBelt, s),
+      flat: table(t.flat, s),
+      shoulder,
+    });
+    if (!known) this.stationAt.set(s, st);
+    return st;
   }
 
   section(s: number): Section {
+    const known = this.sectionAt.get(s);
+    if (known && Object.is(known.st.s, s)) return known;
     const st = this.station(s);
     const sh = st.shoulder!;
-    return {
-      st,
-      r0: [st.wSill - SILL_BEVEL, st.sill],
-      r1: [st.wSill, st.sill + SILL_BEVEL],
-      r2: [st.wCrease, st.crease],
-      r3: [st.wBelt, st.belt],
-      r4: [st.wBelt - sh.inset, st.belt + sh.rise],
-    };
+    const r0: [number, number] = [st.wSill - SILL_BEVEL, st.sill];
+    const r1: [number, number] = [st.wSill, st.sill + SILL_BEVEL];
+    const r2: [number, number] = [st.wCrease, st.crease];
+    const r3: [number, number] = [st.wBelt, st.belt];
+    const r4: [number, number] = [st.wBelt - sh.inset, st.belt + sh.rise];
+    for (const r of [r0, r1, r2, r3, r4]) Object.freeze(r);
+    const sec: Section = Object.freeze({ st, r0, r1, r2, r3, r4 });
+    if (!known) this.sectionAt.set(s, sec);
+    return sec;
   }
 
   /** Outer half width of the side at height y (between the sill and the belt). */
@@ -347,18 +384,18 @@ export class BodyFrame {
   lidX(s: number): number {
     const pillar = this.spec.cabin.pillar;
     if (!this.notched) return this.section(s).r4[0] - pillar;
-    return table(this.spec.stations.map((st) => [st.s, st.notch ?? st.wBelt - (st.shoulder ?? this.spec.shoulder).inset - pillar] as const), s);
+    return table(this.tables.lid, s);
   }
 
   /** 0 away from notched stations, 1 on one, linear between. */
   private notchWeight(s: number): number {
     if (!this.notched) return 0;
-    return table(this.spec.stations.map((st) => [st.s, st.notch === undefined ? 0 : 1] as const), s);
+    return table(this.tables.notch, s);
   }
 
   /** Width of the wall a notched deck rises in at s (`TubStation.notchWall`), linear between stations. */
   private notchWall(s: number): number {
-    return table(this.spec.stations.map((st) => [st.s, st.notchWall ?? NOTCH_WALL] as const), s);
+    return table(this.tables.notchWall, s);
   }
 
   /** Arch radius over the tyre radius at an axle: the rear's `rearArch` if set, else `arch`. */

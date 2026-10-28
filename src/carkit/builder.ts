@@ -485,13 +485,30 @@ export function cutUnder(positions: readonly number[], colors: readonly number[]
   /** Each output triangle's input triangle, for tags kept per triangle elsewhere. */
   const from: number[] = [];
   for (let t = 0; t < positions.length; t += 9) {
+    // The triangle's box: a triangle clear of every outline's box goes through as it is,
+    // as the cut below would emit it (one piece, its first corner's colour).
+    const x0 = Math.min(positions[t]!, positions[t + 3]!, positions[t + 6]!);
+    const x1 = Math.max(positions[t]!, positions[t + 3]!, positions[t + 6]!);
+    const y0 = Math.min(positions[t + 1]!, positions[t + 4]!, positions[t + 7]!);
+    const y1 = Math.max(positions[t + 1]!, positions[t + 4]!, positions[t + 7]!);
+    const z0 = Math.min(positions[t + 2]!, positions[t + 5]!, positions[t + 8]!);
+    const z1 = Math.max(positions[t + 2]!, positions[t + 5]!, positions[t + 8]!);
+    const clear = (c: { lo: number[]; hi: number[] }): boolean =>
+      x1 < c.lo[0]! || x0 > c.hi[0]! || y1 < c.lo[1]! || y0 > c.hi[1]! || z1 < c.lo[2]! || z0 > c.hi[2]!;
+    if (cutters.every(clear)) {
+      for (let k = 0; k < 9; k++) outPositions.push(positions[t + k]!);
+      for (let k = 0; k < 3; k++) outColors.push(colors[t]!, colors[t + 1]!, colors[t + 2]!);
+      from.push(t / 9);
+      continue;
+    }
     const tri: Vec3[] = [0, 3, 6].map((k): Vec3 => [positions[t + k]!, positions[t + k + 1]!, positions[t + k + 2]!]);
     const facing = unit(newell(tri));
     let pieces: Vec3[][] = [tri];
     for (const c of cutters) {
+      // The cheapest test first: the three are pure.
+      if (clear(c)) continue;
       if (!c.solid && !(Math.abs(dot(facing, c.n)) >= CUT_TURN)) continue;
       if (c.outside(tri, facing)) continue;
-      if ([0, 1, 2].some((a) => Math.max(tri[0]![a]!, tri[1]![a]!, tri[2]![a]!) < c.lo[a]! || Math.min(tri[0]![a]!, tri[1]![a]!, tri[2]![a]!) > c.hi[a]!)) continue;
       const next: Vec3[][] = [];
       for (const piece of pieces) {
         let inside: Vec3[] = piece;

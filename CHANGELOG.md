@@ -4,6 +4,30 @@
 
 ### Changed
 
+- A NEW TRAFFIC MODEL NO LONGER HITCHES THE DRIVE (`render/kitbuild.ts`,
+  `render/kitbuildworker.ts`, `carkit/wire.ts`). The first time the stream drew a kit
+  model, `loadModel` built it on the main thread in one task: 75-195 ms in bun on the M2
+  Pro, a 100-150 ms frame in the game (the comment still said 15-50). The car is now built
+  in a worker and sent back as plain data (`writeKitWire`: every node, transform, flag and
+  userData, every attribute's array transferred, shared geometry kept shared), read into
+  the scene on a frame of its own in under 1 ms (`readKitWire`); the round trip gives the
+  very scene `buildKitCar` made, every car checked to the byte. With no worker (or one that
+  fails) the car is built on the main thread as before, and a headless tool's worker no
+  longer keeps the process alive once idle. `buildTemplate` now takes two frames (fit and
+  measure; the draw merge). Longest single main-thread step per new model, headless bun
+  (`loadCarModel`, all 28): 70-182 ms before, 5-27 ms now (the high end the first few
+  models while the code is cold; 5-13 ms once warm).
+
+- KIT CARS BUILD TWICE AS FAST, EVERY CAR IDENTICAL. `buildKitCar` warm in bun, M2 Pro:
+  vaz2112 196 → 83 ms, 2110 185 → 85, GAZ-24 152 → 82, E34 143 → 66, 2108 75 → 44. Same
+  geometry to the byte on every car (every attribute, node, transform and userData hashed
+  against the previous build). `BodyFrame` keeps its station tables and each s's
+  `station` / `section` (`body.ts`); the wipers' ten thousand rays at the windscreen go
+  through `PaneProbe` (`carkit/paneprobe.ts`), which gives three's raycast's own answer but
+  tries only the triangles near each ray; `simplifyFlats` welds by integer cells in a hash
+  table, not strings; `cutUnder` passes a triangle clear of every outline straight
+  through; `fitPlace` gathers the triangles near a place once, not on every pass.
+
 - EVERY THING RIDES IN EVERY CAR; BOOT CELLS ONE SIZE (`vehicle/trunk.ts`). A boot cell is
   0.34 × 0.26 m on every car (`TRUNK_CELL_WIDTH`, `TRUNK_CELL_HEIGHT`: the 2109-wide 4×2
   boot's cell), and a car's grid is its cells at that size, centred, no longer stretched

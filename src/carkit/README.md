@@ -155,6 +155,8 @@ from the angle he complained about; changes are judged there, not in code.
 | `bay.ts` | Engine bay (`kit_bay`), boot (`kit_boot`), underbody (`kit_under`); the exhaust (`exhaust_trim` on the root, outside the detail groups: drawn at every distance, baked into the mid and far meshes). The exhaust is one rule on every car (`exhaust`): the pipe (Ø36, its section standing on a corner) runs `EXHAUST_GAP` (10 mm) under the shell's floor, wherever that floor is, from the down-pipe through a flat oval resonator (0.11 × 0.06) inside the floor crossmembers, dips under the rear axle (and the classic's Panhard rod) or the Samara's beam, and climbs behind it into a flat oval silencer (0.30 × 0.07, at the back of its room, where the floor has risen); the tail pipe leaves under the tail's floor and exits at the right rear under the bumper's foot (exterior.ts `bumperFoot`). Nothing of it goes below 2 mm over the clearance (`exhaustLow`): where the floor stands too low for that (the Nivas, the Oka, a sill drawn low), the pipe rises into the floor and a can stands up into it (`TUNNEL_RISE`, 12 mm over it, under the cabin's carpet), as a real tunnel takes them. The UAZs' high floors follow the same rule (it replaced their `exhaustTuck`). The bay is laid out in a `BayRoom`: under the bonnet (`bonnetRoom`, the shell's walls round it), or on a van in the cabin under the engine cover (`coverRoom`, interior.ts `engineCoverRoom`), with the same four bonnet cells. |
 | `wheels.ts` | The kit's own placeholder wheel (tyre on a plain steel disc): sets where the wheels stand and their size. |
 | `simplify.ts` | `simplifyFlats`: the finished car's flat runs merged into the fewest, fattest triangles and zero-area ones dropped (step 9 of [How the body is built](#how-the-body-is-built)). |
+| `paneprobe.ts` | `PaneProbe`: the glass under a point exactly as three's raycast finds it, trying only the triangles near the ray (the wipers' fitting, `buildWipers`). |
+| `wire.ts` | `writeKitWire` / `readKitWire`: a built car as plain data and back, the same scene to the bit, its vertex arrays transferable (render/kitbuild.ts sends cars from the build worker). |
 | `materials.ts` | The one kit material (`kitBodyMaterial`) and the glass; `KIT_SLOT_FINISH`, each slot's colour, finish and lamp role; `finishKitSurfaces`, which writes a built mesh's slot into its vertices, and the interior trim's family role ([Draw calls](#draw-calls-one-car-three-draws), [Interior trims](#interior-trims-per-car)). |
 | `trims.ts` | Interior trims: the muted palette (`INTERIOR_TRIMS`), which a model may have (`kitTrimOptions`: its own look's first), and the tint a car applies (`kitTrimTint`). See [Interior trims](#interior-trims-per-car). |
 | `names.ts` | Node names the catalogue selects by (wheels, lamps, glass). No imports, so the catalogue can include it. |
@@ -180,7 +182,10 @@ Integration outside the folder:
   `setDetail` (the distance from `Vehicle.viewFrom`'s eye, which main.ts gives once a frame
   with the car the player sits in, whose fine detail always draws) and `update`. The rig,
   not the `STEERING_WHEEL_NODE` path, turns a kit car's wheel.
-- `render/carmodel.ts`: `loadModel` calls `buildKitCar` on a frame of its own. Clear glass
+- `render/carmodel.ts`: `loadModel` asks render/kitbuild.ts for the car, which builds it in
+  a worker (render/kitbuildworker.ts, `buildKitCar`) and sends it as a wire (`wire.ts`);
+  the loader reads it into the scene on a frame of its own (under a millisecond). Without
+  a worker (the headless tools) it calls `buildKitCar` on a frame of its own. Clear glass
   comes from `carClearGlassMaterial`. A detail mesh (cabin, bay, boot, underbody, and the
   exhaust, which is not a detail part) with `userData.kitShadowed` receives shadows and
   casts none; one with `userData.kitCastsNone` (the mirror face) casts none (written into

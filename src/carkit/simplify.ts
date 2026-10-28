@@ -27,12 +27,84 @@ const ZERO = 1e-8;
 
 type V3 = [number, number, number];
 
-const key = (x: number, y: number, z: number): string => `${Math.round(x / WELD)},${Math.round(y / WELD)},${Math.round(z / WELD)}`;
+/** A coordinate's weld cell: points in one cell (per axis) are one corner. */
+function cell(c: number): number {
+  const k = Math.round(c / WELD);
+  // Int32 below holds the cells of any car (21 km); a NaN or a stray point would not fit.
+  if (!(Math.abs(k) < 2 ** 31)) throw new Error(`simplifyFlats: coordinate ${c} is no weld cell`);
+  return k;
+}
 
-/** Every key within one weld step of a point: two corners a hair apart may round apart. */
-function near(p: V3, visit: (k: string) => boolean): boolean {
-  const [x, y, z] = p.map((c) => Math.round(c / WELD)) as V3;
-  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) if (visit(`${x + i},${y + j},${z + k}`)) return true;
+/** Missing from a `WeldMap`. */
+const NONE = -(2 ** 31);
+
+/**
+ * Integers by weld cell (x, y, z): an open-addressed table of the cells' integer triples,
+ * for the millions of lookups a car's merge makes (string keys were a fifth of a build).
+ * Values are int32s other than `NONE`.
+ */
+class WeldMap {
+  private keys = new Int32Array(0);
+  private values = new Int32Array(0);
+  private mask = -1;
+  private size = 0;
+
+  constructor(expected: number) {
+    let capacity = 16;
+    while (capacity < expected * 2) capacity *= 2;
+    this.allocate(capacity);
+  }
+
+  private allocate(capacity: number): void {
+    this.keys = new Int32Array(capacity * 3);
+    this.values = new Int32Array(capacity).fill(NONE);
+    this.mask = capacity - 1;
+  }
+
+  private slot(x: number, y: number, z: number): number {
+    let i = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) & this.mask;
+    for (;;) {
+      if (this.values[i] === NONE) return i;
+      const k = i * 3;
+      if (this.keys[k] === x && this.keys[k + 1] === y && this.keys[k + 2] === z) return i;
+      i = (i + 1) & this.mask;
+    }
+  }
+
+  /** The value at cell (x, y, z), or `NONE`. */
+  get(x: number, y: number, z: number): number {
+    return this.values[this.slot(x, y, z)]!;
+  }
+
+  set(x: number, y: number, z: number, value: number): void {
+    let i = this.slot(x, y, z);
+    if (this.values[i] === NONE) {
+      if ((this.size + 1) * 2 > this.mask + 1) {
+        const { keys, values } = this;
+        this.allocate((this.mask + 1) * 2);
+        for (let j = 0; j < values.length; j++) {
+          if (values[j] === NONE) continue;
+          const at = this.slot(keys[j * 3]!, keys[j * 3 + 1]!, keys[j * 3 + 2]!);
+          this.keys.set(keys.subarray(j * 3, j * 3 + 3), at * 3);
+          this.values[at] = values[j]!;
+        }
+        i = this.slot(x, y, z);
+      }
+      this.size++;
+      this.keys[i * 3] = x;
+      this.keys[i * 3 + 1] = y;
+      this.keys[i * 3 + 2] = z;
+    }
+    this.values[i] = value;
+  }
+}
+
+/** Every cell within one weld step of a point: two corners a hair apart may round apart. */
+function near(p: V3, visit: (x: number, y: number, z: number) => boolean): boolean {
+  const x = cell(p[0]);
+  const y = cell(p[1]);
+  const z = cell(p[2]);
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) if (visit(x + i, y + j, z + k)) return true;
   return false;
 }
 
@@ -56,23 +128,25 @@ export function simplifyFlats(root: THREE.Object3D): void {
     meshes.push(mesh);
   });
   // Which mesh has a corner at each place in the car frame (-1: more than one).
-  const owners = new Map<string, number>();
+  let corners = 0;
+  for (const mesh of meshes) corners += mesh.geometry.getAttribute('position').count;
+  const owners = new WeldMap(corners / 4);
   const v = new THREE.Vector3();
   meshes.forEach((mesh, m) => {
     const p = mesh.geometry.getAttribute('position');
     for (let i = 0; i < p.count; i++) {
       v.fromBufferAttribute(p, i).applyMatrix4(mesh.matrixWorld);
-      const k = key(v.x, v.y, v.z);
-      const o = owners.get(k);
-      if (o === undefined) owners.set(k, m);
-      else if (o !== m) owners.set(k, -1);
+      const [x, y, z] = [cell(v.x), cell(v.y), cell(v.z)];
+      const o = owners.get(x, y, z);
+      if (o === NONE) owners.set(x, y, z, m);
+      else if (o !== m) owners.set(x, y, z, -1);
     }
   });
   meshes.forEach((mesh, m) => {
     const world = (p: V3): V3 => v.set(...p).applyMatrix4(mesh.matrixWorld).toArray() as V3;
-    simplifyMesh(mesh.geometry, (p) => near(world(p), (k) => {
-      const o = owners.get(k);
-      return o !== undefined && o !== m;
+    simplifyMesh(mesh.geometry, (p) => near(world(p), (x, y, z) => {
+      const o = owners.get(x, y, z);
+      return o !== NONE && o !== m;
     }));
   });
 }
@@ -88,15 +162,15 @@ function simplifyMesh(geometry: THREE.BufferGeometry, shared: (p: V3) => boolean
   const tags = geometry.userData.prov as unknown[] | undefined;
   // Weld.
   const pts: V3[] = [];
-  const ids = new Map<string, number>();
+  const ids = new WeldMap(pos.count / 4);
   const corner = (i: number): number => {
     const p: V3 = [pos.getX(i), pos.getY(i), pos.getZ(i)];
-    const k = key(...p);
-    let id = ids.get(k);
-    if (id === undefined) {
+    const [x, y, z] = [cell(p[0]), cell(p[1]), cell(p[2])];
+    let id = ids.get(x, y, z);
+    if (id === NONE) {
       id = pts.length;
       pts.push(p);
-      ids.set(k, id);
+      ids.set(x, y, z, id);
     }
     return id;
   };
@@ -104,18 +178,15 @@ function simplifyMesh(geometry: THREE.BufferGeometry, shared: (p: V3) => boolean
   const colour: number[] = [];
   const from: number[] = [];
   const alive: boolean[] = [];
-  const at = new Map<number, Set<number>>();
+  /** The live triangles at each corner, in the order they came. */
+  const at: (Set<number> | undefined)[] = [];
   const add = (t: [number, number, number], c: number, f: number): void => {
     const n = tris.length;
     tris.push(t);
     colour.push(c);
     from.push(f);
     alive.push(true);
-    for (const q of t) {
-      let s = at.get(q);
-      if (!s) at.set(q, (s = new Set()));
-      s.add(n);
-    }
+    for (const q of t) (at[q] ??= new Set()).add(n);
   };
   const normal = (t: readonly number[]): V3 => cross(sub(pts[t[1]!]!, pts[t[0]!]!), sub(pts[t[2]!]!, pts[t[0]!]!));
   for (let i = 0; i < pos.count; i += 3) {
@@ -129,23 +200,23 @@ function simplifyMesh(geometry: THREE.BufferGeometry, shared: (p: V3) => boolean
 
   const kill = (n: number): void => {
     alive[n] = false;
-    for (const q of tris[n]!) at.get(q)!.delete(n);
+    for (const q of tris[n]!) at[q]!.delete(n);
   };
 
-  /** Takes out vertex `c` if its fan is flat; true when it did. */
-  const remove = (c: number): boolean => {
-    const fan = [...(at.get(c) ?? [])];
-    if (fan.length < 2) return false;
+  /** Takes out vertex `c` if its fan is flat: the fan's triangles it took out, or null. */
+  const remove = (c: number): number[] | null => {
+    const fan = [...(at[c] ?? [])];
+    if (fan.length < 2) return null;
     const tint = colour[fan[0]!]!;
-    if (fan.some((n) => colour[n] !== tint)) return false;
+    if (fan.some((n) => colour[n] !== tint)) return null;
     // The plane: area-weighted normal through the vertex.
     const sum: V3 = [0, 0, 0];
     const normals = fan.map((n) => normal(tris[n]!));
     for (const nn of normals) for (let k = 0; k < 3; k++) sum[k] += nn[k]!;
     const ln = len(sum);
-    if (ln < ZERO) return false;
+    if (ln < ZERO) return null;
     const n: V3 = [sum[0] / ln, sum[1] / ln, sum[2] / ln];
-    if (normals.some((nn) => dot(nn, n) < NORMALS * len(nn))) return false;
+    if (normals.some((nn) => dot(nn, n) < NORMALS * len(nn))) return null;
     // The ring: each triangle turned to start at the vertex, (c, p, q) counter-clockwise.
     const next = new Map<number, number>();
     const prev = new Map<number, number>();
@@ -153,12 +224,12 @@ function simplifyMesh(geometry: THREE.BufferGeometry, shared: (p: V3) => boolean
       const r = t.indexOf(c);
       const p = t[(r + 1) % 3]!;
       const q = t[(r + 2) % 3]!;
-      if (next.has(p) || prev.has(q)) return false;
+      if (next.has(p) || prev.has(q)) return null;
       next.set(p, q);
       prev.set(q, p);
     }
     const starts = [...next.keys()].filter((p) => !prev.has(p));
-    if (starts.length > 1) return false;
+    if (starts.length > 1) return null;
     const ring: number[] = [];
     let p = starts[0] ?? fan.map((k) => tris[k]!).map((t) => t[(t.indexOf(c) + 1) % 3]!)[0]!;
     const first = p;
@@ -166,43 +237,48 @@ function simplifyMesh(geometry: THREE.BufferGeometry, shared: (p: V3) => boolean
       ring.push(p);
       const q = next.get(p);
       if (q === undefined || q === first) break;
-      if (ring.length > fan.length) return false;
+      if (ring.length > fan.length) return null;
       p = q;
     }
     const open = starts.length === 1;
-    if (ring.length !== fan.length + (open ? 1 : 0)) return false;
+    if (ring.length !== fan.length + (open ? 1 : 0)) return null;
     const o = pts[c]!;
-    if (ring.some((r) => Math.abs(dot(sub(pts[r]!, o), n)) > PLANE)) return false;
+    if (ring.some((r) => Math.abs(dot(sub(pts[r]!, o), n)) > PLANE)) return null;
     if (open) {
       // On an open edge: only where the edge runs straight on and nothing else meets it.
       const a = pts[ring[0]!]!;
       const b = pts[ring[ring.length - 1]!]!;
       const ab = sub(b, a);
       const t = dot(sub(o, a), ab) / dot(ab, ab);
-      if (t <= 0 || t >= 1 || len(cross(sub(o, a), ab)) / len(ab) > LINE) return false;
-      if (shared(o) || near(o, (k) => ids.get(k) !== undefined && ids.get(k) !== c)) return false;
+      if (t <= 0 || t >= 1 || len(cross(sub(o, a), ab)) / len(ab) > LINE) return null;
+      if (shared(o) || near(o, (x, y, z) => {
+        const id = ids.get(x, y, z);
+        return id !== NONE && id !== c;
+      })) return null;
     }
     const filled = fill(ring.map((r) => pts[r]!), n);
-    if (!filled) return false;
+    if (!filled) return null;
     const tag = from[fan[0]!]!;
     for (const k of fan) kill(k);
     for (const [i, j, k] of filled) add([ring[i]!, ring[j]!, ring[k]!], tint, tag);
-    return true;
+    return fan;
   };
 
   // Every vertex once, then again around whatever moved, until nothing does.
   const queue = pts.map((_, i) => i);
-  const queued = new Set(queue);
+  const queued = new Uint8Array(pts.length).fill(1);
   for (let head = 0; head < queue.length; head++) {
     const c = queue[head]!;
-    queued.delete(c);
-    const ring = new Set<number>();
-    for (const n of at.get(c) ?? []) for (const q of tris[n]!) if (q !== c) ring.add(q);
-    if (!remove(c)) continue;
+    queued[c] = 0;
+    const fan = remove(c);
+    if (!fan) continue;
     changed = true;
+    // The corners round the vertex taken out, each once, in index order.
+    const ring = new Set<number>();
+    for (const n of fan) for (const q of tris[n]!) if (q !== c) ring.add(q);
     for (const q of [...ring].sort((a, b) => a - b)) {
-      if (!queued.has(q)) {
-        queued.add(q);
+      if (!queued[q]) {
+        queued[q] = 1;
         queue.push(q);
       }
     }

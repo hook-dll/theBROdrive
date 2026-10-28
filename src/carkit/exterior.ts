@@ -16,6 +16,7 @@ import { PartBuilder, clipPolygon, lerp, table, type Caps, type KitSlot, type Ou
 import { addBuilt, addMirrorFace, mirrorFrame, pivotGroup, type KitContext } from './context';
 import { SILL_BEVEL, skinX, tubColumns, type BodyFrame, type KitHole } from './body';
 import { driverEyeAt } from './interior';
+import { PaneProbe } from './paneprobe';
 import type { CornerLampPoint, FaceAnchor, FaceItem, FaceLook, FaceX, FaceY, Finish, LampRole, Span } from './spec';
 import type { KitControl } from './rig';
 
@@ -1576,8 +1577,9 @@ function buildWipers(ctx: KitContext): void {
   const inward = up.clone().multiplyScalar(fromHeader ? -1 : 1);
   /** The way an arm lies parked: to the left, or to the right hanging from the header. */
   const parkWay = across.clone().multiplyScalar(fromHeader ? -1 : 1);
+  const RAY_FAR = 0.6;
   const ray = new THREE.Raycaster();
-  ray.far = 0.6;
+  ray.far = RAY_FAR;
   const origin = new THREE.Vector3();
   const down = new THREE.Vector3();
   /** The surface of `target` under `q`, along `n`. */
@@ -1585,14 +1587,21 @@ function buildWipers(ctx: KitContext): void {
     ray.set(origin.copy(q).addScaledVector(n, 0.3), down.copy(n).negate());
     return ray.intersectObject(target, false)[0];
   };
+  // The fitting below casts some ten thousand rays at the glass: the probe finds what
+  // `under(pane, …)` would, trying only the triangles near each ray (paneprobe.ts).
+  if (!(pane as THREE.Mesh).isMesh) throw new Error(`Kit car "${spec.id}": the shell's glass is not a mesh`);
+  const probe = new PaneProbe(pane as THREE.Mesh, screenNormal);
+  /** The glass under `q`, along `n`: a new point, or undefined. */
+  const glassUnder = (q: THREE.Vector3, n: THREE.Vector3): THREE.Vector3 | undefined =>
+    probe.hit(origin.copy(q).addScaledVector(n, 0.3), down.copy(n).negate(), RAY_FAR);
   const blade = cabin.wiperBlade;
   const q = new THREE.Vector3();
   const m = new THREE.Vector3();
   const onPane = (point: THREE.Vector3, n: THREE.Vector3): boolean =>
-    !!under(pane, m.copy(point).addScaledVector(inward, WIPER_EDGE), n)
-    && !!under(pane, m.copy(point).addScaledVector(inward, -WIPER_FOOT), n)
-    && !!under(pane, m.copy(point).addScaledVector(across, WIPER_EDGE), n)
-    && !!under(pane, m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
+    !!glassUnder(m.copy(point).addScaledVector(inward, WIPER_EDGE), n)
+    && !!glassUnder(m.copy(point).addScaledVector(inward, -WIPER_FOOT), n)
+    && !!glassUnder(m.copy(point).addScaledVector(across, WIPER_EDGE), n)
+    && !!glassUnder(m.copy(point).addScaledVector(across, -WIPER_EDGE), n);
 
   // A single wiper (`CabinSpec.wipers`) on the driver's spindle.
   for (const [i, pivotX] of (cabin.wipers === 1 ? WIPER_PIVOTS.slice(0, 1) : WIPER_PIVOTS).entries()) {
@@ -1601,7 +1610,7 @@ function buildWipers(ctx: KitContext): void {
     const from = fromHeader ? new THREE.Vector3(px, head.y, head.z) : new THREE.Vector3(px, base.y, base.z);
     const start = from.addScaledVector(inward, -0.1);
     let edge: THREE.Vector3 | undefined;
-    for (let t = 0; t < 0.4 && !edge; t += 0.002) edge = under(pane, q.copy(start).addScaledVector(inward, t), screenNormal)?.point;
+    for (let t = 0; t < 0.4 && !edge; t += 0.002) edge = glassUnder(q.copy(start).addScaledVector(inward, t), screenNormal);
     if (!edge) throw new Error(`Kit car "${spec.id}": no windscreen at wiper ${i}'s spindle`);
     const at = edge.addScaledVector(inward, -WIPER_PIVOT_BELOW);
 
@@ -1618,8 +1627,8 @@ function buildWipers(ctx: KitContext): void {
       out.copy(at).addScaledVector(park, r * Math.cos(phi)).addScaledVector(rise, r * Math.sin(phi));
     /** The glass's height over the arm's plane at angle `phi`, radius `r`. */
     const glassAt = (phi: number, r: number): number | undefined => {
-      const hit = under(pane, point(phi, r, q), n);
-      return hit ? hit.point.sub(at).dot(n) : undefined;
+      const hit = glassUnder(point(phi, r, q), n);
+      return hit ? hit.sub(at).dot(n) : undefined;
     };
     const radii = (arm: number, count: number): number[] =>
       Array.from({ length: count + 1 }, (_, k) => arm - blade / 2 + (blade * k) / count);

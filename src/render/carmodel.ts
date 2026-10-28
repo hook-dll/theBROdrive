@@ -47,6 +47,8 @@ import {
 } from '../vehicle/carpaint';
 import { lampLensAnchors } from '../vehicle/vehiclelamps';
 import { buildKitCar } from '../carkit/kit';
+import { readKitWire } from '../carkit/wire';
+import { buildKitWire } from './kitbuild';
 import { kitBodyMaterial } from '../carkit/materials';
 import { INTERIOR_TRIMS, kitTrimOption, kitTrimOptions, kitTrimTint } from '../carkit/trims';
 import { buildRimWheel, isGeneratedWheelSet, rimDesign } from '../carkit/rims';
@@ -1373,8 +1375,17 @@ function creaseCarBodyNormals(scene: THREE.Group): void {
   });
 }
 
-/** Measures a loaded scene and splits it into a body template plus wheel templates. */
-function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
+/**
+ * Measures a loaded scene and splits it into a body template plus wheel templates, over
+ * two frames of its own (`onOwnFrame`): the body fitted, measured and its normals and
+ * materials prepared (2-5 ms on a kit car); then its draw merged (`prepareKitDraw`,
+ * 5-15 ms, up to 25 on the first models while the code is cold). As one task it was
+ * 10-45 ms (headless bun, 2026-10-28), the longest step of a model's load once the
+ * build had left the main thread. The scene is the load's own until the template is
+ * returned.
+ */
+async function buildTemplate(def: CarModelDef, scene: THREE.Group): Promise<Template> {
+  await onOwnFrame(() => undefined);
   if (def.yaw) applyModelYaw(scene, def.yaw);
   // Normalized assets already carry one mesh per independently controlled lamp.
   isolateGlass(scene, def);
@@ -1580,6 +1591,7 @@ function buildTemplate(def: CarModelDef, scene: THREE.Group): Template {
 
   prepareMaterials(scene, true, lensNames(def));
   stampCarBodyPositions(scene, def);
+  await onOwnFrame(() => undefined);
   // A kit body merges whole into one skinned mesh per material (render/kitdraw.ts) and
   // keeps its parts as pick proxies; any other body merges its static lenses and trim.
   const kit = def.kit ? prepareKitDraw(scene) : null;
@@ -1683,6 +1695,18 @@ function onOwnFrame<T>(work: () => T): Promise<T> {
   return run;
 }
 
+/**
+ * A kit car's scene. Building one is 45-85 ms in bun on the M2 Pro (2026-10-28; it had
+ * grown to 75-195 ms, a 100-150 ms hitch in the game whenever a new traffic model
+ * appeared), so it is built in a worker (render/kitbuild.ts) and only read back here, on
+ * a frame of its own, in about a millisecond. Without a worker (or with one that failed)
+ * it is built here, on a frame of its own.
+ */
+async function kitScene(kit: string): Promise<THREE.Group> {
+  const wire = await buildKitWire(kit);
+  return onOwnFrame(() => (wire ? readKitWire(wire) : buildKitCar(kit)));
+}
+
 function loadModel(def: CarModelDef): Promise<void> {
   if (templates.has(def.id)) return Promise.resolve();
   const pending = modelLoads.get(def.id);
@@ -1692,11 +1716,11 @@ function loadModel(def: CarModelDef): Promise<void> {
   // the file, preparing its materials and measuring its body are each several
   // milliseconds of main thread and used to run as one task — a single dropped frame
   // of 25-40 ms per new model — so each step after the parse takes a frame of its own.
-  // A kit body is generated rather than parsed (15-50 ms on the M2 Pro), on its own too.
+  // A kit body is generated rather than parsed: see `kitScene`.
   const load = (async () => {
     if (def.textureFile) await loadPalette(def.textureFile);
     const kit = def.kit;
-    const scene = kit ? await onOwnFrame(() => buildKitCar(kit)) : await loadScene(def.file);
+    const scene = kit ? await kitScene(kit) : await loadScene(def.file);
     await onOwnFrame(() => {
       if (def.textureFile) {
         applyTexture(scene, paletteTextures.get(def.textureFile)!);
@@ -1704,7 +1728,7 @@ function loadModel(def: CarModelDef): Promise<void> {
       tuneMaps(scene);
       unifyCarMaterials(scene, def);
     });
-    templates.set(def.id, await onOwnFrame(() => buildTemplate(def, scene)));
+    templates.set(def.id, await buildTemplate(def, scene));
   })().catch((error) => {
     modelLoads.delete(def.id);
     throw error;

@@ -80,29 +80,43 @@ function fitPlace(node: THREE.Object3D, meshes: readonly THREE.Mesh[]): void {
     return _bounds.copy(mesh.geometry.boundingBox!).applyMatrix4(mesh.matrixWorld).intersectsBox(reach);
   });
 
+  // The room only shrinks from pass to pass, so a triangle whose box misses the first
+  // room (or that has no area) never touches it: the passes go over the rest, in the node's
+  // frame, in the meshes' order.
+  const first = new THREE.Box3(new THREE.Vector3(room.x0, PLACE_LIFT, room.z0), new THREE.Vector3(room.x1, room.height, room.zo)).expandByScalar(1e-6);
+  const tris: number[] = [];
+  for (const mesh of near) {
+    _m.multiplyMatrices(inverse, mesh.matrixWorld);
+    const position = mesh.geometry.getAttribute('position');
+    const index = mesh.geometry.getIndex();
+    const count = index ? index.count : position.count;
+    for (let i = 0; i < count; i += 3) {
+      _a.fromBufferAttribute(position, index ? index.getX(i) : i).applyMatrix4(_m);
+      _b.fromBufferAttribute(position, index ? index.getX(i + 1) : i + 1).applyMatrix4(_m);
+      _c.fromBufferAttribute(position, index ? index.getX(i + 2) : i + 2).applyMatrix4(_m);
+      _tri.set(_a, _b, _c);
+      if (_tri.getArea() < 1e-10) continue;
+      if (!_w.setFromPoints([_a, _b, _c]).intersectsBox(first)) continue;
+      tris.push(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, _c.x, _c.y, _c.z);
+    }
+  }
+
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let cut = false;
-    for (const mesh of near) {
-      _m.multiplyMatrices(inverse, mesh.matrixWorld);
-      const position = mesh.geometry.getAttribute('position');
-      const index = mesh.geometry.getIndex();
-      const count = index ? index.count : position.count;
-      for (let i = 0; i < count; i += 3) {
-        _a.fromBufferAttribute(position, index ? index.getX(i) : i).applyMatrix4(_m);
-        _b.fromBufferAttribute(position, index ? index.getX(i + 1) : i + 1).applyMatrix4(_m);
-        _c.fromBufferAttribute(position, index ? index.getX(i + 2) : i + 2).applyMatrix4(_m);
-        _tri.set(_a, _b, _c);
-        if (_tri.getArea() < 1e-10) continue;
-        _box.min.set(room.x0, PLACE_LIFT, room.z0);
-        _box.max.set(room.x1, room.height, room.zo);
-        if (!_box.intersectsTriangle(_tri)) continue;
-        _w.setFromPoints([_a, _b, _c]).intersect(_box);
-        if (!cutRoom(room, _w)) {
-          node.removeFromParent();
-          return;
-        }
-        cut = true;
+    for (let i = 0; i < tris.length; i += 9) {
+      _a.set(tris[i]!, tris[i + 1]!, tris[i + 2]!);
+      _b.set(tris[i + 3]!, tris[i + 4]!, tris[i + 5]!);
+      _c.set(tris[i + 6]!, tris[i + 7]!, tris[i + 8]!);
+      _tri.set(_a, _b, _c);
+      _box.min.set(room.x0, PLACE_LIFT, room.z0);
+      _box.max.set(room.x1, room.height, room.zo);
+      if (!_box.intersectsTriangle(_tri)) continue;
+      _w.setFromPoints([_a, _b, _c]).intersect(_box);
+      if (!cutRoom(room, _w)) {
+        node.removeFromParent();
+        return;
       }
+      cut = true;
     }
     if (!cut) {
       store(node, room);
