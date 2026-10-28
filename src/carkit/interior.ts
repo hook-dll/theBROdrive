@@ -2674,7 +2674,22 @@ class Cabin {
     if (L.wood) {
       const [y0, y1] = L.wood;
       const m = this.fascia(0, belt + (y0 + y1) / 2);
-      b.color(COLOURS.wood).push(m.matrix).box('trim', [0, 0, 0.002], [half - 0.01, (y1 - y0) / 2, 0.002]).pop();
+      b.color(COLOURS.wood).push(m.matrix);
+      const e = half - 0.01;
+      const glove = this.woodOnGlovebox();
+      if (!glove) {
+        b.box('trim', [0, 0, 0.002], [e, (y1 - y0) / 2, 0.002]);
+      } else {
+        // Broken at the glovebox's lid, which carries its own piece (`glovebox`): run on
+        // under it, the strip crossed the opening when the lid fell open (owner,
+        // 2026-10-28: «когда открываешь — лента видна целиком»). The mount's local X is
+        // the car's -x.
+        const [g0, g1] = [-this.lay.glovebox.x - this.lay.glovebox.half[0], -this.lay.glovebox.x + this.lay.glovebox.half[0]];
+        for (const [xa, xb] of [[-e, Math.min(g0, e)], [Math.max(g1, -e), e]] as const) {
+          if (xb - xa > 1e-4) b.box('trim', [(xa + xb) / 2, 0, 0.002], [(xb - xa) / 2, (y1 - y0) / 2, 0.002]);
+        }
+      }
+      b.pop();
     }
     if (L.band) {
       // Left out where the binnacle stands (its width, its section's height): seen at a
@@ -2949,9 +2964,24 @@ class Cabin {
       if (colour === undefined) slot = this.dashSurface(b, shade(this.spec.look.dash, 1.15));
       else b.color(colour);
       pad(b, slot, [0, 0, 0.007], [hx, hy, 0.007], 0.005);
+      // The fascia's wood strip across the lid, on the lid (`woodOnGlovebox`).
+      const wood = this.woodOnGlovebox();
+      if (wood) b.color(COLOURS.wood).box('trim', [0, (wood[0] + wood[1]) / 2 - dy, 0.016], [hx - 0.005, (wood[1] - wood[0]) / 2, 0.002]);
       b.color(COLOURS.black).box('chrome', [0, hy - 0.018, 0.016], [0.03, 0.006, 0.003]);
       b.pop();
     }));
+  }
+
+  /**
+   * Where the fascia's `wood` strip crosses the glovebox's lid: its [bottom, top] dy within
+   * the lid's height, or undefined where they miss (every car but the E34). The strip then
+   * breaks at the lid's ends and the lid carries that piece, so it falls open with it.
+   */
+  private woodOnGlovebox(): P2 | undefined {
+    const { wood, glovebox } = this.lay;
+    if (!wood) return undefined;
+    const [lo, hi] = [Math.max(wood[0], glovebox.dy - glovebox.half[1]), Math.min(wood[1], glovebox.dy + glovebox.half[1])];
+    return hi > lo ? [lo, hi] : undefined;
   }
 
   /** Radio: a dial with a needle standing on the picked preset, a power knob and a tuning knob. */
