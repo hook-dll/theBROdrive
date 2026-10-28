@@ -24,8 +24,10 @@ import type { KitBody } from './specs';
 
 /**
  * BMW 520i (E34) saloon: overhangs 0.848 / 1.111 over a 2761 wheelbase [F; D the drawn
- * hubs]. The face 0.07 behind the bumper's front, leaning forward to the bonnet's lip
- * (0.755); the bonnet rising to 0.925 at the screen's foot on the centre line (s 1.33); the
+ * hubs]. The face 9 cm behind the bumper's front at its top, leaning 2 cm forward to the
+ * lamps' band's top (0.735), the bonnet's lip rounding back over it (0.755 at 0.08, 0.778
+ * at 0.13, 0.80 at 0.2; review 2026-10-28, measurements-e34.md §9); the bonnet rising to
+ * 0.925 at the screen's foot on the centre line (s 1.33); the
  * A pillar from its foot at 1.53 to the rail at 2.0; the roof 1.412 from 2.5 to 3.1, falling
  * into the back light from 3.45 to its foot on the deck at 4.05 (1.0); the deck to its edge
  * over the tail (0.975 at 4.64); the lid down the tail face between the wing lamps to 0.60.
@@ -36,9 +38,15 @@ export const BODY_E34: KitBody = {
   length: 4.72, // [F 4720; D dimension line 4720]
   platform: 'classic', // rear drive, the engine lengthwise
   stations: [
-    // The face behind the bumper [D side: the lamps' band at s 0.07–0.09 over 0.55–0.735; D
-    // front: the band to ±0.73, the body ±0.80 at the corner]; the bonnet's lip 0.755.
-    { s: 0.07, sill: 0.3, crease: 0.55, belt: 0.735, deck: 0.755, wSill: 0.79, wCrease: 0.8, wBelt: 0.78 },
+    // The face behind the bumper, upright but for a little lean forward to the lamps' band's
+    // top (0.735), the bonnet's lip rounding back over it [S on the hubs, from the bumper's
+    // front: 10 cm at the bumper's top, 7.5 at the lamps' middle, 8 at the band's top, the lip
+    // 12 at 0.767, 16 at 0.788; D side: the band 0.07–0.075 at 0.57–0.69, the lip 0.10 at
+    // 0.735, the bonnet 0.80 at 0.195; P front: the face to ±0.82 at the lamps, the band
+    // under the bonnet's edge]. Review 2026-10-28: the face at 0.07 leaning 3 cm forward to a
+    // square top at 0.755 stood the bonnet's front over the lamps as a slab.
+    { s: 0.09, sill: 0.3, crease: 0.55, belt: 0.735, deck: 0.755, wSill: 0.8, wCrease: 0.815, wBelt: 0.795 },
+    { s: 0.13, sill: 0.295, crease: 0.565, belt: 0.76, deck: 0.778, wSill: 0.835, wCrease: 0.85, wBelt: 0.825 },
     // The bonnet's line [D side: 0.80 at s 0.2, 0.84 at 0.4, 0.865 at 0.6, 0.885 at 0.9,
     // 0.905 at 1.1, 0.925 at the cowl]; the wing's top just under it; the flank ±0.875 [F
     // 1751; D front: ±0.875 at 0.6].
@@ -79,11 +87,9 @@ export const BODY_E34: KitBody = {
   // The side glass's foot ±0.765 over the skin's ±0.835 [D front: the glass ±0.76 at 1.0,
   // ±0.62 at the rail].
   shoulder: { inset: 0.07, rise: 0.02 },
-  // The shark nose: above the bumper the face leans forward to its crease under the lip,
-  // the lip rounding back over it [P side.jpg on the hubs: the wing's front edge 2.6 cm
-  // ahead at 0.73 of where it stands at 0.57, the lip rounding back above; D side: the lamps'
-  // band 0.07 behind the bumper's front at 0.58, 0.09 at the lip].
-  frontLean: { base: 0.55, lean: -0.17, blend: 0.3, full: 0.2, peak: { y: 0.735, lean: 0.5 } },
+  // The face leaning forward 2 cm from the bumper's top to the lamps' band's top, the lip
+  // rounding back over it (the stations at 0.09 and 0.13) [S, D: above].
+  frontLean: { base: 0.55, lean: -0.1, blend: 0.3, full: 0.2, peak: { y: 0.735, lean: 0.5 } },
   cabin: {
     // Door frames, the B pillar and the bar before the rear door's quarter glass black; A
     // and C pillars body colour [P S, F34, R34].
@@ -181,7 +187,7 @@ export const BODY_E34: KitBody = {
     archSegments: 8,
   },
   doorBottom: 0.245, // [D side: the doors' blue ends y 290: 0.243; the black sill strip under it]
-  bonnetFront: 0.07,
+  bonnetFront: 0.09,
   // The bonnet covers the whole top, its side shut lines along the wings' top, round the
   // nose over the lamps and kidneys [P F34].
   bonnet: { inset: 0.01 },
@@ -233,13 +239,15 @@ export const LOOK_E34: KitLook = {
   // behind the front hub, 0.51–0.535 high].
   repeater: { s0: 1.21, s1: 1.33, y0: 0.51, y1: 0.535 },
   cornerLamps: [
-    // The amber indicators at the corners of the lamps' band, wrapping round onto the wings
-    // [P F34, F34r; D front: from ±0.73; D side: to s 0.15].
+    // The amber indicators at the ends of the lamps' band, from the outer lamp round the
+    // face's corner onto the wing a little [P front: ±0.745–0.81 on the face, 0.59–0.73; P
+    // F34, F34r: a short wrap]. Review 2026-10-28: wrapped to s 0.15 along the old 45° corner
+    // they stood out as a big amber panel; the corner now turns in 4 cm (to s 0.125).
     {
       points: [
-        { x: 0.745, y: [0.56, 0.72], role: 'blinker' },
-        { y: [0.565, 0.715], role: 'blinker' },
-        { s: 0.15, y: [0.575, 0.705] },
+        { x: 0.745, y: [0.59, 0.73], role: 'blinker' },
+        { y: [0.592, 0.728], role: 'blinker' },
+        { s: 0.125, y: [0.595, 0.725] },
       ],
     },
     // The wing's tail lamps outside the lid: the amber indicator band over the red tail and
@@ -274,27 +282,34 @@ export const LOOK_E34: KitLook = {
     // the nose's corner, kit-zfight).
     bumper: { kind: 'moulded', drop: 0.11, height: 0.34, finish: 'paint', moulding: { y: 0.465, height: 0.07, finish: 'black' }, corner: 0.15, wrapTo: 0.5, inlays: [{ x: [0, 0.78], y: [0, 0.11], finish: 'black' }] },
     items: [
-      // The black band the lamps stand in, from the kidneys to the indicators [D front:
-      // ±0.18–0.73, 0.55–0.735 on the side view's heights].
-      { kind: 'panel', x: { from: { centre: 0.18 }, to: { centre: 0.735 } }, y: { from: ['bumperTop', 0.02], to: ['deck', -0.02] }, finish: 'black', proud: 0.004 },
-      // Four round head lamps in black rings [D front: centres ±0.40 and ±0.59 at 0.64, the
-      // rings 0.08 in radius; P F34].
-      { kind: 'round', role: 'head', x: { centre: 0.4 }, y: ['bumperTop', 0.112], radius: 0.066, ring: 'black' },
-      { kind: 'round', role: 'head', x: { centre: 0.59 }, y: ['bumperTop', 0.112], radius: 0.066, ring: 'black' },
-      // The twin kidneys: one framed grille ±0.17 with black slats [D front: the kidneys
-      // ±0.015–0.165, 0.55–0.71; P F34] ...
+      // The black band the lamps stand in, from the kidneys to 8 mm short of the indicators
+      // (meeting them, its end fought theirs), up to the bonnet's edge [P front: ±0.215–0.745,
+      // the bumper's top to the bonnet; D front].
+      { kind: 'panel', x: { from: { centre: 0.2 }, to: { centre: 0.737 } }, y: { from: ['bumperTop', 0.02], to: ['deck', -0.02] }, finish: 'black', proud: 0.004 },
+      // Four round head lamps in black rings, flush in the band: the rings in its plane, the
+      // glass 7 mm out of it [P front on the bumper's width (1.246 mm/px): centres ±0.477 and
+      // ±0.664 at 0.664, the rings 0.078 in radius, their tops under the bonnet's edge; D
+      // front: ±0.42 / ±0.59]. Review 2026-10-28 («фары явно утоплены внутрь передка и не
+      // выдаются вперёд перед капотом»): rings 26 mm out and the glass 34 mm stood ahead of
+      // the band as black stalks, and their tops rose over it into the bonnet.
+      { kind: 'round', role: 'head', x: { centre: 0.472 }, y: ['bumperTop', 0.095], radius: 0.062, ring: 'black', standOut: 0.004 },
+      { kind: 'round', role: 'head', x: { centre: 0.655 }, y: ['bumperTop', 0.095], radius: 0.062, ring: 'black', standOut: 0.004 },
+      // The twin kidneys: one framed grille ±0.2 with black slats [P front: the chrome
+      // surround ±0.22, the openings ±0.012–0.185; D front; P F34] ...
       {
         kind: 'grille',
-        x: { centre: 0.17 },
+        x: { centre: 0.2 },
         // The frame's foot 1 cm over the bumper's top (at 6 mm they fought from afar).
         y: { from: ['bumperTop', 0.035], to: ['deck', -0.03] },
         standOut: 0.01,
         frame: { finish: 'chrome', margin: 0.014 },
         back: true,
-        bars: { dir: 'vertical', count: 10, finish: 'dark', margin: 0.02, width: 0.007, depth: 0.012, proud: 0.03 },
+        // Odd, so the middle bar lies wholly in the bridge (an even count put a bar's side
+        // 0.9 mm off the bridge's, kit-zfight); five slats in each kidney.
+        bars: { dir: 'vertical', count: 11, finish: 'dark', margin: 0.02, width: 0.007, depth: 0.012, proud: 0.03 },
       },
-      // ... split in two by a body-colour bridge between them [P F34].
-      { kind: 'panel', x: { centre: 0.01 }, y: { from: ['bumperTop', 0.035], to: ['deck', -0.03] }, finish: 'paint', proud: 0.046 },
+      // ... split in two by a body-colour bridge between them [P F34, front].
+      { kind: 'panel', x: { centre: 0.012 }, y: { from: ['bumperTop', 0.035], to: ['deck', -0.03] }, finish: 'paint', proud: 0.046 },
     ],
   },
   rear: {

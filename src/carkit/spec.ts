@@ -713,8 +713,12 @@ export type FaceItem =
    * line, or a pair of blocks (one each side) when `x` is a span.
    */
   | { readonly kind: 'panel'; readonly x: FaceX | Span<FaceX>; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
-  /** A round lamp in a ring: chrome, or `ring` (the E34's black rings). */
-  | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number; readonly ring?: Finish }
+  /**
+   * A round lamp in a ring: chrome, or `ring` (the E34's black rings). `standOut`: the
+   * ring's front this far out of the face, the lens 7 mm ahead of it (the E34's lamps flush
+   * in their band). Absent: the ring 26 mm out, the lens 8 mm ahead of it.
+   */
+  | { readonly kind: 'round'; readonly role: LampRole; readonly x: FaceX; readonly y: FaceY; readonly radius: number; readonly ring?: Finish; readonly standOut?: number }
   /**
    * A lens, rectangular unless `slant`: how far its top edge's outer and inner ends stand
    * inboard of the bottom's (a trapezoid, or a parallelogram when both move; negative

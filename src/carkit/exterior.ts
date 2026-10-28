@@ -470,15 +470,19 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
       const x = face.x(item.x);
       const y = face.y(item.y);
       const r = item.radius * 1.18;
+      // A ring rooted in the face, 26 mm out of it (clear of a grille's front 24 mm out:
+      // the 2103's lamps stand on its grille), and the lens standing in it, 8 mm ahead of
+      // it; or the ring `standOut` out and the lens 7 mm ahead of it (the E34's, flush in
+      // their band; nearer, the ring's face behind the glass fights it from afar). Chrome
+      // unless `ring` says otherwise (the E34's black rings).
+      const front = item.standOut ?? 0.026;
+      const [lensAt, lensHalf, lensFront] = item.standOut === undefined ? [0.024, 0.01, 0.034] : [front + 0.002, 0.005, front + 0.007];
       return [1, -1].map((side) => {
-        // A ring rooted in the face, 26 mm out of it (clear of a grille's front 24 mm out:
-        // the 2103's lamps stand on its grille), and the lens standing in it. Chrome unless
-        // `ring` says otherwise (the E34's black rings in its black lamp band).
         const rim = item.ring ? finishSlot(item.ring) : { slot: 'chrome' as const, color: CHROME_TRIM };
-        b.color(rim.color).cylinderZ(rim.slot, [side * x, y, face.out((0.026 - FACE_ROOT) / 2)], r, (0.026 + FACE_ROOT) / 2, 12, face.frontCap);
-        b.cylinderZ(lampSlot(item.role, side), [side * x, y, face.out(0.024)], item.radius, 0.01, 12);
+        b.color(rim.color).cylinderZ(rim.slot, [side * x, y, face.out((front - FACE_ROOT) / 2)], r, (front + FACE_ROOT) / 2, 12, face.frontCap);
+        b.cylinderZ(lampSlot(item.role, side), [side * x, y, face.out(lensAt)], item.radius, lensHalf, 12);
         const ring = Array.from({ length: 12 }, (_, i): P2 => [side * x + Math.cos((i / 12) * Math.PI * 2) * r, y + Math.sin((i / 12) * Math.PI * 2) * r]);
-        return { poly: ring, z0: -FACE_ROOT, z1: 0.034 };
+        return { poly: ring, z0: -FACE_ROOT, z1: lensFront };
       });
     }
     case 'lens': {
