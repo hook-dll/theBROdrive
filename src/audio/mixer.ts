@@ -150,6 +150,8 @@ export class AudioMixer {
   private crackleBufferValue: AudioBuffer | null = null;
   private volume = 1;
   private suspendedByPause = false;
+  /** Set once by `fadeOut`: the drive has ended and nothing brings the sound back. */
+  private endedFade = false;
   private started = false;
   private disposed = false;
   private engineWorkletReady = false;
@@ -321,8 +323,23 @@ export class AudioMixer {
     this.applyMasterGain();
   }
 
+  /**
+   * Takes everything the game makes, the radio included, down to silence over `seconds`
+   * and keeps it there: the drive is over (a death fading to black). One-way on purpose;
+   * a pause or a volume change during it must not bring the sound back.
+   */
+  fadeOut(seconds: number): void {
+    if (this.disposed || this.endedFade) return;
+    this.endedFade = true;
+    const g = this.master.gain;
+    const now = this.now;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(0, now + Math.max(0.01, seconds));
+  }
+
   private applyMasterGain(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.endedFade) return;
     const target = this.suspendedByPause || !this.started ? 0 : this.volume;
     const g = this.master.gain;
     g.cancelScheduledValues(this.now);

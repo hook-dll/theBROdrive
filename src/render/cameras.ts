@@ -370,8 +370,9 @@ const HEAD_JOLT_CLAMP_MPS = 4;
 
 /** Death first turns the existing view down, then lifts it while the screen fades. */
 const DEATH_LOOK_DOWN_SECONDS = 2.5;
-const DEATH_RISE_SECONDS = 6.5;
-const DEATH_TOTAL_SECONDS = DEATH_LOOK_DOWN_SECONDS + DEATH_RISE_SECONDS;
+/** The upward flight, which is also the fade to black (`updateDeath` returns its curve). */
+export const DEATH_RISE_SECONDS = 6.5;
+export const DEATH_TOTAL_SECONDS = DEATH_LOOK_DOWN_SECONDS + DEATH_RISE_SECONDS;
 const DEATH_RISE_METRES = 40;
 
 /* ---- module-level scratch: `update()` must not allocate ---- */

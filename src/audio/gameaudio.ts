@@ -176,6 +176,15 @@ export class GameAudio {
   }
 
   /**
+   * The end of a drive (a death): everything, the radio included, fades to silence over
+   * `seconds` and stays there. The radio streams are paused by the `setPaused(true)`
+   * that follows once the fade is over.
+   */
+  fadeOut(seconds: number): void {
+    this.mixer.fadeOut(seconds);
+  }
+
+  /**
    * Per-frame car audio. Every entered car owns its own radio stream; inactive
    * radios remain spatial sources while the listener walks around the world.
    * `pose` places the car's sound sources; `cabin` is how open the cabin round the

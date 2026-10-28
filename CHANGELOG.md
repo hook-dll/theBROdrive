@@ -1279,6 +1279,21 @@
 
 ### Fixed
 
+- A DEATH ALWAYS ENDS ON THE TITLE SCREEN, AND IN SILENCE (`main.ts` `finishDeath`,
+  `armDeathWatchdog`; `audio/mixer.ts` `fadeOut`). Reported from play (owner, 2026-10-28):
+  killed head-on by an oncoming car, the camera rose and the screen went black, but the
+  title never came and the radio played on, with nothing in the console. The death's only
+  way out was the death camera finishing inside the frame's render, followed by a reload;
+  nothing else ended it, and nothing ever turned the sound down. Now everything the game
+  makes, the radio included, fades out over the same 6.5 s as the picture, the radio
+  streams are stopped with the black frame, a wall-clock watchdog 3 s past the sequence's
+  9 s ends a death the render path did not (logged: `death: the death camera did not
+  finish…`, with the frames rendered, the pause and the page's visibility), and a reload
+  that has not landed 10 s later is logged and leaves a «Title screen» button on the
+  black. The death camera and its timings are unchanged since 2026-10-09; the root cause
+  was not reproduced headlessly (no death harness exists, and the browser was not ours
+  to use).
+
 - TRAFFIC NO LONGER SAWS AT THE WHEEL ON A STRAIGHT (`vehicle/autopilot.ts` `dampYaw`,
   `YAW_RATE_DAMPING`; `world/traffic.ts`). Reported from play: cars on a straight jerked
   the wheel left and right without end. The drivers decide 12 times a second

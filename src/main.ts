@@ -59,7 +59,7 @@ import { IMMOVABLE, Player } from './player/player';
 import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
-import { CameraRig, type CameraTarget } from './render/cameras';
+import { CameraRig, DEATH_RISE_SECONDS, DEATH_TOTAL_SECONDS, type CameraTarget } from './render/cameras';
 import { CabinCamera } from './vehicle/cabincamera';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
@@ -219,6 +219,11 @@ const GUM_FLIP_RADIUS = 0.5;
 /** Four dial hours in the game's 24-minute clock. */
 const WATCH_FAST_FORWARD_SECONDS = DAY_LENGTH / 6;
 const WATCH_FAST_FORWARD_REAL_SECONDS = 2;
+
+/** How far past the death sequence's own length the watchdog waits before ending it. */
+const DEATH_WATCHDOG_SLACK_S = 3;
+/** How long a death's reload may take to land before the title gets a button of its own. */
+const DEATH_RELOAD_PATIENCE_MS = 10000;
 
 /** Hand-to-mouth pack motion at the start of the longer chew-and-blow action. */
 const GUM_PACK_ANIM_SECONDS = 1;
@@ -1528,6 +1533,71 @@ async function boot(): Promise<void> {
   let medicineCapReleased = false;
   let dying = vitals.dead;
   let deathReloadScheduled = false;
+  /** The fade to silence has begun (with the fade to black); see `render`. */
+  let deathAudioFading = false;
+  /** Rendered frames since the death began, for the watchdog's report. */
+  let deathFrames = 0;
+  let deathWatchdog = 0;
+  /**
+   * THE END OF A DEATH: back to the title, whoever gets here first — the death camera
+   * finishing in `render`, or the wall-clock watchdog `armDeathWatchdog` set. The title
+   * is a reload, so the slot's resume marker goes first: clearing it is what stops the
+   * reload from resuming straight back into the corpse. The sound, the radio included,
+   * is already fading with the screen; the radio streams are stopped outright with the
+   * black frame, so nothing plays on while the next page loads.
+   */
+  const finishDeath = (): void => {
+    if (deathReloadScheduled) return;
+    deathReloadScheduled = true;
+    window.clearTimeout(deathWatchdog);
+    clearResumeSlot();
+    hud.setHealthEffects(vitals.damageEffect, true, 1);
+    audio.fadeOut(0.25);
+    // Hold one fully black painted frame before navigation replaces the scene.
+    window.setTimeout(() => {
+      audio.setPaused(true);
+      window.location.reload();
+      // A reload is a navigation, and the old page stays up, black and silent, until
+      // the new one arrives. One that never arrives (a stalled server or network) must
+      // still leave the player a way to the title.
+      window.setTimeout(() => {
+        console.error(`death: the reload to the title has not landed in ${DEATH_RELOAD_PATIENCE_MS / 1000} s`);
+        showDeathNotice();
+      }, DEATH_RELOAD_PATIENCE_MS);
+    }, 250);
+  };
+  const showDeathNotice = (): void => {
+    const notice = document.createElement('div');
+    notice.className = 'death-reload';
+    notice.style.cssText =
+      'position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;align-items:center;'
+      + 'justify-content:center;gap:16px;background:#000;color:#eee;font:16px sans-serif;text-align:center';
+    const button = document.createElement('button');
+    button.textContent = 'Title screen';
+    button.addEventListener('click', () => window.location.reload());
+    notice.append(button);
+    document.body.appendChild(notice);
+  };
+  /**
+   * The death camera runs in `render`, so a render loop that stops or throws partway
+   * through would leave the player on a black screen with the world still playing. A
+   * wall-clock timer a little past the sequence's length ends the death regardless, and
+   * says why it had to.
+   */
+  const armDeathWatchdog = (): void => {
+    window.clearTimeout(deathWatchdog);
+    deathFrames = 0;
+    deathWatchdog = window.setTimeout(() => {
+      if (deathReloadScheduled) return;
+      console.error(
+        `death: the death camera did not finish within ${DEATH_TOTAL_SECONDS + DEATH_WATCHDOG_SLACK_S} s `
+          + `(${deathFrames} frames rendered since, camera complete ${camera.deathComplete}, `
+          + `paused ${paused}, page ${document.visibilityState}); going to the title anyway`,
+      );
+      finishDeath();
+    }, (DEATH_TOTAL_SECONDS + DEATH_WATCHDOG_SLACK_S) * 1000);
+  };
+  if (dying) armDeathWatchdog();
   /**
    * The plane ride: the takeoff shot while it runs, then the ending scene, which owns the
    * canvas until it reloads to the title. Both take every control away, like a death.
@@ -1556,6 +1626,7 @@ async function boot(): Promise<void> {
     dying = true;
     autopilot.setEngaged(false);
     camera.beginDeath();
+    armDeathWatchdog();
     if (document.pointerLockElement !== null) document.exitPointerLock();
     Object.assign(lastInput, deathInput);
     lookYawAccum = 0;
@@ -2632,6 +2703,13 @@ async function boot(): Promise<void> {
     let deathFade = 0;
     if (dying) {
       deathFade = camera.updateDeath(frameDt, target);
+      deathFrames++;
+      // The sound goes with the picture: from the first frame of the fade to black,
+      // everything, the radio included, falls silent over the same rise.
+      if (deathFade > 0 && !deathAudioFading) {
+        deathAudioFading = true;
+        audio.fadeOut(DEATH_RISE_SECONDS);
+      }
     } else if (story !== null) {
       const shot = story.update(frameDt);
       camera.updateScripted(frameDt, shot.eye, shot.lookAt, shot.fov);
@@ -2653,14 +2731,9 @@ async function boot(): Promise<void> {
       // Stepping up to a machine, or back from it: the view eases between the two.
       machineFocus.updateCamera(frameDt, camera);
     }
-    if (dying && camera.deathComplete && !deathReloadScheduled) {
-      deathReloadScheduled = true;
-      // Death is an ending, not an interruption: clearing the marker is what stops the
-      // reload below from resuming straight back into the corpse.
-      clearResumeSlot();
-      // Hold one fully black painted frame before navigation replaces the scene.
-      window.setTimeout(() => window.location.reload(), 250);
-    }
+    if (dying && camera.deathComplete) finishDeath();
+    // Whatever ended the death, the screen stays black from here to the reload.
+    if (deathReloadScheduled) deathFade = 1;
     touch.setZoomAvailable(!dying && camera.mode === 'chase');
     touch.setStickerTools(!dying && stickerPreviewCarId !== null);
 
