@@ -6341,7 +6341,10 @@ export class Autopilot {
     this.vergeLine = side * lineOut;
     const overhang = lineOut + CAR_HALF_WIDTH_M - this.asphaltHalfWidth;
     const factory = vehicle.modelDef.factory;
-    const tyreOut = lineOut + (Math.max(factory.frontTrack, factory.rearTrack) + factory.tyreWidth) * 0.5;
+    const tyreOut = lineOut + Math.max(
+      factory.frontTrack + factory.tyreWidth,
+      factory.rearTrack + (factory.rearTyreWidth ?? factory.tyreWidth),
+    ) * 0.5;
     if (overhang > SHOULDER_WIDTH_M) return false;
     if (tyreOut > this.asphaltHalfWidth + SHOULDER_WIDTH_M - VERGE_EDGE_MARGIN_M) return false;
     if (!this.straightAhead(this.hintS, window, passCurvature)) return false;

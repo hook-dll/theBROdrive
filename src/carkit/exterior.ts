@@ -39,12 +39,14 @@ function ends(frame: BodyFrame): { front: number; tail: number } {
 
 /**
  * Height band of a bumper: a blade is a slim bar centred `lift` over the sill's bevel, a
- * moulded bumper a deep band from `drop` under it.
+ * moulded bumper a deep band from `drop` under it; a face with none (`bumper: null`) has
+ * its band at the sill's bevel.
  */
 function bumperBand(frame: BodyFrame, end: 1 | -1): { y0: number; y1: number } {
   const { front, tail } = ends(frame);
   const sec = frame.section(end > 0 ? front : tail);
   const bumper = (end > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper;
+  if (!bumper) return { y0: sec.r1[1], y1: sec.r1[1] };
   if (bumper.kind === 'blade') {
     const y = sec.r1[1] + bumper.lift;
     return { y0: y - bumper.height / 2, y1: y + bumper.height / 2 };
@@ -57,7 +59,7 @@ function bumperBand(frame: BodyFrame, end: 1 | -1): { y0: number; y1: number } {
 export function bumperFoot(frame: BodyFrame, end: 1 | -1): number {
   const { y0, y1 } = bumperBand(frame, end);
   const bumper = (end > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper;
-  const o = bumper.kind === 'blade' ? bumper.overriders : null;
+  const o = bumper?.kind === 'blade' ? bumper.overriders : null;
   return o ? Math.min(y0, (y0 + y1) / 2 - o.drop - o.half[1]) : y0;
 }
 
@@ -342,7 +344,7 @@ class EndFace {
     this.z = frame.z(s);
     this.half = sec.r2[0];
     this.lines = { bumperTop: bumper.y1, bumperBottom: bumper.y0, belt: sec.r3[1], deck, mid: (bumper.y1 + deck) / 2 };
-    if ((facing > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper.kind === 'moulded') {
+    if ((facing > 0 ? frame.spec.look.front : frame.spec.look.rear).bumper?.kind === 'moulded') {
       this.moulded = { ...bumper, front: facing > 0 ? s : frame.spec.length - s };
     }
   }
@@ -805,6 +807,7 @@ function buildBumpers(ctx: KitContext, b: PartBuilder): Map<1 | -1, Ridge> {
     const zFace = frame.z(sEnd);
     const { y0, y1 } = bumperBand(frame, end);
     const bumper = (end > 0 ? spec.look.front : spec.look.rear).bumper;
+    if (!bumper) continue;
     if (bumper.kind === 'blade') {
       // A bar on brackets, its ends turned back round the corners. Its back faces the body
       // a few millimetres off: no face there.
@@ -1377,7 +1380,7 @@ function buildDoorHardware(ctx: KitContext): void {
       b.color(finish.color).bevelBox(finish.slot, [x, y, frame.z(handleS)], chrome ? [0.012, 0.016, half] : [0.012, 0.018, half], 0.006);
     }
     addBuilt(door.node, b, door.pivot, `${owner}_handle`);
-    if (!front || (side < 0 && spec.look.mirrors === 'left')) continue;
+    if (!front || (side < 0 && spec.look.mirrors === 'left') || spec.look.mirrorArm) continue;
     // Mirror: a stalk from the door's front top corner and a head on it, turned so the
     // driver sees straight back along the flank in it (`mirrorFrame`), the car's side a
     // sliver at its inner edge; the far one turns further than his own. On an upright
@@ -1444,38 +1447,94 @@ function buildDoorHardware(ctx: KitContext): void {
     const holder = new THREE.Group();
     holder.name = `${owner}_mirror`;
     addBuilt(holder, m, door.pivot, 'mirrors');
-    // The head turns on a ball at its centre, by hand from a front seat (rig.ts `aim`), as
-    // the inside mirror does: side to side about its own up, then up and down about its
-    // own across, from the built aim.
-    const h = new PartBuilder().color(mirrorFinish.color);
-    const head = h.push(mirrorFrame([hx, hy, hz], eye, [0, 0, -1])).matrix.clone();
-    const e = head.elements;
-    const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
-    const mirror = side > 0 ? 'left' : 'right';
-    const channel = `mirror_${side > 0 ? 'l' : 'r'}`;
-    const ball = pivotGroup(`${channel}_ball`, centre, { channel: `${channel}_yaw`, kind: 'rot', axis: [e[4]!, e[5]!, e[6]!], amount: 1 });
-    const pane = pivotGroup(channel, centre, { channel: `${channel}_pitch`, kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, sideMirrorControl(channel, side));
-    ball.add(pane);
-    holder.add(ball);
-    ball.position.set(centre[0] - door.pivot[0], centre[1] - door.pivot[1], centre[2] - door.pivot[2]);
-    pane.position.set(0, 0, 0);
-    h.bevelBox(mirrorFinish.slot, [0, 0, 0], [headX, headY, 0.025], 0.015);
-    // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
-    const [gx, gy] = [headX - 0.01, headY - 0.01];
-    h.cut([{ poly: ([[-gx, -gy], [gx, -gy], [gx, gy], [-gx, gy]] as const).map(([px, py]): Vec3 => {
-      const p = new THREE.Vector3(px, py, -0.025).applyMatrix4(h.matrix);
-      return [p.x, p.y, p.z];
-    }), reach: 0.0005 }]);
-    h.color(0x7a8a96).box('chrome', [0, 0, -0.026], [gx, gy, 0.002], 0b101111);
-    // The live face 1.5 mm proud of the glass.
-    addMirrorFace(pane, h.matrix, centre, [gx, gy], -0.0295, mirror);
-    h.pop();
-    addBuilt(pane, h, centre, 'mirrors');
-    holder.traverse((node) => {
-      if (node instanceof THREE.Mesh) node.name = 'mirrors';
-    });
+    mirrorHead(holder, door.pivot, [hx, hy, hz], eye, side, mirrorFinish, [headX, headY]);
     door.node.add(holder);
   }
+}
+
+/**
+ * A side mirror's head under `holder` (standing at `origin` in the car frame): turned so
+ * the driver at `eye` sees straight back along the flank in it (`mirrorFrame`), on a ball
+ * at its centre that turns by hand from a front seat (rig.ts `aim`) as the inside mirror's
+ * does: side to side about its own up, then up and down about its own across, from the
+ * built aim. Every mesh under `holder` is named `mirrors` (out of the measured width).
+ */
+function mirrorHead(holder: THREE.Object3D, origin: Vec3, at: Vec3, eye: Vec3, side: number, mirrorFinish: { slot: KitSlot; color: number }, [headX, headY]: readonly [number, number]): void {
+  const h = new PartBuilder().color(mirrorFinish.color);
+  const head = h.push(mirrorFrame(at, eye, [0, 0, -1])).matrix.clone();
+  const e = head.elements;
+  const centre: Vec3 = [e[12]!, e[13]!, e[14]!];
+  const mirror = side > 0 ? 'left' : 'right';
+  const channel = `mirror_${side > 0 ? 'l' : 'r'}`;
+  const ball = pivotGroup(`${channel}_ball`, centre, { channel: `${channel}_yaw`, kind: 'rot', axis: [e[4]!, e[5]!, e[6]!], amount: 1 });
+  const pane = pivotGroup(channel, centre, { channel: `${channel}_pitch`, kind: 'rot', axis: [e[0]!, e[1]!, e[2]!], amount: 1 }, sideMirrorControl(channel, side));
+  ball.add(pane);
+  holder.add(ball);
+  ball.position.set(centre[0] - origin[0], centre[1] - origin[1], centre[2] - origin[2]);
+  pane.position.set(0, 0, 0);
+  h.bevelBox(mirrorFinish.slot, [0, 0, 0], [headX, headY, 0.025], 0.015);
+  // The glass 3 mm proud of the head's face, which is cut under it; no back, it lies in the head.
+  const [gx, gy] = [headX - 0.01, headY - 0.01];
+  h.cut([{ poly: ([[-gx, -gy], [gx, -gy], [gx, gy], [-gx, gy]] as const).map(([px, py]): Vec3 => {
+    const p = new THREE.Vector3(px, py, -0.025).applyMatrix4(h.matrix);
+    return [p.x, p.y, p.z];
+  }), reach: 0.0005 }]);
+  h.color(0x7a8a96).box('chrome', [0, 0, -0.026], [gx, gy, 0.002], 0b101111);
+  // The live face 1.5 mm proud of the glass.
+  addMirrorFace(pane, h.matrix, centre, [gx, gy], -0.0295, mirror);
+  h.pop();
+  addBuilt(pane, h, centre, 'mirrors');
+  holder.traverse((node) => {
+    if (node instanceof THREE.Mesh) node.name = 'mirrors';
+  });
+}
+
+/**
+ * Mirrors on tubular arms from the body (`KitLook.mirrorArm`, the ZIL-130's): a tube from
+ * `root` and one from `brace` on the side's skin meet at a point under the head, a rod
+ * rises from there into the head's centre, so none crosses the glass as the driver sees
+ * it [P F34]. Each starts 2 cm inside the skin or at the head's centre, open there; only
+ * the ends at the joint are closed. The head on its ball (`mirrorHead`). Hung on the root,
+ * not the door, so they stay as the door opens.
+ */
+function buildArmMirrors(ctx: KitContext): void {
+  const { frame, root } = ctx;
+  const spec = frame.spec;
+  const arm = spec.look.mirrorArm;
+  if (!arm) return;
+  const finish = finishSlot(spec.look.mirrorFinish ?? spec.look.brightwork);
+  const eye = driverEyeAt(frame);
+  const [headX, headY] = arm.half;
+  const [hs, hy, hx] = arm.head;
+  for (const side of [1, -1]) {
+    if (side < 0 && spec.look.mirrors === 'left') continue;
+    const m = new PartBuilder().color(finish.color);
+    const centre = new THREE.Vector3(side * hx, hy, frame.z(hs));
+    const foot = new THREE.Vector3(side * hx, hy - headY - 0.03, frame.z(hs));
+    for (const [s, y] of [arm.root, arm.brace]) {
+      tube(m, finish.slot, new THREE.Vector3(side * (skinX(frame, s, y) - 0.02), y, frame.z(s)), foot, 0.009);
+    }
+    tube(m, finish.slot, centre, foot, 0.009);
+    const holder = new THREE.Group();
+    holder.name = `mirror_${side > 0 ? 'l' : 'r'}_arm`;
+    addBuilt(holder, m, [0, 0, 0], 'mirrors');
+    mirrorHead(holder, [0, 0, 0], [centre.x, centre.y, centre.z], eye, side, finish, [headX, headY]);
+    root.add(holder);
+  }
+}
+
+/** A square tube `r` either side of the line from `a` to `c`: open at `a`, sunk in what it starts from; closed at `c`. */
+function tube(b: PartBuilder, slot: KitSlot, a: THREE.Vector3, c: THREE.Vector3, r: number): void {
+  const along = c.clone().sub(a);
+  const length = along.length();
+  along.normalize();
+  const across = Math.abs(along.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const normal = across.clone().cross(along).normalize();
+  const up = along.clone().cross(normal).normalize();
+  b.push(new THREE.Matrix4().makeBasis(along, up, normal).setPosition((a.x + c.x) / 2, (a.y + c.y) / 2, (a.z + c.z) / 2));
+  // Local +x runs to `c`: the -x end face is left out.
+  b.box(slot, [0, 0, 0], [length / 2, r, r], 0b111101);
+  b.pop();
 }
 
 /** Hinge knuckle radius on a split tailgate's leaves; the straps stand 6 mm proud. */
@@ -1823,7 +1882,7 @@ const FILLER_PROUD = 0.04;
 function buildFiller(ctx: KitContext): void {
   const { frame, nodes } = ctx;
   const flap = frame.spec.flap;
-  if (!nodes.has('flap')) return;
+  if (!flap || !nodes.has('flap')) return;
   const s = (flap.s0 + flap.s1) / 2;
   const y = (flap.y0 + flap.y1) / 2;
   const side = flap.side === 'left' ? 1 : -1;
@@ -1976,6 +2035,7 @@ export function buildExterior(ctx: KitContext): void {
   buildLidFace(ctx);
   buildSpoiler(ctx);
   buildDoorHardware(ctx);
+  buildArmMirrors(ctx);
   buildRearLeafHardware(ctx);
   buildWipers(ctx);
   buildFiller(ctx);

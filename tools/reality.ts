@@ -597,6 +597,16 @@ const TARGETS: Readonly<Record<string, Target>> = {
     // kW on 1510 kg runs +13 % and the Vectra's +16 %.
     known0to100: { reason: CATALOGUE_OPTIMISTIC, dev: 0.14 },
   },
+  // The ZIL-130 is held at gross mass (kerb 4175 + 6225 = 10 400), the condition a Soviet
+  // truck's dynamics table is printed at. Its 0-60 (37 s) and its 25 m from 50 km/h have no
+  // column here: a one-off run on handling-bench (2026-10-28) gave 25.6 s to 60 and
+  // 17.6 m floored from 50, a stop with no air-system response time in it.
+  kit_zil130: {
+    wheelbase: 3.8, track: 1.8, radius: 0.49, top: 90, to100: null,
+    loadKg: 6225, load: 'gross mass (payload 6000 + crew), the factory sheet\'s condition', turn: 8.3, lat: null, hz: 1.3,
+    brake80: null, grossKg: 10400,
+    source: 'ZIL-431410 (130): autoopt.ru encyclopedia/truck/zil/mark/zil-130 (90 km/h, 8.3 m at the outer wheel, gross 10400; 0-60 37 s and 25 m from 50 not judged here); geometry kit_zil130 row',
+  },
 
 
 };
@@ -628,6 +638,7 @@ const FACTORY_ENGINES: Readonly<Record<string, MakerEngine>> = {
   engine_i4_1600: { power: { kw: 56.3 }, powerRpm: 5400, torque: { nm: 121 }, torqueRpm: 3000, source: 'VAZ-2106-70; AO AZLK-2141 1998 catalogue' },
   engine_uzam_412de: { power: { kw: 49 }, powerRpm: 5800, torque: { nm: 102 }, torqueRpm: [3000, 3800], source: 'UZAM-412DE; AO Moskvich-412 catalogue' },
   engine_umz_4213: { power: { ps: 99 }, powerRpm: 4000, torque: { nm: 201 }, torqueRpm: 3000, source: 'UMZ-4213.10-10; truck-and-bus.ru UAZ-330364 sheet' },
+  engine_zil_508: { power: { kw: 110 }, powerRpm: 3200, torque: { nm: 402 }, torqueRpm: [1800, 2000], source: 'ZIL-508.10 (governed); autoopt.ru ZIL-431410 factory sheet' },
   engine_umz_4178: { power: { kw: 55.9 }, powerRpm: 4000, torque: { kgfm: 16.3 }, torqueRpm: [2200, 2500], source: 'UMZ-4178, GOST 14846 net; UAZ manual RE 05808600.072-2000 pp. 11-12' },
   engine_i6_2800: { power: { hp: 135 }, powerRpm: 5200, torque: { lbft: 144 }, torqueRpm: 4400, source: 'Nissan L28E, SAE net; 280ZX factory service manual' },
   engine_bmw_m30: { power: { ps: 180 }, powerRpm: 6000, torque: { nm: 255 }, torqueRpm: 3700, source: 'BMW M30B30 (E3 3.0 S / E9 3.0 CS); BMW Group Classic E9 technical data' },

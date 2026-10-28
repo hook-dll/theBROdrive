@@ -49,13 +49,25 @@ merged after it is built (`simplifyFlats`): 10.2–13.7k triangles, 8–18% fewe
 
 ## Roadmap (agreed order)
 
+**Sealed (owner, 2026-10-28):** every car in `KIT_SPECS` has been reviewed and is accepted;
+all 28 are recorded in `fingerprints.json`. A change that moves one is either a fix of a
+defect the owner reports on that car (then re-record it) or a bug. Defects reported later
+on any car are still fixed.
+
 1. ✅ **Generator core**: 2106 and 2108 in the car lab, hover and click.
 2. ✅ **VAZ cars** from specs: 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 21099,
    2110, 2112, 2115, 2121, 2131, 1111. All done (the last three accepted 2026-10-16). The
    2111 estate added 2026-10-16 (draft, awaiting the owner's review).
-3. **GAZ and UAZ-469**, then the **UAZ «буханка»** (UAZ-452). GAZ-24 and GAZ-31029 drafted
+3. **GAZ and UAZ-469**. No more UAZ (owner, 2026-10-28: the UAZ-452 «буханка» is dropped). GAZ-24 and GAZ-31029 drafted
    2026-10-16 (awaiting the owner's review); the GAZ-21 is not wanted.
-4. **Trucks**, starting with the **ZIL-130**. The ZIL-150 is postponed (owner, 2026-10-18).
+4. **Trucks**, all open flatbeds with drop sides (owner, 2026-10-28), on a new cab + chassis
+   generator: the **ZIL-130** first, then the **GAZ-53** (1993), the **GAZ-66** and the
+   **KamAZ-5320**. The ZIL-150 is postponed (owner, 2026-10-18). Engine access: the ZIL-130
+   and GAZ-53 are bonneted (the bonnet opens); the GAZ-66 and KamAZ-5320 are cab-over (the
+   cab tilts forward; the GAZ-66 also has the engine cover between the seats). ZIL-130:
+   first draft 2026-10-28, in the game (`kit_zil130`); reworked on the owner's side photo
+   (no spare, a beam under the platform, the floor at 1.30, the screen wrapping to the
+   door): **draft, awaiting his next look**.
 5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
    see "Foreign cars: the owner's list" below. First batch, the GM cars on Opel running
    gear: the **Daewoo Nexia** drafted 2026-10-18, and with it the foreign running-gear
@@ -242,7 +254,7 @@ slot (as on the 2115).
 - **UAZ-469**: `uaz469.jpg` and `uaz2.jpg` (a 3151 hardtop four-view, dimensioned) present.
   Body-on-frame with a separate soft/hard top, flat panels, external hinges; no pack
   sibling (check `SOVIET_CARS`).
-- **UAZ-452 «буханка»**: no drawing yet. Forward-control van: the cab sits over the front
+- **UAZ-452 «буханка»**: dropped (owner, 2026-10-28). No drawing yet. Forward-control van: the cab sits over the front
   axle, so `bonnetFront`/cowl assumptions in the generator do not hold.
 - **ZIL-130**: needs a **new cab + chassis generator**: a separate cab and bonnet on a
   ladder frame, a load bed, **dual rear wheels**, **3+ axles** for later trucks, and **new

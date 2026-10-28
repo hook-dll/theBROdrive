@@ -128,14 +128,15 @@ export async function checkMirrors(id: string, images: boolean): Promise<{ eye: 
   const expected = car.spec.look.mirrors === 'left' ? (['left'] as const) : (['left', 'right'] as const);
   const shellBoxes: Box[] = [];
   const housingBoxes: Record<'left' | 'right', Box[]> = { left: [], right: [] };
+  // A door mirror hangs under its door (`door_fl/door_fl_mirror/`); an arm mirror on the
+  // body (`KitLook.mirrorArm`, exterior.ts `buildArmMirrors`) under `mirror_l_arm/`.
+  const holders = { left: ['door_fl/door_fl_mirror/', 'mirror_l_arm/'], right: ['door_fr/door_fr_mirror/', 'mirror_r_arm/'] } as const;
   for (let t = 0; t < s.n; t++) {
     const m = s.meshes[s.mesh[t]!]!;
     const box = triBox(s, t);
-    if (m.zone === 'exterior' && !m.hidden && !m.glass && !m.path.includes('_mirror/')) shellBoxes.push(box);
-    for (const side of ['left', 'right'] as const) {
-      const owner = side === 'left' ? 'door_fl' : 'door_fr';
-      if (m.path.startsWith(`${owner}/${owner}_mirror/`) && !m.mirror) housingBoxes[side]!.push(box);
-    }
+    const held = (['left', 'right'] as const).find((side) => holders[side].some((p) => m.path.startsWith(p)));
+    if (m.zone === 'exterior' && !m.hidden && !m.glass && !m.path.includes('_mirror/') && held === undefined) shellBoxes.push(box);
+    if (held !== undefined && !m.mirror) housingBoxes[held]!.push(box);
   }
   // A support that merely floats near the panel can still leave every mirror visible. Require
   // at least one housing triangle's bounds to enter the shell, which catches that separate

@@ -197,6 +197,14 @@ export interface CabinSpec {
    * column's top.
    */
   readonly screenTop?: number;
+  /**
+   * The windscreen wraps round its corners onto the sides (the ZIL-130's): the corner
+   * between the screen's outer edge and the first column is glass, so with the first
+   * column's `glass: 'fixed'` one pane runs from the screen round the corner to the next
+   * painted strip (the door's frame), no painted post at the corner. Absent: a painted
+   * corner post.
+   */
+  readonly screenWrap?: true;
   /** Windscreen wiper blade length (the parts catalogues: the classics 330 mm, the Samaras 510 mm, the tens 500 mm). */
   readonly wiperBlade: number;
   /**
@@ -304,6 +312,21 @@ export interface WheelSpec {
    * edge as `archY` gives it, the well's wall fanned down to the sill or the hub.
    */
   readonly archToSill?: boolean;
+  /**
+   * The wheels stand clear of the shell: a truck's cab sits between its axles and the
+   * wings carry the front arches (`TruckSpec.wings`). The shell cuts no arch and builds no
+   * wells, `archY` finds none; `arch`, `frontArchRise` and `archShift` then shape the
+   * wings' arches instead. Absent: the shell's arches.
+   */
+  readonly outside?: true;
+  /**
+   * Dual rear wheels: each rear `kit_wheel_*` node stands at the pair's centre (the
+   * physics' one wheel) and its placeholder draws two tyres this far apart, centre to
+   * centre (the ZIL-130's twins). Absent: one tyre.
+   */
+  readonly twinRear?: number;
+  /** The steel disc's bead radius (a 20-inch truck rim 0.254). Absent: 0.62 of the tyre's radius. */
+  readonly rimRadius?: number;
 }
 
 /**
@@ -335,9 +358,12 @@ export interface KitCarSpec {
    * (transfer box, front axle) and its own dash. `'van'`: forward control, the cab over
    * the front axle and the engine under a cover between the front seats, no engine bay
    * ahead of the screen, a high flat floor from the dash to the rear doors, four-wheel
-   * drive under it (the UAZ-2206).
+   * drive under it (the UAZ-2206). `'truck'`: a bonneted truck (the ZIL-130); the shell is
+   * its cab alone (stations and greenhouse), standing on a ladder frame between the axles
+   * (`wheels.outside`); bonnet, wings, front, chassis, bay and platform are `truck`'s
+   * (truck.ts), the cab's furniture a bench across it.
    */
-  readonly platform: 'classic' | 'samara' | 'niva' | 'van';
+  readonly platform: 'classic' | 'samara' | 'niva' | 'van' | 'truck';
   readonly stations: readonly TubStation[];
   readonly cabin: CabinSpec;
   readonly wheels: WheelSpec;
@@ -402,12 +428,15 @@ export interface KitCarSpec {
    * `cup`: how far inside the skin the filler cup's back lies (exterior.ts `buildFiller`;
    * 0.035 when absent, the flap's own thickness). On a flank upright at the flap the closed
    * flap's inner skin lies at that depth too, and the cup's back fights it seen through the
-   * glass from the far side: such a car sets a deeper cup.
+   * glass from the far side: such a car sets a deeper cup. Absent: no flap in the shell
+   * (a truck's tank stands on its frame, `TruckSpec.tank`).
    */
-  readonly flap: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right'; readonly cup?: number };
+  readonly flap?: { readonly s0: number; readonly s1: number; readonly y0: number; readonly y1: number; readonly side?: 'left' | 'right'; readonly cup?: number };
   readonly look: KitLook;
   /** Per-car changes to the platform's cabin layout (interior.ts `LAYOUTS`): another dash, wheel or gauges. */
   readonly cabinLayout?: CabinLayoutOverride;
+  /** Everything of a `'truck'` platform's but its cab (truck.ts); required there, absent on every car. */
+  readonly truck?: TruckSpec;
 }
 
 /**
@@ -444,6 +473,19 @@ export interface KitLook {
   readonly tone?: number;
   /** Door mirrors: `'left'` only the driver's (the base Oka). Absent: both. */
   readonly mirrors?: 'left';
+  /**
+   * Mirrors on tubular arms from the body instead of on the doors (the ZIL-130's): two
+   * tubes, from `root` and `brace` on the side (s, height; on the skin there), converge on
+   * the head's centre at `head` (s, height, half width); the head `half` wide and high. On
+   * the body, not the door: they stay as the door opens. Absent: door mirrors
+   * (`mirrorStalk`, `mirrorMount`).
+   */
+  readonly mirrorArm?: {
+    readonly root: readonly [s: number, y: number];
+    readonly brace: readonly [s: number, y: number];
+    readonly head: readonly [s: number, y: number, x: number];
+    readonly half: readonly [number, number];
+  };
   /**
    * Door mirrors on an upright stalk: the head this much higher than on the short arm at
    * the door's top and 3.5 cm further back, the stalk rising to it from a bracket on the
@@ -606,7 +648,12 @@ export type Finish = 'chrome' | 'black' | 'alloy' | 'rubber' | 'grey' | 'paint' 
 
 /** One end of the car: its bumper and what stands on its face. */
 export interface FaceLook {
-  readonly bumper: BumperLook;
+  /**
+   * `null`: no bumper on this end face (a truck's cab, whose faces stand under its bonnet
+   * and against its platform; the truck's own bumper is `TruckSpec.bumper`). Items then
+   * take the bumper's anchors at the face's sill.
+   */
+  readonly bumper: BumperLook | null;
   /** Drawn in order; later items stand on earlier ones (a lamp on its surround). */
   readonly items: readonly FaceItem[];
   /**
@@ -800,3 +847,121 @@ export type FaceItem =
    * a tail `lid` item it rides on the tailgate (the UAZ-469's, on its rear door).
    */
   | { readonly kind: 'wheel'; readonly x: number; readonly y: FaceY; readonly radius: number; readonly width: number; readonly standoff: number; readonly finish: Finish };
+
+/**
+ * A bonneted truck's everything but its cab (`platform: 'truck'`, truck.ts): chassis,
+ * bonnet, wings, front, bay and the load platform. The car's frame of reference: `s` back
+ * from the front bumper's face, heights over the ground, `x` half widths (built on both
+ * sides unless a field says which).
+ */
+export interface TruckSpec {
+  /**
+   * Ladder frame: two channel rails `depth` tall, their outer faces `half` off the centre
+   * line, flanges `flange` wide, from `s0` to `s1`, their top at `top` [at s0, at s1]
+   * (straight between); a cross member at every `cross` s.
+   */
+  readonly frame: {
+    readonly s0: number;
+    readonly s1: number;
+    readonly half: number;
+    readonly depth: number;
+    readonly flange: number;
+    readonly top: readonly [number, number];
+    readonly cross: readonly number[];
+  };
+  /** Leaf springs under the rails, [s0, s1] at each axle. */
+  readonly springs: { readonly front: readonly [number, number]; readonly rear: readonly [number, number] };
+  /**
+   * The bonnet, hinged at its rear edge (`s1`, the top there): the centre line's top at
+   * `top` ([s, y] from the nose's tip at `s0`), its sides upright from the lower edge
+   * `edge` (the wings' top line), `half` wide [at s0, at s1], rolling `roll` (across, down)
+   * from the side's top into the crown; louvres on each side (`louvres`: s and height
+   * ranges, count).
+   */
+  readonly bonnet: {
+    readonly s0: number;
+    readonly s1: number;
+    readonly top: readonly (readonly [number, number])[];
+    readonly edge: number;
+    readonly half: readonly [number, number];
+    readonly roll: readonly [number, number];
+    readonly louvres: { readonly s: readonly [number, number]; readonly y: readonly [number, number]; readonly count: number };
+  };
+  /**
+   * The front wings, each a pressed panel from the face (`s0`) back to the cab's door
+   * (`s1`): the top from the bonnet's lower edge out, rolling down at `brow` into the
+   * flank `outer` off the centre line (narrowing to `nose` at `s0` over the first `taper`
+   * metres), the flank down to `bottom` [front, rear]; the arch is the wheels' (`arch`,
+   * `frontArchRise`, `archShift`). Behind the bonnet the top meets the cab's side at
+   * `cab`. An amber repeater on each flank at `repeater` (s, height, radius).
+   */
+  readonly wings: {
+    readonly s0: number;
+    readonly s1: number;
+    readonly outer: number;
+    readonly nose: number;
+    readonly taper: number;
+    readonly brow: number;
+    readonly bottom: readonly [number, number];
+    readonly cab: number;
+    readonly repeater: readonly [s: number, y: number, r: number];
+  };
+  /**
+   * The face between the wings: a flat panel at `s`, `half` wide from `y[0]` to `y[1]`,
+   * its top corners cut `corner`, in its own `colour` (the late ZIL's white); slots
+   * through it (each row: heights, half width of the row, count and the gap between
+   * slots, or one opening `count` 1); round head lamps and indicators in black rings at
+   * (x, height, lens radius).
+   */
+  readonly face: {
+    readonly s: number;
+    readonly half: number;
+    readonly y: readonly [number, number];
+    readonly corner: number;
+    readonly colour: number;
+    readonly slots: readonly { readonly y: readonly [number, number]; readonly half: number; readonly count: number; readonly gap: number }[];
+    readonly head: readonly [x: number, y: number, r: number];
+    readonly blinker: readonly [x: number, y: number, r: number];
+  };
+  /** A black steel channel across the front: its face at s 0, `depth` deep, `half` wide, heights `y`; tow hooks on its top at ±`hooks`. */
+  readonly bumper: { readonly depth: number; readonly half: number; readonly y: readonly [number, number]; readonly hooks: number };
+  /**
+   * On the cab: three amber marker lamps on the roof's front (`markers`: s, x of the outer
+   * pair); a step under each door (s range, tread height, outer half width).
+   */
+  readonly cab: {
+    readonly markers: readonly [s: number, x: number];
+    readonly step: { readonly s: readonly [number, number]; readonly y: number; readonly out: number };
+  };
+  /** The fuel tank outside the left rail: s range, heights, outer half width. */
+  readonly tank: { readonly s: readonly [number, number]; readonly y: readonly [number, number]; readonly out: number };
+  /**
+   * A toolbox under the platform's front on the left, between the frame and the side
+   * beam: s range, heights (its top sunk into the floor), inner half width; its face
+   * stands out of the side beam to the platform's edge.
+   */
+  readonly toolbox: { readonly s: readonly [number, number]; readonly y: readonly [number, number]; readonly inner: number };
+  /** The silencer inside the right rail (s range) and the tail pipe's exit (s), turned out ahead of the rear wheels. */
+  readonly exhaust: { readonly silencer: readonly [number, number]; readonly tail: number };
+  /**
+   * The load platform: from the front board's face `s0` to the tail board's back `s1`,
+   * its floor's top `floor`, `half` wide outside (the boards' hinges), boards `side` tall
+   * over the floor with `ribs` pressed ribs along them; under the floor a dark steel
+   * beam round its edge, `beam` deep from the floor's top, on two sills over the rails;
+   * the front board fixed, the two side boards and the tail board dropping about their
+   * bottom edges (`board_l`, `board_r`, `board_tail`).
+   */
+  readonly platform: { readonly s0: number; readonly s1: number; readonly floor: number; readonly beam: number; readonly half: number; readonly inside: number; readonly side: number; readonly ribs: number };
+  /** Rear lamp units on brackets at the frame's end: s, half width out, height. */
+  readonly rearLamps: readonly [s: number, x: number, y: number];
+  /** Mud flaps behind the rear wheels: s, half widths [inner, outer], heights. */
+  readonly flaps: { readonly s: number; readonly x: readonly [number, number]; readonly y: readonly [number, number] };
+  /**
+   * Under the bonnet (`kit_bay`): the V8's block (s range, half width, heights) and the
+   * radiator behind the face (s, half width, heights).
+   */
+  readonly bay: {
+    readonly engine: { readonly s: readonly [number, number]; readonly half: number; readonly y: readonly [number, number] };
+    readonly radiator: { readonly s: number; readonly half: number; readonly y: readonly [number, number] };
+  };
+}

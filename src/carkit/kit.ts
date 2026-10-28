@@ -20,6 +20,7 @@ import { fitCabinPlaces } from './places';
 import { finishKitSurfaces } from './materials';
 import { simplifyFlats } from './simplify';
 import { KIT_SPECS } from './specs';
+import { buildTruck } from './truck';
 import { buildWheel } from './wheels';
 import type { KitMotion } from './rig';
 import type { Vec3 } from './builder';
@@ -56,7 +57,7 @@ function shellMotion(owner: string, frame: BodyFrame): KitMotion | undefined {
   if (owner === 'tailgate_l' || owner === 'tailgate_r') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: left ? -1.5 : 1.5 };
   if (owner === 'tailgate' && hinge) return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: hinge === 'left' ? -1.2 : 1.2 };
   if (owner === 'tailgate') return { channel: owner, kind: 'rot', axis: [1, 0, 0], amount: 1.25 };
-  if (owner === 'flap') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: frame.spec.flap.side === 'left' ? -1.6 : 1.6 };
+  if (owner === 'flap') return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: frame.spec.flap?.side === 'left' ? -1.6 : 1.6 };
   // A drop pane winds all the way down into its door (rig.ts `SinkingPane`).
   if (owner.startsWith('window_')) return { channel: owner, kind: 'sink', axis: [0, -1, 0], amount: 1 };
   if (owner.startsWith('vent_')) return { channel: owner, kind: 'rot', axis: [0, 1, 0], amount: left ? -0.9 : 0.9 };
@@ -96,7 +97,9 @@ export function buildKitCar(id: string): THREE.Group {
   const ctx: KitContext = { frame, root, nodes, lining: shell.lining, holes: [] };
   buildExterior(ctx);
   buildInterior(ctx);
-  buildBay(ctx);
+  // A truck's chassis, bonnet, wings, front, bay and platform round its cab (truck.ts).
+  if (spec.platform === 'truck') buildTruck(ctx);
+  else buildBay(ctx);
   cutShellHoles(root, ctx.holes);
   if (spec.rearLean) leanEnd(root, ctx.holes, frame.z(spec.rearLean.full ?? frame.rearBase), -1, spec.rearLean);
   if (spec.frontLean) leanEnd(root, ctx.holes, frame.z(spec.frontLean.full ?? spec.bonnetFront), 1, spec.frontLean);
@@ -117,7 +120,8 @@ export function buildKitCar(id: string): THREE.Group {
     ['kit_wheel_rr', w.rear, -w.rearHalfTrack],
   ];
   for (const [name, s, x] of wheels) {
-    const wheel = buildWheel(w.radius, w.width);
+    // A dual rear wheel draws both tyres about the pair's centre (`WheelSpec.twinRear`).
+    const wheel = buildWheel(w.radius, w.width, name.startsWith('kit_wheel_r') ? w.twinRear : undefined, w.rimRadius);
     wheel.name = name;
     wheel.position.set(x, w.radius, frame.z(s));
     // Built with the outer face to +X (the left side): the right wheels turn round.

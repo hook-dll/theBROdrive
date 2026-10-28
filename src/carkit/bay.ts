@@ -800,6 +800,7 @@ function buildSaloonBoot(frame: BodyFrame, b: PartBuilder, classic: boolean): vo
   b.color(COLOURS.fuelTank);
   bevelS(b, frame, 'trim', [-edge, shelf, t0], [-(inner + 0.004), tankTop, t1], 0.03);
   const flap = spec.flap;
+  if (!flap) return;
   const fs = (flap.s0 + flap.s1) / 2;
   const fy = (flap.y0 + flap.y1) / 2;
   rod(b, 'trim', at(frame, -(frame.sideX(fs, fy) - 0.065), fy, fs), at(frame, -(edge - 0.04), tankTop - 0.03, t0 + 0.06), 0.022, 6);

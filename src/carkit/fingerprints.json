@@ -21,6 +21,17 @@
       "wheel": "89506a99881e7546"
     }
   },
+  "e34": {
+    "triangles": 13327,
+    "zones": {
+      "bay": "cf17ff76cff745ea",
+      "boot": "511db8e05d5688e2",
+      "cabin": "ab842335c28224dd",
+      "exterior": "af2706e5c5361f89",
+      "under": "7bef4526a19ddab4",
+      "wheel": "1cac895e2a25aace"
+    }
+  },
   "espero": {
     "triangles": 13707,
     "zones": {

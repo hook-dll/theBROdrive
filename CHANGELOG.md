@@ -4,6 +4,19 @@
 
 ### Changed
 
+- THE ZIL-130 FLATBED, THE FIRST TRUCK (`carkit/truck.ts`, `zil.ts`, platform `'truck'`;
+  `vehicle/carmodels.ts` `kit_zil130`; measurements-zil130.md). A cab on a ladder frame
+  behind a rear-hinged bonnet between separate wings, the late white grille panel, a
+  wraparound screen with no A pillar (`screenWrap`), mirrors on arms, a steel flatbed whose
+  tail and side boards drop, a dark beam along the platform, toolbox and tank on the left
+  rail; twin rear tyres drawn on each rear wheel (one wide tyre in physics, 0.552 m,
+  `FactoryGeometry.rearTyreWidth`). ZIL-508.10 V8 (110 kW, 402 N·m) and its five-speed box
+  (`engine_zil_508`, `gearbox_zil130_5`, trucks only). In the car lab, the spawn menu and
+  traffic like every car. Getting in: the bench's left half is the driver's seat, its
+  right half the passenger's (`kitFrontBench`); the bonnet and the boards open from
+  outside, a long vehicle's reach grows with its length. Its payload sits 0.32 m ahead of
+  the rear axle, from the factory's axle loads (`holdAheadOfRearAxle`).
+
 - KIT CARS ARE CHEAPER: 7 % FEWER TRIANGLES, THE SAME SHAPES (`carkit/body.ts` `deckColumns`,
   `simplify.ts`, `exterior.ts`, `interior.ts`, `tools/kit-surface.ts`). The bonnet and boot
   no longer carry every flank column (the arches' facets cut them into strips); near-flat

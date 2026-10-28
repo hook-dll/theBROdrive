@@ -371,6 +371,29 @@ export const ENGINE_VARIANTS: readonly PartVariant[] = [
     },
   },
   {
+    // ZIL-508.10 V8 of the ZIL-130 (431410): 5969 cc, 100 x 95 mm, OHV petrol,
+    // 110 kW (150 hp) at 3200 rpm governed, 402 Nm at 1800-2000 (autoopt.ru
+    // ZIL-431410 factory sheet; ru.wikipedia ZIL-130). Dry mass 500 kg (autoopt).
+    // The 3200 is the governor's speed, not a red zone: full power there, the fuel cut
+    // ramping out over the limiter's 150 rpm to 3350.
+    id: 'engine_zil_508',
+    kind: 'engine',
+    label: '6.0 ZIL-508 V8',
+    mass: 500,
+    fits: ['truck'],
+    engine: {
+      peakPowerKw: 110,
+      powerPeakRpm: 3200,
+      peakTorqueNm: 402,
+      torquePeakRpm: 1900,
+      redlineRpm: 3350,
+      idleRpm: 600,
+      bsfc: 0.33,
+      brakingCoeff: 0.06,
+      cylinders: 8,
+    },
+  },
+  {
     // UMZ-4213.10-10 from the long-wheelbase UAZ-330364: 2.89 litres, 99 hp
     // (72.8 kW) at 4000 rpm and 201 Nm at 3000 (truck-and-bus.ru's 330364 sheet;
     // UMZ's own table rates the plain 4213.10 at 84.5 kW GROSS, GOST 14846-81).
@@ -645,6 +668,24 @@ export const GEARBOX_VARIANTS: readonly PartVariant[] = [
       shiftTime: 0.7,
       automatic: false,
       efficiency: 0.88,
+    },
+  },
+  {
+    // ZIL-130 five-speed, synchro on 2nd-5th: 7.44 / 4.10 / 2.29 / 1.47 / 1.00,
+    // R 7.09, on the single hypoid 6.33 axle (autoopt.ru ZIL-431410 sheet;
+    // interdalnoboy.com). Box, propshaft and a hypoid truck axle: 0.90.
+    id: 'gearbox_zil130_5',
+    kind: 'gearbox',
+    label: 'ZIL-130 five-speed',
+    mass: 105,
+    fits: ['truck'],
+    gearbox: {
+      ratios: [7.44, 4.10, 2.29, 1.47, 1.0],
+      reverse: 7.09,
+      finalDrive: 6.33,
+      shiftTime: 0.7,
+      automatic: false,
+      efficiency: 0.9,
     },
   },
 ];

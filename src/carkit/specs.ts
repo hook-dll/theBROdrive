@@ -21,7 +21,7 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_E34, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124 } from './interior';
+import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_E34, CABIN_GAZ24, CABIN_GAZ31029, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124, CABIN_ZIL130 } from './interior';
 import { BODY_W124, LOOK_W124 } from './mercedes';
 import { BODY_E34, LOOK_E34 } from './bmw';
 import { BODY_1111, LOOK_1111 } from './oka';
@@ -32,6 +32,7 @@ import { BODY_2110, BODY_2111, BODY_2112, LOOK_2110, LOOK_2111, LOOK_2112 } from
 import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
 import { BODY_GAZ24, BODY_GAZ31029, LOOK_GAZ24, LOOK_GAZ31029 } from './volgas';
 import { BODY_UAZ2206, BODY_UAZ469, LOOK_UAZ2206, LOOK_UAZ469 } from './uaz';
+import { BODY_ZIL130, LOOK_ZIL130 } from './zil';
 
 /** The shape of a car: everything a spec holds but its id, its looks and its cabin. */
 export type KitBody = Omit<KitCarSpec, 'id' | 'look' | 'cabinLayout'>;
@@ -56,7 +57,7 @@ function onBody(body: KitBody, ds: number, length: number): KitBody {
     bonnetFront: body.bonnetFront + ds,
     bonnet: body.bonnet && { ...body.bonnet, rear: body.bonnet.rear === undefined ? undefined : body.bonnet.rear + ds },
     bootEnd: body.bootEnd === undefined ? undefined : body.bootEnd + ds,
-    flap: { ...body.flap, s0: body.flap.s0 + ds, s1: body.flap.s1 + ds },
+    flap: body.flap && { ...body.flap, s0: body.flap.s0 + ds, s1: body.flap.s1 + ds },
   };
 }
 
@@ -600,4 +601,5 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vectraa: { id: 'vectraa', ...BODY_VECTRA_A, look: LOOK_VECTRA_A, cabinLayout: CABIN_VECTRA_A },
   w124: { id: 'w124', ...BODY_W124, look: LOOK_W124, cabinLayout: CABIN_W124 },
   e34: { id: 'e34', ...BODY_E34, look: LOOK_E34, cabinLayout: CABIN_E34 },
+  zil130: { id: 'zil130', ...BODY_ZIL130, look: LOOK_ZIL130, cabinLayout: CABIN_ZIL130 },
 };

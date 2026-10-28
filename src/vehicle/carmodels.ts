@@ -779,6 +779,12 @@ export interface FactoryGeometry {
   readonly rearTrack: number;
   readonly wheelRadius: number;
   readonly tyreWidth: number;
+  /**
+   * The rear wheel's width where it differs from the front's: a truck's dual rear pair,
+   * drawn as one wheel node with two tyres and run in physics as one equivalent tyre
+   * that wide (outer face to outer face). Unset, the rear is `tyreWidth`.
+   */
+  readonly rearTyreWidth?: number;
   /** Nose to front axle; set when source-art axle bias disagrees with factory drawings. */
   readonly frontOverhang?: number;
 }
@@ -909,6 +915,12 @@ const AERO_AZLK_2141: AeroSpec = { frontalArea: 1.95, liftFront: 0.1, liftRear: 
 const AERO_OKA: AeroSpec = { frontalArea: 1.69, liftFront: 0.14, liftRear: 0.16, sideSlope: 1.55, yawSlope: 0.47 };
 /** UAZ-330364: a cab-over flatbed; the flow leaves the flat cab front and roof, the bed sits in the wake. */
 const AERO_UAZ_330364: AeroSpec = { frontalArea: 3.8, liftFront: 0.25, liftRear: 0, sideSlope: 1.9, yawSlope: 0.2 };
+/**
+ * ZIL-130: a bonneted truck cab on an open flatbed: a blunt grille and a flat screen,
+ * the bed's front board in the cab's wake. Frontal area 2.5 m wide over 2.4 m less the
+ * 0.275 clearance and the gaps between the wheels: about 5.0 m² [E].
+ */
+const AERO_ZIL_130: AeroSpec = { frontalArea: 5.0, liftFront: 0.25, liftRear: 0, sideSlope: 1.9, yawSlope: 0.2 };
 /** IZH-2715: a Moskvich nose on a square van box. */
 const AERO_IZH_2715: AeroSpec = { frontalArea: 2.35, liftFront: 0.2, liftRear: 0.02, sideSlope: 1.8, yawSlope: 0.27 };
 /** VAZ-2110: a nineties saloon shaped in the tunnel, Cd 0.33. */
@@ -1030,6 +1042,12 @@ export interface CarModelDef {
   /** Set instead of `detectWheels` when the pack names its wheels consistently. */
   readonly wheelNodes?: WheelNodeNames;
   readonly bodyClass: BodyClass;
+  /**
+   * The cargo hold's centre this far ahead of the rear axle (m), where the factory's axle
+   * loads put a full payload (vehicle.ts `measureLoadAnchors`). Absent: the class's rule
+   * (a boot or a bed behind the rear axle).
+   */
+  readonly holdAheadOfRearAxle?: number;
   /** Uniform model-units-to-metres scale. */
   readonly scale: number;
   /**
@@ -1259,6 +1277,14 @@ const FACTORY_GEOMETRY: Readonly<Record<string, FactoryGeometry>> = {
   // 0.372 rolling radius and 0.225 width are the running-gear sibling's tyre
   // (sa_uaz330364). src/carkit/measurements-uaz.md §1, §3.1.
   kit_uaz2206:    { length: 4.380, width: 1.940, height: 2.101, clearance: 0.220, wheelbase: 2.300, frontTrack: 1.445, rearTrack: 1.445, wheelRadius: 0.372, tyreWidth: 0.225, frontOverhang: 0.993 },
+  // The ZIL-130 flatbed (431410): 6675 × 2500 × 2400, 3800 wheelbase, 1800/1790 tracks,
+  // 275 clearance (en.wikipedia, avtobuspaz3205.ru, dar-web.ru); 9.00R20 (260R508) whose
+  // rolling radius no source prints: 0.49 [E], between the free 0.509 (rim 0.254 + the
+  // section) and a loaded truck radial's ~0.475; 3200 rpm on 6.33 then gives about the 90.
+  // Front overhang 1.083, the drawing's hub. The rear is the kit's twin pair, 0.312
+  // apart on 0.24 tyres: 0.552 outer to outer (`rearTyreWidth`). The passport's 2400
+  // against the kit's 2.31 is the loader's usual growth (src/carkit/measurements-zil130.md §7).
+  kit_zil130:     { length: 6.675, width: 2.500, height: 2.400, clearance: 0.275, wheelbase: 3.800, frontTrack: 1.800, rearTrack: 1.790, wheelRadius: 0.490, tyreWidth: 0.240, rearTyreWidth: 0.552, frontOverhang: 1.083 },
   // The Daewoo Nexia N100 saloon: 4482 × 1662 × 1393, 2520 wheelbase, 1400/1406 tracks,
   // 175/70 R13 (drom.ru catalogue, Nexia 1.5 MT SOHC GL; 3dcar.ru drawing: 2520, 1400,
   // 1406, 1663); 160 clearance (the Nexia repair manual, 3ruk.ru; drom.ru prints 158).
@@ -2668,7 +2694,7 @@ const GEAR_UAZ_2206: KitRunningGear = {
  */
 type KitOwnGear = KitRunningGear &
   Required<Pick<Entry, 'bodyClass' | 'rearDriveBias' | 'suspension' | 'handlingProfile'>> &
-  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff' | 'wheelSetPool'>;
+  Pick<Entry, 'rearBrakeValve' | 'antiRoll' | 'rollCentre' | 'frontDiff' | 'rearDiff' | 'wheelSetPool' | 'holdAheadOfRearAxle'>;
 
 /**
  * Daewoo Nexia 1.5 GL (G15MF, five-speed), per its repair manual's table (3ruk.ru/vehicles/
@@ -2846,6 +2872,64 @@ const GEAR_BMW_E34: KitOwnGear = {
   wheelSetPool: KIT_E34_WHEEL_SETS,
 };
 
+/**
+ * ZIL-130 flatbed (431410), per the autoopt.ru factory sheet (encyclopedia/truck/zil/mark/
+ * zil-130): kerb 4175 kg with 2005 on the front axle, the ZIL-508.10 V8 and the five-
+ * speed on the 6.33 hypoid axle, 9.00R20 tyres, a 170 l tank, 90 km/h, 0-60 in 37 s,
+ * 25 m from 50 km/h on air drums, 8.3 m turning radius at the outer wheel.
+ *
+ * FOUR PHYSICS WHEELS (owner, 2026-10-28): the dual rears are one wheel node drawing two
+ * tyres, run as one equivalent tyre 0.552 wide (`FactoryGeometry.rearTyreWidth`). The
+ * tyre model is load-sensitive grip on one contact per wheel, so one rear contact under
+ * the axle half's load stands for the pair; what it cannot show is the pair's own scrub.
+ *
+ * Tyre 9.00R20, a radial of about 0.95 aspect (section 260 mm, rim 508 mm, rolling 0.49);
+ * grip 0.55, a truck tread compound below the UAZ's 0.59 [E]. Brakes: air over drums do
+ * NOT out-pull a truck's tyres, unlike every car's (see `BRAKES_*`): a floored pedal is
+ * 0.55 g [E], the stop below the tyre's peak. The factory's 25 m from 50 at gross mass
+ * then holds as a ceiling with the air system's response in it (about 0.6-0.8 s, 8-11 m
+ * at 50 km/h [E]): the bench, which has no response time, stops in the remainder. Lock
+ * from the 8.3 m outer-wheel radius, the E34's derivation: asin(3.8 / (8.3 − 1.8 / 2)) =
+ * 0.539. Springs: leaf beams at both ends as on the UAZ-330364 (its `SUSP_TRUCK`
+ * variant), at the truck's kerb rates (`SUSP_TRUCK`'s); no anti-roll bars, the leaves
+ * well inboard. Cd·A 0.8 on 5.0 m² = 4.0 [E]: no Cd is published for the 130. The fuel
+ * governor (full power at 3200, the fuel cut ramping out by 3350) sets the top in fifth:
+ * 94 km/h at gross on the bench against the passport's 90.
+ *
+ * Shod with the kit's own generated wheels (an empty `wheelSetPool`): no pack set has a
+ * truck's rim or a twin rear.
+ */
+const GEAR_ZIL_130: KitOwnGear = {
+  bodyClass: 'truck',
+  mass: 4175,
+  tyre: { construction: 'radial', aspect: 0.95 },
+  engineId: 'engine_zil_508',
+  gearboxId: 'gearbox_zil130_5',
+  tankLitres: 170,
+  wheelGrip: 0.55,
+  brakeDecelG: 0.55,
+  suspension: {
+    ...SUSP_TRUCK,
+    frontAxle: 'beam',
+    ackermann: 0.8,
+    frontCamberDeg: 1,
+    frontPitchCentre: LEAF_PITCH,
+    frontRollSteer: 0.06,
+  },
+  rollCentre: { front: 0.6, rear: 0.7 },
+  antiRoll: { front: -0.25, rear: -0.25 },
+  steerLock: 0.539,
+  rearDriveBias: 1,
+  handlingProfile: 'utility',
+  frontWeightShare: 2005 / 4175,
+  dragArea: 4.0,
+  aero: AERO_ZIL_130,
+  wheelSetPool: [],
+  // The payload's centre from the factory's axle loads: 6000 kg adding 505 to the front
+  // (2005 → 2510) over the 3.8 m wheelbase puts it 0.32 ahead of the rear axle [autoopt.ru].
+  holdAheadOfRearAxle: (505 / 6000) * 3.8,
+};
+
 /** A kit car on its catalogue sibling's running gear (`gear` over it where it differs), or on its own. */
 type KitCarRow =
   | readonly [id: string, sibling: string, kit: string, label?: string, gear?: KitRunningGear]
@@ -2901,6 +2985,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_vectraa', GEAR_OPEL_VECTRA_A, 'vectraa', 'Opel Vectra A'],
     ['kit_w124', GEAR_MERCEDES_W124, 'w124', 'Mercedes-Benz W124'],
     ['kit_e34', GEAR_BMW_E34, 'e34', 'BMW 520i (E34)'],
+    ['kit_zil130', GEAR_ZIL_130, 'zil130', 'ZIL-130'],
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
@@ -2999,6 +3084,9 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_vectraa: { trunkGrid: G4x2, comfort: 5 },
   kit_w124: { trunkGrid: G4x2, comfort: 5 },
   kit_e34: { trunkGrid: G4x2, comfort: 5 },
+  // The platform is 3.75 × 2.33 m; 4×4 is the largest grid the trunk renderer pools
+  // (`TRUNK_MAX_CELL_COUNT`). Leaf springs at both ends, unladen: the hardest ride.
+  kit_zil130: { trunkGrid: G4x4, comfort: 1 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
 };
 const DEFAULT_CAPACITY: CarCapacity = { trunkGrid: G4x2, comfort: 3 };
@@ -3023,6 +3111,7 @@ function catalogueDef(e: Entry): CarModelDef {
     loadedRideDrop: e.loadedRideDrop,
     wheelNodes: e.wheelNodes,
     bodyClass: e.bodyClass,
+    holdAheadOfRearAxle: e.holdAheadOfRearAxle,
     scale: e.scale ?? 1,
     yaw: e.yaw,
     mass: e.mass,

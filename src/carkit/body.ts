@@ -403,7 +403,8 @@ export class BodyFrame {
     const corner: [number, number] = [column.s, foot.y];
     const base: [number, number] = [foot.s, bottom];
     const knee = foot.knee;
-    const rows = [this.spec.flap.y0, this.spec.flap.y1];
+    const flap = this.spec.flap;
+    const rows = flap ? [flap.y0, flap.y1] : [];
     const snap = (y: number): number => rows.find((r) => Math.abs(r - y) < ROW_SNAP) ?? y;
     const bends = knee ? [...fillet(top, corner, knee, upper), ...fillet(corner, knee, base, upper)] : fillet(top, corner, base, upper);
     return [top, ...bends, ...fillet(knee ?? corner, base, [foot.s - 1, bottom], lower)].map(([s, y]) => [s, snap(y)]);
@@ -459,6 +460,7 @@ export class BodyFrame {
   archY(s: number): number {
     const w = this.spec.wheels;
     let best = -Infinity;
+    if (w.outside) return best;
     for (const axle of [w.front, w.rear]) {
       const r = w.radius * this.archFactor(axle);
       const d = s - this.archCentre(axle);
@@ -679,10 +681,13 @@ export function tubColumns(frame: BodyFrame): number[] {
   s.add(spec.bonnetFront);
   if (spec.bonnet || spec.cabin.screenFoot !== undefined) s.add(frame.bonnetRear);
   if (spec.bootEnd !== undefined) s.add(spec.bootEnd);
-  s.add(spec.flap.s0);
-  s.add(spec.flap.s1);
+  if (spec.flap) {
+    s.add(spec.flap.s0);
+    s.add(spec.flap.s1);
+  }
   const w = spec.wheels;
-  for (const axle of [w.front, w.rear]) {
+  // Wheels standing clear of the shell (`WheelSpec.outside`) add no arch columns.
+  for (const axle of w.outside ? [] : [w.front, w.rear]) {
     const r = w.radius * frame.archFactor(axle);
     const c = frame.archCentre(axle);
     const n = w.archSegments ?? 12;
@@ -784,7 +789,8 @@ function sideCutRows(frame: BodyFrame): { below: number[]; above: number[] } {
   // Every point of a raked shut line between the belt and the doors' bottom is a row, so
   // each band it crosses is cut along a straight piece of it.
   const feet = spec.cabin.columns.flatMap((c) => (c.foot ? frame.shutLine(c).slice(1).map(([, y]) => y).filter((y) => y > spec.doorBottom + 1e-6) : []));
-  const cuts = [spec.doorBottom, spec.flap.y0, spec.flap.y1, ...feet].sort((a, b) => a - b);
+  const flap = spec.flap ? [spec.flap.y0, spec.flap.y1] : [];
+  const cuts = [spec.doorBottom, ...flap, ...feet].sort((a, b) => a - b);
   return { below: cuts.filter((y) => y < meanCrease), above: cuts.filter((y) => y >= meanCrease) };
 }
 
@@ -867,9 +873,10 @@ export function buildShell(frame: BodyFrame): ShellResult {
       const aSide = a.rows.slice(0, sideCount(j) + 1);
       const bSide = b.rows.slice(0, sideCount(j + 1) + 1);
       const doorRow = sideRowIndex(frame, spec.doorBottom);
-      const flapRows = [sideRowIndex(frame, spec.flap.y0), sideRowIndex(frame, spec.flap.y1)];
+      const flap = spec.flap;
+      const flapRows = flap ? [sideRowIndex(frame, flap.y0), sideRowIndex(frame, flap.y1)] : [];
       const sideOwner = (stripLower: string, i: number, sm: number): string => {
-        if (side === (spec.flap.side === 'left' ? 1 : -1) && sm > spec.flap.s0 && sm < spec.flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) return 'flap';
+        if (flap && side === (flap.side === 'left' ? 1 : -1) && sm > flap.s0 && sm < flap.s1 && i >= flapRows[0]! && i < flapRows[1]!) return 'flap';
         return stripLower !== 'body' && i >= doorRow ? doorName(stripLower, side) : 'body';
       };
       for (let i = 0; i + 1 < aSide.length; i++) {
@@ -970,7 +977,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
 
     // ---- wheel wells ----
     const w = spec.wheels;
-    for (const hub of [w.front, w.rear]) {
+    for (const hub of w.outside ? [] : [w.front, w.rear]) {
       const r = w.radius * frame.archFactor(hub);
       const axle = frame.archCentre(hub);
       const archCols = cols.filter((s) => Math.abs(s - axle) <= r);
@@ -1249,6 +1256,9 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // The strip's paint above the belt as black or bright trim (`CabinColumn.finish`).
       let finish: CabinColumn['finish'];
       if (a.kind === 'front' && b.kind === 'front') {
+        glass = 'body';
+      } else if (cabin.screenWrap && a.kind === 'front' && b.kind === 'side') {
+        // The screen wraps round the corner onto the first column's fixed pane.
         glass = 'body';
       } else if (a.kind === 'rear' || b.kind === 'rear') {
         // A soft top's back is the top's, not the tailgate's, with its window only in the

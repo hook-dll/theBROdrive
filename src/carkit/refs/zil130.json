@@ -1,0 +1,40 @@
+{
+  "car": "zil130",
+  "measurements": "measurements-zil130.md",
+  "sources": {
+    "D": { "what": "3dcar.ru 'ЗИЛ 130 (by Crew)', ZIL-130V1 tractor four-view, 2500×1500: side 4.165 mm/px, s from the bumper's face x 1044, view turned 0.7°; front 4.031 mm/px, centre x 426.75, ground y 682.5 (measurements-zil130.md §7)", "url": "https://3dcar.ru/media/blueprints/full/zil/zil_130.jpg", "image": "build/carshape/_refs/bp/img/zil_130.jpg" },
+    "F": { "what": "en.wikipedia ZIL-130; avtobuspaz3205.ru; dar-web.ru; autoopt.ru ZIL-431410 (measurements-zil130.md §2)" },
+    "O": { "what": "the owner's side photo, a blue ZIL-130 flatbed, near-orthographic left side, 904×339: hubs (151.9, 261) / (669.8, 260.4), 7.337 mm/px from the 3800 wheelbase; the platform's floor, beam and toolbox (measurements-zil130.md §7)", "url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQAGvvk7bMT-hPRJkc2bhnpxvNvBBbeyfXqOmS5VAwV0b2VyseHT_1tmIY&s=10", "image": "build/carshape/_refs/photos/zil130/owner_side.jpg" }
+  },
+  "body": {
+    "length": { "v": 6.675, "src": "F 6675" },
+    "width": { "v": 2.5, "src": "F 2500" },
+    "height": {
+      "v": 2.4,
+      "src": "F 2400",
+      "accepted": { "v": 2.31, "why": "D's cab roof stands 2.258 (front) / 2.28 (side), the marker lamps on it 2.31; the passport's 2400 is not on the drawing. The loader grows the body to the passport, the carkit's convention (README, 'Frame of reference'); measurements-zil130.md §7" }
+    },
+    "wheelbase": { "v": 3.8, "src": "F 3800 (D is the V1 tractor's 3300)" },
+    "overhangFront": { "v": 1.083, "src": "D side, the front hub at s 1.083 (measurements-zil130.md §7)" },
+    "screenFoot": { "v": [1.474, 1.681], "src": "D side, the screen's foot in profile (§7)" },
+    "screenTop": { "v": [1.7, 2.142], "tol": 0.06, "src": "D side, the screen's top in profile (§7); the screen wraps round its corners, so the profile's rearmost top is read loosely" },
+    "beltY": { "v": 1.7, "src": "D side, the door glass's foot 1.70 (§7)" },
+    "railY": { "v": 2.05, "src": "D side, the door glass's top 2.05 (§7)" },
+    "doorFront": { "v": [1.774, 2.545], "src": "D side, the door's front edge 1.774 and rear edge 2.545 (§7)" },
+    "doorBottomY": { "v": 0.77, "src": "D side, the door's bottom 0.77 (§7)" },
+    "beltHalfWidth": { "v": 0.88, "src": "D front, ±0.88 at the belt (§7)" },
+    "roofHalfWidth": { "v": 0.826, "src": "D front, ±0.826 at the drip rail (§7)" },
+    "mirror": { "v": [1.48, 1.81], "src": "D side/front, the mirror heads at s ~1.48, 1.81 high (§7)" },
+    "bonnet": { "v": [0.233, 1.358], "src": "D side, the bonnet's nose s 0.233 to its rear edge s 1.358 (§7)" }
+  },
+  "dashNote": "no interior photo is sourced (measurements-zil130.md §3 lists none); the cabin is a bench with a plain dash, the instrument list only from zil130.ru/zil/435",
+  "gaps": [
+    "Behind the cab D is the V1 tractor: platform, frame end and rear are the factory's figures [F], the owner's side photo [O] (the platform's height, beam, toolbox: measurements-zil130.md §7) and the photos, not read here",
+    "archFront/archRear: the wing's arch stands above the hub's height (feet at 0.74 against the hub's 0.527), so the tool's reach at hub height is not read",
+    "dash: no interior photo sourced"
+  ],
+  "overlay": {
+    "side": { "src": "D", "image": "build/carshape/_refs/bp/img/zil_130.jpg", "crop": [1020, 110, 2330, 700], "s": [1044, 0.004165], "y": [679, 0.004165] },
+    "front": { "src": "D", "image": "build/carshape/_refs/bp/img/zil_130.jpg", "crop": [130, 110, 730, 700], "x": [426.75, 0.004031], "y": [682.5, 0.004031] }
+  }
+}

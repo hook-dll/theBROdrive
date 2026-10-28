@@ -89,6 +89,13 @@ const DROP_WALL_MARGIN = 0.15;
 /** Distance from the eye to a car's centre at which entering it is offered. */
 const VEHICLE_RANGE = 3.5;
 /**
+ * Half the chassis box length `VEHICLE_RANGE` was set for: the longest car's (the
+ * GAZ-31029, 4.885 m). A kit vehicle longer than that (the ZIL-130 truck) has its parts
+ * and doors aimed at out to `VEHICLE_RANGE` plus its ends' overhang past a car's
+ * (`Resolved.vehicleRange`), so its bonnet and tail board are reached from where a car's would be.
+ */
+const CAR_HALF_LENGTH = 2.5;
+/**
  * Fastest a seated player may still step out of a moving car, in km/h. Five is
  * walking pace, so a permitted exit reads as stepping out rather than the car
  * being snapped to a halt under you, and it sits above the creep a car makes on
@@ -402,6 +409,11 @@ interface Resolved {
   /** Distance from the eye to the car's chassis centre, metres. */
   vehicleDist: number;
   /**
+   * `vehicleDist` within which a kit car's parts, doors and seats are aimed at:
+   * `VEHICLE_RANGE`, out by a longer vehicle's overhang past a car's (`CAR_HALF_LENGTH`).
+   */
+  vehicleRange: number;
+  /**
    * The kit car's shell panel the eye ray meets (a side door, a lid, the flap), or null;
    * see `aimKit`. Only ever set for `vehicle`.
    */
@@ -465,8 +477,8 @@ const KIT_VEHICLE_CHANNELS: Readonly<Record<string, true>> = {
   temp: true,
 };
 
-/** The shell's own panels (doors, lids, flap): outside parts, not cabin fittings. */
-const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$)/;
+/** The shell's own panels (doors, lids, flap, a truck's drop boards): outside parts, not cabin fittings. */
+const KIT_SHELL_PART = /^(door_|bonnet$|boot$|tailgate(_[lr])?$|flap$|board_(l|r|tail)$)/;
 /** A side door, which a seat is got into through. */
 const KIT_SIDE_DOOR = /^door_[fr][lr]$/;
 /**
@@ -478,7 +490,7 @@ const KIT_SIDE_DOOR = /^door_[fr][lr]$/;
 const KIT_DOOR_REACH_PART = /^engine_cover$/;
 
 /** Lids opened only from outside: from a seat they are not offered. */
-const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?)$/;
+const KIT_LID_PART = /^(bonnet|boot|tailgate(_[lr])?|board_(l|r|tail))$/;
 
 /**
  * Parts worked only through their own control: a door's pane by its crank
@@ -504,7 +516,7 @@ const KIT_SEAT_PART = /^(?:seat|seatback|headrest)_/;
 const KIT_PANEL_SOUND: readonly (readonly [RegExp, FoleyEvent, FoleyEvent])[] = [
   [/^door_/, 'door-open', 'door-close'],
   [/^bonnet$/, 'bonnet-open', 'bonnet-shut'],
-  [/^(boot|tailgate(_[lr])?)$/, 'boot-open', 'boot-shut'],
+  [/^(boot|tailgate(_[lr])?|board_(l|r|tail))$/, 'boot-open', 'boot-shut'],
 ];
 /** A shutting panel is heard landing once its pose is this close to closed (0..1). */
 const PANEL_SHUT_AT = 0.02;
@@ -1603,6 +1615,7 @@ export class Interaction {
     let vehicle: Vehicle | null = null;
     let carId: string | null = null;
     let vehicleDist = Infinity;
+    let vehicleRange = VEHICLE_RANGE;
     let kitHit = false;
     let kitDoor: KitDoor | null = null;
     let locked = false;
@@ -1613,6 +1626,7 @@ export class Interaction {
       const t = vehicle.chassis.translation(this.tScratch);
       vehicle.chassis.rotation(this.qScratch);
       vehicleDist = Math.hypot(t.x - eyeX, t.y - eyeY, t.z - eyeZ);
+      if (vehicle.kit) vehicleRange += Math.max(0, vehicle.modelMeasure.halfExtents[2] - CAR_HALF_LENGTH);
 
       // Rear and front use the same deliberate close-range interaction. The nearer
       // grid wins, so a long bus cannot expose both ends at once. A kit car's grid is
@@ -1658,8 +1672,8 @@ export class Interaction {
 
       // A kit car is worked part by part, so for it the eye ray is also tested against
       // the render mesh, which is what the parts are. Bounded: only this one car, only
-      // inside VEHICLE_RANGE, and the ray itself stops there (`aimKit`).
-      if (rig && vehicleDist <= VEHICLE_RANGE) {
+      // inside `vehicleRange`, and the ray itself stops at VEHICLE_RANGE (`aimKit`).
+      if (rig && vehicleDist <= vehicleRange) {
         kitHit = this.aimKit(vehicle, eyeX, eyeY, eyeZ, dx, dy, dz, VEHICLE_RANGE, false);
         kitDoor = locked ? null : this.kitEntryDoor(rig, vehicle, eyeX, eyeY, eyeZ);
       }
@@ -1710,7 +1724,7 @@ export class Interaction {
     // (the dash, the tunnel, the far door, the far window): the seat that door serves. A
     // shut door met before the opening, a cabin part in the aim (`KIT_DOOR_REACH_PART`)
     // and anything of the world nearer than the car keep the press.
-    if (kitSeat === null && rig && vehicle && !locked && vehicleDist <= VEHICLE_RANGE) {
+    if (kitSeat === null && rig && vehicle && !locked && vehicleDist <= vehicleRange) {
       const t = target as Target;
       const own = t.kind === 'none' || t.kind === 'car-entry' || t.kind === 'car-body';
       const part = kitPart?.control.id ?? null;
@@ -1728,7 +1742,7 @@ export class Interaction {
       }
     }
 
-    return { target, vehicle, carId, vehicleDist, kitPart, kitHit, kitDoor, kitSeat, kitPlace };
+    return { target, vehicle, carId, vehicleDist, vehicleRange, kitPart, kitHit, kitDoor, kitSeat, kitPlace };
   }
 
   /** Scratch for `pickBody`'s stamp read: the hit face's three corners and two edges. */
@@ -1935,12 +1949,15 @@ export class Interaction {
   /**
    * The seat a kit car's surface belongs to, or null: a front seat by its parts' channel
    * (`seat_fl` and the back and headrest riding on it are the driver's, on the left),
-   * the rear bench by its group, halved down the car's centre line.
+   * the bench by its group, halved down the car's centre line: the rear seats', or a
+   * truck's front ones (`kitFrontBench`, carkit/interior.ts `KIT_BENCH_NODE`).
    */
   private kitSeatOf(hit: THREE.Intersection): PlayerSeat | null {
     for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
       if (node.name === KIT_BENCH_NODE) {
-        return node.worldToLocal(this.kitEye.copy(hit.point)).x > 0 ? 'rear-left' : 'rear-right';
+        const left = node.worldToLocal(this.kitEye.copy(hit.point)).x > 0;
+        if (node.userData.kitFrontBench === true) return left ? 'driver' : 'passenger';
+        return left ? 'rear-left' : 'rear-right';
       }
       const id = (node.userData.kitControl as KitControl | undefined)?.id;
       if (id === undefined) continue;
@@ -2964,7 +2981,7 @@ export class Interaction {
    * `haulLoadLock`).
    */
   private lockedCarAimed(resolved: Resolved): string | null {
-    if (!resolved.carId || resolved.vehicleDist > VEHICLE_RANGE) return null;
+    if (!resolved.carId || resolved.vehicleDist > resolved.vehicleRange) return null;
     const t = resolved.target;
     if (!(t.kind === 'car-entry' || t.kind === 'car-body' || (t.kind === 'none' && resolved.kitHit))) return null;
     const car = this.world.state.cars[resolved.carId];

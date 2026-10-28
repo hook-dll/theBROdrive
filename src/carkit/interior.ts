@@ -50,11 +50,13 @@ const FLOOR_RISE = 0.03;
 const HUMP_RISE = 0.03;
 /** The rear bench's closed base reaches this far behind its hip. */
 const BENCH_BACK = 0.12;
+/** The bench's closed base reaches this far ahead of its hip. */
+const BENCH_FRONT = 0.36;
 /** The van's lining below the belt stops this far ahead of the rear doors' opening. */
 const VAN_TRIM_CLEAR = 0.06;
 /** The van's floor runs to this far ahead of the rear doors' opening. */
 const VAN_FLOOR_CLEAR = 0.03;
-/** The van's furniture stands this far into its floor (`Cabin.standY`). */
+/** The van's and the truck's furniture stands this far into its floor (`Cabin.standY`). */
 const VAN_FOOT_SINK = 0.01;
 /**
  * The van's engine cover (`Layout.engineCover`): its pad's chamfer and the taper of its
@@ -644,6 +646,39 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     handbrake: { rear: 0.35, length: 0.18 },
     carpet: 0x2c2d26,
     headliner: 0xcfcabd,
+  },
+  /**
+   * A bonneted truck's cab (the ZIL-130): one bench across the cab for three, its back
+   * against the back wall; a flat floor over the frame with a low hump over the gearbox; a
+   * shallow flat dash under the screen; a big thin wheel on a steep column down to the
+   * floor; a long gear lever out of the floor ahead of the bench. The dash is the truck's
+   * own (`CABIN_ZIL130`). Figures [E] unless marked: no section of the cab.
+   */
+  truck: {
+    ...BASE_LAYOUTS.classic,
+    // The bench's hip 0.87 behind the cowl (the screen's corner foot), its back's foot 0.3
+    // ahead of the back wall (s 2.73 on the ZIL): the back reclines into the room left.
+    hip: 0.87,
+    bench: { from: 'hip', offset: 0 },
+    // A truck's seat stands high over its floor; the driver sits on the bench as the rest.
+    cushion: 0.36,
+    benchCushion: 0.36,
+    recline: 0.22,
+    benchRecline: 0.22,
+    bolsters: false,
+    seatX: 0.45,
+    // The floor stands over the frame's rails, 0.2 over the cab's sill.
+    floorRise: 0.2,
+    toeTop: 0.18,
+    toeRun: 0.25,
+    tunnel: { heights: [0.12, 0.1, 0], base: [0.22, 0.15], top: [0.14, 0.1] },
+    // Out of the floor just ahead of the bench's front edge, leaning back to the driver.
+    gear: { ds: 0.44, height: 0.62, lean: 0.08 },
+    handbrake: { rear: -0.55, length: 0.12 },
+    pedals: { pivot: [0.12, -0.25], pad: [0.3, 0.13] },
+    visor: { half: 0.16, depth: 0.12 },
+    carpet: 0x2a2a28,
+    headliner: 0xbdb8a8,
   },
 };
 
@@ -1766,6 +1801,54 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
   pedals: { pivot: [0.15, -0.22], pad: [0.3, 0.13] },
 };
 
+// The ZIL-130 on the truck's furniture. No photo of its dash is in the refs: the plain
+// painted dash the owner asked for (measurements-zil130.md §6 I1), its sizes [E]; the
+// wheel's centre 0.48 off the centre line [D front view: the rim behind the screen].
+
+/**
+ * ZIL-130: a flat steel dash in the body's colour under the screen, a short level top;
+ * before the driver a black plate with the speedometer in its middle and two small dials
+ * either side (ammeter and oil pressure left, temperature and fuel right), a row of four
+ * warning lamps under the speedometer; a knob or two on the face; a small lid before the
+ * passenger; a big thin three-spoke wheel on a steep column.
+ */
+export const CABIN_ZIL130: CabinLayoutOverride = {
+  // The wheel's centre 0.477 off the centre line [D front, 4.03 mm/px].
+  seatX: 0.47,
+  dash: [
+    [0.06, 0.05], [0.24, 0.05], [0.26, 0.03], [0.26, -0.2],
+    [0.24, -0.23], [0.1, -0.25], [0.045, -0.22], [0.045, -0.06],
+  ],
+  fascia: [[0.26, 0.03], [0.26, -0.2]],
+  wood: undefined,
+  stack: undefined,
+  vents: undefined,
+  heater: undefined,
+  console: undefined,
+  // The plate 3 cm proud of the face, centred on the column.
+  binnacle: [[0.24, 0.005], [0.29, 0.005], [0.29, -0.15], [0.24, -0.15]],
+  binnacleHalf: 0.17,
+  cluster: 0.29,
+  clusterFace: { right: 0, up: -0.072, half: [0.16, 0.07], colour: COLOURS.cluster, frame: 'black' },
+  gauges: [
+    { channel: 'speed', right: 0, up: -0.06, radius: 0.045, full: 100, ...BIG },
+    { channel: 'volts', right: -0.105, up: -0.035, radius: 0.022, ...SMALL, min: 12, full: 16 },
+    { channel: 'oil', right: -0.105, up: -0.095, radius: 0.022, ...SMALL, full: 6, ticks: 4 },
+    { channel: 'temp', right: 0.105, up: -0.035, radius: 0.022, ...SMALL },
+    { channel: 'fuel', right: 0.105, up: -0.095, radius: 0.022, ...SMALL },
+  ],
+  lamps: { right: 0, up: -0.125, cols: 4, pitch: 0.028, show: ['turn', 'beam', 'oil', 'charge'] },
+  lights: { right: 0.24, dy: -0.12, kind: 'knob' },
+  rockers: { on: 'fascia', at: [[0.2, -0.17]] },
+  hazard: [0.12, -0.18],
+  glovebox: { x: -0.45, dy: -0.06, half: [0.14, 0.05] },
+  radio: [-0.12, -0.12],
+  ashtray: [-0.22, -0.16],
+  // Rim 0.48 across [D front: the wheel behind the screen, 0.40-0.50 m], thin; three
+  // spokes; the column steep, down through the dash's face to the floor [E].
+  wheel: { ds: 0.46, dy: 0.06, rake: 40 * (Math.PI / 180), radius: 0.24, rim: 0.011, spokes: [-20, 200, 270], hub: 'round', toFloor: true },
+};
+
 /**
  * Name of an empty node at the driver's eye, in the kit frame. render/carmodel.ts reads
  * it after the body fit as the default cabin camera (`CarModelMeasure.cabinEye`) and
@@ -1776,7 +1859,9 @@ export const KIT_DRIVER_EYE_NODE = 'kit_driver_eye';
 export const KIT_REAR_EYE_NODE = 'kit_rear_eye';
 /**
  * Name of the group holding the rear bench's meshes, inside `kit_cabin`: the bench is
- * one piece with no channel, and getting in (player/interaction.ts) has to know it.
+ * one piece with no channel, and getting in (player/interaction.ts) has to know it. A
+ * truck's bench is its only seat, the front one: its group carries
+ * `userData.kitFrontBench = true`, its left half the driver's and its right the passenger's.
  */
 export const KIT_BENCH_NODE = 'kit_bench';
 /**
@@ -2114,13 +2199,18 @@ class Cabin {
   private readonly hatch: boolean;
   /** A forward-control van (`platform: 'van'`): its floor runs over both axles to the rear doors. */
   private readonly van: boolean;
+  /**
+   * A bonneted truck's cab (`platform: 'truck'`): its floor runs to the back wall, no
+   * arch covers or shelf, the bench across the cab is the only seat.
+   */
+  private readonly truck: boolean;
   /** Firewall lining, floor height, the floor's rear end (the rear arch's front). */
   private readonly fw: number;
   private readonly floorY: number;
   /**
-   * Where furniture standing on the floor puts its foot: the floor, or on the van 10 mm
-   * under it, since its floor shows through the saloon's windows and a foot in its plane
-   * fights it there.
+   * Where furniture standing on the floor puts its foot: the floor, or on the van and the
+   * truck 10 mm under it, since their floor runs under the furniture to the back and a
+   * foot in its plane fights it there.
    */
   private readonly standY: number;
   private readonly floorEnd: number;
@@ -2144,12 +2234,13 @@ class Cabin {
     this.lay = layoutOf(ctx.frame);
     this.hatch = this.spec.bootEnd === undefined;
     this.van = this.spec.platform === 'van';
+    this.truck = this.spec.platform === 'truck';
     const f = this.frame;
     const w = this.spec.wheels;
     this.fw = f.cowl + FIREWALL;
     this.floorY = cabinFloor(f);
-    this.standY = this.van ? this.floorY - VAN_FOOT_SINK : this.floorY;
-    this.floorEnd = this.van ? f.rearBase - VAN_FLOOR_CLEAR : w.rear - w.radius * f.archFactor(w.rear) - 0.01;
+    this.standY = this.van || this.truck ? this.floorY - VAN_FOOT_SINK : this.floorY;
+    this.floorEnd = this.van ? f.rearBase - VAN_FLOOR_CLEAR : this.truck ? f.rearBase - 0.01 : w.rear - w.radius * f.archFactor(w.rear) - 0.01;
     this.belt = f.station(f.cowl).belt;
     this.hipS = f.cowl + this.lay.hip;
     this.benchS = benchHip(f, this.lay);
@@ -2168,20 +2259,21 @@ class Cabin {
     this.group.name = 'kit_cabin';
     this.floor();
     this.sidePanels();
-    // A van's floor stands over its wheel arches: no covers inside.
-    if (!this.van) this.humps();
+    // A van's floor stands over its wheel arches, a truck's cab between them: no covers inside.
+    if (!this.van && !this.truck) this.humps();
     this.sills();
     this.lining();
     this.headliner();
-    if (!this.van) this.shelf();
+    if (!this.van && !this.truck) this.shelf();
     this.dash();
     this.steering();
     this.pedals();
     this.levers();
     this.engineCover();
-    for (const side of [1, -1]) this.frontSeat(side);
+    // A truck's bench is its front seat.
+    if (!this.truck) for (const side of [1, -1]) this.frontSeat(side);
     this.bench();
-    if (!this.van) this.floorPlaces();
+    if (!this.van && !this.truck) this.floorPlaces();
     this.driverEye();
     this.rearEye();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
@@ -2391,10 +2483,10 @@ class Cabin {
     }
   }
 
-  /** Sill trims along the door openings, inside the door's inner skin. */
+  /** Sill trims along the door openings, inside the door's inner skin; a truck's stop at its bench's base. */
   private sills(): void {
     const s0 = this.fw;
-    const s1 = this.floorEnd;
+    const s1 = this.truck ? this.benchS - BENCH_FRONT - 0.01 : this.floorEnd;
     let out = Infinity;
     for (let i = 0; i <= 4; i++) out = Math.min(out, this.frame.sideX(lerp(s0, s1, i / 4), this.spec.doorBottom) - DOOR_CARD - 0.01);
     const y0 = this.floorY - 0.01;
@@ -3270,35 +3362,39 @@ class Cabin {
 
   /**
    * Rear bench on a closed base. A saloon also gets a riser behind it over the rear
-   * axle, up to the shelf. A hatch's load floor (bay.ts) meets the base's back.
+   * axle, up to the shelf. A hatch's load floor (bay.ts) meets the base's back. A truck's
+   * bench is its front seat across the cab, three places in it (the driver's at `seatX`).
    */
   private bench(): void {
     const L = this.lay;
     const b = new PartBuilder();
     const H = this.benchS;
     const top = this.floorY + L.benchCushion;
-    const wall = this.frame.wellX(this.spec.wheels.rear) - (L.bench.clear ?? 0.022);
+    const wall = this.truck
+      ? this.sideRoom(H - 0.36, H + BENCH_BACK, this.standY, top)
+      : this.frame.wellX(this.spec.wheels.rear) - (L.bench.clear ?? 0.022);
     const half = wall - 0.013;
+    const seats = this.truck ? [-L.seatX, 0, L.seatX] : [-BENCH_SEAT_X, BENCH_SEAT_X];
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const skirtTop = top - 0.12;
     b.color(shade(uph, 0.85), 'upholstery');
-    pad(b, 'trim', this.P(0, (this.standY + skirtTop) / 2, H + (BENCH_BACK - 0.36) / 2), [wall, (skirtTop - this.standY) / 2, (BENCH_BACK + 0.36) / 2], 0.015);
+    pad(b, 'trim', this.P(0, (this.standY + skirtTop) / 2, H + (BENCH_BACK - BENCH_FRONT) / 2), [wall, (skirtTop - this.standY) / 2, (BENCH_BACK + BENCH_FRONT) / 2], 0.015);
     if (!this.hatch) {
       const s0 = H + 0.1;
       const s1 = this.frame.rearBase - 0.015;
       const y1 = top + 0.025;
-      b.box('trim', this.P(0, (this.floorY + y1) / 2, (s0 + s1) / 2), [wall, (y1 - this.floorY) / 2, (s1 - s0) / 2]);
+      b.box('trim', this.P(0, (this.standY + y1) / 2, (s0 + s1) / 2), [wall, (y1 - this.standY) / 2, (s1 - s0) / 2]);
     }
     b.pushAt(this.P(0, top - 0.07, H - 0.13), [-0.06, 0, 0]).color(uph, 'upholstery');
     pad(b, 'trim', ORIGIN, [half, 0.07, 0.25], 0.04);
     b.color(insert, 'upholstery');
-    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.12, 0.07, -0.18], [sx + 0.12, 0.07, -0.18], [sx + 0.12, 0.07, 0.18], [sx - 0.12, 0.07, 0.18]]);
+    for (const sx of seats) inlay(b, 'trim', [[sx - 0.12, 0.07, -0.18], [sx + 0.12, 0.07, -0.18], [sx + 0.12, 0.07, 0.18], [sx - 0.12, 0.07, 0.18]]);
     b.pop();
     b.pushAt(this.P(0, top - 0.035, H), [-L.benchRecline, 0, 0]).color(uph, 'upholstery');
     pad(b, 'trim', [0, 0.25, -0.05], [half, 0.25, 0.065], 0.04, 0.97);
     b.color(insert, 'upholstery');
-    for (const sx of [-BENCH_SEAT_X, BENCH_SEAT_X]) inlay(b, 'trim', [[sx - 0.11, 0.06, 0.015], [sx + 0.11, 0.06, 0.015], [sx + 0.11, 0.42, 0.015], [sx - 0.11, 0.42, 0.015]]);
+    for (const sx of seats) inlay(b, 'trim', [[sx - 0.11, 0.06, 0.015], [sx + 0.11, 0.06, 0.015], [sx + 0.11, 0.42, 0.015], [sx - 0.11, 0.42, 0.015]]);
     b.pop();
     const group = new THREE.Group();
     group.name = KIT_BENCH_NODE;
@@ -3313,6 +3409,12 @@ class Cabin {
     const at = add(cushion, rotX([0, 0.07, H - 0.13 - mid], -0.06));
     const edge = Math.min(half - 0.045, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT));
     const room = (halfX: number): PlaceRoom => ({ halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
+    // A truck's bench is the passenger's seat: the place on his third of it.
+    if (this.truck) {
+      group.userData.kitFrontBench = true;
+      this.place(group, ORIGIN, 'seat', add(at, [-L.seatX, 0, 0]), -0.06, room(Math.min(0.21, edge - L.seatX)));
+      return;
+    }
     const inner = 0.01;
     const halfWidth = (edge - inner) / 2;
     this.place(group, ORIGIN, 'bench', at, -0.06, room(edge));

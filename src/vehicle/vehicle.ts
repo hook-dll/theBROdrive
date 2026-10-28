@@ -2360,7 +2360,7 @@ export class Vehicle implements Rebasable {
         { x: wheel.pos[0], y: contactY + wheel.radius + MOUNT_ABOVE_WHEEL_CENTRE, z: wheel.pos[2] },
         restLength,
         wheel.radius,
-        this.model.factory.tyreWidth,
+        wheel.isFront ? this.model.factory.tyreWidth : (this.model.factory.rearTyreWidth ?? this.model.factory.tyreWidth),
       );
 
       const springRateNPerM = wheelSpringRateAbs(hz, designCornerMass);
@@ -6714,7 +6714,8 @@ export class Vehicle implements Rebasable {
       },
       hold: {
         y: floorY + LOAD_CARGO_HALF_HEIGHT,
-        z: axles.rearZ - holdBehind * tail,
+        // A model may name where its factory puts the payload (the ZIL-130's bed).
+        z: this.model.holdAheadOfRearAxle !== undefined ? axles.rearZ + this.model.holdAheadOfRearAxle : axles.rearZ - holdBehind * tail,
       },
       seat: {
         y: floorY + LOAD_SEAT_ABOVE_FLOOR,

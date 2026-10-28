@@ -97,6 +97,8 @@ function buildEngine(b: MeshBuilder, v: PartVariant): void {
     // The Rover's alloy V8 is compact for eight cylinders; the Chevrolet is not.
     case 'engine_rover_v8': return buildVee(b, spec, 0.98);
     case 'engine_chevy_350': return buildVee(b, spec, 1.14);
+    // The ZIL-508 is a cast-iron 6-litre truck V8, bigger than either.
+    case 'engine_zil_508': return buildVee(b, spec, 1.24);
     // The Soviet fours, scaled by displacement against the 1.6 at 1.0.
     case 'engine_lada_1200': return buildInline(b, spec, 0.88);
     case 'engine_lada_1300':
@@ -258,6 +260,7 @@ function buildGearbox(b: MeshBuilder, v: PartVariant): void {
     case 'gearbox_niva_5': scale = 1.26; manual = true; fins = false; break;
     case 'gearbox_auto3': scale = 1.2; manual = false; fins = true; break;
     case 'gearbox_truck6': scale = 1.5; manual = true; fins = true; break;
+    case 'gearbox_zil130_5': scale = 1.4; manual = true; fins = true; break;
     default: throw new Error(`unhandled gearbox variant: ${v.id}`);
   }
   const id = v.id;
