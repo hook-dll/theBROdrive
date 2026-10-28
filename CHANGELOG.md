@@ -4,6 +4,32 @@
 
 ### Changed
 
+- KIT CARS ARE CHEAPER: 7 % FEWER TRIANGLES, THE SAME SHAPES (`carkit/body.ts` `deckColumns`,
+  `simplify.ts`, `exterior.ts`, `interior.ts`, `tools/kit-surface.ts`). The bonnet and boot
+  no longer carry every flank column (the arches' facets cut them into strips); near-flat
+  runs merge (1 mm, 3°); face strips can lie on a part without cutting it (`on`); wipers,
+  the steering wheel's rim and the window cranks use fewer facets; per-part triangle
+  ceilings in kit-surface fail a car whose small part grows. Every frozen car re-recorded
+  (kit-fingerprint); all pass zfight, surface, drawing and mirrors.
+
+- CLOUDS WHITE AGAIN ON EVERY MACHINE (owner: black clouds on the M2 Mac;
+  `render/hazeshader.ts`). Since the clouds began weighting the stars by the scene target's
+  alpha they leave it at 0 in daylight, and the finishing pass passed that alpha on to the
+  canvas: each cloud was a hole in it, which macOS Chrome filled with the page's dark
+  background and other compositors with the cloud added. The pass now writes alpha 1.
+
+- THE BMW E34'S FRONT AND TAIL CLOSER TO THE PHOTOS (owner; `carkit/bmw.ts`, `carkit/body.ts`
+  `ribRise`, `KitCarSpec.bonnetRib`). Bigger head lamps filling their band (glass radius
+  0.062 → 0.07); the kidneys up to the bonnet's lip; grey slats in the band between the
+  kidneys and the lamps; the bonnet's middle raised 16 mm between two ribs. At the tail:
+  each lid lamp in two rows with a black line between, the reversing lamp a small cell at
+  the upper row's inner end, a bright strip under the lamps across the tail, the wings'
+  tops turning in from just over the lamps to the lid (the tail no wider at the top), the wings'
+  top corners rounded down to the lid. The open rear door no longer carries a spike up the
+  C pillar (the 1 cm frame strip behind its glass ends under the cut), the C pillar no slit
+  where the door's cut met it (the pillar's strip split at the same corner, `frameCut` on a
+  body column), and the door's kink one more facet rounder.
+
 - THE VAZ-2102'S OPEN FRONT DOOR HAS ITS FRONT POST AGAIN, AND THE E34'S REAR DOOR IS CUT
   ALONG ITS GLASS'S KINK (owner; `carkit/estates.ts`, `carkit/bmw.ts`, `body.ts`). The 2102
   door's frame ahead of the vent is the door's again, as on the 2101. The E34's quarter

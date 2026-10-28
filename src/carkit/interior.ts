@@ -3109,7 +3109,8 @@ class Cabin {
     wheel.rotation.x = tilt;
     const wb = new PartBuilder().color(COLOURS.black);
     const R = w.radius;
-    wb.torusY('trim', R, w.rim, 16, 5);
+    // Twelve segments round, a four-sided section: the rim reads round from the seat (16 × 5 was 160 triangles).
+    wb.torusY('trim', R, w.rim, 12, 4);
     wb.cylinderY('trim', [0, -0.045, 0], 0.04, 0.02, 8);
     for (const deg of w.spokes) {
       const a = (deg * Math.PI) / 180;
@@ -3472,9 +3473,9 @@ class Cabin {
       fineDetail(this.hinge(group, door.pivot, `crank_${pos}`, at, { channel: window, kind: 'rot', axis: [1, 0, 0], amount: side * 8 * Math.PI }, control, (c) => {
         const inward = (d: number): Vec3 => [-side * d, 0, 0];
         const end = add(at, [0, 0.06, -0.045]);
-        c.color(COLOURS.metal).cylinderX('chrome', add(at, inward(0.006)), 0.02, 0.006, 8);
+        c.color(COLOURS.metal).cylinderX('chrome', add(at, inward(0.006)), 0.02, 0.006, 6);
         beam(c, 'chrome', add(at, inward(0.014)), add(end, inward(0.014)), 0.008, 0.004, [1, 0, 0]);
-        c.color(COLOURS.black).cylinderX('trim', add(end, inward(0.032)), 0.011, 0.016, 6);
+        c.color(COLOURS.black).cylinderX('trim', add(end, inward(0.032)), 0.011, 0.016, 5);
       }));
     }
   }

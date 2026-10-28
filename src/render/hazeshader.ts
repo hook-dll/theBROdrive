@@ -574,6 +574,9 @@ export const HAZE_FRAGMENT = /* glsl */ `
     float finderMask = 1.0 - smoothstep(0.82, 1.04, finderShape);
     color.rgb *= mix(1.0, finderMask, uCameraViewfinder);
 
-    gl_FragColor = color;
+    // Opaque to the page. The scene target's alpha is not coverage: the clouds take it
+    // down to weight the stars behind them (render/clouds.ts "WHAT IT HIDES"), and passed
+    // on it made every cloud a hole in the canvas, the page's dark background through it.
+    gl_FragColor = vec4(color.rgb, 1.0);
   }
 `;

@@ -87,6 +87,20 @@ const FLIP_AREA = 1e-4;
 const CLUSTER_M = 0.2;
 const BUDGET = 13000;
 const BUDGET_HARD = 15000;
+/**
+ * Per-part ceilings (triangles, every mesh of the part summed; the slot suffix stripped):
+ * a small part has no business costing what a door's paint does (two wipers once cost 328,
+ * a steering wheel 219). Over one fails the car, so a part's cost never creeps back.
+ */
+const PART_BUDGETS: readonly (readonly [RegExp, number])[] = [
+  [/^wiper_\d$/, 100],
+  [/^steering_wheel$/, 180],
+  [/^mirrors$/, 180],
+  [/^exhaust$/, 160],
+  [/^(pedal|stalk)_\w+$/, 60],
+  [/^headrest_\w+$/, 80],
+  [/^(ashtray|horn)$/, 80],
+];
 const SLIVER_DEG = 1;
 const TINY_AREA = 1e-6; // m²
 const SLIVER_SHARE = 0.3;
@@ -321,6 +335,15 @@ export function complexity(car: KitCar, s: Soup, prov: Int32Array): Complexity {
     const m = s.meshes[s.mesh[t]!]!;
     const z = m.zone === 'exterior' ? 'body+trim' : m.zone.replace(/^kit_/, '');
     zones[z] = (zones[z] ?? 0) + 1;
+  }
+  const partTris = new Map<string, number>();
+  for (let t = 0; t < s.n; t++) {
+    const part = s.meshes[s.mesh[t]!]!.name.replace(/_(paint|trim|chrome|glass|dark|tyre|rim|lamp\w*)$/, '');
+    partTris.set(part, (partTris.get(part) ?? 0) + 1);
+  }
+  for (const [part, n] of partTris) {
+    const cap = PART_BUDGETS.find(([re]) => re.test(part))?.[1];
+    if (cap !== undefined && n > cap) findings.push({ car: id, level: 'fail', what: `${part}: ${n} triangles, over its part budget ${cap}` });
   }
   const total = s.n;
   if (total > BUDGET_HARD) findings.push({ car: id, level: 'fail', what: `${total} triangles, over the hard limit ${BUDGET_HARD} (budget ${BUDGET}): ${Object.entries(zones).map(([k, v]) => `${k} ${v}`).join(', ')}` });

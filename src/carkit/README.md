@@ -302,6 +302,7 @@ author.
 | `bootTank?` | `false`: no fuel tank on the boot's right shelf (a `classic` saloon whose tank lies under the floor: the E34's). Absent: the classic's tank in the boot. |
 | `rearLean` | `EndLean` `{ base, lean, blend, full?, peak? }`: above height `base`, every point behind `full` (default the rear base) moves forward `lean` m per m of height (negative: back, outwards), faded in over `blend` m ahead of it. Makes an estate's tailgate, lamp corners and lamps one raked plane. Built (closed) pose is warped, so parts still close flush. `peak: { y, lean }`: above `y` the offset goes on from the value reached there at `peak.lean` m per m, so the end bends twice (the GAZ-24's tail: base 0.55, lean −0.14, full 4.637, peak 0.77 / 0.65, its lamp fins the rearmost point); every mesh and the end face are cut at `peak.y`. |
 | `frontLean` | The same at the nose (kit.ts `leanEnd`): above `base`, every point ahead of `full` (default the bonnet's front edge) moves back `lean` m per m of height, faded out over `blend` m behind it. Put `base` on a face row (the crease) and `full` behind the corner lamps' end, so the lamps lean exactly with the faces they lie on; a long `blend` keeps the bonnet one smooth surface. The Samaras' face (`BODY_2108`: base 0.625, lean 0.36, blend 0.15, full 0.17; the 2115 without `full`) and the tens' (`BODY_2110`: base 0.58, lean 0.586, blend 0.6, full 0.2). `peak` as on `rearLean`: the GAZ-24's chevron nose (base 0.56, lean −0.19, peak 0.78 / 0.45: the wings' tip foremost at the crease, the face below and the lip above running back). Negative leans lean out. |
+| `bonnetRib` | `{ from: [s, x], to: [s, x], rise }`: the bonnet's middle deck row runs along this line, the deck between the two standing `rise` over the crown and falling to the bonnet's cut outside (body.ts `ribRise`): a raised middle with a soft fold along each rib. Needs `bonnet`. The E34's. |
 | `flap` | Fuel flap: `s0..s1`, `y0..y1`, `side` (`'right'` default; the classic estates' is `'left'`), `cup?` (how far inside the skin the filler cup's back lies, exterior.ts `buildFiller`; absent 0.035, the flap's own thickness. Where the flank stands upright at the flap the closed flap's inner skin lies at that depth too and the two fight, seen through the glass from the far side: `BODY_124`'s 0.05). |
 
 **`TubStation`** — one half-section; values interpolate linearly between stations.
@@ -1096,6 +1097,26 @@ generator additions (platform `niva` with `clearance`/`nivaTransfer`, `bench.cle
 identical).
 
 ## Budget and current figures
+
+Where triangles go (2026-10-28, census by emitter over all cars): the shell's skin is about
+1 900 a car, its jambs, seals and inner skins about 1 200; the rest is the cabin, the bay,
+the underbody and small parts. What keeps it down:
+
+- The deck (bonnet, boot and the deck round them) is built on its own columns (body.ts
+  `deckColumns`): the stations, its own cut lines, a rib's ends and every column inside an
+  end's lean. Between stations it is ruled, so the flanks' columns (each arch's 13 facets,
+  the flap, the cabin's cut lines) would only cut it into strips. 
+- `simplifyFlats` merges runs flat within 1 mm and 3° (simplify.ts `PLANE`, `NORMALS`).
+- A face panel laid `on` another part (`FaceItem` panel `on`) cuts nothing and leaves no hole:
+  slats on a lamp band, a line across a lens. Rooted, every such strip cut its host and the
+  face up round it.
+- Per-part ceilings in tools/kit-surface.ts (`PART_BUDGETS`: wipers 100, steering wheel 180,
+  mirrors 180, exhaust 160, pedals and stalks 60, headrests, ashtray and horn 80) fail the
+  car, so a small part's cost cannot creep back. The wiper blade is bent at 6 stations
+  (each clear of the glass between its neighbours), the steering wheel's rim 12 × 4.
+
+Total over the 28 cars 354 685 → 329 671 with these (−7 %). The table below is the
+2026-10-15 count.
 
 Budget ≈ 8–13k triangles per car near, with LOD at `KIT_DETAIL_M`. Counted by building each
 car with `buildKitCar` and summing triangles per group (2026-10-15, after the flat-run

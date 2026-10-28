@@ -124,7 +124,8 @@ export interface CabinColumn {
    * The door's frame over the glass is this wide on the strip from this column to the
    * next; the rest up to the rail is the body's. A door cut along its glass's chamfered
    * top (the E34's rear door round the Hofmeister kink), where the painted corner above
-   * the chamfer is the C pillar. Absent: the door's up to the rail.
+   * the chamfer is the C pillar. On a body strip it splits the band at the same line, for
+   * the door strip ending on this column to share its corner. Absent: the door's up to the rail.
    */
   readonly frameCut?: number;
   /**
@@ -323,6 +324,7 @@ export interface EndLean {
   readonly peak?: { readonly y: number; readonly lean: number };
 }
 
+
 /** Everything the builder needs for one car. */
 export interface KitCarSpec {
   readonly id: string;
@@ -359,6 +361,13 @@ export interface KitCarSpec {
    * front face items hang on it (`FaceLook.lid`). Absent: the pillar-row bonnet.
    */
   readonly bonnet?: { readonly inset: number; readonly rear?: number; readonly nose?: { readonly y: number; readonly half: readonly [number, number] } };
+  /**
+   * Two soft ribs along the bonnet, one each side: the deck's middle row runs from half
+   * width `from[1]` at s `from[0]` to `to[1]` at `to[0]`, and the deck between them stands
+   * `rise` over the crown, falling to the bonnet's cut outside (body.ts `ribRise`): the
+   * E34's raised middle. Needs `bonnet`. Absent: the middle row halves the bonnet, on the crown.
+   */
+  readonly bonnetRib?: { readonly from: readonly [number, number]; readonly to: readonly [number, number]; readonly rise: number };
   /** Boot lid from the back light's base to this s; a tailgate when absent. */
   readonly bootEnd?: number;
   /**
@@ -718,9 +727,12 @@ export type LampRole = 'head' | 'tail' | 'brake' | 'reverse' | 'blinker' | 'iner
 export type FaceItem =
   /**
    * A flat surround: from one side to the other when `x` is a distance from the centre
-   * line, or a pair of blocks (one each side) when `x` is a span.
+   * line, or a pair of blocks (one each side) when `x` is a span. `on`: laid on a part
+   * standing this far out of the face (a slat on a lamp band, a strip on a lens) instead
+   * of rooted in the face: from `on` to `proud`, no back, cutting nothing and no hole in
+   * the shell, so neither its host nor the face is cut up round it.
    */
-  | { readonly kind: 'panel'; readonly x: FaceX | Span<FaceX>; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number }
+  | { readonly kind: 'panel'; readonly x: FaceX | Span<FaceX>; readonly y: Span<FaceY>; readonly finish: Finish; readonly proud: number; readonly on?: number }
   /**
    * A round lamp in a ring: chrome, or `ring` (the E34's black rings). `standOut`: the
    * ring's front this far out of the face, the lens 7 mm ahead of it (the E34's lamps flush

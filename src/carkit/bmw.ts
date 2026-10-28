@@ -77,7 +77,11 @@ export const BODY_E34: KitBody = {
     { s: 4.05, sill: 0.26, crease: 0.81, belt: 0.955, deck: 1.0, wSill: 0.855, wCrease: 0.87, wBelt: 0.83 },
     // The deck's edge over the tail [D side: 0.99 at 4.5, 0.98 at 4.62, the corner 0.96 at
     // 4.65]; in plan the tail narrowing to rounded corners [D rear: ±0.83 at the lamps].
-    { s: 4.64, sill: 0.33, crease: 0.845, belt: 0.95, deck: 0.975, wSill: 0.8, wCrease: 0.83, wBelt: 0.79 },
+    // Over the tail the wing's top turns in from just over the lamps (0.90) to the lid's edge
+    // at ±0.72, 0.97 [P R on the bumper's width (1.43 mm/px): the wing ±0.81 at 0.88, the
+    // lid's top edge ±0.73] (owner, 2026-10-28: «корма выглядит более широкой сверху»: the
+    // wing stood upright to 0.95, the top as wide as the lamps).
+    { s: 4.64, sill: 0.33, crease: 0.845, belt: 0.9, deck: 0.975, wSill: 0.8, wCrease: 0.83, wBelt: 0.79, shoulder: { inset: 0.075, rise: 0.07 } },
     // The tail face [D side x 830–834]: the wing lamps' top (0.85) across, the lid down
     // between them to its foot under the lamps (0.60) [D rear: the lid's sides at ±0.60,
     // its foot at 0.60 under the lamps' 0.63]. The shoulder line at the lamps' top, so the
@@ -141,14 +145,18 @@ export const BODY_E34: KitBody = {
       // Two more glass columns round the run into the curve the photos show: its top eases
       // off the rail at 3.30 (0.045 under the straight run) and the corner rounds at 3.48.
       { s: 3.32, top: 3.3, upper: 'door2', glass: 'fixed', glassDrop: 0.045, frameCut: 0.02 },
+      { s: 3.385, top: 3.355, upper: 'door2', glass: 'fixed', glassDrop: 0.072, frameCut: 0.02 },
       { s: 3.44, top: 3.4, upper: 'door2', glass: 'fixed', glassDrop: 0.105, frameCut: 0.02 },
       { s: 3.48, top: 3.403, upper: 'door2', glass: 'fixed', glassRise: 0.02, glassDrop: 0.13, frameCut: 0.02 },
       { s: 3.51, top: 3.405, upper: 'door2', glassRise: 0.045, glassDrop: 0.17, frameCut: 0.02 },
-      // The rear door's rear edge, the door's frame 1 cm wide behind the glass [D side: 3.49
+      // The rear door's rear edge, the door's frame 1 cm wide behind the glass; its glass
+      // line as the column before (`glassRise`, `glassDrop`), so that 1 cm strip ends under
+      // the cut with the rest of the frame instead of running on up the C pillar to the
+      // rail, a spike on the open door and a slot in the pillar (owner, 2026-10-28) [D side: 3.49
       // at the belt, 3.48 at 0.857, 3.474 at 0.816, 3.457 at 0.774, forward round the rear
       // arch's front to the sill at 3.22; P S: 3.51 at the belt]. (The glass on the shut line
       // itself put the jamb's seal in the cabin lining's plane: kit-zfight.)
-      { s: 3.519, top: 3.41, upper: 'body', foot: { y: 0.85, s: 3.22, knee: [3.38, 0.6] } },
+      { s: 3.519, top: 3.41, upper: 'body', glassRise: 0.045, glassDrop: 0.17, frameCut: 0.02, foot: { y: 0.85, s: 3.22, knee: [3.38, 0.6] } },
       // The C pillar, body colour, to the back light's foot; the roof over the back light's
       // top at 3.45 [D side x 622, y 103]. Its corners square: a step `cornerDrop` with the
       // roof's profile (`roofDrop`) folds the roof in behind the header (README).
@@ -199,6 +207,12 @@ export const BODY_E34: KitBody = {
   // The bonnet covers the whole top, its side shut lines along the wings' top, round the
   // nose over the lamps and kidneys [P F34].
   bonnet: { inset: 0.01 },
+  // The two ribs along the bonnet, seen from above: from ±0.19 at s 0.16 by the kidneys to
+  // ±0.33 at 1.29 by the screen [D plan: (55, 595 / 660) → (250, 570 / 685), centre y 629];
+  // the middle between them standing 16 mm proud as the photo's power dome [P front, F34]
+  // (owner, 2026-10-28: «рёбра на капоте … не очень
+  // заметные»).
+  bonnetRib: { from: [0.16, 0.19], to: [1.29, 0.33], rise: 0.016 },
   // On the right rear wing behind the rear door, over the arch's back [P S on the hubs:
   // 0.40–0.54 behind the rear hub, 0.61–0.72 high].
   flap: { s0: 3.99, s1: 4.13, y0: 0.61, y1: 0.72, side: 'right' },
@@ -291,23 +305,32 @@ export const LOOK_E34: KitLook = {
     items: [
       // The black band the lamps stand in, from the kidneys to 8 mm short of the indicators
       // (meeting them, its end fought theirs), up to the bonnet's edge [P front: ±0.215–0.745,
-      // the bumper's top to the bonnet; D front].
+      // the bumper's top to the bonnet; D front] ...
       { kind: 'panel', x: { from: { centre: 0.2 }, to: { centre: 0.737 } }, y: { from: ['bumperTop', 0.02], to: ['deck', -0.02] }, finish: 'black', proud: 0.004 },
+      // ... with four horizontal grey slats laid on it, 7 mm proud of it (closer, they fought it
+      // from afar), between the kidneys and the
+      // inner lamps [P front, F34: the grille there] (`on`: the band is not cut up round them).
+      { kind: 'panel', x: { from: { centre: 0.205 }, to: { centre: 0.384 } }, y: { from: ['bumperTop', 0.045], to: ['bumperTop', 0.053] }, finish: 'grey', proud: 0.011, on: 0.004 },
+      { kind: 'panel', x: { from: { centre: 0.205 }, to: { centre: 0.384 } }, y: { from: ['bumperTop', 0.075], to: ['bumperTop', 0.083] }, finish: 'grey', proud: 0.011, on: 0.004 },
+      { kind: 'panel', x: { from: { centre: 0.205 }, to: { centre: 0.384 } }, y: { from: ['bumperTop', 0.105], to: ['bumperTop', 0.113] }, finish: 'grey', proud: 0.011, on: 0.004 },
+      { kind: 'panel', x: { from: { centre: 0.205 }, to: { centre: 0.384 } }, y: { from: ['bumperTop', 0.135], to: ['bumperTop', 0.143] }, finish: 'grey', proud: 0.011, on: 0.004 },
       // Four round head lamps in black rings, flush in the band: the rings in its plane, the
       // glass 7 mm out of it [P front on the bumper's width (1.246 mm/px): centres ±0.477 and
       // ±0.664 at 0.664, the rings 0.078 in radius, their tops under the bonnet's edge; D
       // front: ±0.42 / ±0.59]. Review 2026-10-28 («фары явно утоплены внутрь передка и не
       // выдаются вперёд перед капотом»): rings 26 mm out and the glass 34 mm stood ahead of
       // the band as black stalks, and their tops rose over it into the bonnet.
-      { kind: 'round', role: 'head', x: { centre: 0.472 }, y: ['bumperTop', 0.095], radius: 0.062, ring: 'black', standOut: 0.004 },
-      { kind: 'round', role: 'head', x: { centre: 0.655 }, y: ['bumperTop', 0.095], radius: 0.062, ring: 'black', standOut: 0.004 },
+      { kind: 'round', role: 'head', x: { centre: 0.472 }, y: ['bumperTop', 0.095], radius: 0.07, ring: 'black', standOut: 0.004 },
+      { kind: 'round', role: 'head', x: { centre: 0.655 }, y: ['bumperTop', 0.095], radius: 0.07, ring: 'black', standOut: 0.004 },
       // The twin kidneys: one framed grille ±0.2 with black slats [P front: the chrome
       // surround ±0.22, the openings ±0.012–0.185; D front; P F34] ...
       {
         kind: 'grille',
         x: { centre: 0.2 },
-        // The frame's foot 1 cm over the bumper's top (at 6 mm they fought from afar).
-        y: { from: ['bumperTop', 0.035], to: ['deck', -0.03] },
+        // The frame's foot 1 cm over the bumper's top (at 6 mm they fought from afar); its top
+        // up under the bonnet's lip: the kidneys as tall as the lamps' band [P front: the
+        // openings 0.15–0.17 high, the surround to the bonnet's edge].
+        y: { from: ['bumperTop', 0.035], to: ['deck', -0.012] },
         standOut: 0.01,
         frame: { finish: 'chrome', margin: 0.014 },
         back: true,
@@ -316,7 +339,7 @@ export const LOOK_E34: KitLook = {
         bars: { dir: 'vertical', count: 11, finish: 'dark', margin: 0.02, width: 0.007, depth: 0.012, proud: 0.03 },
       },
       // ... split in two by a body-colour bridge between them [P F34, front].
-      { kind: 'panel', x: { centre: 0.012 }, y: { from: ['bumperTop', 0.035], to: ['deck', -0.03] }, finish: 'paint', proud: 0.046 },
+      { kind: 'panel', x: { centre: 0.012 }, y: { from: ['bumperTop', 0.035], to: ['deck', -0.012] }, finish: 'paint', proud: 0.046 },
     ],
   },
   rear: {
@@ -328,7 +351,8 @@ export const LOOK_E34: KitLook = {
     // side x 718: s 3.97]. Review 2026-10-28 («корма какая-то чересчур массивная»): 0.235–0.565
     // upright, the valance a 13 cm black stripe in its face, read as a stack of four bands.
     bumper: { kind: 'moulded', drop: 0.133, height: 0.305, finish: 'paint', moulding: { y: 0.4725, height: 0.055, finish: 'black' }, corner: 0.15, wrapTo: 3.97, foot: { y: 0.36, back: 0.08, finish: 'black' } },
-    items: [],
+    // The bright strip under the lamps, on from the lid's out under the wing units [P R].
+    items: [{ kind: 'panel', x: { from: { centre: 0.605 }, to: { centre: 0.77 } }, y: { from: ['belt', -0.238], to: ['belt', -0.228] }, finish: 'chrome', proud: 0.003 }],
     // The lid's part of the band, from the wing units in to the plate, the wing units' red
     // at their heights: one red lens 4 mm out of the lid with the reversing lamp a light cell
     // in its upper half [P R, scaled on the lid's cut at ±0.60: the lamp to the plate
@@ -338,9 +362,15 @@ export const LOOK_E34: KitLook = {
     // Espero's band). Review 2026-10-28 («задние фары выполнены неаккуратно»): six cells on a
     // black housing, hung on the bumper's top, stood 3.4 cm over the wing units' red; now
     // hung on the wing lamps' top (`belt`, 0.85) at their heights, two pieces.
+    // Review 2026-10-28 (against the photos): each lid lamp two rows of red, a thin black
+    // line across between them [P R, R34]; the reversing lamp a light cell at the upper
+    // row's inner end [P R: the lighter block by the plate]; a bright strip across
+    // under the lamps over the lid's foot [P R: the lid's lip, ±0.78].
     lid: [
       { kind: 'lens', role: 'tail', x: { from: { centre: 0.17 }, to: { centre: 0.588 } }, y: { from: ['belt', -0.22], to: ['belt', -0.072] }, depth: 0.002, proud: 0.002, slant: { outer: 0, inner: 0 } },
-      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.44 }, to: { centre: 0.55 } }, y: { from: ['belt', -0.138], to: ['belt', -0.078] }, depth: 0.002, proud: 0.004, slant: { outer: 0, inner: 0 } },
+      { kind: 'panel', x: { from: { centre: 0.17 }, to: { centre: 0.588 } }, y: { from: ['belt', -0.149], to: ['belt', -0.143] }, finish: 'black', proud: 0.011, on: 0.004 },
+      { kind: 'lens', role: 'reverse', x: { from: { centre: 0.175 }, to: { centre: 0.25 } }, y: { from: ['belt', -0.138], to: ['belt', -0.078] }, depth: 0.002, proud: 0.004, slant: { outer: 0, inner: 0 } },
+      { kind: 'panel', x: { centre: 0.588 }, y: { from: ['belt', -0.238], to: ['belt', -0.228] }, finish: 'chrome', proud: 0.003 },
     ],
   },
 };

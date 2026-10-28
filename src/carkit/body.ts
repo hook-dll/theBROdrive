@@ -124,6 +124,9 @@ export interface Section {
 type StationKey = 'sill' | 'crease' | 'belt' | 'deck' | 'wSill' | 'wCrease' | 'wBelt' | 'flat' | 'inset' | 'rise' | 'lid' | 'notch' | 'notchWall';
 
 /** Lookups the interior, trim and bay builders share with the shell. */
+/** How far beyond its ends a bonnet rib (`KitCarSpec.bonnetRib`) eases out. */
+const RIB_EASE = 0.1;
+
 export class BodyFrame {
   readonly spec: KitCarSpec;
   readonly zNose: number;
@@ -240,7 +243,7 @@ export class BodyFrame {
     const sec = this.section(s);
     const edge = sec.r4;
     const t = Math.min(1, Math.abs(x) / edge[0]);
-    const crowned = lerp(sec.st.deck, edge[1], t * t);
+    const crowned = lerp(sec.st.deck, edge[1], t * t) + this.ribRise(s, x);
     const flat = sec.st.flat ?? 0;
     let level = crowned;
     if (flat > 0) {
@@ -269,7 +272,8 @@ export class BodyFrame {
       // the bonnet.
       const nose = this.spec.bonnet?.nose;
       const flat = (sec.st.flat ?? 0) > 0;
-      const half = nose && s <= this.spec.stations[0]!.s ? nose.half[1] : flat ? edge - this.spec.cabin.pillar : bonnet / 2;
+      const rib = this.ribX(s);
+      const half = nose && s <= this.spec.stations[0]!.s ? nose.half[1] : flat ? edge - this.spec.cabin.pillar : rib ?? bonnet / 2;
       return [0, half / edge, bonnet / edge, 1];
     }
     if (!this.notched) return [0, 0.5, (edge - this.spec.cabin.pillar) / edge, 1];
@@ -308,6 +312,31 @@ export class BodyFrame {
    * Half width a `KitCarSpec.bonnet` is cut along at s, `inset` in from the deck's edge,
    * from the bonnet's front to just short of the cowl; undefined elsewhere or without one.
    */
+  /** The bonnet's rib (`KitCarSpec.bonnetRib`) at s: its half width, or undefined. */
+  ribX(s: number): number | undefined {
+    const rib = this.spec.bonnetRib;
+    if (!rib || this.bonnetX(s) === undefined) return undefined;
+    const f = Math.min(1, Math.max(0, (s - rib.from[0]) / (rib.to[0] - rib.from[0])));
+    return lerp(rib.from[1], rib.to[1], f);
+  }
+
+  /**
+   * How far the ribs lift the deck at (s, x): `rise` from the centre line out to the rib's
+   * line (a raised middle, a power dome), falling straight to nothing at the bonnet's cut
+   * (the deck's rows there, so the rows' own quads carry it: a soft fold along each rib);
+   * full between the rib's ends, eased in over `RIB_EASE` beyond them.
+   */
+  ribRise(s: number, x: number): number {
+    const rib = this.spec.bonnetRib;
+    const rx = this.ribX(s);
+    const bx = this.bonnetX(s);
+    if (!rib || rx === undefined || bx === undefined) return 0;
+    const ax = Math.abs(x);
+    const across = ax <= rx ? 1 : Math.max(0, (bx - ax) / (bx - rx));
+    const out = Math.max(rib.from[0] - s, s - rib.to[0], 0);
+    return rib.rise * across * Math.max(0, 1 - out / RIB_EASE);
+  }
+
   bonnetX(s: number): number | undefined {
     const b = this.spec.bonnet;
     if (!b || s < this.spec.bonnetFront || s > this.bonnetRear) return undefined;
@@ -617,6 +646,30 @@ function fillet(prev: readonly [number, number], corner: readonly [number, numbe
   return out;
 }
 
+/**
+ * The tub columns the deck (bonnet, boot, the decks round them) is built on: the stations,
+ * the deck's own cut lines, the cowl and the rear base, the ends of a bonnet rib (and its
+ * ease), and every tub column inside an end's lean, where the warp bends straight runs.
+ */
+function deckColumns(frame: BodyFrame, cols: readonly number[]): Set<number> {
+  const spec = frame.spec;
+  const want = new Set<number>([cols[0]!, cols[cols.length - 1]!, frame.cowl, frame.rearBase, spec.bonnetFront]);
+  for (const st of spec.stations) want.add(st.s);
+  if (spec.bonnet || spec.cabin.screenFoot !== undefined) want.add(frame.bonnetRear);
+  if (spec.bootEnd !== undefined) want.add(spec.bootEnd);
+  const rib = spec.bonnetRib;
+  if (rib) for (const s of [rib.from[0] - RIB_EASE, rib.from[0], rib.to[0], rib.to[0] + RIB_EASE]) want.add(s);
+  const front = spec.frontLean ? (spec.frontLean.full ?? spec.bonnetFront) + spec.frontLean.blend : -Infinity;
+  const rear = spec.rearLean ? (spec.rearLean.full ?? frame.rearBase) - spec.rearLean.blend : Infinity;
+  // Snapped onto the tub's columns (tubColumns merges lines closer than 4 mm).
+  const out = new Set<number>();
+  for (const c of cols) {
+    if (c <= front || c >= rear) { out.add(c); continue; }
+    for (const w of want) if (Math.abs(w - c) < 0.004) { out.add(c); break; }
+  }
+  return out;
+}
+
 /** Tub columns: stations, cabin columns, arch subdivisions and every cut line. */
 export function tubColumns(frame: BodyFrame): number[] {
   const spec = frame.spec;
@@ -858,9 +911,23 @@ export function buildShell(frame: BodyFrame): ShellResult {
       } else {
         shell.face(shoulder, shoulderOwner, 'paint');
       }
-      if (inCabin) continue;
-      const aDeck = a.rows.slice(sideCount(j) + 1);
-      const bDeck = b.rows.slice(sideCount(j + 1) + 1);
+    }
+
+    // ---- deck: its own columns ----
+    // The deck between two stations is ruled (every row's height and half width move
+    // linearly with s), so a column only the flanks need (the arches' facets, the flap's
+    // and the cabin's cut lines) adds nothing to it but strips: it takes the stations and
+    // its own cut lines only, plus every column where an end's lean or a bonnet rib bends
+    // it. The shoulder's extra corners on its edge lie on the deck's straight edge.
+    const deckS = deckColumns(frame, cols);
+    const deckCols = columns.filter((c) => deckS.has(c.s));
+    for (let j = 0; j + 1 < deckCols.length; j++) {
+      const a = deckCols[j]!;
+      const b = deckCols[j + 1]!;
+      const sMid = (a.s + b.s) / 2;
+      if (sMid > frame.cowl && sMid < frame.rearBase) continue;
+      const aDeck = a.rows.slice(a.rows.length - 4);
+      const bDeck = b.rows.slice(b.rows.length - 4);
       for (let i = 0; i + 1 < aDeck.length; i++) {
         let owner = 'body';
         if (i >= 1) {
@@ -1200,8 +1267,10 @@ export function buildShell(frame: BodyFrame): ShellResult {
         else if (kind === 'vent') glass = upper === 'body' ? 'body' : upper.replace('door', 'vent');
         finish = column.finish;
       }
-      // `frameCut`: the door's frame over the glass is that wide, the body's above it.
-      const cut = a.kind === 'side' && b.kind === 'side' && upper !== 'body' ? a.column!.frameCut : undefined;
+      // `frameCut`: the door's frame over the glass is that wide, the body's above it. On a
+      // body strip it only splits the band at the same line, so the door strip ending on
+      // its column shares that corner (no T-junction: a slit up the pillar).
+      const cut = a.kind === 'side' && b.kind === 'side' ? a.column!.frameCut : undefined;
       const over = (r: Ring): Vec3 => along(r.q, r.t, Math.min(r.t[1], r.q[1] + (cut ?? 0)));
       const bands: [Vec3, Vec3, Vec3, Vec3, number][] = [
         [a.b, b.b, b.k, a.k, 0],

@@ -17,9 +17,9 @@ import * as THREE from 'three';
 /** Vertices closer than this (m) are one: the generators' shared corners agree far better. */
 const WELD = 1e-5;
 /** A fan is flat when its corners lie this close (m) to one plane. */
-const PLANE = 1e-4;
+const PLANE = 0.001;
 /** And no two of its triangles' normals part by more than this (cos of 1.5°). */
-const NORMALS = Math.cos((1.5 * Math.PI) / 180);
+const NORMALS = Math.cos((5 * Math.PI) / 180);
 /** A vertex on an open edge lies this close (m) to the straight line through its neighbours. */
 const LINE = 5e-5;
 /** Triangles with twice their area under this (m²) are dropped. */

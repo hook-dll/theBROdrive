@@ -443,11 +443,17 @@ function buildFace(face: EndFace, items: readonly FaceItem[], b: PartBuilder, ri
     const part = new PartBuilder();
     const prints = buildFaceItem(face, item, part);
     const ahead = ridge !== undefined && prints.some((f) => f.z1 > ridge.front && Math.min(...f.poly.map(([, y]) => y)) < ridge.y1 && Math.max(...f.poly.map(([, y]) => y)) > ridge.y0);
-    return { part, prints, ahead };
+    // A panel laid `on` a part is added as built: it cuts nothing and nothing cuts it.
+    const overlay = item.kind === 'panel' && item.on !== undefined;
+    return { part, prints, ahead, overlay };
   });
-  for (const { part, prints } of built.filter((i) => !i.ahead)) face.place(b, part, prints);
+  const put = ({ part, prints, overlay }: (typeof built)[number]): void => {
+    if (overlay) b.append(part);
+    else face.place(b, part, prints);
+  };
+  for (const i of built.filter((i) => !i.ahead)) put(i);
   if (ridge) b.cut(ridge.volume).append(ridge.part.cut(face.placed));
-  for (const { part, prints } of built.filter((i) => i.ahead)) face.place(b, part, prints);
+  for (const i of built.filter((i) => i.ahead)) put(i);
 }
 
 function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint[] {
@@ -461,9 +467,10 @@ function buildFaceItem(face: EndFace, item: FaceItem, b: PartBuilder): Footprint
         const [x, hx] = face.spanX(item.x);
         return [[x - hx, x + hx], [-x - hx, -x + hx]];
       })();
+      const z0 = item.on ?? -FACE_ROOT;
       return spans.map(([x0, x1]) => {
-        b.boxFrom(slot, [x0, y - hy, face.out(-FACE_ROOT)], [x1, y + hy, face.out(item.proud)], face.noBack);
-        return { poly: rect(x0, y - hy, x1, y + hy), z0: -FACE_ROOT, z1: item.proud };
+        b.boxFrom(slot, [x0, y - hy, face.out(z0)], [x1, y + hy, face.out(item.proud)], face.noBack);
+        return { poly: rect(x0, y - hy, x1, y + hy), z0, z1: item.proud };
       });
     }
     case 'round': {
@@ -1560,8 +1567,14 @@ const WIPER_EDGE = 0.015;
 const WIPER_FOOT = 0.006;
 /** The blade's rubber edge clears the glass by this much where it rests: 6 mm avoids z-fighting. */
 const WIPER_GAP = 0.006;
-/** Blade stations along its length: it is bent to the screen between them. */
-const WIPER_STATIONS = 16;
+/**
+ * Blade stations along its length: it is bent to the screen at them (even, the arm meets the
+ * middle one). Each clears the highest glass between its two neighbours (sampled
+ * `WIPER_SAMPLES` times per station step), so the straight run between two stations never
+ * dips into a screen however it curves.
+ */
+const WIPER_STATIONS = 6;
+const WIPER_SAMPLES = 4;
 const WIPER_STEP = Math.PI / 90;
 
 /**
@@ -1746,9 +1759,9 @@ function buildWipers(ctx: KitContext): void {
     turnAbout(axis.copy(centre).addScaledVector(tiltA, ta).addScaledVector(tiltB, tb));
     fit();
 
-    // Blade: at each station, clear of the highest glass it passes over, between stations too.
+    // Blade: at each station, clear of the highest glass between its neighbours.
     const stations = radii(arm, WIPER_STATIONS);
-    const fine = radii(arm, WIPER_STATIONS * 2);
+    const fine = radii(arm, WIPER_STATIONS * WIPER_SAMPLES);
     // Park the blade against the glass at rest.  The old mesh used the highest glass
     // point over the entire sweep, which made a curved screen lift the parked blade
     // visibly away from its lower edge (notably on the UAZ-469). Where its inner half
@@ -1761,7 +1774,7 @@ function buildWipers(ctx: KitContext): void {
       const hit = ray.intersectObjects(shell, true)[0];
       return hit ? hit.point.sub(at).dot(n) : -Infinity;
     });
-    const lift = stations.map((_, k) => Math.max(high[2 * k]!, high[2 * k - 1] ?? -Infinity, high[2 * k + 1] ?? -Infinity) + WIPER_GAP);
+    const lift = stations.map((_, k) => Math.max(...high.slice(Math.max(0, (k - 1) * WIPER_SAMPLES), (k + 1) * WIPER_SAMPLES + 1)) + WIPER_GAP);
     // The spindle stands out of the frame strip.
     const strip = under(panel, at, n);
     if (!strip) throw new Error(`Kit car "${spec.id}": wiper ${i}'s spindle is off the body`);
