@@ -26,8 +26,14 @@
 
 /** The loops' sample rate: the shell leaves nothing above a couple of kHz. */
 const LOOP_RATE = 16000;
-/** Every loop's RMS after rendering (-18 dBFS); peaks are held under `LOOP_PEAK`. */
-const LOOP_RMS = 0.125;
+/**
+ * Every loop is levelled on what is HEARD of it: its RMS above `AUDIBLE_FROM_HZ` is
+ * -21 dBFS, peaks held under `LOOP_PEAK`. Levelled on the full band instead, a bass car's
+ * loop spent its whole level on a 50 Hz sub that laptop speakers do not play, and came
+ * out 12 dB under a talk station: the beats went unheard and only speech got through.
+ */
+const AUDIBLE_FROM_HZ = 150;
+const LOOP_AUDIBLE_RMS = 0.09;
 const LOOP_PEAK = 0.95;
 /** Share of cars with music playing. */
 const MUSIC_SHARE = 0.45;
@@ -522,18 +528,35 @@ export async function renderCabinPasses(spec: CabinLoopSpec, passes: number): Pr
   return rendered.getChannelData(0);
 }
 
-/** The second pass of two, levelled to LOOP_RMS with its peak under LOOP_PEAK. */
+/**
+ * RMS of `x` above `AUDIBLE_FROM_HZ`: two one-pole high-passes. What a laptop's speakers
+ * and the ear in traffic noise actually get of a loop; the sub under it is felt, not heard.
+ */
+export function audibleRms(x: Float32Array): number {
+  const a = Math.exp((-2 * Math.PI * AUDIBLE_FROM_HZ) / LOOP_RATE);
+  let y1 = 0;
+  let x1 = 0;
+  let y2 = 0;
+  let x2 = 0;
+  let energy = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i]!;
+    y1 = a * (y1 + v - x1);
+    x1 = v;
+    y2 = a * (y2 + y1 - x2);
+    x2 = y1;
+    energy += y2 * y2;
+  }
+  return Math.sqrt(energy / Math.max(1, x.length));
+}
+
+/** The second pass of two, levelled on its audible band (`LOOP_AUDIBLE_RMS`), its peak under LOOP_PEAK. */
 async function renderCabinLoop(spec: CabinLoopSpec): Promise<AudioBuffer> {
   const length = loopSamples(spec);
   const loop = (await renderCabinPasses(spec, 2)).subarray(length);
-  let energy = 0;
   let peak = 0;
-  for (let i = 0; i < length; i++) {
-    energy += loop[i]! * loop[i]!;
-    peak = Math.max(peak, Math.abs(loop[i]!));
-  }
-  const rms = Math.sqrt(energy / length);
-  const scale = Math.min(LOOP_RMS / Math.max(rms, 1e-9), LOOP_PEAK / Math.max(peak, 1e-9));
+  for (let i = 0; i < length; i++) peak = Math.max(peak, Math.abs(loop[i]!));
+  const scale = Math.min(LOOP_AUDIBLE_RMS / Math.max(audibleRms(loop), 1e-9), LOOP_PEAK / Math.max(peak, 1e-9));
   const buffer = new AudioBuffer({ numberOfChannels: 1, length, sampleRate: LOOP_RATE });
   const out = buffer.getChannelData(0);
   for (let i = 0; i < length; i++) out[i] = loop[i]! * scale;
