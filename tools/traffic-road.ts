@@ -1615,8 +1615,8 @@ async function tick(): Promise<void> {
   egoS = projection.s;
   egoLateral = projection.lateral;
   keepDesert(egoPosition.x, egoPosition.z, egoLateral);
-  // A spawn waits on a model-load promise, so a fully synchronous loop never lets
-  // `finishSpawn` run and measures a road that cannot fill.
+  // A spawn waits on a model-load promise and then a microtask between its two steps, so
+  // a fully synchronous loop never lets `advanceSpawn` run and measures a road that cannot fill.
   if (++ticks % 6 === 0) await Bun.sleep(0);
 }
 

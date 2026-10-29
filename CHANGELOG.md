@@ -1569,6 +1569,38 @@
 
 ### Fixed
 
+- A TRAFFIC CAR SPAWNING NO LONGER COSTS A 2-19 MS FRAME (`world/traffic.ts`
+  `advanceSpawn`, `PendingSpawn.ready`/`visuals`; `vehicle/vehicle.ts` `Vehicle`'s
+  `visuals`; `render/carmodel.ts` `cloneTree`, `wheelVisuals`, `loadCarModel`;
+  `render/stickerdecals.ts` `setStickers`). Profiled headless (`new Vehicle` per model,
+  CPU profile) and in the game on autopilot "hurried" at 100-110 km/h, traffic High (30),
+  seeds 3226876384, 3981248153, 3597466627. A car was built whole in the microtask after
+  the frame its spawn was queued in (`finishSpawn` → `placeCar` → `new Vehicle` →
+  `createCarModel`), a platoon mate right behind it. Its cost was:
+  - About a quarter in the sticker decal source (`StickerDecalSource`: every
+    sticker-carrying triangle into a spatial grid), built by the car's first, empty
+    `setStickers`. It is now built at the first sticker.
+  - A third in `t.body.clone(true)`: a kit body is about 280 nodes, 150 meshes, and three's
+    `Mesh.clone` makes a throwaway BufferGeometry and MeshBasicMaterial per mesh.
+    `cloneTree` builds each mesh on its source's own.
+  - 4-8 ms in a car's spawn whenever it wore a generated rim set its body had not worn
+    yet (`kitWheelModel` → `bakeKitWheels`), about a hundred times a session. Every set a
+    kit body can wear is now baked in `loadCarModel`, behind the boot cover.
+  - `cloneWheels` took each wheel's precise bounds per car. They are now measured once
+    per wheel.
+  - What is left is split over two frames. The visuals are cloned on one fixed step, and
+    the car is placed with them (`new Vehicle(…, visuals)`) on a step of a later frame.
+    A microtask sets `ready`, so a frame that catches up two steps cannot do both, and a
+    spawn the stream no longer wants is not cloned at all.
+  - Same models, paints, trims, wear, wheel sets, appearance keys and drivers. Every
+    model × 4 ids hashes identical before and after (node tree, transforms, geometry,
+    materials, condition and kit uniforms), both through `createCarModel` and through
+    prebuilt visuals. No program is linked mid-drive.
+  - Before → after, 60 s per seed: worst spawn work in a frame 14.4 / 18.9 / 18.4 →
+    1.4 / 1.5 / 1.2 ms; spawn frames over 1.5 ms 36 / 40 / 42 → 0. Frames over 8.3 ms
+    20.9 / 51.3 / 38.6 → 3.1 / 3.1 / 17.6 a minute; over 12 ms 8.4 / 7.3 / 16.7 → 0 / 1.0 /
+    1.0. The session's first placement, before the code is warm, is 2.7-2.8 ms.
+  - Headless per car: 1.25 → 0.64 ms median, p99 4.9 → 1.0.
 - THE FIRST TORCH PRESS NO LONGER RELINKS THE WORLD'S PROGRAMS (`render/vehiclelights.ts`
   `addTorchBeam`, main.ts `TORCH_BEAM_OWNER`; the renderer's own torch spotlight is gone).
   The hand torch was a scene spotlight toggled `visible`, and three counts visible spots

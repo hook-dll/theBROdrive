@@ -69,7 +69,7 @@ import type { RoadConditionBuffer } from './gradient';
 const REAR_SPAWN_CLOSING_MPS = 2.5;
 /**
  * Road the player may have covered between a spawn being chosen and its model
- * finishing loading. See `finishSpawn`.
+ * finishing loading. See `spawnWanted`.
  */
 const SPAWN_ARRIVAL_SLACK_M = 60;
 /** Extra room for numerical drift/acceleration beyond one step's measured travel. */
@@ -791,8 +791,11 @@ interface PendingSpawn {
   readonly ceiling: number;
   /** Put down already parked on this lay-by's first place; see `parkedSpawnSite`. */
   readonly layby?: Layby;
-  /** Its model has loaded (`prepareModel`): `advanceSpawn` takes it from here. */
-  loaded: boolean;
+  /**
+   * It may take its next step (`advanceSpawn`): its model has loaded, or its visuals were
+   * cloned in an earlier frame. Set from a microtask, which runs after the frame's task.
+   */
+  ready: boolean;
   /** Its visuals, cloned a step before the car is placed (`advanceSpawn`); null till then. */
   visuals: CarModelInstance | null;
 }
@@ -1999,7 +2002,7 @@ export class RoadTraffic {
     // A spawn in flight takes its next step (`advanceSpawn`) before anything reads the
     // list, as a loaded one used to land between two steps: a car placed now is driven,
     // settled and coordinated in this step like every other.
-    if (this.pending?.loaded) this.advanceSpawn(this.pending);
+    if (this.pending?.ready) this.advanceSpawn(this.pending);
     // The stream holds its cap (`desiredCount`): no rotating density (owner, 2026-10-28).
 
     // Refresh the shared road-frame snapshot before trimming or coordinating.
@@ -2780,7 +2783,7 @@ export class RoadTraffic {
       platoonMates: mates,
       ceiling: this.desiredCount,
       layby: parked?.layby,
-      loaded: false,
+      ready: false,
       visuals: null,
     };
     this.loadPending(request);
@@ -2794,7 +2797,7 @@ export class RoadTraffic {
     this.pending = request;
     void this.prepareModel(request.modelId).then(
       () => {
-        request.loaded = true;
+        request.ready = true;
       },
       (error: unknown) => {
         console.error(`failed to load traffic model "${request.modelId}"`, error);
@@ -2804,16 +2807,21 @@ export class RoadTraffic {
   }
 
   /**
-   * ONE SPAWN, TWO STEPS. A car's visuals (a kit body is some 280 nodes, cloned with
+   * ONE SPAWN, TWO FRAMES. A car's visuals (a kit body is some 280 nodes, cloned with
    * its own paint, glass and skinned wheels) and its Vehicle (body, colliders, lamps,
    * rig, cabin) used to be built in one go, after the frame that loaded it, and a
    * platoon's mates in the same go behind it: a frame of 2-7 ms. Now the visuals are
-   * cloned on one step and the car is placed with them on the next, and each mate
-   * takes its own two steps. A spawn the stream no longer wants is not cloned at all.
+   * cloned on one step and the car is placed with them on a step of a later frame (a
+   * frame that catches up two steps must not do both), and each mate takes its own two.
+   * A spawn the stream no longer wants is not cloned at all.
    */
   private advanceSpawn(request: PendingSpawn): void {
     if (request.visuals === null && this.spawnWanted(request)) {
       request.visuals = createCarModel(request.modelId, request.id);
+      request.ready = false;
+      queueMicrotask(() => {
+        request.ready = true;
+      });
       return;
     }
     this.finishSpawn(request);
@@ -3094,7 +3102,7 @@ export class RoadTraffic {
       rear: s < this.playerS,
       platoonMates: mates - 1,
       ceiling: this.trafficCap,
-      loaded: false,
+      ready: false,
       visuals: null,
     };
     this.loadPending(request);
