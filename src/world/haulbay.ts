@@ -62,12 +62,11 @@ const ROLE_INDEX: Readonly<Record<ParkingSlotRole, number>> = { pickup: 0, handI
 export function postParkingSlots(seed: number, road: Road, index: number): readonly ParkingSlot[] {
   const at = roadsideStop(seed, postSlot(index))?.layout.parking;
   if (!at) throw new Error(`postParkingSlots: post ${index} has no parking row`);
-  // The lay-by's traffic runs +s on side -1, -s on side +1.
-  const travel = -Math.sign(at.lateral);
+  // A driver running +s reaches them in this order on either side (settlement.ts `noseOut`).
   const heading = road.headingAt(at.s);
   const middle = road.offsetPoint(at.s, at.lateral);
-  const tx = Math.sin(heading) * travel;
-  const tz = Math.cos(heading) * travel;
+  const tx = Math.sin(heading);
+  const tz = Math.cos(heading);
   const slots: ParkingSlot[] = [];
   for (let k = -1; k <= 1; k++) {
     slots.push({
@@ -76,7 +75,7 @@ export function postParkingSlots(seed: number, road: Road, index: number): reado
       yaw: heading + at.yaw,
       halfWidth: PARKING_SLOT_HALF_WIDTH_M,
       halfDepth: PARKING_SLOT_HALF_DEPTH_M,
-      s: at.s + travel * k * PARKING_SLOT_PITCH_M,
+      s: at.s + k * PARKING_SLOT_PITCH_M,
     });
   }
   return slots;

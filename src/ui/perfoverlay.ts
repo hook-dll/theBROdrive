@@ -41,6 +41,11 @@ export interface PerfSources {
   readonly measuresGpu: () => boolean;
   /** The presentation target, FPS: the cap, or null when uncapped. */
   readonly frameCap: () => number | null;
+  /**
+   * The rate presentation is actually scheduled at, FPS (core/loop.ts `presentation`): the
+   * cap where one holds, else the display's own rate; null until the loop has measured it.
+   */
+  readonly scheduledHz: () => number | null;
   readonly drawCalls: () => number;
   readonly triangles: () => number;
   readonly programs: () => number;
@@ -366,8 +371,11 @@ export class PerfOverlay {
       pen = true;
     }
     g.stroke();
-    // Budget line and the scale.
-    const budget = capMs ?? 1000 / 60;
+    // Budget line and the scale. The interval the frames are scheduled at, not a fixed
+    // 60 Hz: uncapped on a 120 Hz panel the budget is 8.3 ms, and a frame of 12 ms is a
+    // dropped one there however far it stays under a 16.7 ms line.
+    const scheduledHz = this.sources.scheduledHz();
+    const budget = scheduledHz !== null && scheduledHz > 0 ? 1000 / scheduledHz : capMs ?? 1000 / 60;
     g.strokeStyle = '#4de1ff';
     g.setLineDash([4, 3]);
     g.beginPath();

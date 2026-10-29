@@ -54,14 +54,18 @@ const PLACE_EPS_M = 0.005;
  * voice, a few dB under its engine at idle (-23 dBFS, measured offline).
  */
 const CABIN_MUSIC_GAIN = 0.45;
-/** Music at full within NEAR, gone by FAR, metres (on top of the panner's roll-off). */
-const MUSIC_NEAR_M = 12;
-const MUSIC_FAR_M = 25;
+/**
+ * Music at full within NEAR, gone by FAR, metres (on top of the panner's roll-off). Two
+ * cars passing at 90 km/h each close 50 m a second, so a 25 m reach was a blip under a
+ * second long and passed unheard; at 45 m the pass carries the music for some two.
+ */
+const MUSIC_NEAR_M = 20;
+const MUSIC_FAR_M = 45;
 /** Every window and door open: this much louder than shut (+10 dB). */
 const MUSIC_OPEN_BOOST = 2.2;
 /** By this speed the music is down by `MUSIC_SPEED_DROP` under the car's wind and engine, m/s. */
 const MUSIC_SPEED_MPS = 25;
-const MUSIC_SPEED_DROP = 0.6;
+const MUSIC_SPEED_DROP = 0.35;
 
 /** Initial values of the per-frame params, as built (`reuse` puts them back). */
 const AIR_HZ = 12000;

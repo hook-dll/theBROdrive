@@ -71,21 +71,31 @@ type MesaCandidateState = {
   readonly radius: number;
 };
 
+/** render/vista.ts `MesaSet`: the mesas drawn now, and what stands them on the ground. */
+type MesaSetState = {
+  readonly groundY: [Float32Array, Float32Array, Float32Array, Float32Array];
+  readonly heightOffset: Float32Array;
+  readonly centreXZ: Float32Array;
+  readonly exactY: Float32Array;
+  readonly candidates: readonly MesaCandidateState[];
+};
+
 type VistaAnimationState = {
-  mesaGroundY: [Float32Array, Float32Array, Float32Array, Float32Array] | null;
-  mesaHeightOffset: Float32Array | null;
-  mesaCentreXZ: Float32Array | null;
-  mesaExactY: Float32Array | null;
-  mesaCandidates: MesaCandidateState[];
+  mesaSet: MesaSetState | null;
+  mesaBuild: unknown;
   interpolationX: number;
   interpolationZ: number;
 };
 
+function drawnMesas(vista: VistaMesh): MesaSetState {
+  const set = (vista as unknown as VistaAnimationState).mesaSet;
+  invariant(set !== null, 'vista has no mesa set');
+  return set;
+}
+
 function mesaCandidateTops(vista: VistaMesh, mesa: THREE.Mesh): Map<string, number> {
   const state = vista as unknown as VistaAnimationState;
-  const centres = state.mesaCentreXZ;
-  const bases = state.mesaGroundY;
-  invariant(centres !== null && bases !== null, 'vista has no mesa interpolation state');
+  const { centreXZ: centres, groundY: bases } = drawnMesas(vista);
   const position = mesa.geometry.getAttribute('position');
   invariant(position instanceof THREE.BufferAttribute, 'vista has no mesa position buffer');
   const tops = new Map<string, number>();
@@ -97,6 +107,53 @@ function mesaCandidateTops(vista: VistaMesh, mesa: THREE.Mesh): Map<string, numb
     tops.set(key, Math.max(tops.get(key) ?? -Infinity, position.getY(i) - base));
   }
   return tops;
+}
+
+/** Each drawn mesa's vertices in world space, by site key. */
+function mesaWorldVertices(vista: VistaMesh, mesa: THREE.Mesh): Map<number, Float32Array> {
+  const snapshot = worldPositionSnapshot(mesa);
+  const out = new Map<number, Float32Array>();
+  for (const candidate of drawnMesas(vista).candidates) {
+    out.set(
+      candidate.key,
+      snapshot.slice(candidate.firstVertex * 3, (candidate.firstVertex + candidate.vertexCount) * 3),
+    );
+  }
+  return out;
+}
+
+/**
+ * A crossing builds the next cell's mesas over the frames the lattice point stands on
+ * the shared edge (render/vista.ts `MesaBuild`), never in one frame. Stepping onto the
+ * edge (`onto`) starts the build and keeps the drawn set; there the drawn set and its
+ * successor stand every mesa they share in the same place, vertex for vertex; stepping
+ * off it into the next cell (`off`) finds the successor drawn and builds nothing. The
+ * vista is left back on the edge, still drawing the successor.
+ */
+function checkEdgeHandover(vista: VistaMesh, mesas: THREE.Mesh, onto: number, off: number): void {
+  const state = vista as unknown as VistaAnimationState;
+  const drawnBefore = drawnMesas(vista);
+  vista.update(onto, LANE_Z, 0);
+  invariant(drawnMesas(vista) === drawnBefore, 'stepping onto a cell edge rebuilt the mesas in its own frame');
+  invariant(state.mesaBuild !== null, 'stepping onto a cell edge started no mesa build');
+  const standing = mesaWorldVertices(vista, mesas);
+  vista.finishMesaBuild();
+  let shared = 0;
+  let error = 0;
+  for (const [key, rebuilt] of mesaWorldVertices(vista, mesas)) {
+    const before = standing.get(key);
+    if (!before) continue;
+    shared++;
+    invariant(before.length === rebuilt.length, `mesa ${key} changed vertex count across a rebuild`);
+    for (let i = 0; i < rebuilt.length; i++) error = Math.max(error, Math.abs(rebuilt[i]! - before[i]!));
+  }
+  invariant(shared > 0, 'the edge handover shared no mesa between the two cells');
+  invariant(error === 0, `the drawn mesas stand ${error} m off their successors on the shared edge`);
+  const successor = drawnMesas(vista);
+  vista.update(off, LANE_Z, 0);
+  invariant(drawnMesas(vista) === successor, 'stepping off the edge rebuilt the mesas in its own frame');
+  vista.update(onto, LANE_Z, 0);
+  invariant(drawnMesas(vista) === successor, 'stepping back onto the edge rebuilt the mesas in its own frame');
 }
 
 const groundRay = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20_000);
@@ -220,10 +277,12 @@ const rebuilds = 8;
 const started = performance.now();
 for (let i = 1; i <= rebuilds; i++) {
   vista.update(camera.x + i * SNAP, camera.z, S);
+  vista.finishMesaBuild();
 }
 const meanRebuildMs = (performance.now() - started) / rebuilds;
 const steadyCellX = Math.floor((camera.x + rebuilds * SNAP) / SNAP) * SNAP + 1;
 vista.update(steadyCellX, camera.z, S);
+vista.finishMesaBuild();
 // Each update one lattice step on: the disc and mesa rewrite a step costs. Updates
 // inside a step cost nothing.
 const steadySteps = 12;
@@ -335,7 +394,7 @@ continuityVista.update(15 * DISC, LANE_Z, 0);
 const groundBeforeBoundary = worldPositionSnapshot(continuityGround);
 const heightsBeforeBoundary = drawnHeights(continuityGround, spots);
 let previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
-continuityVista.update(16 * DISC, LANE_Z, 0);
+checkEdgeHandover(continuityVista, continuityMesas, 16 * DISC, 17 * DISC);
 const boundaryAngle = largestStepAngle(
   spots,
   heightsBeforeBoundary,
@@ -375,9 +434,11 @@ invariant(
   `reversing across a cell edge leaves ${boundaryReverseError.toFixed(6)} m of drift`,
 );
 continuityVista.update(16 * DISC, LANE_Z, 0);
+continuityVista.finishMesaBuild();
 previousCandidates = mesaCandidateTops(continuityVista, continuityMesas);
 for (let crossing = 1; crossing <= 20; crossing++) {
   continuityVista.update(16 * DISC + crossing * SNAP, LANE_Z, 0);
+  continuityVista.finishMesaBuild();
   const currentCandidates = mesaCandidateTops(continuityVista, continuityMesas);
   residentTransitions += checkResidentTransition(currentCandidates);
   previousCandidates = currentCandidates;
@@ -412,6 +473,15 @@ console.log(
     `${reverseError.toFixed(6)} m reverse error, ${boundaryReverseError.toFixed(6)} m boundary reverse error, ` +
     `${residentTransitions} buried residency transitions`,
 );
+
+// The other way, -x: from cell 41 into cell 40, whose build starts a step earlier, on
+// cell 41's own first lattice point.
+const backEdge = 41 * 16 * DISC;
+continuityVista.update(backEdge + 2 * DISC, LANE_Z, 0);
+continuityVista.finishMesaBuild();
+continuityVista.update(backEdge + DISC, LANE_Z, 0);
+checkEdgeHandover(continuityVista, continuityMesas, backEdge, backEdge - DISC);
+console.log('mesa handover: exact on the shared edge both ways, no rebuild in a crossing frame');
 continuityVista.dispose();
 
 // Regression for the two failures reported together on seed 2225416641:
@@ -438,11 +508,7 @@ invariant(mesaPositions instanceof THREE.BufferAttribute, 'mesa regression gener
 
 // The visual skirt must meet the triangles that are actually rendered, not the
 // higher-resolution analytic height field used to generate those triangles.
-const mesaState = mesaVista as unknown as VistaAnimationState;
-invariant(
-  mesaState.mesaHeightOffset !== null && mesaState.mesaCentreXZ !== null,
-  'mesa regression has no grounding state',
-);
+const mesaState = drawnMesas(mesaVista);
 mesaScene.updateMatrixWorld(true);
 const downward = new THREE.Raycaster(
   new THREE.Vector3(),
@@ -454,10 +520,10 @@ const sampledContacts = new Set<string>();
 let groundedSamples = 0;
 let worstContactError = 0;
 for (let i = 0; i < mesaPositions.count && groundedSamples < 32; i++) {
-  if (mesaState.mesaHeightOffset[i] !== -3) continue;
+  if (mesaState.heightOffset[i] !== -3) continue;
   const centreDistance = Math.hypot(
-    mesaState.mesaCentreXZ[i * 2]!,
-    mesaState.mesaCentreXZ[i * 2 + 1]!,
+    mesaState.centreXZ[i * 2]!,
+    mesaState.centreXZ[i * 2 + 1]!,
   );
   if (centreDistance < 2_000 || centreDistance > 15_000) continue;
   const x = mesaPositions.getX(i);
@@ -511,20 +577,16 @@ invariant(
 );
 
 const silhouettes = new Map<string, { radius: number; height: number }>();
-invariant(
-  mesaState.mesaCentreXZ !== null && mesaState.mesaHeightOffset !== null,
-  'mesa regression has no silhouette state',
-);
 for (let i = 0; i < mesaPositions.count; i++) {
-  const centreX = mesaState.mesaCentreXZ[i * 2]!;
-  const centreZ = mesaState.mesaCentreXZ[i * 2 + 1]!;
+  const centreX = mesaState.centreXZ[i * 2]!;
+  const centreZ = mesaState.centreXZ[i * 2 + 1]!;
   const key = `${centreX},${centreZ}`;
   const silhouette = silhouettes.get(key) ?? { radius: 0, height: 0 };
   silhouette.radius = Math.max(
     silhouette.radius,
     Math.hypot(mesaPositions.getX(i) - centreX, mesaPositions.getZ(i) - centreZ),
   );
-  silhouette.height = Math.max(silhouette.height, mesaState.mesaHeightOffset[i]!);
+  silhouette.height = Math.max(silhouette.height, mesaState.heightOffset[i]!);
   silhouettes.set(key, silhouette);
 }
 const broadMediumMesas = [...silhouettes.values()].filter(
@@ -589,8 +651,7 @@ const approachTerrain = new Terrain(REPORTED_MESA_SEED, mesaRoad);
 const approachVista = new VistaMesh(approachScene, approachTerrain, mesaRoad, new WorldOrigin());
 approachVista.setViewDistance(25_000);
 approachVista.update(0, 0, 0);
-const approachState = approachVista as unknown as VistaAnimationState;
-const targetMesa = approachState.mesaCandidates.find((candidate) => {
+const targetMesa = drawnMesas(approachVista).candidates.find((candidate) => {
   const distance = Math.hypot(candidate.centreX, candidate.centreZ);
   return distance > candidate.radius + 1_500 && distance < 12_000;
 });
@@ -606,7 +667,8 @@ invariant(
 );
 /** The target's plateau and rise as drawn, or null when it is not resident. */
 function targetStanding(): { top: number; rise: number; footed: number } | null {
-  const candidate = approachState.mesaCandidates.find((c) => c.key === targetMesa!.key);
+  const drawn = drawnMesas(approachVista);
+  const candidate = drawn.candidates.find((c) => c.key === targetMesa!.key);
   if (!candidate) return null;
   const position = approachMesas!.geometry.getAttribute('position');
   invariant(position instanceof THREE.BufferAttribute, 'mesa approach has no positions');
@@ -616,7 +678,7 @@ function targetStanding(): { top: number; rise: number; footed: number } | null 
   for (let i = candidate.firstVertex; i < candidate.firstVertex + candidate.vertexCount; i++) {
     low = Math.min(low, position.getY(i));
     high = Math.max(high, position.getY(i));
-    if (Number.isFinite(approachState.mesaExactY![i]!)) footed++;
+    if (Number.isFinite(drawn.exactY[i]!)) footed++;
   }
   return { top: high, rise: high - low, footed };
 }

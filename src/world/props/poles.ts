@@ -765,10 +765,42 @@ varying float vWireCoverage;`;
 const WIRE_FRAGMENT_COVERAGE = /* glsl */ `#include <color_fragment>
 	diffuseColor.a *= vWireCoverage;`;
 
-let _wireMaterial: THREE.MeshStandardMaterial | null = null;
+/** The depth prepass keeps only the pixels a wire mostly covers (`wireMaterials`). */
+const WIRE_DEPTH_MIN_COVERAGE = 0.6;
+const WIRE_FRAGMENT_DEPTH_GATE = /* glsl */ `#include <color_fragment>
+	if ( vWireCoverage < ${WIRE_DEPTH_MIN_COVERAGE.toFixed(2)} ) discard;`;
+
+function patchWireMaterial(material: THREE.MeshStandardMaterial, fragment: string, key: string): void {
+  const previousCompile = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    previousCompile.call(material, shader, renderer);
+    shader.uniforms.sceneFrameHeight = sceneFrameHeight;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', WIRE_VERTEX_PARS)
+      .replace('#include <begin_vertex>', WIRE_VERTEX_WIDEN);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', WIRE_FRAGMENT_PARS)
+      .replace('#include <color_fragment>', fragment);
+  };
+  const previousKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${previousKey.call(material)}:${key}`;
+}
+
+interface WireMaterials {
+  /** Depth only, where the wire covers most of the pixel. Drawn first. */
+  readonly depth: THREE.MeshStandardMaterial;
+  /** Colour, faded by coverage, no depth write. Drawn second. */
+  readonly colour: THREE.MeshStandardMaterial;
+}
+
+/** Render orders of the two wire passes: the depth pass ahead of the colour pass. */
+const WIRE_DEPTH_ORDER = 0;
+const WIRE_COLOUR_ORDER = 0.01;
+
+let _wireMaterials: WireMaterials | null = null;
 /**
- * The wires' material: the pole material (vertex colour, comic light unbanded), its
- * own object so the plain pole meshes keep their program, plus the pixel clamp of
+ * The wires' materials: the pole material (vertex colour, comic light unbanded), their
+ * own objects so the plain pole meshes keep their program, plus the pixel clamp of
  * `WIRE_MIN_WIDTH_PX`: a wire under a pixel is drawn a pixel wide and that much fainter.
  *
  * THE FADE IS ALPHA BLENDING, so the material is transparent. The alternatives were
@@ -780,38 +812,42 @@ let _wireMaterial: THREE.MeshStandardMaterial | null = null;
  * where it would draw a pale line. Up close the coverage is exactly 1 and the wire
  * looks as it did; it is only drawn in the transparent pass instead of the opaque one.
  *
- * DEPTH WRITE STAYS ON. A chunk's wires are one mesh, sorted on that mesh's centre
- * against the other transparent things, which are all either far behind a wire (the
- * mirage tableaux, water) or right at the eye (car glass, spray, dust) and sort the
- * right way round. What depth buys is the post pass (render/hazeshader.ts), which
- * reads the scene's depth: without it a near wire against hot ground would take the
- * ground's depth and boil with it, and against the sky the ink gate would see the far
- * plane and leave it unoutlined. The price is that the
- * faint pixels of a far wire hide anything transparent drawn after them behind it:
- * one pixel wide, at a few per cent opacity.
+ * DEPTH IS WRITTEN ONLY WHERE THE WIRE COVERS THE PIXEL (`WIRE_DEPTH_MIN_COVERAGE`), by a
+ * depth-only pass drawn before the colour pass. The post pass (render/hazeshader.ts)
+ * reads the scene's depth: a near wire needs it, or it would take the ground's depth and
+ * boil with it, and against the sky the ink gate would see the far plane and leave it
+ * unoutlined. But a FAINT pixel holding the wire's depth is mostly the sky behind it,
+ * and the haboob wall, which the post pass lays only over what lies beyond it, left that
+ * sky unwalled: every far span drew a pale sky-blue line across the approaching storm.
+ * A faint pixel now keeps the depth of what is behind it, so the wall covers it as it
+ * covers its neighbours, and the few per cent of wire in it go into the dust.
  *
  * Casts no shadow, like the wire mesh it draws (a 1 cm wire's shadow was never drawn).
  */
-function wireMaterial(): THREE.MeshStandardMaterial {
-  if (_wireMaterial) return _wireMaterial;
-  const material = makePoleMaterial();
-  material.name = 'pole-wire';
-  material.transparent = true;
-  const previousCompile = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile.call(material, shader, renderer);
-    shader.uniforms.sceneFrameHeight = sceneFrameHeight;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', WIRE_VERTEX_PARS)
-      .replace('#include <begin_vertex>', WIRE_VERTEX_WIDEN);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', WIRE_FRAGMENT_PARS)
-      .replace('#include <color_fragment>', WIRE_FRAGMENT_COVERAGE);
-  };
-  const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () => `${previousKey.call(material)}:pole-wire-v1`;
-  _wireMaterial = material;
-  return material;
+function wireMaterials(): WireMaterials {
+  if (_wireMaterials) return _wireMaterials;
+  const colour = makePoleMaterial();
+  colour.name = 'pole-wire';
+  colour.transparent = true;
+  colour.depthWrite = false;
+  patchWireMaterial(colour, WIRE_FRAGMENT_COVERAGE, 'pole-wire-v2');
+  const depth = makePoleMaterial();
+  depth.name = 'pole-wire-depth';
+  depth.transparent = true;
+  depth.colorWrite = false;
+  patchWireMaterial(depth, WIRE_FRAGMENT_DEPTH_GATE, 'pole-wire-depth-v1');
+  _wireMaterials = { depth, colour };
+  return _wireMaterials;
+}
+
+/** A chunk's wires as the depth and colour meshes over one geometry. */
+function wireMeshes(geometry: THREE.BufferGeometry): [THREE.Mesh, THREE.Mesh] {
+  const { depth, colour } = wireMaterials();
+  const depthMesh = new THREE.Mesh(geometry, depth);
+  depthMesh.renderOrder = WIRE_DEPTH_ORDER;
+  const colourMesh = new THREE.Mesh(geometry, colour);
+  colourMesh.renderOrder = WIRE_COLOUR_ORDER;
+  return [depthMesh, colourMesh];
 }
 
 /**
@@ -1016,8 +1052,8 @@ export class PoleProvider implements ChunkProvider {
       group.add(new THREE.LineSegments(wireGeometry, retroWireMaterial()));
     } else if (wireCount > 0) {
       wireGeometry = wires.geometry();
-      // Shadow flags left off, as `poleProgramAnchor`'s wire stand-in copies them.
-      group.add(new THREE.Mesh(wireGeometry, wireMaterial()));
+      // Shadow flags left off, as `poleProgramAnchor`'s wire stand-ins copy them.
+      group.add(...wireMeshes(wireGeometry));
     }
 
     return {
@@ -1039,9 +1075,9 @@ export class PoleProvider implements ChunkProvider {
  * rope, nest, transformer can or loudspeaker, `poleFitting`), on the same plain material:
  * the `plain` anchor holds that program (before, the fittings had materials of their
  * own, and the first nest in view linked one mid-drive: 17 ms on the Mac, seed `flick`).
- * The wires are a plain Mesh too, on `wireMaterial` (transparent, its own patch: a
- * program of its own), and exist only once a chunk with a span streams in, so the
- * `wire` anchor is a real wire from `WireBuilder`, attribute for attribute.
+ * The wires are plain Meshes too, on `wireMaterials` (transparent, their own patches:
+ * two programs of their own), and exist only once a chunk with a span streams in, so the
+ * `wire` anchors are a real wire from `WireBuilder`, attribute for attribute.
  * The anchors are never drawn: their group stays invisible. Each copies the shadow flags
  * of the mesh it stands for.
  */
@@ -1060,7 +1096,6 @@ export function poleProgramAnchor(): THREE.Object3D {
   plain.receiveShadow = true;
   const wires = new WireBuilder();
   wires.tube([[0, 0, 0], [0, 0, 0.01]], 0.001, 0xffffff);
-  const wire = new THREE.Mesh(wires.geometry(), wireMaterial());
-  group.add(anchor, plain, wire);
+  group.add(anchor, plain, ...wireMeshes(wires.geometry()));
   return group;
 }

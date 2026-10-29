@@ -181,6 +181,16 @@ const MESA_CURTAIN_DEPTH = 60;
 const MESA_FOOTING_FULL = DESERT_TILE_SIZE * 3;
 const MESA_FOOTING_REACH = DESERT_TILE_SIZE * 5;
 const MESA_FOOTED_AT = MESA_FOOTING_REACH + SAMPLE_CELL_SIZE * 2;
+/**
+ * Longest stretch of one frame a mesa rebuild may hold the main thread, milliseconds.
+ *
+ * A cell crossing used to rebuild every resident mesa in its own frame: 56k vertices,
+ * 5-9 ms of one frame every 250 m (2026-10-29 trace, 110 km/h), on top of the ground
+ * rewrite — a visible jerk at speed on any display faster than 60 Hz. Rebuilt a slice
+ * per frame instead (`MesaBuild`), with the same one-job-one-millisecond rule the
+ * streaming scheduler holds (world/workqueue.ts `WORLD_JOB_SLICE_MS`).
+ */
+const MESA_BUILD_SLICE_MS = 1;
 
 type GroundSample = {
   heights: Float32Array;
@@ -213,10 +223,87 @@ type MesaCandidate = {
   readonly footed: boolean;
 };
 
+/**
+ * One built set of resident mesas: the drawn geometry and the CPU data that stands it
+ * on the vista's ground (`writeMesaHeights`). Swapped whole, so a frame never draws one
+ * set's vertices on another set's ground.
+ *
+ * A set carries its own frame. `groundY` interpolates the corner samples of `cell`, and
+ * its vertices are relative to the origin it was written under: the floating origin can
+ * move under it (`writeMesaHeights` re-expresses the lattice point in the set's frame,
+ * `showMesas` offsets the mesh), and the disc can move into the next cell while the set
+ * still draws, as long as the lattice point stays on their shared edge (`holdsLattice`).
+ */
+type MesaSet = {
+  readonly geometry: THREE.BufferGeometry;
+  readonly groundY: GroundHeightSamples;
+  readonly heightOffset: Float32Array;
+  readonly centreXZ: Float32Array;
+  /** Per vertex, its exact-ground height (`MESA_FOOTING_FULL`); NaN unless footed. */
+  readonly exactY: Float32Array;
+  readonly candidates: readonly MesaCandidate[];
+  /** The interpolation cell whose four corner samples `groundY` holds, in `origin`'s frame. */
+  readonly cellX: number;
+  readonly cellZ: number;
+  readonly originX: number;
+  readonly originZ: number;
+  readonly visibleOuter: number;
+};
+
+/**
+ * A mesa set under construction, a few mesas a frame (`advanceMesaBuild`). Everything
+ * it reads is captured when it starts, so its slices add up to exactly the set one
+ * synchronous build would have written.
+ *
+ * WHEN IT IS BUILT: while the lattice point stands on the edge of the drawn set's cell
+ * and is heading out across it (`planMesas`). On that edge the two cells' interpolations
+ * blend the same two corner samples, the drawn set's weight there exactly 1 or 0 and
+ * the next cell's the other, so either set draws the point bit-for-bit alike
+ * (tools/vista-check.ts holds this) and the swap can land on any frame of the step. A
+ * lattice step lasts some thirty frames at 110 km/h; the build takes a handful.
+ * Crossing in +x the edge is the next cell's first lattice point, the one the disc moves
+ * on to; in -x it is the drawn cell's own first, a whole step before the disc leaves it.
+ */
+type MesaBuild = {
+  readonly cellX: number;
+  readonly cellZ: number;
+  readonly originX: number;
+  readonly originZ: number;
+  readonly samples: GroundCellSamples;
+  readonly radii: readonly number[];
+  readonly groundPositions: Float32Array;
+  readonly colour: THREE.Color;
+  readonly visibleOuter: number;
+  /** Resident sites in build order, and the arrays sized for all of them. */
+  readonly sites: readonly MesaSite[];
+  /** Next site to append, and non-indexed vertices written so far. */
+  next: number;
+  written: number;
+  readonly position: Float32Array;
+  readonly color: Float32Array;
+  readonly groundY: GroundHeightSamples;
+  readonly heightOffset: Float32Array;
+  readonly centreXZ: Float32Array;
+  readonly exactY: Float32Array;
+  readonly candidates: MesaCandidate[];
+  /** Set once every site is in and the heights and normals are written: the next slice swaps it in. */
+  set: MesaSet | null;
+};
+
+/** Rows of a mesa: the curtain under the skirt, then one per `MESA_RINGS` ring. */
+const MESA_ROWS = MESA_RINGS.length + 1;
+
+/** Per indexed mesa vertex in `VistaMesh.mesaScratch`: x y z, r g b, four grounds, offset, exact. */
+const MESA_SCRATCH_STRIDE = 12;
+
+/** Non-indexed vertices one mesa of `segments` writes: its wall quads and its plateau fan. */
+function mesaVertexCount(segments: number): number {
+  return (MESA_ROWS - 1) * segments * 6 + segments * 3;
+}
+
 /** Palette scratch colours, set once per interpolation-cell load. */
 const sandLinear = new THREE.Color();
 const rockLinear = new THREE.Color();
-const mesaLinear = new THREE.Color();
 /**
  * Mesas need physical light and fog, but not the terrain shader's elevation contours:
  * on a sheer wall those screen-space lines read as printed cardboard. No polygon
@@ -357,7 +444,19 @@ export class VistaMesh {
   private readonly mesaMesh: THREE.Mesh;
   private readonly mesas: MesaField;
   private geometry: THREE.BufferGeometry | null = null;
-  private mesaGeometry: THREE.BufferGeometry | null = null;
+  /** The mesas being drawn, and the set that will replace them (see `MesaBuild`). */
+  private mesaSet: MesaSet | null = null;
+  private mesaBuild: MesaBuild | null = null;
+  /**
+   * The set drawn before `mesaSet`, kept whole: a road that weaves back across the edge
+   * it just crossed swaps it in again rather than rebuilding it in one frame.
+   */
+  private previousMesaSet: MesaSet | null = null;
+  /**
+   * One mesa's indexed vertices while `appendMesa` expands them into its build,
+   * `MESA_SCRATCH_STRIDE` numbers each; grown to the largest outline seen.
+   */
+  private mesaScratch = new Float64Array(0);
   private groundLocalPositions: Float32Array | null = null;
   private groundSamples: GroundCellSamples | null = null;
   private readonly groundSampleCache = new Map<string, GroundSample>();
@@ -369,14 +468,15 @@ export class VistaMesh {
   private discStepX = Number.NaN;
   private discStepZ = Number.NaN;
   private discWindow = -1;
+  /**
+   * The lattice point in world steps (`DISC_STEP` units, origin moves taken out), and
+   * which way it last moved along each axis: the edge of its cell it is heading for.
+   */
+  private worldStepX = Number.NaN;
+  private worldStepZ = Number.NaN;
+  private travelX = 0;
+  private travelZ = 0;
 
-  /** CPU-only mesa animation data; none of these buffers are uploaded as attributes. */
-  private mesaGroundY: GroundHeightSamples | null = null;
-  private mesaHeightOffset: Float32Array | null = null;
-  private mesaCentreXZ: Float32Array | null = null;
-  /** Per mesa vertex, its exact-ground height (`MESA_FOOTING_FULL`); NaN unless footed. */
-  private mesaExactY: Float32Array | null = null;
-  private mesaCandidates: MesaCandidate[] = [];
   private worker: Worker | null = null;
   private workerReady = false;
   private disposed = false;
@@ -406,7 +506,6 @@ export class VistaMesh {
    * wide, so a prefetch sent a cell later gets the same ground.
    */
   private groundHintS = 0;
-  private mesaVisibleOuter = 0;
 
   /** Radius of the disc, metres. Set by the view-distance setting. */
   private outerRadius = 0;
@@ -584,6 +683,12 @@ export class VistaMesh {
     this.outerRadius = outer;
     this.mesh.visible = outer > 0;
     this.mesaMesh.visible = false;
+    // Residency follows the radius: whatever is built or building is for the old one.
+    this.mesaBuild = null;
+    this.mesaSet?.geometry.dispose();
+    this.previousMesaSet?.geometry.dispose();
+    this.mesaSet = null;
+    this.previousMesaSet = null;
     this.radii = outer > 0 ? ringRadii(outer) : [];
     this.groundSamples = null;
     this.groundSampleCache.clear();
@@ -600,6 +705,9 @@ export class VistaMesh {
    * mesas are rewritten only when the point, the cell or the fine tiles' window changes,
    * and are a function of the point alone, so between steps nothing moves. Ground and
    * mesa movement is spatial and reversible.
+   *
+   * The mesas of the next cell are built a slice a frame while the point crosses the
+   * edge (`MesaBuild`), not in one frame; `finishMesaBuild` completes one at once.
    */
   update(cameraX: number, cameraZ: number, s: number): void {
     if (this.outerRadius <= 0) return;
@@ -617,17 +725,128 @@ export class VistaMesh {
     // The road raise inside `ROAD_UNDERLAY_RADIUS` depends on the fine tiles' window
     // (`roadRaiseAt`), which moves at tile crossings, not with the lattice.
     const window = groundWindowRevision();
-    if (!cellChanged && stepX === this.discStepX && stepZ === this.discStepZ && window === this.discWindow) return;
+    if (!cellChanged && stepX === this.discStepX && stepZ === this.discStepZ && window === this.discWindow) {
+      // Nothing moved: the frame has room for a slice of the mesa rebuild.
+      this.advanceMesaBuild(s);
+      return;
+    }
+    const worldStepX = stepX + this.origin.x / DISC_STEP;
+    const worldStepZ = stepZ + this.origin.z / DISC_STEP;
+    if (Number.isFinite(this.worldStepX) && worldStepX !== this.worldStepX) {
+      this.travelX = Math.sign(worldStepX - this.worldStepX);
+    }
+    if (Number.isFinite(this.worldStepZ) && worldStepZ !== this.worldStepZ) {
+      this.travelZ = Math.sign(worldStepZ - this.worldStepZ);
+    }
+    this.worldStepX = worldStepX;
+    this.worldStepZ = worldStepZ;
     this.discStepX = stepX;
     this.discStepZ = stepZ;
     this.discWindow = window;
     this.interpolationX = (stepX - cellX * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
     this.interpolationZ = (stepZ - cellZ * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
-    const anchorX = stepX * DISC_STEP;
-    const anchorZ = stepZ * DISC_STEP;
-    this.updateGroundPositions(anchorX, anchorZ);
-    this.updateMesaPositions(anchorX, anchorZ);
-    if (cellChanged) this.refreshMesaNormals();
+    this.updateGroundPositions(stepX * DISC_STEP, stepZ * DISC_STEP);
+    this.planMesas(s);
+    if (this.mesaSet) this.showMesas(this.mesaSet);
+  }
+
+  /** Completes a mesa rebuild in flight and draws it now. For tools; play builds a slice a frame. */
+  finishMesaBuild(): void {
+    const build = this.mesaBuild;
+    if (!build) return;
+    this.completeMesaBuild(build);
+    this.showMesas(build.set!);
+  }
+
+  /** Runs `build` to its end and swaps it in, without drawing it yet. */
+  private completeMesaBuild(build: MesaBuild): void {
+    if (!build.set) {
+      this.appendMesas(build, Number.POSITIVE_INFINITY);
+      this.shadeMesaBuild(build);
+    }
+    this.swapMesas(build.set!);
+  }
+
+  /**
+   * Keeps a mesa set that draws the disc's lattice point exactly, once the point has
+   * moved (`MesaBuild`). The drawn set does while its cell, edges included, holds the
+   * point; on the edge, heading out, the cell across starts building. A turn back across
+   * the edge just crossed finds the previous set, kept for it. A point outside every set
+   * — the first update, a teleport — is built for in this frame, the way every crossing
+   * used to be.
+   */
+  private planMesas(s: number): void {
+    const live = this.mesaSet;
+    const build = this.mesaBuild;
+    if (live === null || !this.holdsLattice(live)) {
+      const previous = this.previousMesaSet;
+      if (previous !== null && this.holdsLattice(previous)) {
+        this.swapMesas(previous);
+      } else if (build !== null && this.holdsLattice(build)) {
+        this.completeMesaBuild(build);
+      } else {
+        this.mesaBuild = this.startMesaBuild(this.sampleCellX, this.sampleCellZ, this.groundSamples!, s);
+        this.completeMesaBuild(this.mesaBuild);
+      }
+      return;
+    }
+    const shiftX = (this.origin.x - live.originX) / DISC_STEP;
+    const shiftZ = (this.origin.z - live.originZ) / DISC_STEP;
+    const inCellX = this.discStepX + shiftX - live.cellX * DISC_STEPS_PER_CELL;
+    const inCellZ = this.discStepZ + shiftZ - live.cellZ * DISC_STEPS_PER_CELL;
+    const acrossX =
+      inCellX === 0 && this.travelX < 0 ? -1 : inCellX === DISC_STEPS_PER_CELL && this.travelX > 0 ? 1 : 0;
+    const acrossZ =
+      inCellZ === 0 && this.travelZ < 0 ? -1 : inCellZ === DISC_STEPS_PER_CELL && this.travelZ > 0 ? 1 : 0;
+    if (acrossX === 0 && acrossZ === 0) {
+      if (build !== null && !this.holdsLattice(build)) this.mesaBuild = null;
+      return;
+    }
+    // The cell across, in the current origin's frame. Already built if the point is back
+    // on the edge it just crossed: the previous set takes over when it steps off.
+    const targetX = live.cellX + acrossX - shiftX / DISC_STEPS_PER_CELL;
+    const targetZ = live.cellZ + acrossZ - shiftZ / DISC_STEPS_PER_CELL;
+    const previous = this.previousMesaSet;
+    if (previous !== null && this.cellsFrom(previous, targetX, targetZ) === 0) {
+      this.mesaBuild = null;
+      return;
+    }
+    if (build !== null && this.cellsFrom(build, targetX, targetZ) === 0) return;
+    // Corners the worker has not delivered yet are waited for (`advanceMesaBuild` asks
+    // again each frame) rather than swept from the terrain in this one (`cellSamples`).
+    const samples = this.cellSamples(targetX, targetZ);
+    this.mesaBuild = samples === null ? null : this.startMesaBuild(targetX, targetZ, samples, s);
+  }
+
+  /**
+   * Whether a set's (or build's) cell, edges included, holds the disc's lattice point:
+   * whether it draws that point exactly, its interpolation weights inside [0, 1].
+   */
+  private holdsLattice(frame: { cellX: number; cellZ: number; originX: number; originZ: number }): boolean {
+    const inCellX =
+      this.discStepX + (this.origin.x - frame.originX) / DISC_STEP - frame.cellX * DISC_STEPS_PER_CELL;
+    const inCellZ =
+      this.discStepZ + (this.origin.z - frame.originZ) / DISC_STEP - frame.cellZ * DISC_STEPS_PER_CELL;
+    return inCellX >= 0 && inCellX <= DISC_STEPS_PER_CELL && inCellZ >= 0 && inCellZ <= DISC_STEPS_PER_CELL;
+  }
+
+  /**
+   * One slice of the rebuild in flight: mesas until the slice's deadline, then, each in a
+   * frame of its own, the heights and normals, and the swap (whose frame also uploads it).
+   * With none in flight, a build still waiting for its corners is asked for again.
+   */
+  private advanceMesaBuild(s: number): void {
+    const build = this.mesaBuild;
+    if (!build) {
+      if (this.mesaSet) this.planMesas(s);
+    } else if (build.set) {
+      this.swapMesas(build.set);
+      this.showMesas(build.set);
+    } else if (build.next === build.sites.length) {
+      this.shadeMesaBuild(build);
+    } else {
+      this.appendMesas(build, performance.now() + MESA_BUILD_SLICE_MS);
+    }
   }
 
   /** Writes the disc for the lattice point (`anchorX`, `anchorZ`); see `update`. */
@@ -698,29 +917,40 @@ export class VistaMesh {
     normal.needsUpdate = true;
   }
 
+  /** Draws `set` for the disc's lattice point, offset for the origin it was written under. */
+  private showMesas(set: MesaSet): void {
+    this.mesaMesh.visible = this.writeMesaHeights(set, this.discStepX, this.discStepZ);
+    this.mesaMesh.position.set(set.originX - this.origin.x, 0, set.originZ - this.origin.z);
+  }
+
   /**
-   * Writes the mesas for the lattice point (`anchorX`, `anchorZ`): their ground, and
-   * their spatial fades (buried at the edge of the resident set, onto exact ground near
-   * the player), are measured from that point, not from the camera, so they too hold
-   * still between steps.
+   * Writes a set's heights for the lattice point (`stepX`, `stepZ`, current origin):
+   * their ground, and their spatial fades (buried at the edge of the resident set, onto
+   * exact ground near the player), are measured from that point, not from the camera,
+   * so they too hold still between steps. True when any of its mesas shows.
    */
-  private updateMesaPositions(anchorX: number, anchorZ: number): void {
-    if (!this.mesaGeometry || !this.mesaGroundY || !this.mesaHeightOffset || !this.mesaExactY) return;
-    const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
+  private writeMesaHeights(set: MesaSet, stepX: number, stepZ: number): boolean {
+    const position = set.geometry.getAttribute('position') as THREE.BufferAttribute;
     const xyz = position.array as Float32Array;
-    const [base00, base10, base01, base11] = this.mesaGroundY;
-    const exact = this.mesaExactY;
-    const offsets = this.mesaHeightOffset;
-    const tx = this.interpolationX;
-    const tz = this.interpolationZ;
-    const outerFadeStart = Math.max(1, this.mesaVisibleOuter - MESA_OUTER_FADE);
+    const [base00, base10, base01, base11] = set.groundY;
+    const exact = set.exactY;
+    const offsets = set.heightOffset;
+    // The lattice point in the set's frame. Origins sit on whole cells (`REBASE_STEP`),
+    // so this is whole steps, and the weights are the disc's own when the set is current.
+    const setStepX = stepX + (this.origin.x - set.originX) / DISC_STEP;
+    const setStepZ = stepZ + (this.origin.z - set.originZ) / DISC_STEP;
+    const tx = (setStepX - set.cellX * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
+    const tz = (setStepZ - set.cellZ * DISC_STEPS_PER_CELL) / DISC_STEPS_PER_CELL;
+    const anchorX = setStepX * DISC_STEP;
+    const anchorZ = setStepZ * DISC_STEP;
+    const outerFadeStart = Math.max(1, set.visibleOuter - MESA_OUTER_FADE);
     let anyVisible = false;
-    for (const candidate of this.mesaCandidates) {
+    for (const candidate of set.candidates) {
       const distance = Math.hypot(candidate.centreX - anchorX, candidate.centreZ - anchorZ);
       const farWeight =
         1 -
         smoothstep01(
-          (distance - outerFadeStart) / Math.max(1, this.mesaVisibleOuter - outerFadeStart),
+          (distance - outerFadeStart) / Math.max(1, set.visibleOuter - outerFadeStart),
         );
       // `radius` is the footprint's farthest vertex, so this errs toward exact ground.
       const footWeight = candidate.footed
@@ -746,26 +976,18 @@ export class VistaMesh {
         xyz[i * 3 + 1] = y - (1 - farWeight) * MESA_BURY_DEPTH;
       }
     }
-    this.mesaMesh.visible = anyVisible;
     position.needsUpdate = true;
+    return anyVisible;
   }
 
   /**
    * Flat face normals, then each quad's two triangles given their shared normal so a
    * ledge reads as one face. Written over the typed arrays: through `computeVertexNormals`
-   * and `getX`/`setXYZ` this was 2 ms of every 250 m cell crossing for 18k vertices,
-   * and it runs in the same frame as the mesa rebuild.
+   * and `getX`/`setXYZ` this was 2 ms of every 250 m cell crossing for 18k vertices; it
+   * is still about a millisecond for the 56k of a 25 km view, so it has a slice of its
+   * own (`advanceMesaBuild`).
    */
-  private refreshMesaNormals(): void {
-    if (!this.mesaGeometry) return;
-    const position = this.mesaGeometry.getAttribute('position') as THREE.BufferAttribute;
-    const p = position.array as Float32Array;
-    let normal = this.mesaGeometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
-    if (!normal || normal.count !== position.count) {
-      normal = new THREE.BufferAttribute(new Float32Array(p.length), 3);
-      this.mesaGeometry.setAttribute('normal', normal);
-    }
-    const n = normal.array as Float32Array;
+  private writeMesaNormals(p: Float32Array, n: Float32Array): void {
     // Face normals, the arithmetic `computeVertexNormals` uses on a non-indexed buffer.
     for (let v = 0; v + 8 < p.length; v += 9) {
       const bx = p[v + 3]!;
@@ -790,7 +1012,8 @@ export class VistaMesh {
         n[k + 2] = nz;
       }
     }
-    for (let i = 0; i + 5 < position.count; i += 6) {
+    const vertexCount = p.length / 3;
+    for (let i = 0; i + 5 < vertexCount; i += 6) {
       const o = i * 3;
       const bx = p[o + 3]!;
       const by = p[o + 4]!;
@@ -851,7 +1074,6 @@ export class VistaMesh {
         n[k + 2] = nz / length;
       }
     }
-    normal.needsUpdate = true;
   }
 
   private prepareRoadUnderlay(s: number): void {
@@ -1009,26 +1231,15 @@ export class VistaMesh {
     const palette = desertPaletteAt(s);
     sandLinear.setHex(palette.sand);
     rockLinear.setHex(palette.rock).lerp(sandLinear, 0.45);
-    mesaLinear.setHex(palette.rock).lerp(sandLinear, 0.2);
 
-    const samples: GroundCellSamples = [
+    this.groundSamples = [
       this.groundSampleAt(x0, z0),
       this.groundSampleAt(x0 + SAMPLE_CELL_SIZE, z0),
       this.groundSampleAt(x0, z0 + SAMPLE_CELL_SIZE),
       this.groundSampleAt(x0 + SAMPLE_CELL_SIZE, z0 + SAMPLE_CELL_SIZE),
     ];
-    this.groundSamples = samples;
     this.sampleCellX = cellX;
     this.sampleCellZ = cellZ;
-    invariantLocalPositions(this.groundLocalPositions);
-    this.buildMesas(
-      x0 + SAMPLE_CELL_SIZE * 0.5,
-      z0 + SAMPLE_CELL_SIZE * 0.5,
-      this.groundLocalPositions,
-      samples,
-      x0,
-      z0,
-    );
 
     this.trimGroundSampleCache();
     // Queue the corners of the eight neighbouring cells. Whichever way the camera
@@ -1220,117 +1431,164 @@ export class VistaMesh {
   }
 
   /**
-   * Rebuilds the resident mesas (`world/mesas.ts`) for the current interpolation cell.
-   * The residency margin keeps candidates below ground before they can enter view.
+   * Whole cells between a set's (or build's) interpolation cell and local cell
+   * (`cellX`, `cellZ`), across any origin move between them; Infinity when the two
+   * frames do not share the cell lattice.
    */
-  private buildMesas(
-    cx: number,
-    cz: number,
-    groundPositions: Float32Array,
-    groundSamples: GroundCellSamples,
-    groundX0: number,
-    groundZ0: number,
-  ): void {
+  private cellsFrom(
+    frame: { cellX: number; cellZ: number; originX: number; originZ: number },
+    cellX: number,
+    cellZ: number,
+  ): number {
+    const dx = frame.cellX - cellX + (frame.originX - this.origin.x) / SAMPLE_CELL_SIZE;
+    const dz = frame.cellZ - cellZ + (frame.originZ - this.origin.z) / SAMPLE_CELL_SIZE;
+    if (!Number.isInteger(dx) || !Number.isInteger(dz)) return Infinity;
+    return Math.max(Math.abs(dx), Math.abs(dz));
+  }
+
+  /**
+   * The four corner samples of a cell, for a build ahead of the disc: from the cache the
+   * worker fills, or null while any is still on its way. With no worker nothing would
+   * ever arrive, so they are sampled here, as a crossing would sample them.
+   */
+  private cellSamples(cellX: number, cellZ: number): GroundCellSamples | null {
+    const x0 = cellX * SAMPLE_CELL_SIZE;
+    const z0 = cellZ * SAMPLE_CELL_SIZE;
+    const x1 = x0 + SAMPLE_CELL_SIZE;
+    const z1 = z0 + SAMPLE_CELL_SIZE;
+    if (!this.worker) {
+      return [
+        this.groundSampleAt(x0, z0),
+        this.groundSampleAt(x1, z0),
+        this.groundSampleAt(x0, z1),
+        this.groundSampleAt(x1, z1),
+      ];
+    }
+    const ox = this.origin.x;
+    const oz = this.origin.z;
+    const s00 = this.groundSampleCache.get(`${x0 + ox},${z0 + oz}`);
+    const s10 = this.groundSampleCache.get(`${x1 + ox},${z0 + oz}`);
+    const s01 = this.groundSampleCache.get(`${x0 + ox},${z1 + oz}`);
+    const s11 = this.groundSampleCache.get(`${x1 + ox},${z1 + oz}`);
+    return s00 && s10 && s01 && s11 ? [s00, s10, s01, s11] : null;
+  }
+
+  /**
+   * A build of the resident mesas (`world/mesas.ts`) of interpolation cell (`cellX`,
+   * `cellZ`), coloured for arclength `s`; the residency margin keeps candidates below
+   * ground before they can enter view.
+   */
+  private startMesaBuild(cellX: number, cellZ: number, samples: GroundCellSamples, s: number): MesaBuild {
+    invariantLocalPositions(this.groundLocalPositions);
+    const palette = desertPaletteAt(s);
+    const colour = new THREE.Color(palette.rock).lerp(new THREE.Color(palette.sand), 0.2);
     const visibleOuter = Math.min(MESA_MAX_DISTANCE, this.outerRadius - MESA_MAX_RADIUS);
     const residentOuter = Math.min(
       MESA_MAX_DISTANCE + MESA_RESIDENCY_MARGIN,
       this.outerRadius - MESA_MAX_RADIUS,
     );
-    this.mesaVisibleOuter = visibleOuter;
-    const positions: number[] = [];
-    const colors: number[] = [];
-    const indices: number[] = [];
-    const baseGroundY: [number[], number[], number[], number[]] = [[], [], [], []];
-    const heightOffsets: number[] = [];
-    const centres: number[] = [];
-    const exacts: number[] = [];
-    const candidates: MesaCandidate[] = [];
+    const cx = cellX * SAMPLE_CELL_SIZE + SAMPLE_CELL_SIZE * 0.5;
+    const cz = cellZ * SAMPLE_CELL_SIZE + SAMPLE_CELL_SIZE * 0.5;
+    const ox = this.origin.x;
+    const oz = this.origin.z;
+    const sites: MesaSite[] = [];
+    let vertexCount = 0;
     if (residentOuter > 0) {
-      const cameraX = cx + this.origin.x;
-      const cameraZ = cz + this.origin.z;
+      const cameraX = cx + ox;
+      const cameraZ = cz + oz;
       const minCellX = Math.floor((cameraX - residentOuter) / MESA_CELL_SIZE);
       const maxCellX = Math.floor((cameraX + residentOuter) / MESA_CELL_SIZE);
       const minCellZ = Math.floor((cameraZ - residentOuter) / MESA_CELL_SIZE);
       const maxCellZ = Math.floor((cameraZ + residentOuter) / MESA_CELL_SIZE);
-
-      for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
-        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
-          const site = this.mesas.site(cellX, cellZ);
+      for (let siteX = minCellX; siteX <= maxCellX; siteX++) {
+        for (let siteZ = minCellZ; siteZ <= maxCellZ; siteZ++) {
+          const site = this.mesas.site(siteX, siteZ);
           if (site === null) continue;
-          const x = site.x - this.origin.x;
-          const z = site.z - this.origin.z;
-          if (Math.hypot(x - cx, z - cz) >= residentOuter) continue;
-          const firstVertex = indices.length;
-          const footed = footprintDistance(site, cameraX, cameraZ) < MESA_FOOTED_AT;
-          this.appendMesa(
-            positions,
-            colors,
-            indices,
-            baseGroundY,
-            heightOffsets,
-            centres,
-            exacts,
-            groundPositions,
-            groundSamples,
-            groundX0,
-            groundZ0,
-            site,
-            x,
-            z,
-            footed,
-          );
-          candidates.push({
-            footed,
-            key: site.key,
-            firstVertex,
-            vertexCount: indices.length - firstVertex,
-            centreX: x,
-            centreZ: z,
-            radius: site.footprintRadius,
-          });
+          if (Math.hypot(site.x - ox - cx, site.z - oz - cz) >= residentOuter) continue;
+          sites.push(site);
+          vertexCount += mesaVertexCount(site.segments);
         }
       }
     }
+    return {
+      cellX,
+      cellZ,
+      originX: ox,
+      originZ: oz,
+      samples,
+      radii: this.radii,
+      groundPositions: this.groundLocalPositions,
+      colour,
+      visibleOuter,
+      sites,
+      next: 0,
+      written: 0,
+      position: new Float32Array(vertexCount * 3),
+      color: new Float32Array(vertexCount * 3),
+      groundY: [
+        new Float32Array(vertexCount),
+        new Float32Array(vertexCount),
+        new Float32Array(vertexCount),
+        new Float32Array(vertexCount),
+      ],
+      heightOffset: new Float32Array(vertexCount),
+      centreXZ: new Float32Array(vertexCount * 2),
+      exactY: new Float32Array(vertexCount),
+      candidates: [],
+      set: null,
+    };
+  }
 
-    const indexed = new THREE.BufferGeometry();
-    indexed.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    indexed.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    indexed.setAttribute('_base00', new THREE.Float32BufferAttribute(baseGroundY[0], 1));
-    indexed.setAttribute('_base10', new THREE.Float32BufferAttribute(baseGroundY[1], 1));
-    indexed.setAttribute('_base01', new THREE.Float32BufferAttribute(baseGroundY[2], 1));
-    indexed.setAttribute('_base11', new THREE.Float32BufferAttribute(baseGroundY[3], 1));
-    indexed.setAttribute('_heightOffset', new THREE.Float32BufferAttribute(heightOffsets, 1));
-    indexed.setAttribute('_centreXZ', new THREE.Float32BufferAttribute(centres, 2));
-    indexed.setAttribute('_exactY', new THREE.Float32BufferAttribute(exacts, 1));
-    indexed.setIndex(indices);
-    // Separate triangle normals keep the sedimentary ledges and faceted walls legible.
-    const geometry = indexed.toNonIndexed();
-    indexed.dispose();
-    this.mesaGroundY = [
-      (geometry.getAttribute('_base00') as THREE.BufferAttribute).array as Float32Array,
-      (geometry.getAttribute('_base10') as THREE.BufferAttribute).array as Float32Array,
-      (geometry.getAttribute('_base01') as THREE.BufferAttribute).array as Float32Array,
-      (geometry.getAttribute('_base11') as THREE.BufferAttribute).array as Float32Array,
-    ];
-    this.mesaHeightOffset = (geometry.getAttribute('_heightOffset') as THREE.BufferAttribute)
-      .array as Float32Array;
-    this.mesaCentreXZ = (geometry.getAttribute('_centreXZ') as THREE.BufferAttribute)
-      .array as Float32Array;
-    this.mesaExactY = (geometry.getAttribute('_exactY') as THREE.BufferAttribute)
-      .array as Float32Array;
-    geometry.deleteAttribute('_base00');
-    geometry.deleteAttribute('_base10');
-    geometry.deleteAttribute('_base01');
-    geometry.deleteAttribute('_base11');
-    geometry.deleteAttribute('_heightOffset');
-    geometry.deleteAttribute('_centreXZ');
-    geometry.deleteAttribute('_exactY');
-    (geometry.getAttribute('position') as THREE.BufferAttribute).setUsage(THREE.DynamicDrawUsage);
-    this.mesaGeometry?.dispose();
-    this.mesaGeometry = geometry;
-    this.mesaMesh.geometry = geometry;
-    this.mesaCandidates = candidates;
-    this.mesaMesh.visible = positions.length > 0;
+  /** The build's next mesas: at least one, then as many as fit before `deadline`. */
+  private appendMesas(build: MesaBuild, deadline: number): void {
+    do {
+      const site = build.sites[build.next];
+      if (site === undefined) return;
+      build.next++;
+      this.appendMesa(build, site);
+    } while (performance.now() < deadline);
+  }
+
+  /**
+   * Wraps a build whose every mesa is in as a set, and writes its heights for the
+   * current lattice point and then its normals from them. `advanceMesaBuild` swaps it in
+   * on the next slice.
+   */
+  private shadeMesaBuild(build: MesaBuild): void {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(build.position, 3).setUsage(THREE.DynamicDrawUsage),
+    );
+    geometry.setAttribute('color', new THREE.BufferAttribute(build.color, 3));
+    const normals = new Float32Array(build.position.length);
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    const set: MesaSet = {
+      geometry,
+      groundY: build.groundY,
+      heightOffset: build.heightOffset,
+      centreXZ: build.centreXZ,
+      exactY: build.exactY,
+      candidates: build.candidates,
+      cellX: build.cellX,
+      cellZ: build.cellZ,
+      originX: build.originX,
+      originZ: build.originZ,
+      visibleOuter: build.visibleOuter,
+    };
+    this.writeMesaHeights(set, this.discStepX, this.discStepZ);
+    this.writeMesaNormals(build.position, normals);
+    build.set = set;
+  }
+
+  /** Puts `set` in place of the mesas on screen, keeping the set it replaces; `showMesas` draws it. */
+  private swapMesas(set: MesaSet): void {
+    const replaced = this.mesaSet;
+    if (this.previousMesaSet !== set) this.previousMesaSet?.geometry.dispose();
+    this.previousMesaSet = replaced;
+    this.mesaSet = set;
+    this.mesaBuild = null;
+    this.mesaMesh.geometry = set.geometry;
   }
 
   /**
@@ -1340,24 +1598,19 @@ export class VistaMesh {
    * actually drawn around it. A `footed` mesa also carries every vertex's exact-ground
    * height, which it stands on up close (`MESA_FOOTING_FULL`). Under the skirt hangs the
    * curtain (`MESA_CURTAIN_DEPTH`): one more row of vertices, the skirt's own, lowered.
+   *
+   * Its vertices go into `mesaScratch` indexed, then into the build triangle by triangle,
+   * flat-shaded: the order `BufferGeometry.toNonIndexed` produced from an index, written
+   * straight into the set's arrays (that copy was over half of every crossing's cost).
    */
-  private appendMesa(
-    positions: number[],
-    colors: number[],
-    indices: number[],
-    baseGroundY: [number[], number[], number[], number[]],
-    heightOffsets: number[],
-    centres: number[],
-    exacts: number[],
-    groundPositions: Float32Array,
-    groundSamples: GroundCellSamples,
-    groundX0: number,
-    groundZ0: number,
-    site: MesaSite,
-    x: number,
-    z: number,
-    footed: boolean,
-  ): void {
+  private appendMesa(build: MesaBuild, site: MesaSite): void {
+    const groundX0 = build.cellX * SAMPLE_CELL_SIZE;
+    const groundZ0 = build.cellZ * SAMPLE_CELL_SIZE;
+    const cameraX = groundX0 + SAMPLE_CELL_SIZE * 0.5 + build.originX;
+    const cameraZ = groundZ0 + SAMPLE_CELL_SIZE * 0.5 + build.originZ;
+    const footed = footprintDistance(site, cameraX, cameraZ) < MESA_FOOTED_AT;
+    const x = site.x - build.originX;
+    const z = site.z - build.originZ;
     const groundAt = (sampleIndex: number, px: number, pz: number): number => {
       const sampleX = groundX0 + (sampleIndex % 2) * SAMPLE_CELL_SIZE;
       const sampleZ = groundZ0 + Math.floor(sampleIndex / 2) * SAMPLE_CELL_SIZE;
@@ -1366,9 +1619,9 @@ export class VistaMesh {
         pz - sampleZ,
         0,
         0,
-        this.radii,
-        groundPositions,
-        groundSamples[sampleIndex]!.heights,
+        build.radii,
+        build.groundPositions,
+        build.samples[sampleIndex]!.heights,
       );
     };
     const centreGround: [number, number, number, number] = [
@@ -1380,12 +1633,17 @@ export class VistaMesh {
     const footing = footed ? this.mesas.footing(site) : null;
     const seed = this.road.seed;
     const segments = site.segments;
-    const firstVertex = positions.length / 3;
+    const colour = build.colour;
+    const indexedCount = MESA_ROWS * segments + 1;
+    if (this.mesaScratch.length < indexedCount * MESA_SCRATCH_STRIDE) {
+      this.mesaScratch = new Float64Array(indexedCount * MESA_SCRATCH_STRIDE);
+    }
+    const scratch = this.mesaScratch;
     // Row 0 is the curtain under the skirt; row r > 0 is ring r - 1. The skirt row stands
     // on the curtain's ground, sampled once.
-    const rows = MESA_RINGS.length + 1;
     const skirtGrounds: [number, number, number, number][] = [];
-    for (let row = 0; row < rows; row++) {
+    let o = 0;
+    for (let row = 0; row < MESA_ROWS; row++) {
       const ring = Math.max(0, row - 1);
       const level = MESA_RINGS[ring]!;
       for (let segment = 0; segment < segments; segment++) {
@@ -1404,51 +1662,87 @@ export class VistaMesh {
           ? -MESA_SKIRT_DROP - MESA_CURTAIN_DEPTH
           : ring === 0 ? -MESA_SKIRT_DROP : site.height * level.height;
         const shade = mesaFacetShade(seed, site, ring, segment);
-        positions.push(px, grounds[0] + heightOffset, pz);
-        colors.push(
-          Math.min(1, mesaLinear.r * shade),
-          Math.min(1, mesaLinear.g * shade),
-          Math.min(1, mesaLinear.b * shade),
-        );
-        for (let sample = 0; sample < 4; sample++) {
-          baseGroundY[sample]!.push(grounds[sample]!);
-        }
-        heightOffsets.push(heightOffset);
-        centres.push(x, z);
         const exact = footing ? mesaFootingY(site, footing, ring, segment) : NaN;
-        exacts.push(row === 0 ? exact - MESA_CURTAIN_DEPTH : exact);
+        scratch[o] = px;
+        scratch[o + 1] = grounds[0] + heightOffset;
+        scratch[o + 2] = pz;
+        scratch[o + 3] = Math.min(1, colour.r * shade);
+        scratch[o + 4] = Math.min(1, colour.g * shade);
+        scratch[o + 5] = Math.min(1, colour.b * shade);
+        scratch[o + 6] = grounds[0];
+        scratch[o + 7] = grounds[1];
+        scratch[o + 8] = grounds[2];
+        scratch[o + 9] = grounds[3];
+        scratch[o + 10] = heightOffset;
+        scratch[o + 11] = row === 0 ? exact - MESA_CURTAIN_DEPTH : exact;
+        o += MESA_SCRATCH_STRIDE;
       }
     }
+    const top = (MESA_ROWS - 1) * segments;
+    const centre = MESA_ROWS * segments;
+    const topOffset = site.height * MESA_TOP_HEIGHT;
+    scratch[o] = x;
+    scratch[o + 1] = centreGround[0] + topOffset;
+    scratch[o + 2] = z;
+    scratch[o + 3] = colour.r;
+    scratch[o + 4] = colour.g;
+    scratch[o + 5] = colour.b;
+    scratch[o + 6] = centreGround[0];
+    scratch[o + 7] = centreGround[1];
+    scratch[o + 8] = centreGround[2];
+    scratch[o + 9] = centreGround[3];
+    scratch[o + 10] = topOffset;
+    scratch[o + 11] = footing ? footing.centreGroundY + topOffset : NaN;
 
-    for (let row = 0; row < rows - 1; row++) {
-      const current = firstVertex + row * segments;
+    const firstVertex = build.written;
+    for (let row = 0; row < MESA_ROWS - 1; row++) {
+      const current = row * segments;
       const next = current + segments;
       for (let segment = 0; segment < segments; segment++) {
         const b = (segment + 1) % segments;
-        indices.push(
-          current + segment,
-          next + segment,
-          current + b,
-          current + b,
-          next + segment,
-          next + b,
-        );
+        this.emitMesaVertex(build, current + segment, x, z);
+        this.emitMesaVertex(build, next + segment, x, z);
+        this.emitMesaVertex(build, current + b, x, z);
+        this.emitMesaVertex(build, current + b, x, z);
+        this.emitMesaVertex(build, next + segment, x, z);
+        this.emitMesaVertex(build, next + b, x, z);
       }
     }
-    const top = firstVertex + (rows - 1) * segments;
-    const centre = positions.length / 3;
-    const topOffset = site.height * MESA_TOP_HEIGHT;
-    positions.push(x, centreGround[0] + topOffset, z);
-    colors.push(mesaLinear.r, mesaLinear.g, mesaLinear.b);
-    for (let sample = 0; sample < 4; sample++) {
-      baseGroundY[sample]!.push(centreGround[sample]!);
-    }
-    heightOffsets.push(topOffset);
-    centres.push(x, z);
-    exacts.push(footing ? footing.centreGroundY + topOffset : NaN);
     for (let segment = 0; segment < segments; segment++) {
-      indices.push(centre, top + ((segment + 1) % segments), top + segment);
+      this.emitMesaVertex(build, centre, x, z);
+      this.emitMesaVertex(build, top + ((segment + 1) % segments), x, z);
+      this.emitMesaVertex(build, top + segment, x, z);
     }
+    build.candidates.push({
+      footed,
+      key: site.key,
+      firstVertex,
+      vertexCount: build.written - firstVertex,
+      centreX: x,
+      centreZ: z,
+      radius: site.footprintRadius,
+    });
+  }
+
+  /** Copies indexed scratch vertex `v` of the mesa centred on (`x`, `z`) to the build's next vertex. */
+  private emitMesaVertex(build: MesaBuild, v: number, x: number, z: number): void {
+    const s = this.mesaScratch;
+    const o = v * MESA_SCRATCH_STRIDE;
+    const w = build.written++;
+    build.position[w * 3] = s[o]!;
+    build.position[w * 3 + 1] = s[o + 1]!;
+    build.position[w * 3 + 2] = s[o + 2]!;
+    build.color[w * 3] = s[o + 3]!;
+    build.color[w * 3 + 1] = s[o + 4]!;
+    build.color[w * 3 + 2] = s[o + 5]!;
+    build.groundY[0][w] = s[o + 6]!;
+    build.groundY[1][w] = s[o + 7]!;
+    build.groundY[2][w] = s[o + 8]!;
+    build.groundY[3][w] = s[o + 9]!;
+    build.heightOffset[w] = s[o + 10]!;
+    build.centreXZ[w * 2] = x;
+    build.centreXZ[w * 2 + 1] = z;
+    build.exactY[w] = s[o + 11]!;
   }
 
   /** Vertices in the current disc, for the perf bench. */
@@ -1465,17 +1759,15 @@ export class VistaMesh {
     this.scene.remove(this.mesh);
     this.scene.remove(this.mesaMesh);
     this.geometry?.dispose();
-    this.mesaGeometry?.dispose();
+    this.mesaSet?.geometry.dispose();
+    this.previousMesaSet?.geometry.dispose();
     this.geometry = null;
-    this.mesaGeometry = null;
+    this.mesaSet = null;
+    this.previousMesaSet = null;
+    this.mesaBuild = null;
     this.groundLocalPositions = null;
     this.groundSamples = null;
     this.groundSampleCache.clear();
-    this.mesaGroundY = null;
-    this.mesaHeightOffset = null;
-    this.mesaCentreXZ = null;
-    this.mesaExactY = null;
-    this.mesaCandidates = [];
   }
 }
 

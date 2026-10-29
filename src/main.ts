@@ -702,6 +702,7 @@ async function boot(): Promise<void> {
         gpuMs: () => renderer.latestGpuMs,
         measuresGpu: () => renderer.measuresGpuTime,
         frameCap: () => world.state.settings.frameRateLimit,
+        scheduledHz: () => loop.presentation.scheduledHz,
         drawCalls: () => renderer.drawCalls,
         triangles: () => renderer.drawnTriangles,
         programs: () => renderer.renderer.info.programs?.length ?? 0,

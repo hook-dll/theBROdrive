@@ -491,8 +491,11 @@ function settlementStop(seed: number, roll: RoadsideSlot): RoadsideStop {
   // The services along the pad's service band (the `*_ALONG_M` table above).
   const face = faceRoad(side, 0);
   const pumps = roll01(6) < PUMPS_CHANCE ? spot(s0 + PUMPS_ALONG_M, side, padOuter - PUMPS_IN_M, face) : null;
-  // Nose out of a slot: against the lay-by's traffic (-s on side -1) and in toward the road.
-  const noseOut = Math.atan2(-side * Math.sin(PARKING_SLOT_ANGLE), side * Math.cos(PARKING_SLOT_ANGLE));
+  // Nose out of a slot: back along the road (-s) and in toward the road, on either side.
+  // A slot is entered nose first by a driver running +s, so the row reads / / / on the
+  // right of travel and \ \ \ on the left: the left one is the right one mirrored across
+  // the road, not turned half round.
+  const noseOut = Math.atan2(-side * Math.sin(PARKING_SLOT_ANGLE), -Math.cos(PARKING_SLOT_ANGLE));
 
   // Everything of the stop's own stands on the pad; the houses on this side reach past it.
   let siteOuter = padOuter;
