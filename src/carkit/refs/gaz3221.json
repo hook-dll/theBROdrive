@@ -23,6 +23,14 @@
       "what": "drive2.ru logbook 5107007 (GAZelle 1999): the first cars' instrument combination 384.3801 out of its dash, face on: tachometer and speedometer side by side, a column of lamps between, oil over temperature at the left end, fuel over the voltmeter at the right",
       "url": "https://www.drive2.ru/l/5107007/",
       "image": "build/carshape/_refs/photos/gazelle/25107007_418f39cs-960.jpg"
+    },
+    "O": {
+      "what": "the owner's photos of a real early GAZ-32213 (2026-10-29): owner-66b01cc7_medium.jpg front 3/4, owner-6acc0810_medium.jpg rear 3/4, owner-6730fa4d.jpg the saloon from the sliding door, owner-6abb1fad.jpg the saloon from the rear doors looking forward, owner-6647b199.jpg the dash and the front row from above; owner-seat-plan-322132.png the factory 13-seat plan (measurements-gazelle.md §8, §9)",
+      "image": "build/carshape/_refs/gazelle/owner-66b01cc7_medium.jpg"
+    },
+    "P32": {
+      "what": "drom.ru ads 941182264 (the straight rear: the rear doors' top 2.12, panes ±0.09-0.72 x 1.37-1.95, hinges, handle; 3.3 mm/px from the tail lamps' 0.42) and 267151758 (a 1998 32213, early face); the-blueprints.com GAZ-32213 four-view preview and GAZ-3221 manual drawing (the roof's rise over the cab); fkrit.ru glass sizes (the rear doors' pane 821 x 660) (measurements-gazelle.md §9)",
+      "image": "build/carshape/_refs/gazelle/src-dromad-941182264-01.jpg"
     }
   },
   "body": {
@@ -101,10 +109,10 @@
   "gaps": [
     "archFront/archRear: the body's bottom (0.40-0.46) stands above the hub's height (0.34), so the opening's reach at the hub's height is not on the drawing (the arches' sizes are in measurements-gazelle.md §3 and the spec)",
     "The drawing carries the 2003 face: the early face from D96 and the photos, not judged here",
-    "No rear view of the 3221 sourced: the rear doors' glass, hinges and handle and the tail lamps' cells are estimates",
+    "The rear (doors, panes, hinges, handle) from a late-face 32213 on the same body (drom 941182264): not judged here (no rear-view key for split leaves)",
     "The sliding door's run from D96's coarse right side (23 mm/px)",
-    "The saloon's seat layout: eight seats [F], their places an estimate",
-    "Dash: only the instrument combination is sourced (DASH)"
+    "Dash: only the instrument combination is sourced (DASH)",
+    "Side windows' rounded corners [O]: built (CabinColumn.glassRound 0.1) but not judged: the drawing's runs are read 3 cm over the belt, where the corners shorten them"
   ],
   "overlay": {
     "side": {

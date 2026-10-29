@@ -180,6 +180,24 @@ export class PhysicsWorld {
     return collider;
   }
 
+  /**
+   * Fixed box at `rotation` (a unit quaternion): a post, a beam, a log. Solid, so
+   * nothing fast tunnels through it as it can through a thin trimesh.
+   */
+  addStaticBox(
+    halfExtents: Vec3,
+    position: Vec3,
+    rotation: { x: number; y: number; z: number; w: number },
+    surface: SurfaceType,
+  ): RAPIER.Collider {
+    const bodyRef = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(position.x, position.y, position.z).setRotation(rotation),
+    );
+    const collider = this.world.createCollider(RAPIER.ColliderDesc.cuboid(halfExtents.x, halfExtents.y, halfExtents.z), bodyRef);
+    this.surfaces.register(collider.handle, surface);
+    return collider;
+  }
+
   /** Dynamic box, used for loose parts and debris. */
   addDynamicBox(
     halfExtents: Vec3,

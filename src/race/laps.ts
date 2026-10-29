@@ -8,7 +8,7 @@ import type { RaceTrack, TrackProjection } from '../world/racetrack/track';
  * arclength `s` (0 at the line, wrapping at `lengthM`) and its lateral.
  *
  * A LAP COUNTS ONLY AFTER THE CHECKPOINTS, IN ORDER. The track has six (`checkpoints`,
- * evenly round the lap; the line is not one). Checkpoint `next` is taken when the car is
+ * about evenly round the lap, never in a chicane; the line is not one). Checkpoint `next` is taken when the car is
  * ON THE TRACK AREA — within the asphalt's half width plus the run-off of the centreline —
  * anywhere in the `CHECKPOINT_WINDOW_M` past it. Crossing the line forward with all six
  * taken counts the lap; crossing it without them does not, and the lap is begun again

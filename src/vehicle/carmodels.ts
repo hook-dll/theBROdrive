@@ -2995,9 +2995,9 @@ const GEAR_GAZ_3302: KitOwnGear = {
 };
 
 /**
- * GAZelle GAZ-3221 minibus (1996-2002): the 3302's running gear, kerb 2000 kg with 1050 on
- * the front axle (autoopt.ru's GAZ-3221 page; drom.ru prints 2500), its own box body's
- * aero; the same 115 km/h and 5.5 m.
+ * GAZelle GAZ-32213 13-seat minibus (1996-2002; on the GAZ-3221 body, id `gaz3221`): the
+ * 3302's running gear, kerb 2000 kg with 1050 on the front axle (autoopt.ru's GAZ-3221
+ * page; drom.ru prints 2500), its own box body's aero; the same 115 km/h and 5.5 m.
  */
 const GEAR_GAZ_3221: KitOwnGear = {
   ...GEAR_GAZ_3302,
@@ -3064,7 +3064,7 @@ const KIT_CARS: readonly Entry[] = (
     ['kit_e34', GEAR_BMW_E34, 'e34', 'BMW 520i (E34)'],
     ['kit_zil130', GEAR_ZIL_130, 'zil130', 'ZIL-130'],
     ['kit_gaz3302', GEAR_GAZ_3302, 'gaz3302', 'GAZ-3302'],
-    ['kit_gaz3221', GEAR_GAZ_3221, 'gaz3221', 'GAZ-3221'],
+    ['kit_gaz3221', GEAR_GAZ_3221, 'gaz3221', 'GAZ-32213'],
   ] satisfies readonly KitCarRow[]
 ).map(kitEntry);
 
@@ -3168,7 +3168,7 @@ const KIT_CAPACITY: Readonly<Record<string, CarCapacity>> = {
   kit_zil130: { trunkGrid: G4x4, comfort: 1 },
   // The platform 3.06 x 1.94 m; leaf springs at both ends, unladen.
   kit_gaz3302: { trunkGrid: G4x4, comfort: 1 },
-  // Eight passengers behind the cab; the saloon's floor is the hold.
+  // Thirteen passengers (two in the cab, eleven behind it); the saloon's floor is the hold.
   kit_gaz3221: { trunkGrid: G4x3, comfort: 2 },
   kit_espero: { trunkGrid: G4x2, comfort: 5 },
 };

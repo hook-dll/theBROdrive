@@ -150,7 +150,7 @@ from the angle he complained about; changes are judged there, not in code.
 | `zilfront.ts` | The ZIL-130's bonneted front (`TruckSpec.front`, every size in zil.ts): bumper, face panel with its nose, slots and lamp pockets, wings, bonnet, roof markers; `underTruckBonnet` for the cells' tops. |
 | `truckparts.ts` | The truck builders' palette and shapes: `bar`, `cap`, `sweep`, `tableAt`, `steps`, `stops`. |
 | `zil.ts` | The ZIL-130: `BODY_ZIL130` / `LOOK_ZIL130` (measurements-zil130.md). |
-| `gazelle.ts` | The first GAZelles on one cab-over cab: `BODY_GAZ3302` (tented flatbed) and `BODY_GAZ3221` (minibus, sliding door), their looks (measurements-gazelle.md). |
+| `gazelle.ts` | The first GAZelles on one cab-over cab: `BODY_GAZ3302` (tented flatbed) and `BODY_GAZ3221` (the GAZ-32213 13-seat minibus, id `gaz3221`: raised roof, sliding door), their looks (measurements-gazelle.md). |
 | `daewoo.ts` | The Daewoo Nexia (N100 saloon) and Espero (KLEJ saloon): `BODY_NEXIA` / `LOOK_NEXIA`, `BODY_ESPERO` / `LOOK_ESPERO` (platform `samara`). |
 | `opel.ts` | The Opel Astra F (five-door hatch) and Vectra A (saloon): `BODY_ASTRA_F` / `LOOK_ASTRA_F`, `BODY_VECTRA_A` / `LOOK_VECTRA_A` (platform `samara`). |
 | `mercedes.ts` | The Mercedes-Benz W124 230 E saloon (1989–92 facelift): `BODY_W124` / `LOOK_W124` (platform `classic`, rear drive). Draft, awaiting the owner. |
@@ -339,6 +339,7 @@ author.
 | `crownPower?` | How the crown falls across the roof: `crown · (1 − f^crownPower)` at fraction f of its half width. Default 2 (a parabola); the UAZ-2206 3 (flat middle, rolled into the gutters); the UAZ-469 20 (level across, rolled down only at its edges, the windscreen's top straight with it). |
 | `railInset`, `railRise` | The rail's chamfer onto the roof. |
 | `railBend?` | `[across, up]`: a row along that chamfer at those fractions of `railInset` / `railRise` from the rail, so the roof's edge turns into the side glass and the screens' headers in two facets (the Volgas and tens `[0.3, 0.6]`); its first facet never rises steeper than 95 % of the glass under it, and with it every twisted greenhouse and roof quad is cut on its convex diagonal (`buildShell` `quad`). Absent: one chamfer. Keep `roofDrop` convex (the roof rising ever less steeply from the screen) and do not combine it with a step `cornerDrop`: either folds the roof in behind the header (the tens' corner dents, 2026-10-16). |
+| `railRun?` | `{ front?, rear? }`: how far along the car the rail's chamfer runs over each end's glass instead of `railInset`. `front`: a raised roof rising from the windscreen's header in one long slope over the cab; the side columns whose tops stand under the slope carry a share of the chamfer tapering from none at the A pillar, the corner between them and the roof's first row is fanned from the slope's top, the headliner follows the straight slope, and its end must stand on a column's top (the roof's edge has no T-junction there). `rear`: the tail's face stands up into the roof's edge, and with `rearPanes` the tailgate's top (`rearPanes.top`) cuts the chamfer there, so the rear doors reach into the roof's rounding. The GAZ-32213's raised roof: `{ front: 0.555, rear: 0.03 }`. Absent: `railInset` at both ends (every other car). |
 | `roofDrop?` | The roof's line in profile, `[s, drop]` points: everything at the roof at s (rail, its chamfer, the side glass's tops, the screen's and back light's tops, the roof's rows; the headliner, mirror, visors and wipers follow through `BodyFrame.roofDrop`) stands that much lower, linear between points, held beyond; every point between two columns' tops adds a row (`buildShell` inserts a ring entry). Keep the drop at a column's `top + railInset` no more than `railRise` over the drop at its `top`, or the roof dips under the screen's header. The Volgas' arched roofs, the tens' (whose screen top may come down only 0.02 before the 500 mm blades stop sweeping 90°). Absent: level. |
 | `glassBottom`, `glassTop` | Side glass: bottom above the belt, top below the rail. |
 | `screenBottom`, `screenHeader` | Windscreen base strip above the cowl, header below the rail. |
@@ -371,7 +372,11 @@ every tub column). The side faces it crosses are clipped
 along it, and the body's piece behind it gets cabin trim. `drop?` lowers the column's top
 point below the rail: one straight chamfer from the A pillar up to the next column's top,
 so the pillar rounds into the roof in profile (Samaras 0.03, tens 0.037, the door frames'
-tops moved back to meet it). A door's frame strips are short strips with `glass` absent.
+tops moved back to meet it). `glassRound?` rounds the four corners of the strip's pane on
+that radius, the strip's own paint (or `finish`) filling the corners; the pane is the strip
+from this column to the next, its corners the columns' glass foot and top (`k`, `q`), so
+set it on a strip of one pane between two painted columns (the GAZ-32213's saloon windows
+and the sliding door's glass, 0.08). Absent: square corners. A door's frame strips are short strips with `glass` absent.
 Example —
 the five-door Samara B pillar (`B_PILLAR` in samaras.ts):
 
@@ -557,8 +562,20 @@ an optional opening size `half`), `eyeballs`, `clusterFace`, `lamps` (telltales:
 cluster face, or `on: 'fascia'` on the fascia's line and the stack below it: the 2110's), `carpet`,
 `headliner`, `bench.clear` (the bench base's air to the rear wheel-house covers, default
 0.022: a bench standing between them, the Nivas' and the Oka's, takes 0.04, since 2 mm
-there fights at a distance), `lenses` (a second telltale grid) and `transfer` (static
-transfer-box levers on the tunnel, `LAYOUTS.niva`). In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
+there fights at a distance), `lenses` (a second telltale grid), `transfer` (static
+transfer-box levers on the tunnel, `LAYOUTS.niva`) and `visor` (the sun visors: `half`
+width, `depth`, centre `x` off the centre line; absent 0.32 × 0.15 at 0.34). The visors are
+placed by `Cabin.headliner`, not by hand: each end of the hinge line stands under the
+lining (`KitContext.lining`) in the screen's section at its half width, behind the header
+band under the roof proper, where stowed the pad hides no glass from the driver's eye
+and, lowered, its glass-side face keeps `VISOR_CLEAR` off the panes as built and off the
+header band and at most `VISOR_REACH` off whichever stands in front of it; the hinge line
+follows the screen's top in plan and the roof's crown, the stowed pad lies under the
+lining over its length, and channel 1 turns it until it lies **parallel to the glass**
+(the angle from the screen's rake, per car). Lowered, neither end of its bottom edge
+comes lower than `VISOR_OVER_EYE` over the driver's eye (the owner's rule for the low
+roofs, 2026-10-18, now for every car): `depth` is the visor's real size, cut there where
+the roof leaves less, the outer end shorter on a crowned roof. In `Layout`, `ds` is metres behind the cowl and `dy` an offset from the belt
 at the cowl. Existing dashes: `CABIN_2101` (ribbon speedometer), `CABIN_2103` (five dials on
 wood), `CABIN_2105` (own pod), `CABIN_2107` (one-piece "euro" panel), `CABIN_2110` (tall
 face, hood over swapped big dials, two big centre vents, heater panel, radio low in the
@@ -904,7 +921,9 @@ Working files (crops, grids, overlays) go in `/tmp/<family>/`; only the report i
   absent on a cab-over), `tent`, `TruckCell.top`, the optional `platform` / `toolbox` /
   `step` / `rearLamps` / `flaps`, the tank's optional `cap`, `wheels.outside: 'rear'`
   (front arch in the shell, rear wheels under the platform), `slidingDoor`, and the
-  layout's `frontSeats` and `saloon` (the GAZelles).
+  layout's `frontSeats` and `saloon` (the GAZelles; its seats' sideways `facing: 0`),
+  column `glassRound` and the cabin's `railRun` (the GAZ-32213's rounded saloon windows,
+  its raised roof's long rise over the cab and its rear doors up into the roof's edge).
 - Register it in `KIT_SPECS` (specs.ts): `vaz2110: { id: 'vaz2110', ...BODY_2110, look:
   LOOK_2110, cabinLayout: CABIN_2110 }` (via `onBody` if the family frame differs).
 

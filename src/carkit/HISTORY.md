@@ -1600,8 +1600,55 @@ surface, mirrors, proportions pass on all 28; zfight fails on the 2101/2103/2106
 fuel flap against its filler, as at HEAD) and drawing on the same three (`backLightFoot`,
 as at HEAD), neither touched by the wipers.
 
+## Sun visors: lowered parallel to the glass, sized and placed per car (2026-10-29)
+
+- **Visors open badly, not all the way: in a real car they swing down parallel to the
+  glass; not every one is the right size or well placed (owner).** → Every car turned its
+  visors by one fixed 1.35 rad (77°) about a level line at ±0.34, 1.4 cm under the
+  headliner at 3.5 cm behind the screen's top. Audit (throwaway mesh check, all 31 cars,
+  sheets `build/kitcheck/visors/before-*.png`): lowered 12–49° off the glass (classics
+  18°, 2104/05/07 31°, Samaras and tens 45°, Espero 49°); one 0.32 width everywhere, the
+  outer end 6–31 cm off the A pillar's trim (the tens 1.5), the Oka's through both doors
+  stowed, swinging and lowered, the ZIL's through its cab lining; stowed 1–12 cm under
+  the lining (flat under a crowned, rising roof); lowered under the driver's eye on the
+  Samaras, tens, Volgas, W124 (1–2 cm), Espero and E34 (4 cm) since the eye moved
+  (2026-10-28). → `Cabin.headliner` works each end of the hinge line out in the screen's
+  section there against the lining as built (`KitContext.lining`, `liningOver`): under
+  the roof proper behind the header band, where stowed the pad hides no glass from the
+  eye and, lowered, keeps 5 mm off the panes as built (`paneGap`: a screen curved in plan
+  stands nearer than its foot-to-top line) and the header band, at most 3.5 cm off
+  whichever stands in front of it; the pad's top edge cranked 0.5–4 cm off the hinge so
+  the roof ahead stays out of it. The hinge line follows the screen's top in plan and the
+  roof's crown; the stowed pad lies along the lining, tipped where a crown would touch
+  it; channel 1 turns it about that line until it lies parallel to the glass (123–170°
+  by car). The owner's eye rule (2026-10-18) holds at each end of the bottom edge on
+  every car: `depth` is now the real size [E: no kit photo shows a visor], cut there, so
+  on a crowned roof the outer end is shorter. Sizes and places per car (`Layout.visor`
+  `x`): classics and Nivas 0.35 × 0.15, Samaras 0.38 × 0.16, tens 0.32 × 0.17, Oka
+  0.29 × 0.14, Volgas 0.38 × 0.16, 2141 0.37 × 0.16, Opels, Daewoos, W124 0.355–0.36 ×
+  0.17, E34 0.38 × 0.17, UAZ-2206 0.33 × 0.15, ZIL 0.40 × 0.18, GAZelles 0.375 × 0.19, the
+  outer end about 2.5 cm in from the pillar's trim or the inner 4.5 cm off the mirror; the
+  UAZ-469 0.30 × 0.13 ahead of each seat on the header bar (`SOFT_TOP_BAR`). Lowered
+  now: 0–4° off the glass, 0.6–3.9 cm off it, no triangle crossed stowed, lowered or in
+  the swing, the bottom edge 0.7–13 cm over the eye (UAZ-2206 9 cm deep: its rounded
+  header leaves no more). *interior.ts `VISOR_*`, `SOFT_TOP_BAR`, `Layout.visor`,
+  `Cabin.headliner`/`liningOver`/`paneGap`, `pad` `slant`, `CABIN_*`; specs.ts
+  `VISOR_SAMARA`*.
+
+Checks: tsc clean; with the visor meshes left out every car's every zone is identical to
+before (31 cars); kit-fingerprint: the 28 accepted cars moved in cabin only, re-recorded
+(the owner asked), zil130/gaz3302/gaz3221 left unrecorded; `npm run kit-check`: every
+check passes on all 31 but the ZIL's DASH UNVERIFIED, as before. Sheets before and after:
+`build/kitcheck/visors/{before,after}-{1..4}.png`, per car `<id>-{before,after}.png`.
+
 ## Failed approaches (do not retry)
 
+- **A sun visor's hinge as far forward as it fits** (on the header band, nearest the
+  glass): stowed, the pad hung in front of the glass's top from the eye, and the eye rule
+  cut the visors to 3–10 cm. Hang it under the roof proper; only where the roof proper
+  stands far off the glass (the UAZ-2206's rounded header) take the first place that
+  reaches down over the glass (`Cabin.headliner`). Ends picked each on its own skewed the
+  hinge line 7–10° in plan: both ends go equally far back from the screen's top.
 - **Tessellating the body before the `rearLean` warp** (to bend it more smoothly): it bent
   the pillars. Reverted. The warp works on the built geometry as is.
 - **Bridging a sloped boot lid straight to a notched tail outline** (the lid's rear face

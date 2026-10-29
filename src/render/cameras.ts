@@ -5,7 +5,11 @@ import { CAR_FIELD_OF_VIEW, FOOT_FIELD_OF_VIEW, nearPlaneForFarPlane } from '../
 import type { CameraStyle } from '../game/settings';
 import { WorldOrigin, type RebaseShift } from '../world/origin';
 
-export type CameraMode = 'foot' | 'cabin' | 'chase';
+/**
+ * `'eagle'` is the dev-only top-down view (`setEagle`, EAGLE FLIGHT below); it is never
+ * stored as the driving selection and never reached by C.
+ */
+export type CameraMode = 'foot' | 'cabin' | 'chase' | 'eagle';
 
 export interface CameraTarget {
   x: number;
@@ -375,6 +379,37 @@ export const DEATH_RISE_SECONDS = 6.5;
 export const DEATH_TOTAL_SECONDS = DEATH_LOOK_DOWN_SECONDS + DEATH_RISE_SECONDS;
 const DEATH_RISE_METRES = 40;
 
+/**
+ * EAGLE FLIGHT, a dev camera (`setEagle`; the pause menu's developer section and
+ * `__bro.eagle(on?)`): the GTA 1 view, straight down from `EAGLE_HEIGHT_M` above
+ * whatever the camera follows — the driven car's interpolated render pose, the pose
+ * its mesh is drawn at this frame, or the player's feet on foot (the player has no
+ * body to draw, so on foot the frame is centred on an empty spot).
+ *
+ * LOCKED, not followed: no spring, lerp, shake, lean or FOV widening touches it, so
+ * the car never moves on screen. The normal views keep running underneath it
+ * unseen — `eyePosition` and `eyeDirection` stay the player's own eye, so interaction
+ * rays, F to enter a car and the dev drops work as usual — and only the rendered
+ * camera is replaced at the end of `update`. Whatever reads the rendered camera
+ * (streaming and LOD, the sky's shadow box, which centres itself on a view with no
+ * ground direction, fog, the audio listener) sees a camera 12 m over the car.
+ *
+ * NORTH-UP, because GTA 1 keeps the map fixed and lets the car turn on it. North is
+ * world +Z (game/calendar.ts: +X east, +Z north; the road advances along +Z,
+ * world/road.ts), so driving on means driving up the screen. Looking down a +Y-up
+ * world with +Z at the top of the screen puts +X (east) on the LEFT: that is the
+ * world's own handedness, not a mirror.
+ *
+ * Any normal camera change ends it and returns to the view underneath it, which kept
+ * its state: C (`cycleDriving`, `setMode('foot')` on foot), getting in (`setMode`),
+ * getting out (the foot/driving switch in `update`), V (`recenterCamera`), and the
+ * views that take the camera over (`updateScripted` — cutscenes, a machine's close
+ * view — and `beginDeath`).
+ */
+export const EAGLE_HEIGHT_M = 12;
+/** Eagle flight's fixed vertical FOV: the driving views' resting one, about 22 m of ground top to bottom. */
+const EAGLE_FIELD_OF_VIEW = CAR_FIELD_OF_VIEW;
+
 /* ---- module-level scratch: `update()` must not allocate ---- */
 const _vA = new THREE.Vector3();
 const _vB = new THREE.Vector3();
@@ -392,6 +427,10 @@ const _rayOrigin = { x: 0, y: 0, z: 0 };
 const _rayDir = { x: 0, y: 0, z: 0 };
 const _qB = new THREE.Quaternion();
 const _eA = new THREE.Euler();
+/** Eagle flight's orientation: looking down world -Y with world +Z (north) up the screen. */
+const _EAGLE_DOWN = new THREE.Quaternion().setFromRotationMatrix(
+  new THREE.Matrix4().lookAt(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 1)),
+);
 /** Output of `springStep`, written in place so the camera path allocates nothing. */
 const _spring = { position: 0, velocity: 0 };
 
@@ -431,9 +470,11 @@ function wrapAngle(angle: number): number {
 }
 
 export class CameraRig {
-  /** Driving-view selection survives a trip on foot; `mode` reports foot while walking. */
-  private _mode: Exclude<CameraMode, 'foot'> = 'chase';
+  /** Driving-view selection survives a trip on foot; `mode` reports foot while walking, eagle while `eagle`. */
+  private _mode: Exclude<CameraMode, 'foot' | 'eagle'> = 'chase';
   private onFoot = true;
+  /** Eagle flight (EAGLE_HEIGHT_M) is drawn instead of the view underneath. */
+  private eagle = false;
 
   private yawValue = 0;
   private pitch = 0;
@@ -635,7 +676,18 @@ export class CameraRig {
   }
 
   get mode(): CameraMode {
+    if (this.eagle) return 'eagle';
     return this.onFoot ? 'foot' : this._mode;
+  }
+
+  /** Whether eagle flight is showing (EAGLE_HEIGHT_M). */
+  get eagleFlight(): boolean {
+    return this.eagle;
+  }
+
+  /** Dev only: eagle flight on or off; off returns to the view it was drawn over. */
+  setEagle(on: boolean): void {
+    this.eagle = on;
   }
   /** On-foot view heading (0 = +Z, + = +X); drives camera-relative movement. */
   get yaw(): number {
@@ -662,7 +714,9 @@ export class CameraRig {
     this.cabinLookHeld = held;
   }
 
-  setMode(mode: CameraMode): void {
+  setMode(mode: Exclude<CameraMode, 'eagle'>): void {
+    // Any mode request is a normal camera change, so it ends eagle flight.
+    this.eagle = false;
     // Foot is derived from `onFoot`. The driving selection is kept across a walk, the
     // chase's zoom with it; main.ts selects the cabin as the player gets in from foot, and
     // the entry snap (`snapDriving`) then faces it down the car.
@@ -683,6 +737,7 @@ export class CameraRig {
    */
   beginDeath(): void {
     if (this.deathActive) return;
+    this.eagle = false;
     this.deathActive = true;
     this.deathElapsed = 0;
     this.deathStartEye.copy(this.eye);
@@ -756,6 +811,7 @@ export class CameraRig {
    */
   updateScripted(dt: number, eye: THREE.Vector3, lookAt: THREE.Vector3, fovDeg: number): void {
     const d = dt > 0 ? dt : 1 / 60;
+    this.eagle = false;
     this.eye.copy(eye);
     this.lookAt.copy(lookAt);
     // A zero-length look direction has no orientation; keep the previous heading by
@@ -776,12 +832,18 @@ export class CameraRig {
    * the arm back where it was (`showChase`).
    */
   cycleDriving(): void {
+    // Out of eagle flight C goes back to the view it was drawn over, not on to the next.
+    if (this.eagle) {
+      this.eagle = false;
+      return;
+    }
     if (this._mode === 'chase') this.showCabin();
     else this.showChase();
   }
 
   /** Switches to the cabin view looking straight ahead, unless it is already showing. */
   showCabin(): void {
+    this.eagle = false;
     if (this._mode === 'cabin') return;
     if (!this.onFoot) {
       this.chaseYawOffset = wrapAngle(this.yawValue - this.vehicleYaw);
@@ -815,6 +877,7 @@ export class CameraRig {
     // Entering/exiting a vehicle is the one legitimate snap point: teleporting
     // between a vehicle and a standing pose must not spring-in (a fly-through).
     if (onFoot !== this.onFoot) {
+      this.eagle = false;
       if (onFoot) {
         // `snapFoot` must reuse yaw/pitch for camera-relative walking, so retain the
         // driving heading first. Otherwise looking around on foot overwrites where
@@ -887,6 +950,7 @@ export class CameraRig {
       this.recentering = false;
     }
     if (input.recenterCamera) {
+      this.eagle = false;
       this.recentering = true;
       // Capture once: even a re-centre in progress must not inherit a wreck's spin.
       this.recenterYaw = onFoot ? 0 : followYaw;
@@ -1020,6 +1084,13 @@ export class CameraRig {
     // `eyeDirection` expose that same relative eye to interaction and spawn code,
     // which also live in the relative frame, so no absolute accessor is needed.
     this.camera.position.copy(this.eye);
+
+    // EAGLE FLIGHT: the view above was built and kept for the return; the rendered
+    // camera is put straight over this frame's target pose instead, nothing eased.
+    if (this.eagle) {
+      this.camera.position.set(target.x, target.y + EAGLE_HEIGHT_M, target.z);
+      this.camera.quaternion.copy(_EAGLE_DOWN);
+    }
 
     this.updateFov(d, mode !== 'foot');
   }
@@ -1447,10 +1518,13 @@ export class CameraRig {
    * pillars and head restraints a hand's width from the eye are drawn, not sliced open.
    */
   private updateProjection(): void {
-    const targetNear = this._mode === 'cabin' ? CABIN_NEAR : nearPlaneForFarPlane(this.camera.far, this.camera.reversedDepth);
+    // Eagle flight keeps its own fixed FOV and the ordinary near plane; `this.fov` goes
+    // on following the view underneath, so the return finds it where it would have been.
+    const fov = this.eagle ? EAGLE_FIELD_OF_VIEW : this.fov;
+    const targetNear = this._mode === 'cabin' && !this.eagle ? CABIN_NEAR : nearPlaneForFarPlane(this.camera.far, this.camera.reversedDepth);
     let projectionChanged = false;
-    if (Math.abs(this.fov - this.camera.fov) > FOV_EPSILON) {
-      this.camera.fov = this.fov;
+    if (Math.abs(fov - this.camera.fov) > FOV_EPSILON) {
+      this.camera.fov = fov;
       projectionChanged = true;
     }
     if (this.camera.near !== targetNear) {

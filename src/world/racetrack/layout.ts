@@ -40,11 +40,13 @@ import { SurfaceType } from '../../core/surfaces';
  * line through it stays on the asphalt — and there is room under its middle for the
  * rocks that stop a driver cutting it (world/racetrack/mesh.ts `chicaneBlockers`).
  *
- * BANKING. Fast corners and sweepers are mostly banked properly (7-14% cross-slope),
- * some hairpins are laid as BOWLS (10-16%), everything else carries a mild camber into
- * the bend, chicanes and esses lie flat for the quick changes of direction, and now and
- * then one medium or fast corner is laid OFF-CAMBER. The cross-slope is ramped over
- * `BANK_SMOOTH_M`, short enough that a 50 m corner reaches its bank.
+ * BANKING. Fast corners and sweepers are mostly banked properly (14-28% cross-slope,
+ * 8-16°), some hairpins are laid as BOWLS (18-30%, up to 17°), banked mediums carry
+ * 8-16%, everything else a mild camber into the bend, chicanes and esses lie flat for
+ * the quick changes of direction, and now and then one medium or fast corner is laid
+ * OFF-CAMBER. The cross-slope is ramped over `BANK_SMOOTH_M`, short enough that a 50 m
+ * corner reaches its bank and long enough that the outer edge's own rise into a full
+ * bowl stays a few per cent of grade.
  *
  * SMOOTHNESS, AND THE CLOSURE IT COSTS. Straight-into-arc is a step in curvature, which
  * a steering controller feels as a kick. The curvature table is box-filtered over
@@ -137,7 +139,7 @@ export const TRACK_STEP_M = 1;
 /** Length of the clothoid every curvature step is spread into, metres. */
 export const CURVATURE_SMOOTH_M = 12;
 /** Length a change of banking is spread over, metres: short, so a 50 m hairpin reaches its bank. */
-const BANK_SMOOTH_M = 14;
+const BANK_SMOOTH_M = 24;
 /** Shortest lap kept, and longest. */
 export const TRACK_MIN_LENGTH_M = 900;
 export const TRACK_MAX_LENGTH_M = 1700;
@@ -147,8 +149,10 @@ const TARGET_MAX_M = 1550;
 /** Shortest straight left between two corners, metres. */
 const MIN_STRAIGHT_M = 22;
 /**
- * The start straight holds the grid (`GRID_SLOTS` boxes, the last 36.5 m behind the
- * line, track.ts), the line 62% of the way along, and the paddock beside the grid.
+ * The start straight holds the grid (`GRID_SLOTS` = 4 boxes, the last 27.5 m behind the
+ * line, track.ts), the line 62% of the way along, and the paddock beside the grid. The
+ * paddock (site.ts: up to 56 m, ending 4 m before the line, with 24 m kept clear before
+ * it) is what sizes it, not the grid: 120 m gives the line 74 m and the paddock 50.
  */
 export const START_STRAIGHT_MIN_M = 120;
 /** No corner is rounded tighter than this, metres. */
@@ -224,13 +228,13 @@ function cornerBank(rand: Rand, kind: TrackPieceKind): number {
   switch (kind) {
     case 'sweeper':
     case 'fast':
-      return rand() < 0.7 ? between(rand, 0.07, 0.14) : between(rand, 0.02, 0.04);
+      return rand() < 0.75 ? between(rand, 0.14, 0.28) : between(rand, 0.03, 0.06);
     case 'medium':
-      return rand() < 0.35 ? between(rand, 0.06, 0.1) : between(rand, 0.025, 0.05);
+      return rand() < 0.4 ? between(rand, 0.08, 0.16) : between(rand, 0.03, 0.06);
     case 'hairpin':
-      return rand() < 0.45 ? between(rand, 0.1, 0.16) : between(rand, 0.02, 0.05);
+      return rand() < 0.5 ? between(rand, 0.16, 0.24) : between(rand, 0.03, 0.06);
     case 'tight':
-      return between(rand, 0.02, 0.05);
+      return between(rand, 0.03, 0.07);
     case 'counter':
       return between(rand, 0.01, 0.03);
     default:

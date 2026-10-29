@@ -185,9 +185,10 @@ export const BODY_GAZ3302: KitBody = {
 };
 
 /**
- * GAZ-3221: the cab and the all-metal saloon to the tail at 5.37 [D 2006: 5.34], the rear
- * arch in the body, three windows a side behind the cab, the sliding door on the right,
- * two rear doors; the roof over the saloon a little higher than the cab's [F 2200].
+ * GAZ-32213, the 13-seat route minibus of 1996 on the GAZ-3221 body (id `gaz3221`): the cab
+ * and the all-metal saloon to the tail at 5.37 [D 2006: 5.34], the rear arch in the body,
+ * three windows a side behind the cab with rounded corners, the sliding door on the right,
+ * two rear doors up into the roof's edge; the raised roof rising over the cab [F 2200].
  */
 export const BODY_GAZ3221: KitBody = {
   length: 5.47, // [F]; the rear bumper's back
@@ -206,31 +207,48 @@ export const BODY_GAZ3221: KitBody = {
   shoulder: { inset: 0.03, rise: 0.02 },
   cabin: {
     ...CAB_GREENHOUSE,
-    // The saloon's roof 2.20 [F; D 2.24]: the rail as the cab's, the crown higher.
-    crown: 0.22,
+    // The high roof (owner's review, 2026-10-29; P owner-66b01cc7, -6acc0810): its sides
+    // standing on up 0.24 over the drip rail before rounding over in a long edge into a
+    // near-flat top at 2.21 [F 2200; D 2.24], the step where it rises over the cab's screen.
+    crown: 0.05,
+    crownPower: 4,
+    railInset: 0.12,
+    railRise: 0.24,
+    railBend: [0.12, 0.75],
+    // The raised roof rises from the screen's header in one long slope over the cab to the
+    // front door's glass end at 1.885 [D manual side: the header 1.97 at s 1.39, 2.11 at
+    // 1.57, 2.17 at 1.72; D 32213: 1.97 at 1.46, 2.13 at 1.72, 2.19 at 1.85]; behind, the
+    // rear doors stand straight up into the roof's edge, their top 2.12 [P drom
+    // 941182264-01, the straight rear: the doors' top 0.07 under the roof's].
+    railRun: { front: 0.555, rear: 0.03 },
     columns: [
-      ...CAB_COLUMNS,
+      // The A pillar black, the screen's wide black frame [P owner-66b01cc7].
+      { ...CAB_COLUMNS[0]!, finish: 'black' },
+      ...CAB_COLUMNS.slice(1),
       // The B pillar to the sliding door's front 2.25 [D96 right side x 252]; on the left
-      // the same strips are the body's with their glass [D 2006 left: 2.23-3.19].
+      // the same strips are the body's with their glass [D 2006 left: 2.23-3.19; D 32213
+      // left: 2.32-3.32]. Every saloon pane's corners rounded r 0.1 [O owner-66b01cc7,
+      // -6acc0810: about a sixth of the 0.6 glass's height; D 32213].
       { s: 2.25, top: 2.25, upper: 'door2', only: 'right' },
-      { s: 2.3, top: 2.3, upper: 'door2', glass: 'fixed', only: 'right' },
+      { s: 2.3, top: 2.3, upper: 'door2', glass: 'fixed', only: 'right', glassRound: 0.1 },
       { s: 3.25, top: 3.25, upper: 'door2', only: 'right' },
       // The door's rear edge 3.40 [D96 x 201: 3.44]; the saloon's windows 3.48-4.42 and
-      // 4.60-5.12 [D 2006 left: 3.46-4.41, 4.61-5.11].
+      // 4.60-5.12 [D 2006 left: 3.46-4.41, 4.61-5.11; D 32213 left: 3.455-4.46, 4.60-5.15].
       { s: 3.4, top: 3.4, upper: 'body' },
-      { s: 3.48, top: 3.48, upper: 'body', glass: 'fixed' },
+      { s: 3.48, top: 3.48, upper: 'body', glass: 'fixed', glassRound: 0.1 },
       { s: 4.42, top: 4.42, upper: 'body' },
-      { s: 4.6, top: 4.6, upper: 'body', glass: 'fixed' },
+      { s: 4.6, top: 4.6, upper: 'body', glass: 'fixed', glassRound: 0.1 },
       { s: 5.12, top: 5.12, upper: 'body' },
       // rearBase; the tail upright [D].
       { s: 5.35, top: 5.33 },
     ],
     rearBottom: 0.06,
     rearHeader: 0.1,
-    // One pane in each rear door ±0.06-0.68, 1.32-1.82, corners r 0.06, clear of the
-    // hinges outboard of it; the doors' top straight across at 1.93 under the roof's rear
-    // [E: no rear view of the 3221 sourced].
-    rearPanes: { x0: 0.06, x1: 0.68, y0: 1.32, y1: 1.82, r: 0.06, top: 1.93 },
+    // One pane in each rear door ±0.09-0.71, 1.37-1.95, corners r 0.09, inboard of the
+    // hinges; the doors' top straight across at 2.12 in the roof's edge [P drom
+    // 941182264-01, the straight rear, 3.3 mm/px from the tail lamps' 0.42; F the glass
+    // 821 x 660, fkrit.ru].
+    rearPanes: { x0: 0.09, x1: 0.71, y0: 1.37, y1: 1.95, r: 0.09, top: 2.12 },
   },
   wheels: {
     ...WHEELS,
@@ -252,6 +270,15 @@ export const BODY_GAZ3221: KitBody = {
     // The rails level under the saloon's floor (0.65), their bottom 1.5 cm under the
     // body's at the nose, clear of it [E].
     frame: { ...CHASSIS.frame, top: [0.535, 0.535] },
+    // The engine under the bonnet only, no cover in the cab (owner's review, 2026-10-29;
+    // P owner-6647b199: a flat floor between the seats): all four cells under the bonnet
+    // [E], their tops under its closed skin (the deck 0.99 at s 0.14 to 1.28 at 0.56).
+    bay: {
+      radiator: { x: [-0.36, 0.36], s: [0.1, 0.18], floor: 0.46, top: 0.86 },
+      engine: { x: [-0.24, 0.24], s: [0.24, 0.54], floor: 0.5, top: 0.98 },
+      air_filter: { x: [0.3, 0.6], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
+      turbine: { x: [-0.6, -0.3], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
+    },
   },
 };
 
@@ -288,12 +315,23 @@ const LOOK_GAZELLE_BASE = {
         back: true,
         bars: { dir: 'vertical', count: 5, finish: 'grey', margin: 0.13, width: 0.012, depth: 0.012, proud: 0.015 },
       },
-      // Rectangular head lamps ±0.43-0.73, 0.65-0.84 [D96 front; P museum].
-      { kind: 'lens', role: 'head', x: { from: { centre: 0.43 }, to: { centre: 0.73 } }, y: { from: ['bumperTop', 0.03], to: ['bumperTop', 0.22] }, depth: 0.03, proud: 0.012 },
-      // The amber indicators outboard of them, out to the corner [D96; P museum].
-      { kind: 'lens', role: 'blinker', x: { from: { centre: 0.745 }, to: { inset: 0.03 } }, y: { from: ['bumperTop', 0.03], to: ['bumperTop', 0.22] }, depth: 0.03, proud: 0.012 },
     ],
   },
+  // The head lamp and the indicator as one flush unit on the nose (owner, 2026-10-29: not
+  // boxes standing out of it): the rectangular head lamp from ±0.43 [D96 front; P
+  // owner-66b01cc7, museum], the amber indicator its outer part from ±0.745 to the corner,
+  // wrapping a short way round onto the wing [P owner-66b01cc7, 1995 front]; 0.65-0.84,
+  // the bumper's top to just under the bonnet's lip [D96 front].
+  cornerLamps: [
+    {
+      points: [
+        { x: 0.43, y: [0.65, 0.84], role: 'head' },
+        { x: 0.745, y: [0.65, 0.84], role: 'blinker' },
+        { y: [0.65, 0.84], role: 'blinker' },
+        { s: 0.09, y: [0.66, 0.83] },
+      ],
+    },
+  ],
   // The pressed crease along the side at the door handles [D side 1.02-1.04].
   featureLine: { points: [[0.25, 1.02], [5.3, 1.04]], height: 0.025 },
 } as const satisfies Partial<KitLook>;
@@ -307,17 +345,34 @@ export const LOOK_GAZ3302: KitLook = {
 };
 
 /**
- * GAZ-3221: tall lamp clusters on the rear pillars beside the two rear doors, a black
- * rear bumper; the rear doors' hinges and handle.
+ * GAZ-32213 (the 13-seat route minibus, 1996; id `gaz3221`): tall lamp clusters on the
+ * rear pillars beside the two rear doors, a black rear bumper; the rear doors' hinges and
+ * handle.
  */
 export const LOOK_GAZ3221: KitLook = {
   ...LOOK_GAZELLE_BASE,
-  label: 'GAZ-3221',
-  // The leaves' outside hinges across the outer shut line, the handle on the right leaf by
-  // its inner edge [E: no rear view sourced].
+  label: 'GAZ-32213',
+  front: {
+    ...LOOK_GAZELLE_BASE.front,
+    items: [
+      // The grille's chrome frame round two rows of six cells [O owner-66b01cc7; P museum
+      // 32213]: its five dividers chrome, standing 3 cm proud so they show over the dark
+      // back (the shared grille's 15 mm bars stay inside it, not built: the GAZ-3302's,
+      // left as it is).
+      {
+        ...LOOK_GAZELLE_BASE.front.items[0],
+        frame: { finish: 'chrome', margin: 0.02 },
+        bars: { dir: 'vertical', count: 5, finish: 'chrome', margin: 0.13, width: 0.012, depth: 0.014, proud: 0.03 },
+      },
+    ],
+  },
+  // The leaves' outside hinges across the outer shut line outboard of the panes, the
+  // handle on the right leaf by its inner edge [P drom 941182264-01, the straight rear:
+  // hinges ±0.74-0.86 at 0.74-0.81 and 1.67-1.75 across the shut line ±0.83, the handle
+  // at 1.22; here to the kit's shut line ±0.80].
   rearLeaves: {
-    hinges: { x0: 0.62, x1: 0.79, bands: [[0.8, 0.87], [1.62, 1.69]] },
-    handle: { leaf: 'right', x0: 0.05, x1: 0.15, y: 1.05 },
+    hinges: { x0: 0.72, x1: 0.81, bands: [[0.74, 0.81], [1.67, 1.75]] },
+    handle: { leaf: 'right', x0: 0.05, x1: 0.15, y: 1.22 },
   },
   rear: {
     // 0.44-0.60, black [D 2006 side: the bumper's band; E].

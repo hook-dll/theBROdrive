@@ -78,6 +78,23 @@ const COVER_LIFT = 0.75;
 const COVER_ROOM_GAP = 0.03;
 /** ...and this far under its top: the top's chamfer and a hair, as under a bonnet (bay.ts `LID_ROOM`). */
 const COVER_ROOM_TOP = 0.045;
+/**
+ * Sun visors (`Layout.visor`, `Cabin.headliner`): the pad's thickness; how far over the
+ * driver's eye height a lowered visor ends at the lowest (owner, 2026-10-18: lowered it
+ * must not hide the road); how far the pad's top stands under the lining stowed; the
+ * least room between the lowered pad and the glass (as built) or the lining's header
+ * band, and the most between it and whichever of them stands in front of it (unless no
+ * nearer place fits); and the least and most the pad's top edge stands off its hinge line
+ * (the pivot rod's crank).
+ */
+const VISOR_THICK = 0.016;
+const VISOR_OVER_EYE = 0.005;
+const VISOR_UNDER = 0.004;
+const VISOR_CLEAR = 0.005;
+const VISOR_REACH = 0.035;
+const VISOR_CRANK = [0.005, 0.04] as const;
+/** A soft top's windscreen header bar, how deep it stands behind the glass (the old visor's 5 cm stood 2 cm behind it). */
+const SOFT_TOP_BAR = 0.03;
 const ORIGIN: Vec3 = [0, 0, 0];
 
 const COLOURS = {
@@ -375,10 +392,13 @@ interface Layout {
   /** The cabin floor over the sill's underside under the front seats; default `FLOOR_RISE` (the van's stands high). */
   readonly floorRise?: number;
   /**
-   * The sun visors' size: half width across and depth from the hinge (the length that hangs
-   * down when lowered). Absent: 0.16 x 0.15, every car before the Espero's.
+   * The sun visors: half width across, depth (the pad's length from its top edge, what
+   * hangs down when lowered) and the centre's distance off the centre line. Lowered, a
+   * visor lies parallel to the windscreen (`Cabin.headliner`); the depth is held so that it
+   * then ends no lower than `VISOR_OVER_EYE` over the driver's eye. Absent: 0.32 x 0.15 at
+   * 0.34, the stock visor.
    */
-  readonly visor?: { readonly half: number; readonly depth: number };
+  readonly visor?: { readonly half: number; readonly depth: number; readonly x?: number };
   /** A padded engine cover on the centre line between the front seats (the van's): ds range, half width, height over the floor; in the dash's colour. */
   readonly engineCover?: { readonly ds0: number; readonly ds1: number; readonly half: number; readonly height: number };
   /**
@@ -388,12 +408,23 @@ interface Layout {
    */
   readonly frontSeats?: true;
   /**
-   * A van body behind a truck's cab (the GAZelle minibus): its saloon's fixed single seats
-   * facing forward, each at [ds behind the cowl, x], and the rear bench at `bench`; the
-   * floor and the lining run on to the rear doors and the rear wheel houses are covered.
-   * Absent: the cab alone.
+   * A van body behind a truck's cab (the GAZelle minibus): its saloon's fixed high-back
+   * seats on black pedestals, each at [ds behind the cowl, x, facing: 1 forward, -1
+   * rearward, 0 sideways, its back to the wall and facing the aisle], every one a
+   * `KIT_BENCH_NODE` group (sat in as the rear left or right seat by its side); the rear
+   * passengers' eye over seat `eye`; a grab pole from floor to roof at `pole` [ds, x]; a
+   * grab rail under the roof over the side door from ds `rail[0]` to `rail[1]`. The floor
+   * and the lining run on to the rear doors and the rear wheel houses are covered. Absent:
+   * the cab alone.
    */
-  readonly saloon?: { readonly seats: readonly (readonly [ds: number, x: number])[] };
+  readonly saloon?: {
+    readonly seats: readonly (readonly [ds: number, x: number, facing: 1 | -1 | 0])[];
+    readonly eye: number;
+    readonly pole: readonly [ds: number, x: number];
+    readonly rail: readonly [ds0: number, ds1: number];
+  };
+  /** The front passenger's seat a double (two places, one cushion: the GAZelle minibus's), its middle further in. Absent: a single seat. */
+  readonly passengerDouble?: true;
 }
 
 /** A car's changes to its platform's layout (`KitCarSpec.cabinLayout`). */
@@ -618,6 +649,9 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
       ],
     },
     handbrake: { rear: 0.1, length: 0.2 },
+    // Sun visors 0.35 x 0.15 [E: the interior photo shows none], the outer end 2.5 cm in
+    // from the A pillar's trim (2026-10-29: it stood 7-10 cm off it).
+    visor: { half: 0.175, depth: 0.15, x: 0.37 },
     // Black ribbed rubber mats, a pale perforated headliner [P].
     carpet: 0x1c1c1d,
     headliner: 0xcfcabd,
@@ -689,7 +723,6 @@ const LAYOUTS: Readonly<Record<KitCarSpec['platform'], Layout>> = {
     gear: { ds: 0.44, height: 0.62, lean: 0.08 },
     handbrake: { rear: -0.55, length: 0.12 },
     pedals: { pivot: [0.12, -0.25], pad: [0.3, 0.13] },
-    visor: { half: 0.16, depth: 0.12 },
     carpet: 0x2a2a28,
     headliner: 0xbdb8a8,
   },
@@ -725,8 +758,9 @@ export const CABIN_2101: CabinLayoutOverride = {
   eyeballs: { radius: 0.026, at: [[0.115, -0.014], [0.045, -0.014]] },
   radio: [0, -0.08],
   wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.4 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.13 },
+  // Sun visors 0.35 x 0.15 [E: no photo shows them], the outer end 2.5 cm in from the A
+  // pillar's trim (2026-10-29: it stood 8-11 cm off it).
+  visor: { half: 0.175, depth: 0.15, x: 0.375 },
 };
 
 /**
@@ -763,8 +797,8 @@ export const CABIN_2103: CabinLayoutOverride = {
   stack: { half: 0.1 },
   radio: [0, -0.22],
   wheel: { ...LAYOUTS.classic.wheel, rim: 0.012 },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.4 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.13 },
+  // Sun visors as the 2101's.
+  visor: { half: 0.175, depth: 0.15, x: 0.375 },
 };
 
 /**
@@ -810,8 +844,9 @@ export const CABIN_2105: CabinLayoutOverride = {
   rockers: { on: 'cluster', at: [[-0.163, 0.0335], [0.163, 0.0885], [0.163, 0.0335]] },
   vents: [{ dy: -0.04 }],
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.6 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.128 },
+  // Sun visors 0.35 x 0.15 [E: no photo shows them], the outer end 2.5 cm in from the A
+  // pillar's trim (2026-10-29: it stood 7-8 cm off it).
+  visor: { half: 0.175, depth: 0.15, x: 0.37 },
 };
 
 /**
@@ -850,8 +885,8 @@ export const CABIN_2107: CabinLayoutOverride = {
   radio: [0, -0.26],
   ashtray: [0, -0.33],
   wheel: { ...LAYOUTS.classic.wheel, hub: 'pad' },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 1.6 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.128 },
+  // Sun visors as the 2105's.
+  visor: { half: 0.175, depth: 0.15, x: 0.37 },
 };
 
 // The VAZ-2110 on the Samara platform, read off two Wikimedia Commons photos (no
@@ -972,8 +1007,10 @@ export const CABIN_2110: CabinLayoutOverride = {
   // on a door seen at a slant, so a little further back than drawn: 0.30 / -0.12 and
   // 0.22 / -0.35.
   frontDoor: { handle: [0.3, -0.12], crank: [0.22, -0.35] },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 0.8 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.137 },
+  // Sun visors 0.32 x 0.17 [E: no photo shows them], from 4.5 cm off the mirror to 2.5 cm
+  // in from the A pillar's trim: the stock place put the outer end into the door's frame
+  // (2026-10-29).
+  visor: { half: 0.16, depth: 0.17, x: 0.31 },
   // The front doors' front edges stand 1.5 mm ahead of the firewall lining (2110, 2112)
   // or across it (2111), and the side falls in from about 0.81 at the toe board's top to
   // 0.73 at the scuttle: an upright edge stood 15 mm into the doors' front edges at 0.74.
@@ -1033,10 +1070,10 @@ export const CABIN_NEXIA: CabinLayoutOverride = {
   glovebox: { x: -0.4, dy: -0.18, half: [0.16, 0.05] },
   // A wide pad on two spokes at four and eight o'clock [P]; the Samara's size.
   wheel: { ...LAYOUTS.samara.wheel, spokes: [-35, 215] },
-  // Owner (2026-10-18): the stock 0.15-deep visors, lowered, hid the road. A third of the
-  // screen's visible height (from its foot strip at 0.973 to under its header at 1.288:
-  // 0.315) deep, 0.105 [E: no Nexia visor measured]; the stock width.
-  visor: { half: 0.16, depth: 0.105 },
+  // Sun visors 0.36 x 0.17 [E: no Nexia visor measured], from 4.5 cm off the mirror to
+  // 2.5 cm in from the A pillar's trim. Lowered they stop at the driver's eye height (owner,
+  // 2026-10-18: the stock 0.15, hung straight down, hid the road): `Layout.visor`.
+  visor: { half: 0.18, depth: 0.17, x: 0.33 },
 };
 
 // The Daewoo Espero's dash (owner's review 1, 2026-10-18: its own, not the Nexia's), read
@@ -1105,12 +1142,11 @@ export const CABIN_ESPERO: CabinLayoutOverride = {
   // The bench's base 3 cm off the wheel-house covers instead of 2.2: its side met the
   // quarter trim 2 mm away in the Espero's body (kit-zfight).
   bench: { from: 'hip', offset: 0.78, clear: 0.03 },
-  // Owner's review (2026-10-18): the stock 0.15-deep visors, lowered under the Espero's low,
-  // raked roof, hung to the horizon and hid the road. A third of the screen's visible height
-  // (from its foot strip at 0.944 to under its header at 1.236: 0.29) deep, 0.10 [E: no
-  // Espero visor photographed]; the stock width, 0.32 a side.
-  // From the lowered eye (2026-10-18) the 0.10 visor still hung 1.6 cm under eye height.
-  visor: { half: 0.16, depth: 0.078 },
+  // Sun visors 0.36 x 0.17 [E: no Espero visor photographed], from 4.5 cm off the mirror
+  // to 2.5 cm in from the A pillar's trim. Lowered they stop at the driver's eye height
+  // (owner's review, 2026-10-18: under the low, raked roof the stock 0.15, hung straight
+  // down, reached the horizon and hid the road): `Layout.visor`.
+  visor: { half: 0.18, depth: 0.17, x: 0.32 },
 };
 
 // The Opel Astra F's dash, read off Wikimedia Commons "Opel Astra F cockpit.jpg" (a
@@ -1162,8 +1198,9 @@ export const CABIN_ASTRA_F: CabinLayoutOverride = {
   glovebox: { x: -0.39, dy: -0.15, half: [0.16, 0.05] },
   // Four spokes round a wide pad (the airbag's) [P].
   wheel: { ...LAYOUTS.samara.wheel, spokes: [20, 160, -60, 240] },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 3.6 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.108 },
+  // Sun visors 0.355 x 0.17 [E: the cockpit photo shows none], from 4.5 cm off the mirror
+  // to 2.5 cm in from the A pillar's trim.
+  visor: { half: 0.1775, depth: 0.17, x: 0.3275 },
 };
 
 // The Opel Vectra A's dash, read off Wikimedia Commons "Opel Vectra taxi dashboard (GT 8445
@@ -1216,8 +1253,10 @@ export const CABIN_VECTRA_A: CabinLayoutOverride = {
   // Three spokes, left, right and down, round a small pad [P].
   wheel: { ...LAYOUTS.samara.wheel, radius: 0.19, spokes: [-15, 195, 270] },
   // The bench's base 3 cm off the wheel-house covers (2 mm from the quarter trim at 2.2 cm).
-  bench: { from: 'hip', offset: 0.78, clear: 0.03 },  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 5.2 cm under it).
-  visor: { half: 0.16, depth: 0.092 },
+  bench: { from: 'hip', offset: 0.78, clear: 0.03 },
+  // Sun visors 0.36 x 0.17 [E: the taxi photo shows none], from 4.5 cm off the mirror to
+  // 2.5 cm in from the A pillar's trim.
+  visor: { half: 0.18, depth: 0.17, x: 0.33 },
 };
 
 // The Mercedes-Benz W124 (1989-92) on the classic's furniture, read off Wikimedia Commons
@@ -1309,6 +1348,9 @@ export const CABIN_W124: CabinLayoutOverride = {
   // base stands between the rear wheel-house covers, 4 cm off them (at the default 2.2 cm
   // it fought them at a distance, kit-zfight).
   bench: { from: 'rearBase', offset: -0.78, clear: 0.04 },
+  // Sun visors 0.36 x 0.17 [E: the photos show none], from 4.5 cm off the mirror to 2.5 cm
+  // in from the A pillar's trim.
+  visor: { half: 0.18, depth: 0.17, x: 0.33 },
 };
 
 // The BMW 520i (E34) of 1990-1995, read off Wikimedia Commons "5-er e34 BMW PL.JPG" (CC
@@ -1387,6 +1429,9 @@ export const CABIN_E34: CabinLayoutOverride = {
   pedals: { pivot: [0.05, -0.16], pad: [0.15, 0.135] },
   gear: { ds: 0.452, height: 0.22, lean: 0.04 },
   console: { ds0: 0.172, ds1: 0.552, height: 0.2 },
+  // Sun visors 0.38 x 0.17 [E: the photos show none], from 4.5 cm off the mirror to 2.5 cm
+  // in from the A pillar's trim.
+  visor: { half: 0.19, depth: 0.17, x: 0.34 },
 };
 
 // The VAZ-1111 «Ока» of 1988-1996 on the Samara's furniture, read off these sources:
@@ -1455,8 +1500,10 @@ export const CABIN_1111: CabinLayoutOverride = {
   // Rim 0.36 across with a thick tube (22 px on 458 in the photo's thumbnail) [P/E].
   wheel: { ...LAYOUTS.samara.wheel, ds: 0.56, radius: 0.18, rim: 0.016, spokes: [34, 270] },
   gear: { ds: 0.62, height: 0.24, lean: 0.04 },
-  // Lowered, the visor ends at the driver's eye height (the stock 0.15 hung 2.5 cm below it, 2026-10-18).
-  visor: { half: 0.16, depth: 0.119 },
+  // Sun visors 0.29 x 0.14 [E: no photo shows them], from 4.5 cm off the mirror to 2.5 cm
+  // in from the A pillar's trim: the stock 0.32 at 0.34 stood into the doors' frames
+  // (2026-10-29).
+  visor: { half: 0.145, depth: 0.14, x: 0.295 },
 };
 
 /**
@@ -1502,6 +1549,9 @@ export const CABIN_2141: CabinLayoutOverride = {
   // Lid x 1365-1647, y 306-422: from 0.18 to 0.44 right of the centre line, its top at
   // the fascia's.
   glovebox: { x: -0.31, dy: -0.11, half: [0.13, 0.045] },
+  // Sun visors 0.37 x 0.16 [E: the salon photo shows none], the outer end 2.5 cm in from
+  // the A pillar's trim.
+  visor: { half: 0.185, depth: 0.16, x: 0.345 },
 };
 
 // The Volgas on the classic's furniture, read off Wikimedia Commons photos (readings in
@@ -1582,6 +1632,9 @@ export const CABIN_GAZ24: CabinLayoutOverride = {
   // 0.2005 to the grip's centre, a 19 mm grip; the bar across the hub dips a little in the
   // middle (spokes 8 degrees under the level) [P], chrome; its middle drawn as a round boss.
   wheel: { ...LAYOUTS.classic.wheel, dy: 0, radius: 0.2005, rim: 0.0095, spokes: [-8, 188], hub: 'round', chrome: true },
+  // Sun visors 0.38 x 0.16 [E: the photos show none], the outer end 2.5 cm in from the A
+  // pillar's trim (2026-10-29: it stood 6-10 cm off it).
+  visor: { half: 0.19, depth: 0.16, x: 0.35 },
 };
 
 /**
@@ -1652,6 +1705,8 @@ export const CABIN_GAZ31029: CabinLayoutOverride = {
   // 0.193 to the grip's centre, an 18 mm grip; the pad reaches the rim at nine o'clock,
   // a little under the level, and at six [P]; the right spoke by symmetry [E].
   wheel: { ...LAYOUTS.classic.wheel, dy: 0, radius: 0.193, rim: 0.0095, spokes: [-10, 190, 270], hub: 'pad' },
+  // Sun visors as the 24's, the outer end 2.5 cm in from the A pillar's trim.
+  visor: { half: 0.19, depth: 0.16, x: 0.345 },
 };
 
 // The UAZ-469 on the Niva's furniture (its four-wheel drive and transfer levers), read off
@@ -1735,6 +1790,8 @@ export const CABIN_UAZ469: CabinLayoutOverride = {
       { x: -0.1, height: 0.24, knob: 0.02, lean: [0.03, -0.01] },
     ],
   },
+  // Sun visors 0.30 x 0.13, flat plates on the screen frame's header bar [E].
+  visor: { half: 0.15, depth: 0.13, x: 0.36 },
   // Bare painted floor, the canvas' grey-green inside [E].
   carpet: 0x2c2d26,
   headliner: 0x6f6d58,
@@ -1812,6 +1869,9 @@ export const CABIN_UAZ2206: CabinLayoutOverride = {
   // 3 cm under the face's foot, so the column hung clear of the dash with nothing round it.
   wheel: { ds: 0.53, dy: 0.19, rake: 52 * (Math.PI / 180), radius: 0.2, rim: 0.012, spokes: [30, 150, 270], hub: 'round', toFloor: true },
   pedals: { pivot: [0.15, -0.22], pad: [0.3, 0.13] },
+  // Sun visors 0.33 x 0.15 [E: the dash photo shows none], from 4.5 cm off the mirror to
+  // 2.5 cm in from the A pillar's trim.
+  visor: { half: 0.165, depth: 0.15, x: 0.32 },
 };
 
 // The ZIL-130 on the truck's furniture. No photo of its dash is in the refs: the plain
@@ -1862,6 +1922,9 @@ export const CABIN_ZIL130: CabinLayoutOverride = {
   // Rim 0.48 across [D front: the wheel behind the screen, 0.40-0.50 m], thin; three
   // spokes; the column steep, down through the dash's face to the floor [E].
   wheel: { ds: 0.46, dy: 0.06, rake: 40 * (Math.PI / 180), radius: 0.24, rim: 0.011, spokes: [-20, 200, 270], hub: 'round', toFloor: true },
+  // Sun visors 0.40 x 0.18 [E], the outer end 2.5 cm in from the A pillar's trim
+  // (2026-10-29: the stock place stood 11-17 cm off it).
+  visor: { half: 0.2, depth: 0.18, x: 0.385 },
 };
 
 // The GAZelles on the truck's furniture, with the cab-over's front seats and engine cover.
@@ -1923,23 +1986,42 @@ export const CABIN_GAZELLE: CabinLayoutOverride = {
   ashtray: [-0.16, -0.17],
   // Rim 0.42 across, two spokes [E]; the column steep down to the floor.
   wheel: { ds: 0.5, dy: 0.08, rake: 40 * (Math.PI / 180), radius: 0.21, rim: 0.012, spokes: [-15, 195], hub: 'round', toFloor: true },
+  // Sun visors 0.375 x 0.19 [E], the outer end 2.5 cm in from the A pillar's trim.
+  visor: { half: 0.1875, depth: 0.19, x: 0.3675 },
   carpet: 0x232425,
   headliner: 0xb8b4aa,
 };
 
 /**
- * GAZ-3221: the cab's, and the saloon behind it: single seats facing forward, two on the
- * left behind the driver, then two on the left and one on the right at the sliding door's
- * rear, and the rear bench across the back for three [F: eight passenger seats; E the
- * layout].
+ * GAZ-32213, the 13-seat route minibus (owner's reviews, 2026-10-29: his photos
+ * owner-6647b199, -6730fa4d, -6abb1fad and the factory seat plan owner-seat-plan-322132,
+ * scaled 6.0 mm/px between the rearward row's backs and the rear doors): the engine under
+ * the bonnet only, no cover in the cab; the driver's seat and a double passenger seat;
+ * eleven high-back seats on black pedestals in the saloon: a row of three facing rearward
+ * behind the cab, left of the sliding door's entry; one on the left wall facing the aisle
+ * opposite the door; one forward on the left and a forward pair on the right over the
+ * rear axle; two on each wall at the back facing the aisle; a grab pole at the aisle by
+ * the forward left seat, a grab rail over the sliding door (measurements-gazelle.md §9).
+ * The rear passengers' eye over the forward left seat; every seat on a side maps to that
+ * side's rear place.
  */
 export const CABIN_GAZ3221: CabinLayoutOverride = {
   ...CABIN_GAZELLE,
-  saloon: { seats: [[1.45, 0.25], [1.45, 0.62], [2.3, 0.25], [2.3, 0.62], [2.3, -0.62]] },
-  // The bench's hip 0.55 ahead of the rear doors' opening (s 4.80) [E].
-  bench: { from: 'rearBase', offset: -0.55 },
-  benchCushion: 0.42,
-  benchRecline: 0.2,
+  engineCover: undefined,
+  passengerDouble: true,
+  saloon: {
+    seats: [
+      [1.29, 0.62, -1], [1.29, 0.15, -1], [1.29, -0.32, -1],
+      [2.27, 0.56, 0],
+      [3.19, 0.63, 1], [3.19, -0.21, 1], [3.19, -0.66, 1],
+      [3.71, 0.56, 0], [4.18, 0.56, 0], [3.71, -0.56, 0], [4.18, -0.56, 0],
+    ],
+    eye: 4,
+    pole: [2.76, 0.3],
+    rail: [1.5, 2.3],
+  },
+  benchCushion: 0.45,
+  benchRecline: 0.14,
 };
 
 /**
@@ -1951,10 +2033,16 @@ export const KIT_DRIVER_EYE_NODE = 'kit_driver_eye';
 /** The same over the rear bench's left seat; the right one is its mirror. */
 export const KIT_REAR_EYE_NODE = 'kit_rear_eye';
 /**
+ * The same over a front bench's middle place (`kitFrontBench`): on the bench's centre line at
+ * the driver's eye height and distance from the screen. Absent on cars without one.
+ */
+export const KIT_MIDDLE_EYE_NODE = 'kit_middle_eye';
+/**
  * Name of the group holding the rear bench's meshes, inside `kit_cabin`: the bench is
  * one piece with no channel, and getting in (player/interaction.ts) has to know it. A
  * truck's bench is its only seat, the front one: its group carries
- * `userData.kitFrontBench = true`, its left half the driver's and its right the passenger's.
+ * `userData.kitFrontBench = true` and `userData.kitBenchHalf` (its half width), its thirds
+ * the driver's, the middle place's and the passenger's.
  */
 export const KIT_BENCH_NODE = 'kit_bench';
 /**
@@ -2073,7 +2161,11 @@ function cabinFloor(frame: BodyFrame): number {
 function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
   const cab = frame.spec.cabin;
   const xr = cab.railHalf - cab.railInset;
-  return cab.rail + cab.railRise + frame.crownAt(x / xr) - LINING_DEPTH - frame.roofDrop(s);
+  // A raised roof's long rise over the cab (`railRun.front`): the lining under its
+  // straight slope from the windscreen's header, under the shell's convex chamfer.
+  const run = cab.railRun?.front;
+  const rise = run === undefined ? 1 : Math.min(1, Math.max(0, (s - cab.columns[0]!.top) / run));
+  return cab.rail + cab.railRise * rise + frame.crownAt(x / xr) - LINING_DEPTH - frame.roofDrop(s);
 }
 
 /**
@@ -2123,6 +2215,34 @@ function norm(a: Vec3): Vec3 {
   const l = Math.hypot(a[0], a[1], a[2]) || 1;
   return [a[0] / l, a[1] / l, a[2] / l];
 }
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+/** The point of triangle abc nearest p (Ericson, Real-Time Collision Detection 5.1.5). */
+function closestOnTriangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3): Vec3 {
+  const ab = sub(b, a);
+  const ac = sub(c, a);
+  const ap = sub(p, a);
+  const d1 = dot(ab, ap);
+  const d2 = dot(ac, ap);
+  if (d1 <= 0 && d2 <= 0) return a;
+  const bp = sub(p, b);
+  const d3 = dot(ab, bp);
+  const d4 = dot(ac, bp);
+  if (d3 >= 0 && d4 <= d3) return b;
+  const vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) return add(a, scale(ab, d1 / (d1 - d3)));
+  const cp = sub(p, c);
+  const d5 = dot(ab, cp);
+  const d6 = dot(ac, cp);
+  if (d6 >= 0 && d5 <= d6) return c;
+  const vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) return add(a, scale(ac, d2 / (d2 - d6)));
+  const va = d3 * d6 - d5 * d4;
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return add(b, scale(sub(c, b), (d4 - d3) / (d4 - d3 + (d5 - d6))));
+  const denom = 1 / (va + vb + vc);
+  return add(a, add(scale(ab, vb * denom), scale(ac, vc * denom)));
+}
 /** `v` turned about X by `a`. */
 function rotX(v: Vec3, a: number): Vec3 {
   const c = Math.cos(a);
@@ -2143,8 +2263,10 @@ function shade(hex: number, k: number): number {
  * Box with all twelve edges chamfered by `c`, in the builder's current frame; the +Y
  * face's X half width is scaled by `taper`. Reads as a moulded cushion, not a slab.
  * `bottom = false` leaves the −Y face out: a hollow cover over what stands under it.
+ * `slant` moves the −Z face's +X end that much further out along −Z and its −X end in by
+ * as much: a pad deeper at one end (a sun visor's).
  */
-function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number, taper = 1, bottom = true): void {
+function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number, taper = 1, bottom = true, slant = 0): void {
   const [cx, cy, cz] = centre;
   const [hx, hy, hz] = half;
   // A corner's three points, each flush with one face (`axis`) and chamfered back on the other two.
@@ -2153,7 +2275,7 @@ function pad(b: PartBuilder, slot: KitSlot, centre: Vec3, half: Vec3, c: number,
     return [
       cx + sx * (axis === 0 ? wx : wx - c),
       cy + sy * (axis === 1 ? hy : hy - c),
-      cz + sz * (axis === 2 ? hz : hz - c),
+      cz + sz * (axis === 2 ? hz : hz - c) - (sz < 0 ? slant * sx : 0),
     ];
   };
   for (const s of [-1, 1]) {
@@ -2327,6 +2449,8 @@ class Cabin {
   private readonly x0: number;
   /** `root.userData.kitDash`: the fittings below, where they were built. */
   private readonly dashItems: KitDashItem[] = [];
+  /** The windscreen's panes as built (`paneGap`), read once. */
+  private panes?: [Vec3, Vec3, Vec3][];
 
   constructor(ctx: KitContext) {
     this.ctx = ctx;
@@ -2379,7 +2503,7 @@ class Cabin {
     // A truck's bench across the cab is its front seat; a truck with front seats has a
     // rear bench only in its saloon.
     if (!this.truckBench) for (const side of [1, -1]) this.frontSeat(side);
-    if (!this.truck || this.truckBench || this.saloon) this.bench();
+    if (!this.truck || this.truckBench) this.bench();
     if (this.saloon) this.saloonSeats();
     if (!this.van && !this.truck) this.floorPlaces();
     this.driverEye();
@@ -2396,14 +2520,24 @@ class Cabin {
     eye.name = KIT_DRIVER_EYE_NODE;
     eye.position.set(...driverEyeAt(this.frame));
     this.ctx.root.add(eye);
+    if (!this.truckBench) return;
+    const middle = new THREE.Object3D();
+    middle.name = KIT_MIDDLE_EYE_NODE;
+    middle.position.set(0, eye.position.y, eye.position.z);
+    this.ctx.root.add(middle);
   }
 
   /** The empty `KIT_REAR_EYE_NODE`, seated on the bench as the driver's is on his cushion. */
   private rearEye(): void {
     const eye = new THREE.Object3D();
     eye.name = KIT_REAR_EYE_NODE;
-    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(BENCH_SEAT_X, this.benchS + EYE_BEHIND_HIP) - EYE_HEADROOM);
-    eye.position.set(...this.P(BENCH_SEAT_X, y, this.benchS + EYE_BEHIND_HIP));
+    // A saloon's eye over its chosen seat (`Layout.saloon.eye`); the bench's otherwise.
+    const sal = this.lay.saloon;
+    const seat = sal?.seats[sal.eye];
+    const ex = seat ? seat[1] : BENCH_SEAT_X;
+    const es = seat ? this.frame.cowl + seat[0] + seat[2] * EYE_BEHIND_HIP : this.benchS + EYE_BEHIND_HIP;
+    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(ex, es) - EYE_HEADROOM);
+    eye.position.set(...this.P(ex, y, es));
     this.ctx.root.add(eye);
   }
 
@@ -2439,6 +2573,56 @@ class Cabin {
   /** Underside of the headliner at half width x and position s. */
   private dome(x: number, s: number): number {
     return headlinerUnder(this.frame, x, s);
+  }
+
+  /** The lowest of the shell's lining (`KitContext.lining`) over (x, s), at or above `floor`. */
+  private liningOver(x: number, s: number, floor: number): number | undefined {
+    const z = this.frame.z(s);
+    let best: number | undefined;
+    for (const poly of this.ctx.lining) {
+      const a = poly[0]!;
+      for (let i = 1; i + 1 < poly.length; i++) {
+        const b = poly[i]!;
+        const c = poly[i + 1]!;
+        // (x, z) as a + u (b - a) + v (c - a) in plan.
+        const det = (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
+        if (Math.abs(det) < 1e-9) continue;
+        const u = ((x - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (z - a[2])) / det;
+        const v = ((b[0] - a[0]) * (z - a[2]) - (x - a[0]) * (b[2] - a[2])) / det;
+        if (u < 0 || v < 0 || u + v > 1) continue;
+        const y = a[1] + u * (b[1] - a[1]) + v * (c[1] - a[1]);
+        if (y >= floor && (best === undefined || y < best)) best = y;
+      }
+    }
+    return best;
+  }
+
+  /** How far `p` stands from the windscreen's panes as built (the body's glass ahead of the roof, facing along the car). */
+  private paneGap(p: Vec3): number {
+    if (!this.panes) {
+      const f = this.frame;
+      const top = this.spec.cabin.columns[0]!.top;
+      const ahead = Math.min(f.screenFoot(0), f.screenFoot(1)) - 0.05;
+      const panes: [Vec3, Vec3, Vec3][] = [];
+      for (const node of this.ctx.root.children) {
+        if (node.name !== 'body_glass' || !(node instanceof THREE.Mesh)) continue;
+        const geo = node.geometry as THREE.BufferGeometry;
+        const pos = geo.getAttribute('position');
+        const at = (i: number): Vec3 => {
+          const k = geo.index ? geo.index.getX(i) : i;
+          return [pos.getX(k), pos.getY(k), pos.getZ(k)];
+        };
+        for (let i = 0; i < (geo.index ? geo.index.count : pos.count); i += 3) {
+          const t: [Vec3, Vec3, Vec3] = [at(i), at(i + 1), at(i + 2)];
+          const s = f.z(0) - (t[0][2] + t[1][2] + t[2][2]) / 3;
+          if (s > ahead && s < top + 0.15 && Math.abs(norm(cross(sub(t[1], t[0]), sub(t[2], t[0])))[2]) > 0.3) panes.push(t);
+        }
+      }
+      this.panes = panes;
+    }
+    let best = Infinity;
+    for (const [a, b, c] of this.panes) best = Math.min(best, Math.hypot(...sub(p, closestOnTriangle(p, a, b, c))));
+    return best;
   }
 
   /**
@@ -2734,26 +2918,152 @@ class Cabin {
     // The live face 2 mm proud of the glass.
     addMirrorFace(pane, frame, centre, [0.095, 0.022], -0.016, 'inner');
 
-    // Sun visors lie flat under the headliner and swing down about their front edge. Under
-    // a soft top (`CabinSpec.softTop`) they hang from the windscreen frame's header bar
-    // instead, flat behind it with their underside at the glass's top and 5 cm behind the
-    // glass (the header's lining stands 3 cm behind it): the canvas rises `railRise` over
-    // the frame, and from under it a lowered visor covered none of the glass.
+    // Sun visors (`Layout.visor`): stowed flat under the lining, they turn about a hinge
+    // line along the windscreen's top until the pad lies parallel to the glass, as a real
+    // one swings down (owner, 2026-10-29: they opened only part of the way, 77° for every
+    // car). Each end of the hinge line is worked out in the screen's section at its half
+    // width (`glass`, the foot-to-top line) against the ceiling over it, the lining
+    // (`KitContext.lining`: header band and roof): see `fits` and `first` below. Under a
+    // soft top (`CabinSpec.softTop`) the canvas stands `railRise` over the frame, and
+    // visors under it covered none of the glass: there they hang from the windscreen
+    // frame's header bar, `SOFT_TOP_BAR` deep behind the glass, the pad's underside at the
+    // bar's, the glass's visible top.
+    const ceiling = (x: number, s: number): number | undefined => {
+      const top = glass(x, 'front')[1][1] - cab.screenHeader;
+      const lining = this.liningOver(x, s, top - 0.05);
+      if (!cab.softTop) return lining;
+      const bar = s < glassS(x, top) + SOFT_TOP_BAR ? top : top + VISOR_THICK + VISOR_UNDER;
+      return lining === undefined ? bar : Math.min(lining, bar);
+    };
+    const vis = this.lay.visor ?? { half: 0.16, depth: 0.15 };
+    const half = VISOR_THICK / 2;
+    const ends = [-1, 1].map((k) => {
+      const x = (vis.x ?? 0.34) + k * vis.half;
+      const [[sb, yb], [st, yt]] = glass(x, 'front');
+      const len = Math.hypot(sb - st, yb - yt);
+      // Down the glass, and off it into the cabin; a section point's distance along each.
+      const g: P2 = [(sb - st) / len, (yb - yt) / len];
+      const n: P2 = [-g[1], g[0]];
+      const uw = (s: number, y: number): P2 => [(s - st) * g[0] + (y - yt) * g[1], (s - st) * n[0] + (y - yt) * n[1]];
+      const profile: { s: number; y: number; u: number; w: number }[] = [];
+      for (let s = st - 0.12; s <= st + 0.4; s += 0.004) {
+        const y = ceiling(x, s);
+        if (y !== undefined) profile.push({ s, y, u: uw(s, y)[0], w: uw(s, y)[1] });
+      }
+      // Where the hinge may stand: stowed, the pad's underside over the sight line from the
+      // driver's eye to the header's lower edge (it hides no glass); lowered, its glass-side
+      // face clear of the glass, and the ceiling ahead of the hinge (the header band, the
+      // roof's front) off it, and at most `VISOR_REACH` off whatever stands in front of it
+      // there, the glass or the header band (or the first place that fits). Under a soft
+      // top, behind the header bar.
+      const [es, ey] = screenHeaderEdge(f, x);
+      const eyeS = f.z(0) - eye[2];
+      const bar = yt - cab.screenHeader + half;
+      const fits: { s: number; y: number; crank: number; off: number; top: number; roof: boolean }[] = [];
+      for (const c of profile) {
+        const hy = c.y - VISOR_UNDER - half;
+        if (cab.softTop && hy < bar) continue;
+        if (hy - half < ey + ((c.s - es) * (eye[1] - ey)) / (eyeS - es)) continue;
+        const [hu, hw] = uw(c.s, hy);
+        if (hw - half < VISOR_CLEAR) continue;
+        let crank: number = VISOR_CRANK[0];
+        for (const k of profile) if (k.u > hu && k.w > hw - half - VISOR_CLEAR) crank = Math.max(crank, k.u - hu + VISOR_CLEAR);
+        if (crank > VISOR_CRANK[1]) continue;
+        const front = Math.max(0, ...profile.filter((k) => k.u > hu + crank && k.u < hu + crank + vis.depth).map((k) => k.w));
+        if (fits.length > 0 && hw - half - front > VISOR_REACH) continue;
+        fits.push({ s: c.s, y: hy, crank, off: hw, top: hy + crank * g[1], roof: cab.softTop !== undefined || c.y >= this.dome(x, c.s) - 0.01 });
+      }
+      if (fits.length === 0) throw new Error(`${this.spec.id}: no room for a sun visor at half width ${x.toFixed(3)}`);
+      // The first of them under the roof proper, behind the header band (the lining up
+      // within a centimetre of the headliner's level, `dome`), as a visor's pivot stands
+      // just behind the screen's top, where lowered it reaches at least halfway down from
+      // the header's lower edge to the eye; else (a van's deep, rounded header, a raised
+      // roof's slope) the first that reaches; else the one whose top edge stands highest.
+      const reaching = fits.filter((c) => c.top + vis.depth * g[1] <= (ey + eye[1]) / 2);
+      const first = reaching.find((c) => c.roof) ?? reaching[0] ?? fits.reduce((a, b) => (b.top > a.top ? b : a));
+      return { x, st, fits, first, down: g, profile };
+    });
+    // Both ends as far back from the glass's top as the farther of the two (`back`): the
+    // hinge line runs along the glass's top in plan, and lowered, the pad stands as far
+    // off the glass at each end.
+    const place = (back: number) => {
+      const hinges = ends.map((e) => ({ ...e, ...(e.fits.find((c) => c.s - e.st >= back - 1e-6) ?? e.fits[e.fits.length - 1]!) }));
+      const crank = Math.max(...hinges.map((e) => e.crank));
+      // The hinge line (x positive along it), and the pad's line down the glass square to it.
+      const hingeOf = (side: number): { pivot: Vec3; axis: Vec3; down: Vec3 } => {
+        const [inner, outer] = hinges.map((e) => this.P(side * e.x, e.y, e.s));
+        const axis = norm(scale(sub(outer!, inner!), side));
+        const square = (v: Vec3): Vec3 => norm(sub(v, scale(axis, dot(v, axis))));
+        // s runs back along the car, the kit frame's z forward.
+        const down = square(hinges.reduce<Vec3>((d, e) => add(d, [0, e.down[1], -e.down[0]]), [0, 0, 0]));
+        return { pivot: scale(add(inner!, outer!), 0.5), axis, down };
+      };
+      // Lowered, each end of the pad's bottom edge (its cabin-side corner) no lower than
+      // `VISOR_OVER_EYE` over the driver's eye: the depth is cut to that where it would be,
+      // so on a crowned roof the outer end, hung lower, is the shorter.
+      const driver = hingeOf(1);
+      const fall = -driver.down[1];
+      const sink = crank * fall + half * Math.abs(cross(driver.axis, driver.down)[1]);
+      const depths = hinges.map((e) => Math.min(vis.depth, (e.y - sink - eye[1] - VISOR_OVER_EYE) / fall));
+      // A point of the lowered pad's glass-side face (`u` across, -1 the inner end, `k`
+      // down it), on either side, against the panes as built: the glass's line at each end
+      // is a chord, and a screen curved in plan stands nearer between its facets' corners.
+      const gap = (u: number, k: number): number => Math.min(...[1, -1].map((side) => {
+        const { pivot, axis, down } = hingeOf(side);
+        const d = lerp(depths[0]!, depths[1]!, (u + 1) / 2);
+        return this.paneGap(add(add(pivot, scale(axis, side * u * vis.half)), add(scale(cross(axis, down), -half), scale(down, crank + k * d))));
+      }));
+      const near = Math.min(...[-1, -0.5, 0, 0.5, 1].flatMap((u) => [0, 0.5].map((k) => gap(u, k))));
+      return { hinges, crank, hingeOf, depths, gap, near };
+    };
+    // Moved back off the glass while the pad's upper half comes nearer than `VISOR_CLEAR`;
+    // an end whose bottom corner still does is cut shorter.
+    let back = Math.max(...ends.map((e) => e.first.s - e.st));
+    let placed = place(back);
+    for (let pass = 0; pass < 4 && placed.near < VISOR_CLEAR; pass++) placed = place((back += 2 * (VISOR_CLEAR - placed.near)));
+    const { hinges, crank, hingeOf, depths, gap } = placed;
+    for (const [i, u] of [[0, -1], [1, 1]] as const) {
+      while (depths[i]! > 0.05 && Math.min(gap(u, 1), gap(u / 2, 1)) < VISOR_CLEAR) depths[i] = depths[i]! - 0.005;
+    }
+    const [inDepth, outDepth] = depths as [number, number];
+    const depth = (inDepth + outDepth) / 2;
+    // The lowered pose is the stowed one turned about the hinge line; the pad's thickness
+    // lies on the glass's side of the hinge line once lowered.
     for (const side of [1, -1]) {
       const name = side > 0 ? 'visor_l' : 'visor_r';
-      const x = side * 0.34;
-      let y = this.dome(Math.abs(x) + 0.16, frontTop + 0.005) - 0.014;
-      let s = frontTop + 0.005;
-      if (cab.softTop) {
-        y = glass(Math.abs(x) + 0.16, 'front')[1][1] - cab.screenHeader + 0.016;
-        s = glassS(x, y) + 0.05;
+      const { pivot, axis, down } = hingeOf(side);
+      // Stowed, the pad runs back from the hinge under the ceiling over its length: at the
+      // steepest down (or least up) to any of it, so a ceiling that bows down clears it too.
+      const stowed = norm(hinges.reduce<Vec3>((d, e) => {
+        const reach = e.profile.filter((k) => k.s > e.s + crank && k.s <= e.s + crank + Math.max(inDepth, outDepth));
+        const slope = Math.min(...reach.map((k) => (k.y - VISOR_UNDER - half - e.y) / (k.s - e.s)));
+        return add(d, norm([0, Number.isFinite(slope) ? slope : 0, -1]));
+      }, [0, 0, 0]));
+      let r = norm(sub(stowed, scale(axis, dot(stowed, axis))));
+      // A rolled and yawed pad under a crowned roof can still touch the lining between its
+      // ends: tipped down about the hinge until its top face keeps `VISOR_UNDER` under the
+      // lining all over (the lowered pose stays as it is).
+      const slant = (side * (outDepth - inDepth)) / 2;
+      for (let pass = 0; pass < 2; pass++) {
+        const up = cross(scale(r, -1), axis);
+        let tip = 0;
+        for (const u of [-1, -0.5, 0, 0.5, 1]) {
+          for (const k of [0.25, 0.5, 0.75, 1]) {
+            const along = crank + k * (depth + slant * u);
+            const p = add(add(pivot, scale(axis, u * vis.half)), add(scale(up, half), scale(r, along)));
+            const lining = this.liningOver(p[0], f.z(0) - p[2], p[1] - 0.05);
+            if (lining !== undefined && lining - p[1] < VISOR_UNDER) tip = Math.max(tip, Math.atan2(VISOR_UNDER - (lining - p[1]), along));
+          }
+        }
+        r = norm(sub(scale(r, Math.cos(tip)), scale(up, Math.sin(tip))));
       }
-      const at = this.P(x, y, s);
-      fineDetail(this.hinge(this.group, ORIGIN, name, at, { channel: name, kind: 'rot', axis: [1, 0, 0], amount: -1.35 }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
+      const swing = Math.atan2(dot(axis, cross(r, down)), dot(r, down));
+      const forward = scale(r, -1);
+      const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(...axis), new THREE.Vector3(...cross(forward, axis)), new THREE.Vector3(...forward)).setPosition(...pivot);
+      fineDetail(this.hinge(this.group, ORIGIN, name, pivot, { channel: name, kind: 'rot', axis, amount: swing }, { id: name, label: `Козырёк ${WHERE[name.slice(-1)]}` }, (v) => {
         v.color(shade(this.lay.headliner, 0.92));
-        v.pushAt(at);
-        const { half, depth } = this.lay.visor ?? { half: 0.16, depth: 0.15 };
-        pad(v, 'trim', [0, -0.008, -0.005 - depth / 2], [half, 0.008, depth / 2], 0.006);
+        v.push(basis);
+        pad(v, 'trim', [0, 0, -crank - depth / 2], [vis.half, half, depth / 2], 0.006, 1, true, slant);
         v.pop();
       }));
     }
@@ -3415,23 +3725,27 @@ class Cabin {
   private frontSeat(side: number): void {
     const L = this.lay;
     const pos = side > 0 ? 'fl' : 'fr';
-    const x = side * this.x0;
+    // The minibus's double passenger seat: wider, its middle further in (`passengerDouble`).
+    const dbl = side < 0 && L.passengerDouble === true;
+    const w = dbl ? 1.6 : 1;
+    const cells = dbl ? [-0.19, 0.19] : [0];
+    const x = side * (dbl ? this.x0 - 0.05 : this.x0);
     const hip = this.hipS;
     const top = this.floorY + L.cushion;
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const fixed = this.fixed.color(COLOURS.metal);
-    for (const dx of [-0.17, 0.17]) beam(fixed, 'trim', this.P(x + dx, this.standY + 0.012, hip - 0.45), this.P(x + dx, this.standY + 0.012, hip + 0.1), 0.012, 0.012);
+    for (const dx of [-0.17 * w, 0.17 * w]) beam(fixed, 'trim', this.P(x + dx, this.standY + 0.012, hip - 0.45), this.P(x + dx, this.standY + 0.012, hip + 0.1), 0.012, 0.012);
 
     const baseAt = this.P(x, this.floorY, hip - 0.15);
     const seat = this.hinge(this.group, ORIGIN, `seat_${pos}`, baseAt, { channel: `seat_${pos}`, kind: 'pos', axis: [0, 0, 1], amount: 0.15 }, { id: `seat_${pos}`, label: `Сиденье ${WHERE[pos]}` }, (b) => {
       const frameTop = top - 0.12;
       const frameBottom = this.floorY + 0.025;
       b.color(COLOURS.black);
-      pad(b, 'trim', this.P(x, (frameBottom + frameTop) / 2, hip - 0.17), [0.2, (frameTop - frameBottom) / 2, 0.2], 0.02);
+      pad(b, 'trim', this.P(x, (frameBottom + frameTop) / 2, hip - 0.17), [0.2 * w, (frameTop - frameBottom) / 2, 0.2], 0.02);
       b.pushAt(this.P(x, top - 0.065, hip - 0.17), [-0.07, 0, 0]).color(uph, 'upholstery');
-      pad(b, 'trim', ORIGIN, [0.25, 0.065, 0.26], 0.04);
-      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.11, 0.065, -0.19], [0.11, 0.065, -0.19], [0.11, 0.065, 0.19], [-0.11, 0.065, 0.19]]);
+      pad(b, 'trim', ORIGIN, [0.25 * w, 0.065, 0.26], 0.04);
+      for (const c of cells) inlay(b.color(insert, 'upholstery'), 'trim', [[c - 0.11, 0.065, -0.19], [c + 0.11, 0.065, -0.19], [c + 0.11, 0.065, 0.19], [c - 0.11, 0.065, 0.19]]);
       b.pop();
     });
     // The front passenger's cushion holds things (vehicle/cabin.ts): the room over its
@@ -3442,7 +3756,7 @@ class Cabin {
       const front = hip - 0.17 - 0.26 + 0.04;
       const mid = (back + front) / 2;
       const at = add(cushion, rotX([0, 0.065, hip - 0.17 - mid], -0.07));
-      const halfX = Math.min(0.21, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT) - this.x0);
+      const halfX = Math.min(dbl ? 0.36 : 0.21, this.sideRoom(front, back, top, top + SEAT_ROOM_HEIGHT) - Math.abs(x));
       this.place(seat, baseAt, 'seat', at, -0.07, { halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
     }
 
@@ -3450,9 +3764,9 @@ class Cabin {
     const backAt = this.P(x, top - 0.035, hip + 0.07);
     const back = this.hinge(seat, baseAt, `seatback_${pos}`, backAt, { channel: `seatback_${pos}`, kind: 'rot', axis: [1, 0, 0], amount: -0.6 }, { id: `seatback_${pos}`, label: `Спинка сиденья ${WHERE[pos]}` }, (b) => {
       b.pushAt(backAt, [-t, 0, 0]).color(uph, 'upholstery');
-      pad(b, 'trim', [0, 0.27, -0.05], [0.245, 0.27, 0.065], 0.04, 0.88);
-      if (L.bolsters) for (const sx of [-1, 1]) pad(b, 'trim', [sx * 0.2, 0.24, -0.005], [0.045, 0.22, 0.05], 0.03);
-      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.1, 0.07, 0.015], [0.1, 0.07, 0.015], [0.1, 0.48, 0.015], [-0.1, 0.48, 0.015]]);
+      pad(b, 'trim', [0, 0.27, -0.05], [0.245 * w, 0.27, 0.065], 0.04, 0.88);
+      if (L.bolsters) for (const sx of [-1, 1]) pad(b, 'trim', [sx * 0.2 * w, 0.24, -0.005], [0.045, 0.22, 0.05], 0.03);
+      for (const c of cells) inlay(b.color(insert, 'upholstery'), 'trim', [[c - 0.1, 0.07, 0.015], [c + 0.1, 0.07, 0.015], [c + 0.1, 0.48, 0.015], [c - 0.1, 0.48, 0.015]]);
       b.pop();
     });
 
@@ -3521,6 +3835,7 @@ class Cabin {
     // A truck's bench is the passenger's seat: the place on his third of it.
     if (this.truckBench) {
       group.userData.kitFrontBench = true;
+      group.userData.kitBenchHalf = half;
       this.place(group, ORIGIN, 'seat', add(at, [-L.seatX, 0, 0]), -0.06, room(Math.min(0.21, edge - L.seatX)));
       return;
     }
@@ -3532,29 +3847,52 @@ class Cabin {
   }
 
   /**
-   * The saloon's single seats (`Layout.saloon`), fixed and facing forward: a closed base,
-   * the cushion and the back in the upholstery with their inlays, at the rear bench's
-   * cushion height and recline. No channel and no place: they are the saloon's furniture.
+   * The saloon (`Layout.saloon`): high-back single seats on black pedestals, facing forward
+   * or rearward, each its own `KIT_BENCH_NODE` group so getting in seats the player on its
+   * side's rear place; the grab pole from the floor to the roof and the grab rail under the
+   * roof over the side door, in black.
    */
   private saloonSeats(): void {
     const L = this.lay;
+    const sal = L.saloon;
+    if (!sal) return;
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const top = this.floorY + L.benchCushion;
-    const b = this.fixed;
-    for (const [ds, x] of L.saloon?.seats ?? []) {
-      const hip = this.frame.cowl + ds;
-      b.color(shade(uph, 0.85), 'upholstery');
-      pad(b, 'trim', this.P(x, (this.standY + top - 0.12) / 2, hip - 0.15), [0.19, (top - 0.12 - this.standY) / 2, 0.18], 0.015);
-      b.pushAt(this.P(x, top - 0.065, hip - 0.15), [-0.06, 0, 0]).color(uph, 'upholstery');
-      pad(b, 'trim', ORIGIN, [0.22, 0.065, 0.23], 0.04);
-      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.1, 0.065, -0.17], [0.1, 0.065, -0.17], [0.1, 0.065, 0.17], [-0.1, 0.065, 0.17]]);
+    for (const [ds, x, facing] of sal.seats) {
+      const b = new PartBuilder();
+      // Built about the hip facing +z (forward), then turned round for a rearward seat, or
+      // a quarter turn to face the aisle from its wall.
+      b.pushAt(this.P(x, 0, this.frame.cowl + ds), [0, facing === 0 ? -Math.sign(x) * (Math.PI / 2) : facing > 0 ? 0 : Math.PI, 0]);
+      b.color(COLOURS.black);
+      pad(b, 'trim', [0, (this.standY + top - 0.13) / 2, 0.14], [0.13, (top - 0.13 - this.standY) / 2, 0.12], 0.01);
+      b.box('trim', [0, top - 0.125, 0.15], [0.19, 0.012, 0.19]);
+      b.pushAt([0, top - 0.065, 0.15], [-0.06, 0, 0]).color(uph, 'upholstery');
+      pad(b, 'trim', ORIGIN, [0.21, 0.06, 0.22], 0.035);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.09, 0.06, -0.16], [0.09, 0.06, -0.16], [0.09, 0.06, 0.16], [-0.09, 0.06, 0.16]]);
       b.pop();
-      b.pushAt(this.P(x, top - 0.035, hip + 0.07), [-L.benchRecline, 0, 0]).color(uph, 'upholstery');
-      pad(b, 'trim', [0, 0.3, -0.05], [0.22, 0.3, 0.06], 0.04, 0.9);
-      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.09, 0.08, 0.01], [0.09, 0.08, 0.01], [0.09, 0.5, 0.01], [-0.09, 0.5, 0.01]]);
+      // A high back [P owner-6730fa4d: to about the windows' middle], its rear in black plastic.
+      b.pushAt([0, top - 0.03, -0.07], [-L.benchRecline, 0, 0]).color(uph, 'upholstery');
+      pad(b, 'trim', [0, 0.33, -0.02], [0.21, 0.33, 0.035], 0.035, 0.92);
+      b.color(COLOURS.black);
+      pad(b, 'trim', [0, 0.32, -0.075], [0.2, 0.31, 0.02], 0.015, 0.92);
+      inlay(b.color(insert, 'upholstery'), 'trim', [[-0.09, 0.1, 0.015], [0.09, 0.1, 0.015], [0.09, 0.55, 0.015], [-0.09, 0.55, 0.015]]);
       b.pop();
+      b.pop();
+      const group = new THREE.Group();
+      group.name = KIT_BENCH_NODE;
+      addBuilt(group, b, ORIGIN, 'bench', true);
+      this.group.add(group);
     }
+    const f = this.fixed.color(COLOURS.black);
+    const [pds, px] = sal.pole;
+    const ps = this.frame.cowl + pds;
+    const roof = this.dome(px, ps) - 0.004;
+    f.cylinderY('trim', this.P(px, (this.standY + roof) / 2, ps), 0.016, (roof - this.standY) / 2, 8);
+    const rx = -(this.sideRoom(this.frame.cowl + sal.rail[0], this.frame.cowl + sal.rail[1], this.belt + 0.5, this.belt + 0.6) - 0.05);
+    const ry = Math.min(this.dome(rx, this.frame.cowl + sal.rail[0]), this.dome(rx, this.frame.cowl + sal.rail[1])) - 0.07;
+    beam(f, 'trim', this.P(rx, ry, this.frame.cowl + sal.rail[0]), this.P(rx, ry, this.frame.cowl + sal.rail[1]), 0.014, 0.014);
+    for (const d of sal.rail) f.box('trim', this.P(rx, ry + 0.04, this.frame.cowl + d), [0.012, 0.04, 0.012]);
   }
 
   /**

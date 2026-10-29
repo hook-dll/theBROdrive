@@ -4,23 +4,70 @@
 
 ### Added
 
-- The desert races are a mini-game. A FIELD of four rivals waits on the grid with the
-  player's box at the back, five cars in all. Each rival is the frantic racer on its own
-  skill (grip share 0.8–1 and pace, race/rival.ts `fieldPlan`) in a car near the
-  player's class, and the field differs from round to round. A rival knocked off,
+- The ZIL-130's bench seats three: its middle is a fifth seat, `'middle'` (game/state.ts
+  `PLAYER_SEATS`), offered only on a car whose front seat is a bench (`kitFrontBench`,
+  carkit/specs.ts). F on the bench's left, middle or right third (by its width,
+  `kitBenchHalf`) seats the player as driver, middle or passenger, from outside or by
+  moving over from inside; the camera sits on the centre line at the driver's eye height
+  (`kit_middle_eye`, an empty node: every car's fingerprint unchanged). Nobody drives
+  from the middle. He gets out by the door on the side he looks to, the passenger's when
+  he looks ahead. A save in the middle reloads there; on a car without a bench it loads
+  as the passenger.
+- The desert races are a mini-game. A FIELD of three rivals waits on the grid with the
+  player's box at the back, four cars in all. Every rival is the frantic racer at the top
+  skill (grip share 1, full pace; race/rival.ts `RIVAL_SKILL`), in a car near the
+  player's class, so the field differs only by its cars. A rival knocked off,
   flipped or stuck is put back on the lap out of view, or after 3 s, as a ghost to the
   other racers (race/recovery.ts). `Backspace` restarts from the grid and `T` (the pad's
-  RS) puts the player back at his last checkpoint (CONTROLS.md). The results panel shows
-  each car's place, race time and best lap. The places pay 9/5/3 shells for a 3-shell
-  stake (race/stake.ts `RACE_PRIZES`); `F` or `Backspace` races the same field again.
-  Tracks are 0.9–1.7 km (were 1.8–3.5 km) with 9 or more corner features. 82% have a
-  hairpin, and chicanes are walled off with boulders and logs that have colliders.
-  Corners are banked up to 8.7°, laps climb 3–32 m, and checkpoint gates stand at every
-  checkpoint. Kerbs no longer z-fight the edge line: the line is cut where a kerb or the
-  chequers run. The race board is one material repainted per field. Build steps are
-  ≤ 2.8 ms. In game no program links and nothing hitches from approach to rematch.
-  Checked with tools/race-bench.ts, a full 5-car race with a shoved and a flipped rival,
-  and tools/racetrack-gen.ts.
+  RS) puts the player back at his last checkpoint (CONTROLS.md). Two laps. The race is
+  over the moment the player takes the flag (or is out): the results come up at once,
+  his place final and paid, a rival still running placed by laps and distance with its
+  projected time ("~3:12.4", race/session.ts `projectedTime`). The places pay 9/5/3
+  shells for a 3-shell stake (race/stake.ts `RACE_PRIZES`); `F` or `Backspace` races the
+  same field again at once.
+  Tracks are 0.9–1.7 km with 9 or more corner features, 82% with a hairpin. Each lap
+  rises and falls over 2–3 laid-out hills and hollows: a height span of 8–32 m (median
+  17 m, was 11), a climb of 11–36 m (median 21, was 15), grades ≤ 11%; fast corners and
+  bowls banked up to 15.5° (median steepest 12°, was 6.8°). Each chicane is closed by
+  exactly one rock and one log, with colliders, across its cut line (was about 23
+  boulders and logs). Checkpoint gates collide: posts 0.8 m outside the asphalt edge, the
+  beam's underside ≥ 5.15 m up with its own collider, and no gate inside a chicane. The
+  access lane's collider follows its drawn surface and its edges run down to the sand on
+  collided shoulders (was a step of up to 3.1 m). Kerbs no longer z-fight the edge line.
+  The race board is one material repainted per field. Build steps are ≤ 2.9 ms.
+  RACE FRAME COST, measured in game (per-section profile, 4-car race, Mac M2 Pro, and the
+  same with the CPU throttled 4×, standing in for a slower machine): a race added each
+  fixed step a whole car's driver and physics per rival, a trailer per car, and drew
+  each rival's ~11 shadow casters; on the slower CPU that pushed the frame past its
+  budget and the fixed-step loop ran 3.5 steps a frame, multiplying every per-step cost,
+  the road's traffic (out of sight, beside the track) the largest at a third of the
+  frame. Now a race thins the road's traffic to 6 cars while it runs (world/traffic.ts
+  `raceCeiling`), rivals are drawn as traffic is (mid/far meshes, shadows from the
+  shared far mesh), and the field is three. A trailer race on Medium, CPU 4× slower:
+  60 → 18–22 ms a frame; on the Mac at full speed 6.0 → 4.9 ms busy. The trailer's
+  triangles were not the cause (GPU time the same with and without trailers).
+  Checked with tools/race-bench.ts (full 4-car races with a shoved and a flipped rival,
+  every car home) and tools/racetrack-gen.ts.
+- Dev camera "eagle flight": the GTA 1 view, straight down from 12 m over the driven car
+  (or the player on foot), locked to the car's rendered pose and north-up (world +Z at
+  the top of the screen). Developer section of the pause menu ("Eagle camera") or
+  `__bro.eagle(on?)`. C, V, getting in or out, a cutscene or a machine's close view
+  return to the view it was drawn over (render/cameras.ts `EAGLE_HEIGHT_M`).
+- Kit GAZelle minibus is now the GAZ-32213 (1996, 13 seats; id `kit_gaz3221`): the saloon
+  as on the factory plan (three facing rearward behind the cab, one sideways opposite the
+  sliding door, one plus a pair facing forward, two sideways on each wall at the back;
+  saloon seats may face the aisle, `facing: 0`); the saloon windows and the sliding
+  door's glass with rounded corners (new `CabinColumn.glassRound`); the raised roof
+  rising in one long slope over the cab and the rear doors reaching up into the roof's
+  edge, their panes larger (new `CabinSpec.railRun`); hinges and handle where the photos
+  show them; chrome grille dividers. Every other kit car is identical (fingerprints).
+  Sources and readings: measurements-gazelle.md §9.
+- Kit GAZ-3221, owner's review (his photos of a real early car): the engine reached only
+  under the bonnet (no cover in the cab); a double front passenger seat; the saloon's
+  high-back seats on black pedestals, a rearward row of three behind the cab facing the
+  next row, three across the back, a grab pole and a grab rail at the sliding door; a
+  black A pillar and a high roof with long rounded edges. Both GAZelles: the head lamps
+  and indicators flush corner units instead of boxes standing out of the nose.
 - Kit GAZelle (first generation, early face): the GAZ-3302 flatbed with steel drop boards
   and a dark olive tent on hoops (its rear flap rolls up), and the GAZ-3221 minibus with a
   sliding right door, two rear doors and eight passenger seats, on one cab-over cab (the
@@ -32,6 +79,18 @@
   moved to zilfront.ts with all its sizes as data in zil.ts (the ZIL identical).
 
 ### Changed
+
+- SUN VISORS SWING DOWN PARALLEL TO THE WINDSCREEN, ON EVERY KIT CAR (`carkit/interior.ts`
+  `Cabin.headliner`, `Layout.visor`; `carkit/specs.ts` `VISOR_SAMARA`). They turned a
+  fixed 77° on every car, so lowered they stood 12–49° off the glass; now each car's
+  hinge line runs along its screen's top, under the lining behind the header, and the
+  visor turns until it lies parallel to the glass, 0.6–3.9 cm off it, clear of the
+  header, mirror and pillar trim (the Oka's went through both doors, the ZIL's through its
+  cab lining). Each car has its own size and place (0.29–0.40 wide, 0.13–0.19 deep [E],
+  the outer end near the A pillar); stowed they lie along the lining instead of 1–12 cm
+  under it, and lowered they still stop at the driver's eye height (the owner's rule for
+  the low roofs, now on every car). Nothing else in any car moved; the 28 accepted cars'
+  fingerprints re-recorded.
 
 - THE ZIL-130 FLATBED, THE FIRST TRUCK (`carkit/truck.ts`, `zil.ts`, platform `'truck'`;
   `vehicle/carmodels.ts` `kit_zil130`; measurements-zil130.md). A cab on a ladder frame

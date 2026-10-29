@@ -74,14 +74,26 @@ import { RaceVisuals } from './visuals';
  * track area 20 s, 150 m away) and here: out of the car, on its roof `FLIPPED_S`, or the
  * car gone or its engine dead `WRECKED_S`.
  *
- * THE RESULTS. When the player has taken the flag (or is out) and the field is in or
- * `FINISH_WAIT_S` has passed, the stake is settled for his place (race/stake.ts
+ * THE RESULTS. The moment the player has taken the flag (or is out), the race is over:
+ * no waiting for the field. The stake is settled for his place (race/stake.ts
  * `RACE_PRIZES`: 1st 9, 2nd 5, 3rd 3, out of the prizes nothing), the track's round moves
  * on, the trailers come off, and the results panel (ui/hudrace.ts) shows the order, the
- * times and the prize. While it is up, Backspace or F races the SAME field again for a
- * new stake (a rematch: everybody back on the grid); driving `RESULTS_AWAY_M` from the
- * grid closes it. A rival that takes the flag drives a slow cool-down lap to its box and
- * stops; one out of the player's view is simply stood back in its box.
+ * times and the prize: a rival still running is placed where it is (laps, then distance)
+ * and its time is its projection (`RaceSession.projectedTime`), shown "~1:52.3". While
+ * the panel is up, Backspace or F races the SAME field again for a new stake (a rematch:
+ * everybody back on the grid); driving `RESULTS_AWAY_M` from the grid closes it. Every
+ * rival, finished or not, drives a slow cool-down lap to its box and stops; one out of
+ * the player's view is simply stood back in its box.
+ *
+ * WHAT A RACE COSTS A FRAME (measured in the game with a per-section profile; numbers in
+ * the CHANGELOG): every rival is a whole car simulated each fixed step, its driver and
+ * its vehicle step, and drawn, and a trailer race adds a trailer per car. On a slower CPU
+ * that extra work per step pushes the frame past its budget, and the fixed-step loop then
+ * runs several steps a frame (core/loop.ts), which multiplies every per-step cost, the
+ * road's traffic the largest of them. So, while a race is on, the road's traffic is
+ * thinned to `RACE_TRAFFIC_CAP` cars (the race is off the road), and the rivals are drawn
+ * as traffic is (`drawsAsTraffic`): mid and far meshes by distance, their shadows cast by
+ * the shared far mesh rather than by ~11 meshes each.
  *
  * A rival lost to the world mid-race (its body slept or removed) calls the race off and
  * pays the stake back: that was not the player's doing.
@@ -142,6 +154,11 @@ const TRAILER_LOAD_MAX_KG = 350;
 const TRAILER_LOAD_DOMAIN = 0x52544c31;
 /** The trailer is set down just over its ride height, as a haul's (contracts/world.ts). */
 const TRAILER_SETTLE_CLEARANCE_M = 0.085;
+/**
+ * The road's traffic ceiling while a race is on (world/traffic.ts `raceCeiling`): the
+ * lowest traffic setting's. See WHAT A RACE COSTS A FRAME.
+ */
+const RACE_TRAFFIC_CAP = 6;
 
 const PROMPT_RACE = `[F] RACE! ${RACE_STAKE} shells → win ${RACE_PRIZES[0]}`;
 const PROMPT_POOR = `RACE ME! — need ${RACE_STAKE} shells`;
@@ -325,6 +342,26 @@ export class RaceDirector {
   keepsLive(id: string): boolean {
     const car = this.fieldCar(id);
     return car !== null && (car.state !== 'waiting' || this.readout.results !== null);
+  }
+
+  /**
+   * The road traffic's ceiling (world/traffic.ts `raceCeiling`): `RACE_TRAFFIC_CAP` while
+   * a race is on, null (the menu's) otherwise. main.ts hands it to the stream every step.
+   */
+  get trafficCeiling(): number | null {
+    return this.race ? RACE_TRAFFIC_CAP : null;
+  }
+
+  /**
+   * Car `id` is a rival of the field standing on its wheels: drawn as traffic is (main.ts
+   * passes it the far, mid and shadow fields, render/farcars.ts), its own ~40 casting
+   * meshes replaced by the shared far mesh outside the self-shadow line. One on its side
+   * or roof is drawn in full, as a traffic wreck is.
+   */
+  drawsAsTraffic(id: string, vehicle: Vehicle): boolean {
+    if (this.fieldCar(id) === null) return false;
+    const q = vehicle.root.quaternion;
+    return 1 - 2 * (q.x * q.x + q.z * q.z) >= FLIPPED_UP;
   }
 
   /** Visits every rival while it is driven, for its engine to be heard. */
@@ -1041,17 +1078,16 @@ export class RaceDirector {
   private resultRows(field: Field, race: LiveRace): RaceResultRow[] {
     const session = race.session;
     const order = session.standings();
-    const leader = order[0]!;
-    const leaderLaps = session.counters[leader]!.completed;
     return order.map((i, k): RaceResultRow => {
       const player = i === 0;
       const name = player ? 'YOU' : carModel(field.cars[i - 1]!.driver.modelId).label;
       let time: string;
-      if (session.finished(i)) time = clock(session.finishTimes[i]!);
-      else if (player && session.end !== null && session.end !== 'laps' && session.end !== 'dev') time = 'OUT';
+      if (player && session.end !== null && session.end !== 'laps' && session.end !== 'dev') time = 'OUT';
+      else if (session.finished(i)) time = clock(session.finishTimes[i]!);
       else {
-        const down = leaderLaps - session.counters[i]!.completed;
-        time = down > 0 ? `+${down} LAP${down > 1 ? 'S' : ''}` : '—';
+        // Still running when the player was done: where its pace so far would have finished.
+        const projected = session.projectedTime(i);
+        time = Number.isFinite(projected) ? `~${clock(projected)}` : 'running';
       }
       const best = session.bestLap(i);
       return { place: k + 1, name, time, best: Number.isFinite(best) ? clock(best) : '—', player };
@@ -1116,7 +1152,7 @@ export class RaceDirector {
     r.racers = session.racers;
     const counter = session.counters[0]!;
     r.hint =
-      !r.racing ? (session.playerDone ? 'FINISHED — waiting for the field' : null)
+      !r.racing ? null
       : race.flippedS > 0.5 || counter.offTrackS > 2 ? `[${this.host.keyLabel('raceReturn')}] back to the track`
       : null;
   }
@@ -1131,15 +1167,22 @@ export class RaceDirector {
     this.scanIn = 0;
   }
 
-  /** Starts a race of the waiting field from the grid with no stake. */
-  devStart(): string {
+  /**
+   * Starts a race of the waiting field from the grid with no stake; `trailer` true or false
+   * makes it a trailer race or not, whatever the round drew (the perf A/B).
+   */
+  devStart(trailer?: boolean): string {
     const carId = this.world.state.player.drivingCarId;
     if (this.race) return 'a race is on already';
-    const field = this.field;
+    let field = this.field;
     if (!field || field.cars.some((car) => car.state !== 'waiting')) return 'no field waiting near by';
     if (carId === null) return 'get in a car first';
+    if (trailer !== undefined && trailer !== field.plan.trailer) {
+      field = { ...field, plan: { ...field.plan, trailer } };
+      this.field = field;
+    }
     return this.startRace(carId)
-      ? `racing ${field.plan.rivals.map((d) => `${d.modelId} ${d.skill.toFixed(2)}`).join(', ')} (${field.plan.level}${field.plan.trailer ? ', trailers' : ''})`
+      ? `racing ${field.plan.rivals.map((d) => d.modelId).join(', ')}${field.plan.trailer ? ' (trailers)' : ''}`
       : 'the cars are not live yet';
   }
 
@@ -1183,10 +1226,9 @@ export class RaceDirector {
       track: this.track ? { id: this.track.id, lengthM: this.track.lengthM, stats: this.track.stats } : null,
       field: field
         ? {
-            level: field.plan.level,
             trailer: field.plan.trailer,
             round: field.round,
-            cars: field.cars.map((car) => ({ id: car.id, model: car.driver.modelId, skill: car.driver.skill, state: car.state, spawned: car.spawned, live: this.host.vehicle(car.id) !== null, ghost: car.ghostS > 0 })),
+            cars: field.cars.map((car) => ({ id: car.id, model: car.driver.modelId, state: car.state, spawned: car.spawned, live: this.host.vehicle(car.id) !== null, ghost: car.ghostS > 0 })),
           }
         : null,
       stake: this.world.state.raceStake,

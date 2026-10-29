@@ -192,8 +192,12 @@ export interface CarState {
   lotPaid?: true;
 }
 
-/** A kit car's four seats; the driver sits on the car's left (+X in the kit frame). */
-export const PLAYER_SEATS = ['driver', 'passenger', 'rear-left', 'rear-right'] as const;
+/**
+ * A kit car's seats; the driver sits on the car's left (+X in the kit frame). 'middle' is a
+ * front bench's middle place (carkit/interior.ts `kitFrontBench`, the ZIL-130's), offered
+ * only on such a car.
+ */
+export const PLAYER_SEATS = ['driver', 'passenger', 'rear-left', 'rear-right', 'middle'] as const;
 export type PlayerSeat = (typeof PLAYER_SEATS)[number];
 
 export interface PlayerState {

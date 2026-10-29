@@ -2100,6 +2100,8 @@ async function boot(): Promise<void> {
       const anchor = activeWorldAnchor();
       haulBays.tick(dt, anchor.x, anchor.z, activeS);
       race.afterStep(dt);
+      // A race thins the road's traffic while it runs (race/director.ts, WHAT A RACE COSTS A FRAME).
+      traffic.raceCeiling = race.trafficCeiling;
     }
 
     // Recover only after Rapier has produced the escaped pose, before the
@@ -2608,8 +2610,19 @@ async function boot(): Promise<void> {
 
     frameProfiler?.begin('vehicles');
     Vehicle.viewFrom(renderer.camera.position, frameDt, driving);
-    for (const vehicle of vehicles.values()) vehicle.syncVisuals(alpha);
+    // The far, mid and shadow fields are begun and ended here, not by the traffic: the
+    // race's rivals are drawn into them too (race/director.ts `drawsAsTraffic`).
+    farCars.begin();
+    midCars.begin();
+    shadowCars.begin();
+    for (const [id, vehicle] of vehicles) {
+      if (race.drawsAsTraffic(id, vehicle)) vehicle.syncVisuals(alpha, farCars, midCars, shadowCars);
+      else vehicle.syncVisuals(alpha);
+    }
     traffic.syncVisuals(alpha, farCars, midCars, shadowCars);
+    farCars.end();
+    midCars.end();
+    shadowCars.end();
     // Trailer physics advances and snapshots in the fixed step exactly like cars,
     // but its scene root must also consume those snapshots every rendered frame.
     // Without this call the rigid body and hitch moved while the GLB stayed forever
@@ -3412,6 +3425,14 @@ async function boot(): Promise<void> {
             return poiReceivesShadows();
           },
           setEnabled: (on: boolean) => setPoiReceiveShadows(renderer.scene, on),
+        }
+      : undefined,
+    eagle: import.meta.env.DEV
+      ? {
+          get enabled() {
+            return camera.eagleFlight;
+          },
+          setEnabled: (on: boolean) => camera.setEagle(on),
         }
       : undefined,
     devLook: import.meta.env.DEV

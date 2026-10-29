@@ -1,4 +1,4 @@
-# GAZelle GAZ-3302 / GAZ-3221 (first generation, early face): measurements
+# GAZelle GAZ-3302 / GAZ-32213 (first generation, early face): measurements
 
 Spec: `src/carkit/gazelle.ts` (`BODY_GAZ3302`, `BODY_GAZ3221`, `LOOK_GAZ3302`,
 `LOOK_GAZ3221`), cabins `CABIN_GAZELLE` / `CABIN_GAZ3221` in interior.ts, platform `truck`
@@ -14,7 +14,10 @@ under a cover between the front seats; the cab does not tilt) on a ladder frame 
 axles on leaf springs at both ends. GAZ-3302: the dropside flatbed (series from 13.07.1994),
 a steel platform with drop side and tail boards, hoops and a tent. GAZ-3221: the all-metal
 minibus on the same cab (series from 03.1996 [F ru.wikipedia]), a sliding door on the
-right, two rear doors, eight passenger seats.
+right, two rear doors, eight passenger seats. The kit's minibus (id `gaz3221`, label
+GAZ-32213, owner 2026-10-29) is the GAZ-32213: the 13-seat route minibus on the 3221's
+body (from 03.1996 [F 5koleso.ru]), two passengers beside the driver and eleven in the
+saloon (§9).
 
 ## 2. Factory figures [F]
 
@@ -122,14 +125,154 @@ Lab captures: build/kitcheck/gaz3302/lab-*.png, build/kitcheck/gaz3221/lab-*.png
 ## 7. Gaps
 
 - The drawings carry the 2003 face: the early face comes from D96 (23 mm/px) and photos.
-- No rear view of the 3221 or of the 3302's cab: the rear doors' glass, hinges, handle,
-  the tail clusters' cells and the cab's back window are estimates.
-- The front passenger seat is a double on the real cab (three places): the kit draws one
-  seat (the generator's front seat is single).
+- No rear view of the 3302's cab: its back window and the 3302's lamps' cells are
+  estimates (the minibus's rear is sourced since §9).
+- The 3302's front passenger seat is single (the real one a double; the minibus has it,
+  `passengerDouble`, §8).
 - No step under the doors (the drawn step's plate stood 4 mm under the cab's bottom, a
   far-band z-fight in the generic step; left out rather than moving the ZIL's step code).
-- The 3221's roof over the screen rounds up at the screen's top instead of the long rise
-  of the drawing over the cab.
 - Dash: only the combination is sourced; the dash's shape, wheel and seats are estimates.
 - archFront/archRear reaches are not judged in the refs: the body's bottom stands above
   the hub.
+
+## 8. The owner's review of the GAZ-3221 (2026-10-29)
+
+Photos **[O]** of a real early 3221, `build/carshape/_refs/gazelle/`:
+
+| File | What it shows |
+|---|---|
+| owner-66b01cc7_medium.jpg | front 3/4: the early face (rectangular head lamps, the amber indicator wrapping round the corner, the chrome-framed grille), the big raked screen in a wide black frame, the short sloping bonnet, the high roof rounding over its long edges, three big saloon windows with rounded corners |
+| owner-6acc0810_medium.jpg | rear 3/4: the roof's long rounded edges, upright sides with the belt crease, the two rear doors with their windows, the tail lamps upright on the rear pillars |
+| owner-6730fa4d.jpg | the saloon from the sliding door: individual high-back seats in blue vinyl on black pedestal frames; nearest the cab a row of three facing rearward; across the door's opening seats facing forward toward them; a black grab pole from floor to roof at the aisle; a black grab rail at the door |
+| owner-6abb1fad.jpg | the saloon from the rear doors looking forward: the rearward row of three behind the cab (no partition: the driver's seat seen over it), the next row facing forward (black plastic seat backs: one on the left, two on the right), the rear row of three across the back, the pole at the aisle, the grab rail under the roof over the sliding door |
+| owner-6647b199.jpg | the dash and the front row from above: a flat floor between the seats with the gear lever out of it (no engine cover in the cab), the driver's seat (grey cloth) and a double passenger seat (two blue cushions right of the lever); a grey moulded dash with the hooded cluster, a two-spoke wheel |
+
+Built from them (`BODY_GAZ3221`, `LOOK_GAZELLE_BASE`, `CABIN_GAZ3221`):
+
+- Engine access only under the bonnet: no `engine_cover` in the 3221's cab
+  (`engineCover: undefined`); its four cells under the bonnet (radiator s 0.10-0.18,
+  engine 0.24-0.54 ±0.24, air filter and turbine either side) [E their sizes]. The 3302
+  keeps its cover (unchanged).
+- Front row: the driver's seat and a double passenger seat (`passengerDouble`: one
+  cushion and back 1.6 times as wide, two inlays, its middle at x −0.47). No partition.
+- Saloon (`saloon.seats`, ds behind the cowl 0.86): a rearward row of three at s 2.15
+  (x 0.6, 0, −0.6); a forward row at s 3.25: one on the left (0.6), two on the right
+  (−0.22, −0.64) across the door's opening; the rear row of three at s 4.45; the knee gap
+  between the first two rows 0.34 m, the door's opening over it [E the distances, O the
+  order and facing]. High backs (0.66 tall) in the upholstery with black plastic rears,
+  on black pedestals. Grab pole at s 2.70, x 0.27; grab rail under the roof over the
+  sliding door, s 2.36-3.16 [O].
+- Sitting: every saloon seat is a `KIT_BENCH_NODE`, so getting in by any seat on the left
+  seats the player as rear-left, on the right as rear-right; the rear passengers' eye
+  stands over the second row's left seat (x 0.6, facing forward), its mirror for the right.
+- Shape: the A pillar strip black (the screen's black frame) [O]; the high roof's sides
+  rising 0.24 over the drip rail and rounding over (railInset 0.12, railBend) into a
+  near-flat top (crown 0.05, power 4) [O, F 2200].
+- Front lamps (both GAZelles, owner 2026-10-29): the head lamp and indicator one flush
+  `cornerLamps` unit, head from ±0.43, amber from ±0.745 round the corner onto the wing to
+  s 0.09, 0.65-0.84 [O, D96]; they stood out as boxes before. The 3302 changed only there.
+
+Checks: `npm run kit-check -- gaz3221` passes (12 470 triangles). Comparison sheets
+(owner's photo | lab): build/kitcheck/gaz3221/compare-{front34,rear34,interior-door,
+interior-rear,driver}.png; lamps: build/kitcheck/{gaz3221,gaz3302}/lab-lamps.png.
+
+Gaps (closed in §9): the side windows' rounded corners; the roof's step over the screen
+was the rail chamfer's rise; the lab captures were framed far. The saloon of this round
+(nine seats) was superseded by the 13-seat GAZ-32213 in §9.
+
+## 9. Third round: the 1996 GAZ-32213 (2026-10-29)
+
+The owner: the car is the GAZ-32213, the first-series 13-seat route minibus (1996), not
+the 8-seat 3221; label GAZ-32213 (the id stays `gaz3221`: saves, fit rows, refs).
+
+### 9.1 Sources found (all in `build/carshape/_refs/gazelle/`, gitignored)
+
+| File | URL | Licence / owner | What it shows |
+|---|---|---|---|
+| owner-seat-plan-322132.png | the owner (factory plan) | the owner | **the 13-seat plan from above** (ГАЗ-322132): the seat layout of §9.3 |
+| src-bp-theblueprints-3221.png (782 × 939) | the-blueprints.com/blueprints/cars/gaz/83479/view/gaz-3221_gazelle/ | the-blueprints.com (Dr Dan Saranga), a factory-manual scan | **[DM]** early-face side elevation and plan, dimensioned: 5500, 2900, 990 / 1610 overhangs, 2200 high, 2075 wide, 1336 between seat rows, 22° / 18°; hand-drawn (its 990 / 2900 / 1610 spans disagree by up to 15 %) |
+| src-bp-theblueprints-32213-preview.jpg (1280 × 890) | the-blueprints.com/vectordrawings/show/30705/gaz_-_32213_gazelle/ | the-blueprints.com watermarked preview (the vector is paid) | **[D32]** the 32213's four-view: side (6.64 mm/px from the drawn 2900 hubs x 175 / 612, `s = 1.0 + (x − 175) · 0.006636`), top, front, rear |
+| src-mtmuseum-32213-0…4.jpg | mtmuseum.ru/exhibits/gaz-32213-gazel/ | Moscow Transport Museum (GAZ brochure scans) | the factory brochure: four saloon plans (8, 10, 11, 13 seats), a side elevation; the museum's white 1999 32213; press shots |
+| src-drom-g1996-938520…938526.jpg | drom.ru/catalog/lcv/gaz/gazelle/g_1996_10804/ | drom.ru (GAZ press photos) | factory press shots of the early-face minibuses, front 3/4 |
+| src-dromad-267151758-00…08.jpg | auto.drom.ru/…/gaz/32213/bus/micro/267151758.html | drom.ru sale ad (seller) | **a 1998 GAZ-32213, early face**: straight front, near-straight right side, rear 3/4 with the rear doors, the saloon (seats out), the cab's double seat, the 1998 dash |
+| src-dromad-941182264-00…04.jpg | auto.drom.ru/…/gaz/32213/bus/micro/941182264.html | drom.ru sale ad (seller) | a late-face 32213 on the same body: **straight rear** (the rear doors, their panes, hinges, handle), straight left side, saloon looking rearward |
+| src-dromad-434630052-00…06.jpg | auto.drom.ru/…/gaz/32213/bus/micro/434630052.html | drom.ru sale ad (seller) | late face, same body: rear 3/4 (the rear doors), the saloon's seats and rails |
+| src-drive2-1036288-*.jpg | drive2.ru/l/1036288/ | drive2 owner | the early "old-type" dash out of the car and in place (1998) |
+| src-drive2-1265725-00.jpg, src-drive2-288230376151983608-00.jpg | drive2.ru | drive2 owners | 1996 white minibuses, front 3/4 and rear 3/4 |
+| src-commons-moscowbus16515…358 / …359.jpg | commons.wikimedia.org File:Moscow_bus_16515_2010-03_… | CC BY 4.0, Artyom Svetlov | early-face route bus, the right side near side-on (the sliding door) |
+| src-commons-mytischimoscowregionpanoramio2-38.jpg | commons File:Mytischi_Moscow_Region_-_panoramio_(2).jpg | CC BY 3.0, Alexey Seleznev | early face, the left side near straight, a rear door open |
+| src-commons-gazellevanfromthebackdniproukr-458.jpg | commons File:Gazelle_van_from_the_back;_Dnipro… | CC BY-SA 4.0, VKras | the rear doors, 3/4 |
+| src-commons-moscowbus16521…, -3221jpg-273, -gaz32211jpg, -gazelnam11jpg, -marshrutkajpg, -jpg-476, -funnybusjpg-830, -vaninasinorussiajpg, -gazgazeltaxi…-371, -moscowbus2026…, -gaz22171sobol…, -gazel3221jpg, -rainbowzelenograd, -pnautobuspresent2000{1,2}, -gazelleinmedvezhyegorsk | commons (each file's page) | CC BY 4.0 / CC BY-SA 3.0–4.0 / CC BY 2.0 / public domain (per file, local://gazelle-sources.md of this round) | early-face minibuses, mostly front 3/4; colour, trim, the face |
+
+Factory figures found: 5470 × 2075 × 2200, 2900 [F drom.ru 272259, the 1999-2002 32213];
+[DM] 5500, 990 / 1610; glass (fkrit.ru/stekla-na-gazel, "ГАЗ 3221"): windscreen 1655 ×
+910 (avtomaxi.pro), saloon side panes 1258 / 1245 × 675 (front, left / right), 1245 × 675
+(the sliding door's), 1194 × 675 (middle), 1265 × 675 (rear), **the rear doors' panes 821
+× 660**; no corner radii anywhere. The 13 seats: two beside the driver and eleven in the
+saloon [F truck.ironhorse.ru, autort.ru, mtmuseum.ru]; series from 03.1996 [F 5koleso.ru].
+Nothing found: a larger getoutlines rendition, any free 32213 vector, Commons interior or
+dash photos of the early cars, side-glass corner radii.
+
+### 9.2 Readings → spec
+
+| Item | Reading | Spec (before → now) |
+|---|---|---|
+| Roof over the cab | [DM] the header 1.97 at s 1.39, 2.11 at 1.57, 2.17 at 1.72; [D32] 1.97 at 1.46, 2.13 at 1.72, 2.19 at 1.85: one long rise from the screen's top to the saloon's roof | the rail's chamfer rising 0.24 over 0.12 right at the screen's top → over 0.555 (`railRun.front`, to the front door glass's end 1.885): 1.97 at 1.33 → 2.21 at 1.885, the headliner following |
+| Roof height, edge | 2200 [F]; the long edges rounded [O] | unchanged: 2.21, railInset 0.12, railRise 0.24, railBend [0.12, 0.75] |
+| Windscreen | [F] glass 1655 × 910; [D] 1.325-1.87, ±0.76; the black frame [O] | unchanged (the kit's glass ±0.76 × 0.95 along the centre line, 0.67 at the corners) |
+| Side windows | [D32 left] 2.32-3.32 (split by the slider), 3.455-4.46, 4.60-5.15; [DM] 2.18-3.24, 3.42-4.43, 4.55-5.07, glass 1.32-1.90; [D 2006] 2.23-3.19, 3.46-4.41, 4.61-5.11; corners rounded about a sixth of the height [O] | runs unchanged (within 3-7 cm of the three drawings' mean); the panes' corners rounded r 0.08 (`glassRound`), the sliding door's too |
+| Rear doors | [P 941182264-01, 3.3 mm/px from the tail lamps' 0.42]: the doors' top 2.12 (the roof 2.25 there), each pane ±0.09-0.72, 1.37-1.95, corners r ≈ 0.1; [F] the pane's glass 821 × 660 | the doors' top 1.93 → 2.12 into the roof's rounding (`railRun.rear` 0.03, the tail upright), panes ±0.06-0.68 × 1.32-1.82 r 0.06 → ±0.09-0.71 × 1.37-1.95 r 0.09 |
+| Rear hinges, handle | [P 941182264-01] hinges ±0.74-0.86 at 0.74-0.81 and 1.67-1.75; the handle on the right leaf by its inner edge at 1.22 | hinges ±0.62-0.79 at 0.80-0.87 / 1.62-1.69 → ±0.72-0.81 at 0.74-0.81 / 1.67-1.75 (to the kit's shut line ±0.80); handle 1.05 → 1.22 |
+| Sides, belt, crease, bonnet, face | [D32], [DM], [P] | unchanged: they agree with §4 within the drawings' accuracy |
+
+### 9.3 The saloon: 13 seats [owner-seat-plan-322132, the brochure's 13-seat plan, O]
+
+The plan scaled 6.0 mm/px between the rearward row's backs (y 458, the kit's s 2.03) and
+the rear doors' inside (y 1004, s 5.30); across, its inner walls (x 122, 436) are 1.88 m
+apart at that scale, the kit's ±0.90 [the plan's own body outline gives 5.36 mm/px along
+and 5.6 across: it is not to one scale]. Seat hips (ds behind the cowl 0.86; the plan's
+seat centres, less the kit seat's 0.125 between its hip and its middle):
+
+| Seats | Plan (px) | s, x (kit) | Facing |
+|---|---|---|---|
+| Driver, double passenger | — | unchanged (§8) | forward |
+| Row 1: three across, left of the door's entry | y 458-572, x 122-196 / 200-275 / 280-355 | s 2.15; x 0.62, 0.15, −0.32 (was 0.6, 0, −0.6) | rearward, backs to the cab |
+| One on the left wall, opposite the door | y 605-680, back x 115-145 | s 3.13; x 0.56 | sideways, facing the aisle |
+| Row 2: one left, a pair right | y 708-835 | s 4.05; x 0.63 / −0.21, −0.66 (was s 3.25) | forward |
+| Two on each wall at the back | y 845-920, 922-1000 | s 4.57, 5.04; x ±0.56 | sideways, facing the aisle |
+
+2 + 3 + 1 + 3 + 4 = 13 passengers. The sideways seats are `facing: 0` (new): the seat
+turned a quarter, its back to its wall. Their hips stand at ±0.56, not the plan's ±0.64,
+so the reclined backs' tops stay inside the greenhouse's tumblehome: at ±0.64 they stood
+3 cm out through the glass. The grab pole moved to the forward left seat's
+front-right corner, s 3.62, x 0.30 [O owner-6730fa4d]; the grab rail over the door
+unchanged. The rear passengers' eye over row 2's left seat. Getting in: every left seat →
+rear-left, every right seat → rear-right (unchanged). No partition: the factory plan has
+none (the brochure's other 13-seat variant has a low one) and the owner's photos show the
+driver's seat over the rearward row.
+
+### 9.4 Also changed
+
+The grille (the 32213 only): a chrome frame and five chrome dividers 3 cm proud, i.e.
+two rows of six cells [O]. The shared grille's 15 mm bars sit inside its dark back and are
+never built; the GAZ-3302 keeps that grille.
+
+### 9.5 Checks and captures
+
+`npm run kit-check -- gaz3221`: pass (zfight, proportions, reality, mirrors L100 % R80 %,
+0 dents, 13 111 triangles, drawing 8/8, dash 3/3). Fingerprints: the other 30 cars read
+identical (zil130 and gaz3302 against temporary records taken before this round).
+Close-ups: build/kitcheck/gaz3221/close-{front34,rear34,side,side-left,front,rear,
+windows,interior-door,interior-rear,driver}.png. Sheets (source | lab): compare-{front34,
+rear34,side,side-left,side-drawing,front,rear,windows,interior-door,interior-rear,driver,
+seatplan}.png.
+
+What still differs on the sheets: the real roof's long edges and rear corners are
+rounder (the kit's two chamfer facets); the grille's dividers hardly show at 3/4 in
+daylight; the bumpers are black, as on the 1996 press cars (the owner's car has grey
+ones); the rear doors stop at the kit's shut line ±0.80 (the real one is ±0.83), so the
+hinges are narrower; the slider's divider in the left front saloon window, the screen's
+wide black rubber, the low cab partition of the brochure's other 13-seat variant and the
+blue vinyl and floor tread are not drawn; the first saloon window's front edge stands 6 cm
+behind the drawings' mean.
+

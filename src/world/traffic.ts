@@ -2679,20 +2679,16 @@ export class RoadTraffic {
    * (`far`, render/farcars.ts) and the mid ones as their mid parts (`mid`); the near ones
    * cast their shadows as their far mesh in `shadow`, the shadow-only field. A crashed
    * car, and a wreck on its side, end or roof, is drawn in full: see CRASH_FULL_DETAIL_S.
+   * The caller begins and ends the three fields (main.ts draws the race's rivals into
+   * them as well).
    */
   syncVisuals(alpha: number, far: FarCarField, mid: FarCarField, shadow: FarCarField): void {
-    far.begin();
-    mid.begin();
-    shadow.begin();
     for (const car of this.carList) {
       const q = car.vehicle.root.quaternion;
       const upright = 1 - 2 * (q.x * q.x + q.z * q.z) >= WRECK_UP_MAX;
       const lod = car.fullDetailFor <= 0 && upright;
       car.vehicle.syncVisuals(alpha, lod ? far : null, lod ? mid : null, lod ? shadow : null);
     }
-    far.end();
-    mid.end();
-    shadow.end();
   }
 
   dispose(): void {
@@ -3340,10 +3336,19 @@ export class RoadTraffic {
 
   /** This machine's traffic ceiling; see `TRAFFIC_CAPS`. Read live so the menu applies at once. */
   private get trafficCap(): number {
-    return this.capOverride ?? TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
+    const cap = this.capOverride ?? TRAFFIC_CAPS[this.sourceWorld.state.settings.trafficDensity];
+    return this.raceCeiling === null ? cap : Math.min(cap, this.raceCeiling);
   }
 
   private capOverride: number | null = null;
+
+  /**
+   * A lower ceiling while a race runs at a track (race/director.ts `trafficCeiling`, set by
+   * main.ts every step; null otherwise): the race is off the road, and the stream's cars
+   * are the largest cost of a race frame. Surplus cars drain behind the player as at any
+   * lowering; the menu's ceiling comes back when the race is over.
+   */
+  raceCeiling: number | null = null;
 
   /**
    * Console and dev-menu override of the menu's traffic ceiling (`__bro.traffic.cap = 30`;

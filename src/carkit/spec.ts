@@ -141,6 +141,13 @@ export interface CabinColumn {
    * The rail's chamfer onto the roof stays painted. Absent: painted.
    */
   readonly finish?: 'black' | 'chrome';
+  /**
+   * The glass on the strip from this column to the next is a rounded pane: each of its
+   * four corners rounded on this radius inside the strip's window band, the strip's own
+   * paint (or `finish`) filling the corners round it (the GAZelle minibus's saloon
+   * windows). For a strip of one pane between two painted columns. Absent: square corners.
+   */
+  readonly glassRound?: number;
 }
 
 export interface CabinSpec {
@@ -169,6 +176,15 @@ export interface CabinSpec {
    * steps (convex with `up` > `across`). Absent: one straight chamfer.
    */
   readonly railBend?: readonly [number, number];
+  /**
+   * The rail's chamfer over the end glass runs this far along the car instead of
+   * `railInset`. `front`: a raised roof rising from the windscreen's header in one long
+   * slope over the cab, the columns under it carrying a tapering share of the chamfer;
+   * its end stands on a column's top. `rear`: the tail's face standing up into the roof's
+   * edge, the tailgate's top (`rearPanes.top`) cutting the chamfer there (the GAZelle
+   * minibus's raised roof and rear doors). Absent: `railInset` at both ends.
+   */
+  readonly railRun?: { readonly front?: number; readonly rear?: number };
   /**
    * The roof's line in profile: `[s, drop]` points, nose to tail. At s everything at the
    * roof (the rail and its chamfer, the side glass's and the end glass's tops, the roof's

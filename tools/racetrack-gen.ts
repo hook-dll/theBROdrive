@@ -20,13 +20,19 @@
  *    under the asphalt everywhere on the track and level with the run-off's plane, and
  *    no slope in the skirt round it is a wall;
  *  - VARIED AND DENSE: laps 0.9-1.7 km, nine corner features or more each (a chicane
- *    or esses counts once), most with a hairpin, most banked into a corner by 7% or
- *    more and rising 3 m or more;
+ *    or esses counts once), most with a hairpin, most banked into a corner by 8° or
+ *    more and with 12 m or more between their highest and lowest points, none steeper
+ *    than `GRADE_MAX`;
  *  - DRESSED: no two paint quads overlap (a curb or the chequers cut the edge line
- *    under them), and every chicane is CLOSED — each straight cut from the entry
- *    straight's asphalt to the exit straight's, at any pair of laterals, meets the solid
- *    core of a rock or log (`chicaneBlockers`), and none stays on the asphalt — while
- *    every blocker stands 1.5 m or more clear of the asphalt;
+ *    under them), and every chicane is CLOSED by exactly one rock and one log
+ *    (`chicaneBlockers`) — each straight cut from the entry straight's asphalt to the
+ *    exit straight's, at any pair of laterals, meets the solid core of one of them, and
+ *    none stays on the asphalt — while both stand 1.5 m or more clear of the asphalt;
+ *    every checkpoint gate (`checkpointGates`) has its posts just beyond the asphalt's
+ *    edge, its beam `GATE_CLEARANCE_MIN_M` or more over the surface, and no post near a
+ *    blocker; the numbers per post and per blocker are printed;
+ *  - LANE: the access lane's drawn surface is its collider, and a wheel crossing its
+ *    edge meets no step (tools/racelane.ts);
  *  - CHEAP TO SHOW: every placed track is built by the provider with its colliders and
  *    each build step timed: none may hold the main thread past `STEP_BUDGET_MS`, and a
  *    placement (`terrain.raceTracks.track`) averages `PLACE_BUDGET_MS` or less;
@@ -39,9 +45,12 @@
  * has the levelled desert, and the lap time, pace and worst excursion are reported.
  * Last, one track per seed is plotted top-down to build/race/track-<seed>-<post>.svg:
  * asphalt, curbs, edge lines, numbered checkpoint gates, blockers, grid slots and the
- * centreline coloured by height.
+ * centreline coloured by height; and the first seed's first track with a chicane is
+ * plotted close up at a chicane and at a gate, from the collider data itself, to
+ * build/race/gates-anticut-<seed>.svg.
  */
 
+import RAPIER from '@dimforge/rapier3d-compat';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { emptyInput } from '../src/core/input';
@@ -53,6 +62,7 @@ import { preloadCarModels } from '../src/render/carmodel';
 import { Autopilot } from '../src/vehicle/autopilot';
 import { Vehicle } from '../src/vehicle/vehicle';
 import type { ChunkContext } from '../src/world/chunks';
+import { tileGroundSampler } from '../src/world/deserttiledata';
 import { postSlot } from '../src/world/poislots';
 import { postS } from '../src/world/poststops';
 import type { InstanceBatches } from '../src/world/props/instancebatch';
@@ -63,11 +73,12 @@ import { RoadDistance } from '../src/world/roaddistance';
 import { roadHalf, roadsideStop } from '../src/world/settlement';
 import { Terrain } from '../src/world/terrain';
 import { CHICANE_SHIFT_MIN_M, CURVATURE_SMOOTH_M, loopSeparation, NEIGHBOUR_S_M, TRACK_CLEAR_M, TRACK_MAX_LENGTH_M, TRACK_MIN_LENGTH_M } from '../src/world/racetrack/layout';
-import { chicaneBlockers, RaceTrackProvider, trackChicanes, trackPaintRects, TRACK_LIFT_M, type TrackPaintRect } from '../src/world/racetrack/mesh';
+import { checkpointGates, chicaneBlockers, RaceTrackProvider, trackChicanes, trackPaintRects, TRACK_LIFT_M, type TrackPaintRect } from '../src/world/racetrack/mesh';
 import { CHUNK_SPREAD_M, LANE_HALF_WIDTH_M, postHasTrack, RUNOFF_M, SKIRT_M } from '../src/world/racetrack/site';
 import type { RaceTrack } from '../src/world/racetrack/track';
 import { installAssetShim } from './assetshim';
 import { installDocumentShim } from './domshim';
+import { measureLane, newLaneMeasure } from './racelane';
 import { buildLapGround } from './racelapworld';
 
 class BunProgressEvent extends Event implements ProgressEvent {
@@ -96,6 +107,12 @@ const RUNOFF_FIT_M = 0.25;
 /** Longest a build step may hold the main thread, and the mean placement's budget, ms. */
 const STEP_BUDGET_MS = 4;
 const PLACE_BUDGET_MS = 60;
+/** Steepest grade a lap may have (site.ts holds 11%), and the least clearance under a gate's beam. */
+const GRADE_MAX = 0.111;
+const GATE_CLEARANCE_MIN_M = 5;
+/** The lane: most its drawn surface may stand off its collider, or off what a wheel stands on, and the largest jump across 0.25 m. */
+const LANE_DRAWN_FIT_M = 0.03;
+const LANE_STEP_MAX_M = 0.12;
 
 let failures = 0;
 function check(label: string, ok: boolean, detail: string): void {
@@ -220,7 +237,7 @@ console.log(
     `(${((rows.length / settlements) * 100).toFixed(0)}% of settlements)`,
 );
 console.log(
-  '\n seed post    km  lap m feat hp ch es  elev  bank°  offc° grade  asph grav dirt  corners                   place ms step ms build ms',
+  '\n seed post    km  lap m feat hp ch es  elev climb  bank°  offc° grade  asph grav dirt  corners                   place ms step ms build ms',
 );
 for (const { seed, track, ms } of rows) {
   const st = track.stats;
@@ -232,7 +249,7 @@ for (const { seed, track, ms } of rows) {
     ` ${String(seed).padStart(4)} ${String(track.postIndex).padStart(4)} ${(track.postS / 1000).toFixed(1).padStart(5)} ` +
       `${track.lengthM.toFixed(0).padStart(6)} ${String(featureCount(track)).padStart(4)} ${String(st.corners.hairpin ?? 0).padStart(2)} ` +
       `${String(st.corners.chicane ?? 0).padStart(2)} ${String(st.corners.esses ?? 0).padStart(2)} ${st.elevationM.toFixed(1).padStart(5)} ` +
-      `${degrees(st.maxBank).toFixed(1).padStart(6)} ${degrees(st.maxOffCamber).toFixed(1).padStart(6)} ${(st.maxGrade * 100).toFixed(1).padStart(5)}% ` +
+      `${st.climbM.toFixed(0).padStart(5)} ${degrees(st.maxBank).toFixed(1).padStart(6)} ${degrees(st.maxOffCamber).toFixed(1).padStart(6)} ${(st.maxGrade * 100).toFixed(1).padStart(5)}% ` +
       `${(st.surfaceShare.asphalt * 100).toFixed(0).padStart(4)}% ${(st.surfaceShare.gravel * 100).toFixed(0).padStart(3)}% ` +
       `${(st.surfaceShare.dirt * 100).toFixed(0).padStart(3)}%  ${corners.padEnd(25)} ${ms.toFixed(0).padStart(8)} ` +
       `${timing.maxStepMs.toFixed(2).padStart(7)} ${timing.totalMs.toFixed(1).padStart(8)}`,
@@ -314,9 +331,9 @@ let mixed = 0;
 let fewestFeatures = Infinity;
 for (const { track } of rows) {
   for (const corner of track.corners) kinds.add(corner.kind);
-  if (track.stats.elevationM >= 3) withHill++;
+  if (track.stats.elevationM >= 12) withHill++;
   if (track.stats.maxOffCamber > 0.01) withOffCamber++;
-  if (track.stats.maxBank >= 0.07) withBank++;
+  if (track.stats.maxBank >= Math.tan((8 * Math.PI) / 180)) withBank++;
   if (track.stats.corners.hairpin) withHairpin++;
   fewestFeatures = Math.min(fewestFeatures, featureCount(track));
   const share = track.stats.surfaceShare;
@@ -334,11 +351,22 @@ check(
   fewestFeatures >= 9 && withHairpin >= rows.length * 0.6,
   `fewest features ${fewestFeatures}, ${withHairpin} of ${rows.length} with a hairpin (${((withHairpin / rows.length) * 100).toFixed(0)}%)`,
 );
+/** min-median-mean-max of a list, at `digits`. */
+const spread = (values: readonly number[], digits: number): string => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mean = sorted.reduce((a, b) => a + b, 0) / sorted.length;
+  return `${sorted[0]!.toFixed(digits)}-${sorted[sorted.length - 1]!.toFixed(digits)} (median ${sorted[Math.floor(sorted.length / 2)]!.toFixed(digits)}, mean ${mean.toFixed(digits)})`;
+};
+console.log(`  elevation (highest - lowest) m: ${spread(rows.map((r) => r.track.stats.elevationM), 1)}`);
+console.log(`  climb per lap m:                ${spread(rows.map((r) => r.track.stats.climbM), 0)}`);
+console.log(`  steepest bank °:                ${spread(rows.map((r) => degrees(r.track.stats.maxBank)), 1)}`);
+console.log(`  steepest grade %:               ${spread(rows.map((r) => r.track.stats.maxGrade * 100), 1)}`);
 check(
-  'every lap mixes surfaces, most have real banking and height',
-  mixed === rows.length && withBank >= rows.length * 0.6 && withHill >= rows.length * 0.6,
-  `${mixed} mixed, ${withBank} banked to 7% (${degrees(0.07).toFixed(1)}°)+, ${withOffCamber} with an off-camber corner, ` +
-    `${withHill} rising 3 m+; piece kinds seen: ${[...kinds].sort().join(', ')}`,
+  'every lap mixes surfaces, most have real banking and height, none too steep to climb',
+  mixed === rows.length && withBank >= rows.length * 0.6 && withHill >= rows.length * 0.6 && rows.every((r) => r.track.stats.maxGrade <= GRADE_MAX),
+  `${mixed} mixed, ${withBank} banked to 8°+, ${withOffCamber} with an off-camber corner, ` +
+    `${withHill} spanning 12 m+ of height, steepest grade ${(Math.max(...rows.map((r) => r.track.stats.maxGrade)) * 100).toFixed(1)}% ` +
+    `(ceiling ${(GRADE_MAX * 100).toFixed(1)}); piece kinds seen: ${[...kinds].sort().join(', ')}`,
 );
 
 // ---------------------------------------------------------------------------
@@ -447,6 +475,117 @@ check(
     `the straight's line (rolled ${CHICANE_SHIFT_MIN_M}+, eased a little by the clothoids), cuts that stay on the asphalt: ${linesOnAsphalt}${openExample}`,
 );
 check('the blockers stand clear of the asphalt', nearestBlocker >= 1.5, `nearest outline ${nearestBlocker.toFixed(2)} m beyond the asphalt's edge (floor 1.5)`);
+
+// Exactly one rock and one log per chicane, and where each stands off the centreline.
+let wrongMix = 0;
+let blockerCentreMin = Infinity;
+const blockerLines: string[] = [];
+for (const { seed, track } of rows) {
+  const blockers = chicaneBlockers(track);
+  trackChicanes(track).forEach((_, index) => {
+    const mine = blockers.filter((b) => b.chicane === index);
+    const rocks = mine.filter((b) => b.kind === 'rock');
+    const logs = mine.filter((b) => b.kind === 'log');
+    if (rocks.length !== 1 || logs.length !== 1 || mine.length !== 2) wrongMix++;
+    const parts = mine.map((b) => {
+      // Nearest the outline comes to the centreline, along a log's whole length.
+      let near = Infinity;
+      let far = 0;
+      const steps = Math.max(1, Math.ceil(b.halfLength * 2));
+      for (let k = 0; k <= steps; k++) {
+        const t = b.halfLength > 0 ? -1 + (2 * k) / steps : 0;
+        const p = track.project(b.x + Math.cos(b.yaw) * b.halfLength * t, b.z - Math.sin(b.yaw) * b.halfLength * t);
+        near = Math.min(near, Math.abs(p.lateral) - b.radius);
+        far = Math.max(far, Math.abs(p.lateral) + b.radius);
+      }
+      blockerCentreMin = Math.min(blockerCentreMin, near);
+      return b.kind === 'rock'
+        ? `rock r${b.radius.toFixed(1)} ${near.toFixed(1)} m off the centreline`
+        : `log ${(2 * b.halfLength).toFixed(1)} m x ${(2 * b.radius).toFixed(1)} ${near.toFixed(1)}-${far.toFixed(1)} m off`;
+    });
+    blockerLines.push(`  seed ${seed} ${track.id} chicane ${index} (half width ${track.halfWidth.toFixed(1)}): ${parts.join('; ')}`);
+  });
+}
+console.log(`\nanti-cut blockers, every one (distances from the centreline to the outline):\n${blockerLines.join('\n')}`);
+check(
+  'every chicane has exactly one rock and one log',
+  wrongMix === 0,
+  `${chicaneCount} chicanes, ${blockerTotal} blockers (${(blockerTotal / Math.max(1, chicaneCount)).toFixed(1)} per chicane), ${wrongMix} not one rock and one log; ` +
+    `nearest outline ${blockerCentreMin.toFixed(2)} m from the centreline`,
+);
+
+// The checkpoint gates: posts just beyond the edge, never on the asphalt nor by a
+// blocker, the beam clear of the tallest load.
+let postEdgeMin = Infinity;
+let postEdgeMax = -Infinity;
+let postCentreMin = Infinity;
+let beamClearanceMin = Infinity;
+let postBlockerMin = Infinity;
+let gateCount = 0;
+let gateBoxes = 0;
+let gatesInChicane = 0;
+const gateLines: string[] = [];
+for (const { seed, track } of rows) {
+  const hw = track.halfWidth;
+  const boxes = checkpointGates(track);
+  const blockers = chicaneBlockers(track);
+  gateCount += track.checkpoints.length;
+  gateBoxes += boxes.length;
+  for (const s of track.checkpoints) {
+    for (const chicane of trackChicanes(track)) if (s > chicane.startS && s < chicane.startS + chicane.length) gatesInChicane++;
+  }
+  let edgeMin = Infinity;
+  let centreMin = Infinity;
+  let clearMin = Infinity;
+  for (const box of boxes) {
+    const ux = Math.cos(box.yaw);
+    const uz = -Math.sin(box.yaw);
+    const fx = Math.sin(box.yaw);
+    const fz = Math.cos(box.yaw);
+    if (box.part === 'beam') {
+      // The beam's underside over the highest point of the surface under it, post to post.
+      for (let l = -box.halfX; l <= box.halfX; l += 0.25) clearMin = Math.min(clearMin, box.y - box.halfY - track.surfaceY(box.s, l));
+      continue;
+    }
+    // The post's footprint, its edges sampled: nearest it comes to the centreline.
+    for (let a = -1; a <= 1; a += 0.25) {
+      for (const b of [-1, 1]) {
+        for (const [p, q] of [
+          [a, b],
+          [b, a],
+        ] as const) {
+          const x = box.x + ux * box.halfX * p + fx * box.halfZ * q;
+          const z = box.z + uz * box.halfX * p + fz * box.halfZ * q;
+          const at = track.project(x, z, box.s);
+          centreMin = Math.min(centreMin, Math.abs(at.lateral));
+          edgeMin = Math.min(edgeMin, Math.abs(at.lateral) - hw);
+          for (const blocker of blockers) {
+            const along = Math.max(-blocker.halfLength, Math.min(blocker.halfLength, (x - blocker.x) * Math.cos(blocker.yaw) - (z - blocker.z) * Math.sin(blocker.yaw)));
+            const d = Math.hypot(x - blocker.x - Math.cos(blocker.yaw) * along, z - blocker.z + Math.sin(blocker.yaw) * along) - blocker.radius;
+            postBlockerMin = Math.min(postBlockerMin, d);
+          }
+        }
+      }
+    }
+  }
+  postEdgeMin = Math.min(postEdgeMin, edgeMin);
+  postEdgeMax = Math.max(postEdgeMax, edgeMin);
+  postCentreMin = Math.min(postCentreMin, centreMin);
+  beamClearanceMin = Math.min(beamClearanceMin, clearMin);
+  gateLines.push(
+    `  seed ${seed} ${track.id}: ${track.checkpoints.length} gates at ${track.checkpoints.map((s) => s.toFixed(0)).join('/')} m; ` +
+      `post colliders ${edgeMin.toFixed(2)} m+ beyond the asphalt edge, ${centreMin.toFixed(2)} m+ from the centreline (half width ${hw.toFixed(2)}); ` +
+      `beam ${clearMin.toFixed(2)} m+ over the surface`,
+  );
+}
+console.log(`\ncheckpoint gates, every track (each post's collider footprint against the lap):\n${gateLines.join('\n')}`);
+check(
+  'every gate collides, its posts just beyond the asphalt edge, clear of the blockers, its beam over the tallest load',
+  gateBoxes === gateCount * 3 && postEdgeMin > 0.5 && postEdgeMax < 1.2 && gatesInChicane === 0 && postBlockerMin > 5 && beamClearanceMin >= GATE_CLEARANCE_MIN_M,
+  `${gateCount} gates, ${gateBoxes} collider boxes (2 posts and a beam each); post footprints ${postEdgeMin.toFixed(2)}-${postEdgeMax.toFixed(2)} m beyond the asphalt edge ` +
+    `at nearest, ${postCentreMin.toFixed(2)} m+ from the centreline; ${gatesInChicane} gates inside a chicane; nearest blocker outline ${postBlockerMin.toFixed(1)} m from a post; ` +
+    `beam underside ${beamClearanceMin.toFixed(2)} m+ over the surface (floor ${GATE_CLEARANCE_MIN_M})`,
+);
 
 // ---------------------------------------------------------------------------
 // Placement and ground.
@@ -585,8 +724,42 @@ console.log('\nstreaming');
   check(
     'colliders only in the physics band, built disabled, freed with the chunk',
     visualBodies === 0 && bodies > 0 && disabled === bodies && after === before,
-    `${visualBodies} bodies visual-only, ${bodies} static trimesh bodies physical (all disabled until attached), ` +
+    `${visualBodies} bodies visual-only, ${bodies} static bodies physical (all disabled until attached), ` +
       `${after - before} left after teardown`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The access lane: what is drawn is what a wheel stands on, and its edge is no step.
+// ---------------------------------------------------------------------------
+console.log('\naccess lane');
+{
+  const lane = newLaneMeasure();
+  const laneDistances = new Map<number, RoadDistance>();
+  for (const { seed, track } of rows) {
+    // A world of its own per track: only this build's colliders under the rays.
+    const lanePhysics = await PhysicsWorld.create();
+    const entry = providers.get(seed)!;
+    const context = { ...chunkContext(seed, track, true, entry.world), physics: lanePhysics };
+    const built = entry.provider.build(context);
+    if (!built) continue;
+    for (const collider of built.colliders) collider.setEnabled(true);
+    lanePhysics.step();
+    // The shared road-distance index the provider's lane drape asks, as the tiles do.
+    const { road, terrain } = terrains.get(seed)!;
+    let roadDistance = laneDistances.get(seed);
+    if (!roadDistance) laneDistances.set(seed, (roadDistance = new RoadDistance(road)));
+    const ground = tileGroundSampler({ seed, road, terrain, roadDistance });
+    measureLane(track, built.group, lanePhysics, ground, context.originX, context.originZ, lane);
+    built.dispose?.();
+    lanePhysics.world.free();
+  }
+  check(
+    'the lane is collided as drawn and its edges are no step',
+    lane.drawnVsCollider <= LANE_DRAWN_FIT_M && lane.sink <= LANE_DRAWN_FIT_M && lane.step <= LANE_STEP_MAX_M,
+    `${lane.samples} samples across ${rows.length} lanes, every 0.25 m from the middle to past the widest shoulder: drawn vs collider ${(lane.drawnVsCollider * 100).toFixed(1)} cm at worst, ` +
+      `drawn surface over what a wheel stands on ${(lane.sink * 100).toFixed(1)} cm at worst (${lane.sinkAt}), largest jump in what a wheel stands on across 0.25 m beyond the desert's own ` +
+      `${(lane.step * 100).toFixed(1)} cm (${lane.stepAt})`,
   );
 }
 
@@ -597,7 +770,11 @@ if (LAP_TRACKS > 0) {
   await preloadCarModels([MODEL_ID]);
   console.log('\ndrivability (frantic, one lap from the grid)');
 }
+/** Each driven lap's path, world x, z pairs: the racing line the proof plot draws. */
+const drivenPaths = new Map<RaceTrack, number[]>();
 for (const { seed, track } of rows.slice(0, LAP_TRACKS)) {
+  const path: number[] = [];
+  drivenPaths.set(track, path);
   const lapPhysics = await PhysicsWorld.create();
   const origin = new WorldOrigin();
   const grid = track.startGrid[0];
@@ -639,6 +816,7 @@ for (const { seed, track } of rows.slice(0, LAP_TRACKS)) {
     vehicle.postStep();
     elapsed += FIXED_DT;
     vehicle.absoluteTranslation(position);
+    path.push(position.x, position.z);
     const projection = track.project(position.x, position.z, hint);
     hint = projection.s;
     let delta = projection.s - previousS;
@@ -741,18 +919,20 @@ function trackSvg(track: RaceTrack, caption: readonly string[]): string {
   }
   const post = hw + 1.8;
   out.push(`<polyline points="${ring(0, -post)} ${ring(0, post)}" stroke="#444" stroke-width="0.8"/>`);
-  track.checkpoints.forEach((s, i) => {
-    out.push(`<polyline points="${ring(s, -post)} ${ring(s, post)}" stroke="#e3b21c" stroke-width="1"/>`);
-    track.offsetPoint(s, post + 5, at);
-    out.push(`<text x="${at.x.toFixed(1)}" y="${at.z.toFixed(1)}" font-size="7" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle" fill="#7a5c00">${i + 1}</text>`);
-  });
+  for (const box of checkpointGates(track)) {
+    out.push(boxFootprint(box.x, box.z, box.halfX, box.halfZ, box.yaw, box.part === 'beam' ? 'fill="#e3b21c" fill-opacity="0.6"' : 'fill="#333"'));
+    if (box.part === 'beam') {
+      track.offsetPoint(box.s, post + 5, at);
+      out.push(`<text x="${at.x.toFixed(1)}" y="${at.z.toFixed(1)}" font-size="7" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle" fill="#7a5c00">${box.gate + 1}</text>`);
+    }
+  }
   for (const b of chicaneBlockers(track)) {
     if (b.kind === 'rock') {
       out.push(`<circle cx="${b.x.toFixed(2)}" cy="${b.z.toFixed(2)}" r="${b.radius.toFixed(2)}" fill="#815f42" stroke="#4a3624" stroke-width="0.15"/>`);
     } else {
       const ux = Math.cos(b.yaw) * b.halfLength;
       const uz = -Math.sin(b.yaw) * b.halfLength;
-      out.push(`<line x1="${(b.x - ux).toFixed(2)}" y1="${(b.z - uz).toFixed(2)}" x2="${(b.x + ux).toFixed(2)}" y2="${(b.z + uz).toFixed(2)}" stroke="#6e5a3c" stroke-width="${(2 * b.solid + 0.2).toFixed(2)}" stroke-linecap="round"/>`);
+      out.push(`<line x1="${(b.x - ux).toFixed(2)}" y1="${(b.z - uz).toFixed(2)}" x2="${(b.x + ux).toFixed(2)}" y2="${(b.z + uz).toFixed(2)}" stroke="#6e5a3c" stroke-width="${(2 * b.radius).toFixed(2)}" stroke-linecap="round"/>`);
     }
   }
   caption.forEach((line, i) => {
@@ -760,6 +940,21 @@ function trackSvg(track: RaceTrack, caption: readonly string[]): string {
   });
   out.push('</svg>');
   return out.join('\n');
+}
+
+/** A box's footprint seen from above: half extents across (`hx`) and along (`hz`), turned `yaw`. */
+function boxFootprint(x: number, z: number, hx: number, hz: number, yaw: number, style: string): string {
+  const ux = Math.cos(yaw);
+  const uz = -Math.sin(yaw);
+  const fx = Math.sin(yaw);
+  const fz = Math.cos(yaw);
+  const corners = [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ].map(([a, b]) => `${(x + ux * hx * a! + fx * hz * b!).toFixed(3)},${(z + uz * hx * a! + fz * hz * b!).toFixed(3)}`);
+  return `<polygon points="${corners.join(' ')}" ${style}/>`;
 }
 
 mkdirSync('build/race', { recursive: true });
@@ -770,18 +965,178 @@ for (const { seed, track } of plotted.slice(0, 3)) {
   const st = track.stats;
   const corners = Object.entries(st.corners).map(([kind, n]) => `${n} ${kind}`).join(', ');
   const path = `build/race/track-${seed}-${track.postIndex}.svg`;
+  const blockers = chicaneBlockers(track);
   writeFileSync(
     path,
     trackSvg(track, [
       `seed ${seed}, post ${track.postIndex}: ${track.lengthM.toFixed(0)} m, ${featureCount(track)} corner features`,
       corners,
-      `elevation ${st.elevationM.toFixed(1)} m, grade ${(st.maxGrade * 100).toFixed(1)}%, bank ${degrees(st.maxBank).toFixed(1)}°, ` +
-        `off-camber ${degrees(st.maxOffCamber).toFixed(1)}°, tightest ${st.minRadiusM.toFixed(0)} m`,
+      `elevation ${st.elevationM.toFixed(1)} m (highest - lowest), climb ${st.climbM.toFixed(0)} m per lap, grade ${(st.maxGrade * 100).toFixed(1)}%, ` +
+        `bank ${degrees(st.maxBank).toFixed(1)}°, off-camber ${degrees(st.maxOffCamber).toFixed(1)}°, tightest ${st.minRadiusM.toFixed(0)} m`,
+      `${trackChicanes(track).length} chicanes: ${blockers.filter((b) => b.kind === 'rock').length} rocks, ${blockers.filter((b) => b.kind === 'log').length} logs; ` +
+        `${track.checkpoints.length} gates, posts and beam collided`,
     ]),
   );
   plots.push(path);
 }
 console.log(`\nplots: ${plots.join(', ')}`);
+
+// ---------------------------------------------------------------------------
+// Proof: a chicane and a gate close up, drawn from the COLLIDERS themselves — the
+// bench's lap ground built into a physics world, every Rock and Concrete collider read
+// back from Rapier (boxes by their half extents and pose, the rock's trimesh by its
+// triangles) — against the asphalt's edges, the centreline, the straight cuts the
+// chicane closes and the line the autopilot drove.
+// ---------------------------------------------------------------------------
+{
+  const proof = rows.slice(0, LAP_TRACKS).find((row) => trackChicanes(row.track).length > 0) ?? rows.find((row) => trackChicanes(row.track).length > 0);
+  if (proof) {
+    const { seed, track } = proof;
+    const hw = track.halfWidth;
+    const proofPhysics = await PhysicsWorld.create();
+    const origin = new WorldOrigin();
+    origin.reset(track.startGrid[0]!.x, track.startGrid[0]!.z);
+    buildLapGround(proofPhysics, origin, track);
+    // Every solid the lap has besides its ground, as footprints in world XZ.
+    const solids: { kind: string; svg: string; xs: number[]; zs: number[] }[] = [];
+    const turn = new THREE.Quaternion();
+    const corner = new THREE.Vector3();
+    proofPhysics.world.forEachCollider((collider) => {
+      const surface = proofPhysics.surfaces.lookupType(collider.handle);
+      if (surface !== SurfaceType.Rock && surface !== SurfaceType.Concrete) return;
+      const t = collider.translation();
+      const r = collider.rotation();
+      turn.set(r.x, r.y, r.z, r.w);
+      const xs: number[] = [];
+      const zs: number[] = [];
+      if (collider.shape.type === RAPIER.ShapeType.Cuboid) {
+        const h = (collider.shape as RAPIER.Cuboid).halfExtents;
+        for (const [a, b, c] of [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1], [-1, 1, -1], [1, 1, -1], [1, 1, 1], [-1, 1, 1]] as const) {
+          corner.set(h.x * a, h.y * b, h.z * c).applyQuaternion(turn);
+          xs.push(t.x + corner.x + origin.x);
+          zs.push(t.z + corner.z + origin.z);
+        }
+        // Top-down outline of a box: the hull of its eight corners.
+        const hull = convexHull(xs, zs);
+        const kind = surface === SurfaceType.Concrete ? (h.x > 2 ? 'beam' : 'post') : 'log';
+        const fill = kind === 'beam' ? '#e3b21c' : kind === 'post' ? '#d0312d' : '#6e5a3c';
+        solids.push({ kind, xs, zs, svg: `<polygon points="${hull}" fill="${fill}" fill-opacity="${kind === 'beam' ? 0.35 : 0.85}" stroke="#000" stroke-width="0.04"/>` });
+        return;
+      }
+      const vertices = collider.shape.type === RAPIER.ShapeType.TriMesh ? (collider.shape as RAPIER.TriMesh).vertices : null;
+      if (!vertices) return;
+      for (let i = 0; i < vertices.length; i += 3) {
+        corner.set(vertices[i]!, vertices[i + 1]!, vertices[i + 2]!).applyQuaternion(turn);
+        xs.push(t.x + corner.x + origin.x);
+        zs.push(t.z + corner.z + origin.z);
+      }
+      solids.push({ kind: 'rock', xs, zs, svg: `<polygon points="${convexHull(xs, zs)}" fill="#815f42" fill-opacity="0.85" stroke="#000" stroke-width="0.04"/>` });
+    });
+    const counts = new Map<string, number>();
+    for (const solid of solids) counts.set(solid.kind, (counts.get(solid.kind) ?? 0) + 1);
+    const driven = drivenPaths.get(track) ?? [];
+    const at = { x: 0, y: 0, z: 0 };
+    const ring = (s: number, lateral: number): string => {
+      track.offsetPoint(s, lateral, at);
+      return `${at.x.toFixed(2)},${at.z.toFixed(2)}`;
+    };
+    // One panel: the lap's surfaces round `centre`, `half` metres either way, and what stands there.
+    const panel = (cx: number, cz: number, half: number, title: string, extra: string[]): string => {
+      const out: string[] = [
+        `<svg x="0" y="0" viewBox="${(cx - half).toFixed(1)} ${(cz - half).toFixed(1)} ${(2 * half).toFixed(1)} ${(2 * half).toFixed(1)}" width="640" height="640">`,
+        `<rect x="${cx - half}" y="${cz - half}" width="${2 * half}" height="${2 * half}" fill="#dcc79f"/>`,
+      ];
+      const band = (l0: number, l1: number, fill: string): void => {
+        const left: string[] = [];
+        const right: string[] = [];
+        for (let s = 0; s <= track.lengthM; s += 1) {
+          left.push(ring(s, l1));
+          right.push(ring(s, l0));
+        }
+        out.push(`<polygon points="${[...left, ...right.reverse()].join(' ')}" fill="${fill}"/>`);
+      };
+      band(-(hw + RUNOFF_M), hw + RUNOFF_M, '#cfb88c');
+      band(-hw, hw, '#5b5b5e');
+      const line = (lateral: number, style: string): void => {
+        const points: string[] = [];
+        for (let s = 0; s <= track.lengthM; s += 1) points.push(ring(s, lateral));
+        out.push(`<polyline points="${points.join(' ')}" fill="none" ${style}/>`);
+      };
+      line(-hw, 'stroke="#fff" stroke-width="0.12"');
+      line(hw, 'stroke="#fff" stroke-width="0.12"');
+      line(0, 'stroke="#9ad" stroke-width="0.1" stroke-dasharray="1 1"');
+      out.push(...extra);
+      for (const solid of solids) out.push(solid.svg);
+      if (driven.length > 0) {
+        const points: string[] = [];
+        for (let i = 0; i < driven.length; i += 2) points.push(`${driven[i]!.toFixed(2)},${driven[i + 1]!.toFixed(2)}`);
+        out.push(`<polyline points="${points.join(' ')}" fill="none" stroke="#1f9e3a" stroke-width="0.25"/>`);
+      }
+      out.push(`<text x="${(cx - half + 1).toFixed(1)}" y="${(cz - half + 2.5).toFixed(1)}" font-size="${(half / 26).toFixed(2)}" font-family="sans-serif" fill="#111">${title}</text>`);
+      out.push('</svg>');
+      return out.join('\n');
+    };
+    // The chicane: its middle, the straight cuts it closes (entry asphalt edge to exit asphalt edge).
+    const chicane = trackChicanes(track)[0]!;
+    const mid = track.sampleAt(chicane.startS + chicane.length / 2);
+    const cuts: string[] = [];
+    for (const [l0, l1] of [
+      [-hw, -hw],
+      [hw, hw],
+      [-hw, hw],
+      [hw, -hw],
+    ] as const) {
+      cuts.push(`<polyline points="${ring(chicane.startS - 12, l0)} ${ring(chicane.startS + chicane.length + 12, l1)}" fill="none" stroke="#d0312d" stroke-width="0.15" stroke-dasharray="0.8 0.5"/>`);
+    }
+    const mine = chicaneBlockers(track).filter((b) => b.chicane === 0);
+    const blockerNote = mine
+      .map((b) => {
+        const p = track.project(b.x, b.z, b.s);
+        return `${b.kind} ${(Math.abs(p.lateral) - hw - b.radius).toFixed(1)} m past the edge at its middle`;
+      })
+      .join(', ');
+    const chicaneHalf = chicane.length / 2 + 14;
+    // The gate: the first checkpoint's.
+    const gateS = track.checkpoints[0]!;
+    const gateAt = track.sampleAt(gateS);
+    const posts = checkpointGates(track).filter((box) => box.gate === 0 && box.part === 'post');
+    const postNote = posts
+      .map((box) => `${(Math.abs(box.lateral) - box.halfX - hw).toFixed(2)} m`)
+      .join(' and ');
+    const svgPath = `build/race/gates-anticut-${seed}.svg`;
+    writeFileSync(
+      svgPath,
+      [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="700" viewBox="0 0 1300 700">',
+        '<rect width="1300" height="700" fill="#fff"/>',
+        `<text x="10" y="18" font-size="13" font-family="sans-serif">seed ${seed} ${track.id}: collider footprints read back from Rapier (red posts, yellow beam, brown rock, dark log), asphalt edges white, centreline dashed blue, autopilot's driven line green, straight cuts red dashed</text>`,
+        `<text x="10" y="36" font-size="13" font-family="sans-serif">colliders: ${[...counts.entries()].map(([k, n]) => `${n} ${k}`).join(', ')}; chicane 0: ${blockerNote}; gate 1 posts' inner faces ${postNote} beyond the asphalt edge</text>`,
+        `<g transform="translate(10 50)">${panel(mid.x, mid.z, chicaneHalf, `chicane 0, ${chicane.length.toFixed(0)} m`, cuts)}</g>`,
+        `<g transform="translate(655 50)">${panel(gateAt.x, gateAt.z, 14, `gate 1 at ${gateS.toFixed(0)} m`, [])}</g>`,
+        '</svg>',
+      ].join('\n'),
+    );
+    console.log(`proof: ${svgPath} (${[...counts.entries()].map(([k, n]) => `${n} ${k}`).join(', ')} collider(s) read back)`);
+  }
+}
+
+/** The convex hull of points as an SVG points list (monotone chain). */
+function convexHull(xs: readonly number[], zs: readonly number[]): string {
+  const points = xs.map((x, i) => [x, zs[i]!] as const).sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const cross = (o: readonly [number, number], a: readonly [number, number], b: readonly [number, number]): number =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: (readonly [number, number])[] = [];
+  for (const p of points) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: (readonly [number, number])[] = [];
+  for (const p of [...points].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)].map((p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(' ');
+}
 
 console.log(failures === 0 ? '\nall race track checks passed' : `\n${failures} race track check(s) FAILED`);
 if (failures > 0) process.exitCode = 1;

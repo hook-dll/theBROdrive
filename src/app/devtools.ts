@@ -681,6 +681,12 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     // the sky back to the schedule.
     weather: { force: forceWeather, now: weather },
     state: () => ctx.world.state,
+    // `eagle(true)` / `eagle(false)` / `eagle()` to flip: the dev top-down camera
+    // (render/cameras.ts EAGLE FLIGHT). Returns whether it is now on.
+    eagle: (on?: boolean): boolean => {
+      ctx.camera.setEagle(on ?? !ctx.camera.eagleFlight);
+      return ctx.camera.eagleFlight;
+    },
     view: () => ({
       eye: ctx.camera.eyePosition,
       dir: ctx.camera.eyeDirection,
@@ -728,15 +734,16 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     return null;
   };
   /**
-   * `race`: the races at the tracks (race/director.ts). `start()` races the waiting field
-   * from the grid, with no stake; `finish('player' | 'rival')` decides the race on now,
+   * `race`: the races at the tracks (race/director.ts). `start(trailer?)` races the waiting
+   * field from the grid, with no stake (`trailer` true/false forces a trailer race or none);
+   * `finish('player' | 'rival')` decides the race on now,
    * the player first or last (a place pays only when a stake was taken); `restart()` and
    * `back()` are the race keys (Backspace, T); `autodrive(on)` has the race's own racer
    * drive the player's car after the green; `state()` is the track, the field, the stake,
    * every racer's laps and checkpoints, and the results.
    */
   dev['race'] = {
-    start: (): string => ctx.race.devStart(),
+    start: (trailer?: boolean): string => ctx.race.devStart(trailer),
     finish: (winner: 'player' | 'rival' = 'player'): string => ctx.race.devFinish(winner),
     restart: (): string => ctx.race.devKey('restart'),
     back: (): string => ctx.race.devKey('back'),

@@ -555,10 +555,11 @@ const LOOK_2107: KitLook = {
 };
 
 /**
- * Sun visors sized so that, lowered, they end at the driver's eye height (2026-10-18): the
- * Samaras' (the platform's layout as is).
+ * The Samaras' sun visors (the platform's layout as is otherwise): 0.38 x 0.16 [E: no photo
+ * shows them], the outer end 2.5 cm in from the A pillar's trim (2026-10-29: it stood
+ * 10-11 cm off it); lowered they stop at the driver's eye height (`Layout.visor`).
  */
-const VISOR_SAMARA = { half: 0.16, depth: 0.134 } as const;
+const VISOR_SAMARA = { half: 0.19, depth: 0.16, x: 0.385 } as const;
 
 export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   vaz2101: { id: 'vaz2101', ...onBody(BODY_124, -0.045, 4.073), frontLean: NOSE_2101, look: LOOK_2101, cabinLayout: CABIN_2101 },
@@ -606,3 +607,12 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   gaz3302: { id: 'gaz3302', ...BODY_GAZ3302, look: LOOK_GAZ3302, cabinLayout: CABIN_GAZELLE },
   gaz3221: { id: 'gaz3221', ...BODY_GAZ3221, look: LOOK_GAZ3221, cabinLayout: CABIN_GAZ3221 },
 };
+
+/**
+ * The kit car's front seat is one bench across the cab (a truck without
+ * `Layout.frontSeats`, the ZIL-130; carkit/interior.ts `truckBench`): its middle is a seat.
+ */
+export function kitFrontBench(kitId: string): boolean {
+  const spec = KIT_SPECS[kitId];
+  return spec !== undefined && spec.platform === 'truck' && !spec.cabinLayout?.frontSeats;
+}

@@ -16,9 +16,10 @@ import { LapCounter } from './laps';
  *  - STANDINGS. Finished racers by their finishing time; the rest by how far they have
  *    run (`LapCounter.score`); level, the lower index (the player first).
  *  - FINISH. A racer who completes `RACE_LAPS` is finished there and then, its time the
- *    race clock. The race is OVER when the player is finished (or out) and either every
- *    rival is finished or `FINISH_WAIT_S` has passed since; whoever is still running
- *    then is classified by distance, without a time.
+ *    race clock. The race is OVER the moment the player is finished (or out): no waiting
+ *    for the others. His place is final; whoever is still running is classified where it
+ *    is (laps done, then distance) and timed by `projectedTime`, its average pace so far
+ *    carried to the flag.
  *  - OUT. The player out of the track area (`LapCounter.onTrack`) for more than
  *    `OFF_TRACK_FORFEIT_S`, or further than `AWAY_FORFEIT_M` from its centreline, is out
  *    of the race (`out`), and so is he for the director's own reasons (out of the car, the
@@ -27,7 +28,7 @@ import { LapCounter } from './laps';
  * Nothing is allocated per step.
  */
 
-export const RACE_LAPS = 3;
+export const RACE_LAPS = 2;
 /** Seconds between one red light and the next; the green comes one step after the third red. */
 export const LIGHT_STEP_S = 1;
 /** The lights before the green: red, red, red. */
@@ -39,8 +40,6 @@ export const RED_LIGHTS = 3;
 export const OFF_TRACK_FORFEIT_S = 20;
 /** Metres from the centreline past which the player has left the race. */
 export const AWAY_FORFEIT_M = 150;
-/** Seconds the race waits for the rivals still running once the player is done. */
-export const FINISH_WAIT_S = 45;
 
 export type RacePhase = 'countdown' | 'racing' | 'finished';
 /** How the player's race ended. */
@@ -62,8 +61,8 @@ export class RaceSession {
   /** Racer indices in finishing order (as they cross; `order` is the full classification). */
   private readonly finishers: number[] = [];
   private readonly lapStarts: Float64Array;
-  /** Race time the player was done at, for `FINISH_WAIT_S`. */
-  private playerDoneAt = Number.NaN;
+  /** Per racer, its standings score on the grid (`LapCounter.score`), for `projectedTime`. */
+  private readonly startScores: Float64Array;
   /** The classification, best first, rewritten by `standings`. */
   private readonly orderStore: number[];
 
@@ -72,6 +71,7 @@ export class RaceSession {
     this.finishTimes = new Float64Array(racers).fill(Number.NaN);
     this.lapTimes = new Float64Array(racers * RACE_LAPS).fill(Number.NaN);
     this.lapStarts = new Float64Array(racers);
+    this.startScores = new Float64Array(racers);
     this.orderStore = Array.from({ length: racers }, (_, i) => i);
   }
 
@@ -81,12 +81,14 @@ export class RaceSession {
     this.clock = 0;
     this.raceTime = 0;
     this.end = null;
-    this.playerDoneAt = Number.NaN;
+    for (let i = 0; i < this.racers; i++) {
+      this.counters[i]!.reset(xs[i]!, zs[i]!);
+      this.startScores[i] = this.counters[i]!.score;
+    }
     this.finishers.length = 0;
     this.finishTimes.fill(Number.NaN);
     this.lapTimes.fill(Number.NaN);
     this.lapStarts.fill(0);
-    for (let i = 0; i < this.racers; i++) this.counters[i]!.reset(xs[i]!, zs[i]!);
   }
 
   /** Lights shown: 0 none, 1-3 that many red, 4 green. */
@@ -118,6 +120,20 @@ export class RaceSession {
   /** Racer `i`'s time for lap `lap` (0-based), seconds, or NaN. */
   lapTime(i: number, lap: number): number {
     return this.lapTimes[i * RACE_LAPS + lap]!;
+  }
+
+  /**
+   * Racer `i`'s race time: at the flag, or for one still running when the race ended, the
+   * time its average pace so far would have taken it to the flag (`RACE_LAPS` laps from
+   * its grid box). NaN before it has run anything.
+   */
+  projectedTime(i: number): number {
+    const finish = this.finishTimes[i]!;
+    if (Number.isFinite(finish)) return finish;
+    const start = this.startScores[i]!;
+    const run = this.counters[i]!.score - start;
+    if (!(run > 0) || !(this.raceTime > 0)) return Number.NaN;
+    return (this.raceTime * (RACE_LAPS * this.track.lengthM - start)) / run;
   }
 
   /** Racer `i`'s best lap, seconds, or NaN. */
@@ -193,9 +209,6 @@ export class RaceSession {
       else if (player.lateralDistance > AWAY_FORFEIT_M) this.playerOut('away');
     }
     if (this.end === null) return false;
-    let running = 0;
-    for (let i = 1; i < this.racers; i++) if (!this.finished(i)) running++;
-    if (running > 0 && this.raceTime - this.playerDoneAt < FINISH_WAIT_S) return false;
     this.phase = 'finished';
     return true;
   }
@@ -204,7 +217,6 @@ export class RaceSession {
   playerOut(end: RaceEnd): boolean {
     if (this.end !== null || this.phase === 'finished') return false;
     this.end = end;
-    this.playerDoneAt = this.raceTime;
     return true;
   }
 

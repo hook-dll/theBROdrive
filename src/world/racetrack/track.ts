@@ -146,15 +146,22 @@ export const GRID_BEHIND_M = 14;
 /**
  * THE GRID: `GRID_SLOTS` boxes in rows of two, `GRID_ROW_M` apart, the left box of each
  * row `GRID_STAGGER_M` behind the right one, as a staggered start is laid. Slot 0 is pole
- * (front row, right of the crown), slot 1 beside and behind it, and so on back.
+ * (front row, right of the crown), slot 1 beside and behind it, and so on back. Four
+ * boxes: three rivals and the player (race/director.ts), the last 27.5 m behind the line.
  */
-export const GRID_SLOTS = 6;
+export const GRID_SLOTS = 4;
 const GRID_ROW_M = 9;
 const GRID_STAGGER_M = 4.5;
 /** The slots' laterals, as a share of the half width either side of the crown. */
 const GRID_LATERAL_SHARE = 0.48;
-/** Checkpoints a lap must pass in order, evenly round it (the line itself is not one). */
+/**
+ * Checkpoints a lap must pass in order, about evenly round it (the line itself is not
+ * one). One that would fall in a chicane, or within `CHECKPOINT_CHICANE_CLEAR_M` of
+ * either end, is moved to the nearer end plus that margin: its gate's posts then stand
+ * beside a straight, never among the chicane's rock and log (world/racetrack/mesh.ts).
+ */
 const CHECKPOINT_COUNT = 6;
+const CHECKPOINT_CHICANE_CLEAR_M = 10;
 /** Window either side of a hint a hinted projection searches, metres. */
 const PROJECT_WINDOW_M = 60;
 
@@ -242,7 +249,7 @@ export class RaceTrack {
       const left = k % 2 === 1;
       return pose(GRID_BEHIND_M + row * GRID_ROW_M + (left ? GRID_STAGGER_M : 0), left ? gridLateral : -gridLateral);
     });
-    this.checkpoints = Array.from({ length: CHECKPOINT_COUNT }, (_, i) => ((i + 1) * this.lengthM) / (CHECKPOINT_COUNT + 1));
+    this.checkpoints = this.placeCheckpoints();
     this.road = new RaceTrackRoad(this);
     this.stats = this.measure();
   }
@@ -251,6 +258,27 @@ export class RaceTrack {
   wrap(s: number): number {
     const lap = this.lengthM;
     return ((s % lap) + lap) % lap;
+  }
+
+  /** The checkpoints: evenly round the lap, each moved off any chicane (see `CHECKPOINT_COUNT`). */
+  private placeCheckpoints(): number[] {
+    // The chicanes' spans: four consecutive `chicane` pieces each (layout.ts).
+    const spans: [number, number][] = [];
+    const corners = this.corners;
+    for (let i = 0; i + 3 < corners.length; i++) {
+      if (corners[i]!.kind !== 'chicane') continue;
+      let length = 0;
+      for (let k = i; k < i + 4; k++) length += corners[k]!.length;
+      spans.push([corners[i]!.startS - CHECKPOINT_CHICANE_CLEAR_M, corners[i]!.startS + length + CHECKPOINT_CHICANE_CLEAR_M]);
+      i += 3;
+    }
+    return Array.from({ length: CHECKPOINT_COUNT }, (_, i) => {
+      const s = ((i + 1) * this.lengthM) / (CHECKPOINT_COUNT + 1);
+      for (const [from, to] of spans) {
+        if (s > from && s < to) return s - from < to - s ? from : to;
+      }
+      return s;
+    });
   }
 
   /** The lap at arclength `s` (wrapped), into `out` when given. */

@@ -4,8 +4,9 @@
  * levelled desert.
  *
  * The ribbon is the game's own (`buildTrackRibbon`, `addTrackRibbonColliders`: slabs by
- * surface), and so are the chicanes' rocks and logs (`addChicaneBlockerColliders`), so a
- * car that cuts a chicane hits what it would hit in the game. The desert the game's
+ * surface), and so are the chicanes' rock and log (`addChicaneBlockerColliders`) and the
+ * checkpoint gates' posts and beams (`addGateColliders`), so a car that cuts a chicane
+ * or runs wide past a gate hits what it would hit in the game. The desert the game's
  * tiles draw either side — the track's plane carried across the run-off, then flat
  * sand — is a trimesh strip each side, so a car that runs wide lands on what it would
  * land on in the game.
@@ -14,7 +15,7 @@
 import type { PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import type { WorldOrigin } from '../src/world/origin';
-import { addChicaneBlockerColliders, addTrackRibbonColliders, buildTrackRibbon } from '../src/world/racetrack/mesh';
+import { addChicaneBlockerColliders, addGateColliders, addTrackRibbonColliders, buildTrackRibbon } from '../src/world/racetrack/mesh';
 import { RUNOFF_M } from '../src/world/racetrack/site';
 import type { RaceTrack } from '../src/world/racetrack/track';
 
@@ -22,6 +23,7 @@ export function buildLapGround(physics: PhysicsWorld, origin: WorldOrigin, track
   const ribbon = buildTrackRibbon(track, origin.x, origin.z);
   addTrackRibbonColliders(physics, ribbon, true, [], []);
   addChicaneBlockerColliders(physics, track, origin.x, origin.z, true, [], []);
+  addGateColliders(physics, track, origin.x, origin.z, true, [], []);
   for (const side of [-1, 1]) {
     const columns = [track.halfWidth + 1.1, track.halfWidth + RUNOFF_M, track.halfWidth + RUNOFF_M + 20];
     const rowsCount = Math.round(track.lengthM / 2);

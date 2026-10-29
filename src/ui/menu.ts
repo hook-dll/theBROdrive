@@ -794,6 +794,8 @@ export interface PauseHooks {
   ink?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /** POI scenery receiving shadows (world/poi.ts `setPoiReceiveShadows`): off, it only casts them. Dev only. */
   poiShadows?: { readonly enabled: boolean; setEnabled(on: boolean): void };
+  /** Eagle flight, the GTA 1 top-down camera (render/cameras.ts `setEagle`). Dev only. */
+  eagle?: { readonly enabled: boolean; setEnabled(on: boolean): void };
   /**
    * The trial designs of the toy box's stand (world/devlook.ts): `cycle` saves the drive,
    * writes the next one and reloads. Dev only.
@@ -2844,6 +2846,15 @@ export class MainMenu {
             shadows.setEnabled(!shadows.enabled);
             const btn = devTools[index];
             if (btn) btn.textContent = label();
+          });
+        }
+        // A switch too, but it resumes: the view is the point. Any normal camera change
+        // (C, V, getting in or out) ends it, so the label is read fresh on every pause.
+        if (import.meta.env.DEV && hooks.eagle) {
+          const eagle = hooks.eagle;
+          devButton(`Eagle camera: ${eagle.enabled ? 'on' : 'off'}`, () => {
+            eagle.setEnabled(!eagle.enabled);
+            finish('resume');
           });
         }
         // A reload: the stops are built as their chunks stream in.

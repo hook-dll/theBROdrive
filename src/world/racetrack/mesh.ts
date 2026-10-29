@@ -47,10 +47,12 @@ import type { RaceTrack } from './track';
  *    `CURB_RADIUS_M`, the chequered line and a box per grid slot, no two quads over
  *    the same asphalt (the edge line is cut where a curb or the chequers cross it);
  *  - the PROPS in the flat palette the settlements' kit merges into: the start gantry
- *    over the line, a yellow-and-black gate at every checkpoint (never collided), tyre
- *    walls on the outside of the tight corners, each collided as one trimesh, and the
- *    CHICANE BLOCKERS (`chicaneBlockers`): the desert scatter's own boulders and
- *    fallen trunks on the side a driver would cut, one `Rock` trimesh per chicane.
+ *    over the line, a yellow-and-black gate at every checkpoint (`checkpointGates`:
+ *    posts just beyond the asphalt's edge and a beam 5.2 m over the surface, every
+ *    part a solid box collider), tyre walls on the outside of the tight corners, each
+ *    collided as one trimesh, and the CHICANE BLOCKERS (`chicaneBlockers`): one of the
+ *    desert scatter's boulders and one long fallen log per chicane, across the line a
+ *    driver would cut, the rock a `Rock` trimesh and the log a solid box.
  *
  * NO NEW PROGRAM AND NO LONG STEP when a track appears. Every piece is drawn in a
  * material the boot already links (`raceTrackProgramAnchor`); the scatter's forms give
@@ -58,12 +60,13 @@ import type { RaceTrack } from './track';
  * is sliced (`buildSteps`) so no step holds the main thread more than a few
  * milliseconds: the paint `PAINT_RECTS_PER_STEP` quads at a time, the props a group at
  * a time (appended into plain arrays, one geometry at the end, no per-part clone and
- * merge), the ribbon's colliders `COLLIDER_SLABS_PER_STEP` slabs at a time, and every
- * wall and chicane's colliders a step each. tools/racetrack-gen.ts times every step.
+ * merge), the ribbon's colliders `COLLIDER_SLABS_PER_STEP` slabs at a time, every wall's
+ * colliders a step each, then the blockers' and the gates' a step each.
+ * tools/racetrack-gen.ts times every step.
  *
  * Triangle budget for a 1.3 km lap (tools/racetrack-gen.ts prints the real figures):
- * about 5k in the ribbon, a few thousand of paint, 5-10k of tyres and as much again of
- * rocks; 20-40 static trimesh bodies.
+ * about 5k in the ribbon, a few thousand of paint, 5-10k of tyres, a few hundred of
+ * rocks and logs; 20-40 static trimesh bodies and a box per gate part and log.
  */
 
 /** The asphalt's height over the track's plane, so the levelled ground never shows through. */
@@ -128,9 +131,23 @@ const TYRE_RADIUS_M = 45;
 const TYRE_STACK_RADIUS_M = 0.38;
 const TYRE_STACK_HEIGHT_M = 0.78;
 const TYRE_PITCH_M = 0.8;
-/** The lane's lift over the drawn ground, and its stations' smoothing reach (rows). */
-const LANE_LIFT_M = 0.06;
+/**
+ * The lane: its lift over the highest drawn ground under its top, its stations'
+ * smoothing reach (rows), the steepest cross-fall it follows the ground with, and its
+ * SHOULDERS — at least `LANE_SHOULDER_M` either side and as wide as it takes (up to
+ * `LANE_SHOULDER_MAX_M`) to fall at `LANE_SHOULDER_SLOPE` from the top's edge to just
+ * under the drawn ground (`LANE_TUCK_M`), collided as drawn, so a wheel over the edge
+ * rolls down the shoulder onto the sand instead of dropping off a step. The cross-fall
+ * eases to level over `LANE_CROSS_EASE_M` at both ends, where it meets level pads.
+ */
+const LANE_LIFT_M = 0.04;
 const LANE_SMOOTH_ROWS = 2;
+const LANE_CROSS_MAX = 0.08;
+const LANE_SHOULDER_M = 1.6;
+const LANE_SHOULDER_MAX_M = 12;
+const LANE_SHOULDER_SLOPE = 0.25;
+const LANE_TUCK_M = 0.02;
+const LANE_CROSS_EASE_M = 9;
 /** The palette's roughness: the settlements' kit merges at this one (world/poi/kit.ts). */
 const PROP_ROUGHNESS = 0.88;
 
@@ -459,19 +476,18 @@ function* paintSteps(track: RaceTrack, rects: readonly TrackPaintRect[], ox: num
   return sheetGeometry(sheet, false);
 }
 
-/** Checkpoint gates: the banner's middle over the crown, its depth, and blocks across it. */
-const GATE_BEAM_Y = 4.6;
-const GATE_BANNER_M = 0.8;
-const GATE_BLOCKS = 9;
+/** Prop colours: the gates' banner blocks, the gantry's and gates' steel, and black. */
 const GATE_YELLOW = 0xe3b21c;
 const PROP_GREY = 0x8c8f93;
 const PROP_BLACK = 0x1c1c1c;
-/** Gantry and gate posts stand this far beyond the asphalt's edge: outside its lip. */
+/** The gantry's posts stand this far beyond the asphalt's edge: outside its lip. */
 const POST_OUT_M = LIP_M + 0.6;
 /** Tyre stacks appended per build step. */
 const TYRE_STACKS_PER_STEP = 160;
 
 const UP = new THREE.Vector3(0, 1, 0);
+const FORWARD_Z = new THREE.Vector3(0, 0, 1);
+const scratchPitch = new THREE.Quaternion();
 const scratchVertex = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
 const scratchTurn = new THREE.Quaternion();
@@ -539,16 +555,16 @@ interface PropTemplates {
   readonly box: THREE.BufferGeometry;
   readonly tyre: THREE.BufferGeometry;
   readonly boulder: THREE.BufferGeometry;
-  readonly boulderLow: THREE.BufferGeometry;
-  readonly trunk: THREE.BufferGeometry;
+  readonly log: THREE.BufferGeometry;
 }
 let templates: PropTemplates | null = null;
 
 /**
- * The parts the props are placed from: a unit box, one tyre stack, and the desert
- * scatter's own painted boulders and fallen trunk (world/props/forms.ts), whose
- * geometry only is taken — they are drawn here in the palette, not in the scatter's
- * instanced, ground-faded material.
+ * The parts the props are placed from: a unit box, one tyre stack, the desert scatter's
+ * own painted boulder (world/props/forms.ts), whose geometry only is taken — it is drawn
+ * here in the palette, not in the scatter's instanced, ground-faded material — and the
+ * chicane's log: a tapered trunk along +X, half length 1 and butt radius 1 (scaled to
+ * the log), painted the scatter's fallen trunk's own dead wood.
  */
 function propTemplates(): PropTemplates {
   if (!templates) {
@@ -557,12 +573,18 @@ function propTemplates(): PropTemplates {
       if (!found) throw new Error(`racetrack: no '${id}' form`);
       return found.geometry;
     };
+    const wood = form(sandForms(), 'trunk').getAttribute('color');
+    // Tip toward -X once turned: the cylinder's top (+Y) goes to -X under a quarter turn about Z.
+    const log = new THREE.CylinderGeometry(LOG_TIP_SHARE, 1, 2, 9, 1).rotateZ(Math.PI / 2);
+    const count = log.getAttribute('position').count;
+    const colours = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) colours.set([wood.getX(0), wood.getY(0), wood.getZ(0)], i * 3);
+    log.setAttribute('color', new THREE.BufferAttribute(colours, 3));
     templates = {
       box: new THREE.BoxGeometry(1, 1, 1),
       tyre: new THREE.CylinderGeometry(TYRE_STACK_RADIUS_M, TYRE_STACK_RADIUS_M, TYRE_STACK_HEIGHT_M, 8),
       boulder: form(rockForms(), 'boulder'),
-      boulderLow: form(rockForms(), 'boulderlow'),
-      trunk: form(sandForms(), 'trunk'),
+      log,
     };
   }
   return templates;
@@ -572,8 +594,6 @@ interface Props {
   readonly geometry: THREE.BufferGeometry | null;
   /** Tyre walls as collision triangle soups, origin-relative. */
   readonly walls: readonly { readonly vertices: Float32Array; readonly indices: Uint32Array }[];
-  /** Each chicane's blockers, origin-relative: drawn in `geometry`, collided one trimesh each. */
-  readonly blockers: readonly PaletteSoup[];
 }
 
 /**
@@ -628,22 +648,24 @@ function* propSteps(track: RaceTrack, ox: number, oz: number): Generator<void, P
   }
   yield;
 
-  // A gate at every checkpoint: two posts beyond the lip, as the gantry's, and a banner of
-  // yellow and black blocks across. Never collided: a car running wide meets nothing it
-  // cannot see, and the posts stand where the gantry's do.
-  for (const s of track.checkpoints) {
-    const at = track.sampleAt(s);
-    const bannerY = track.centreY(s) + GATE_BEAM_Y;
-    for (const sign of [-1, 1]) {
-      track.offsetPoint(s, sign * postLateral, point);
-      const ground = track.surfaceY(s, sign * postLateral) - 0.3;
-      const height = bannerY + GATE_BANNER_M / 2 - ground;
-      box([0.3, height, 0.3], point.x - ox, ground + height / 2, point.z - oz, at.heading, PROP_GREY);
+  // A gate at every checkpoint (`checkpointGates`): two posts just beyond the asphalt's
+  // edge and a banner of yellow and black blocks across, collided as drawn.
+  for (const part of checkpointGates(track)) {
+    if (part.part === 'post') {
+      box([2 * part.halfX, 2 * part.halfY, 2 * part.halfZ], part.x - ox, part.y, part.z - oz, part.yaw, PROP_GREY);
+      continue;
     }
-    const width = (2 * postLateral) / GATE_BLOCKS;
+    const width = (2 * part.halfX) / GATE_BLOCKS;
     for (let k = 0; k < GATE_BLOCKS; k++) {
-      track.offsetPoint(s, -postLateral + width * (k + 0.5), point);
-      box([width, GATE_BANNER_M, 0.12], point.x - ox, bannerY, point.z - oz, at.heading, k % 2 === 0 ? GATE_YELLOW : PROP_BLACK);
+      const lateral = -part.halfX + width * (k + 0.5);
+      box(
+        [width, 2 * part.halfY, 2 * part.halfZ],
+        part.x + Math.cos(part.yaw) * lateral - ox,
+        part.y,
+        part.z - Math.sin(part.yaw) * lateral - oz,
+        part.yaw,
+        k % 2 === 0 ? GATE_YELLOW : PROP_BLACK,
+      );
     }
   }
   yield;
@@ -672,10 +694,9 @@ function* propSteps(track: RaceTrack, ox: number, oz: number): Generator<void, P
   }
   yield;
 
-  const blockers = blockerSoups(track, ox, oz);
-  for (const chicane of blockers) soup.append(chicane);
+  addBlockers(soup, track, ox, oz);
   yield;
-  return { geometry: soup.geometry(), walls, blockers };
+  return { geometry: soup.geometry(), walls };
 }
 
 /** A chicane of the lap: its four arcs' span, and the side its middle stands out to. */
@@ -705,14 +726,18 @@ export interface ChicaneBlocker {
   readonly kind: 'rock' | 'log';
   /** Which of `trackChicanes(track)` it closes. */
   readonly chicane: number;
-  /** Its foot in the lap's frame (lateral positive LEFT), and the same point in world XZ. */
+  /** Its middle in the lap's frame (lateral positive LEFT), and the same point in world XZ. */
   readonly s: number;
   readonly lateral: number;
   readonly x: number;
   readonly z: number;
+  /** The ground under its middle (the track's plane carried across the run-off), absolute. */
+  readonly y: number;
+  /** The boulder form's scale (a rock); 1 for a log. */
   readonly scale: number;
-  /** Turn about +Y; the form's own +X, a log's length, then lies along (cos yaw, -sin yaw). */
+  /** Turn about +Y; a log's length then lies along (cos yaw, -sin yaw), its +X end up by `pitch`. */
   readonly yaw: number;
+  readonly pitch: number;
   /**
    * The footprint as a capsule round a segment `halfLength` either way along the yaw's
    * axis: `radius` bounds everything drawn, `solid` the core no car passes through.
@@ -726,66 +751,65 @@ const BLOCKER_DOMAIN = 0x43484b42; // 'CHKB'
 /** Nearest a blocker's outline comes to the asphalt's edge, metres: past the curb and the lip. */
 const BLOCKER_CLEAR_M = 1.8;
 /**
- * The forms at scale 1 (world/props/forms.ts): a boulder's radius is 0.78-1.18 and it is
- * sunk 0.28 of it, so its footprint at the ground is at least 0.74; the fallen trunk is
- * 3.1 m long, its tip kinked 0.45 m off its axis, and lies 0.1 m into the sand.
+ * The boulder form at scale 1 (world/props/forms.ts): radius 0.78-1.18, sunk 0.28 of it,
+ * so its footprint at the ground is at least 0.74. The chicane's rock is it at
+ * `ROCK_SCALE`: 2.1 m round at most, a solid 1.3 m core, 1.3 m high.
  */
 const ROCK_SOLID = 0.74;
 const ROCK_REACH = 1.18;
 const ROCK_SINK = 0.28;
-const LOG_HALF = 1.45;
-const LOG_SOLID = 0.15;
-const LOG_REACH = 0.65;
-const LOG_SINK = 0.1;
-/** The wall's boulders: their scale range and spacing, close enough that their solid cores overlap. */
-const WALL_SCALE_MIN = 1.0;
-const WALL_SCALE_MAX = 1.35;
-const WALL_PITCH_M = 1.3;
-/** Spacing of the rocks and logs lining the middle arcs' inside. */
-const LINING_PITCH_M = 3.4;
+const ROCK_SCALE = 1.8;
+/**
+ * The log: a tapered trunk `LOG_RADIUS_M` round at its butt and `LOG_TIP_SHARE` of that
+ * at its tip, sunk `LOG_SINK_M` into the sand — 0.65 m standing, which no car drives
+ * over — and reaching `LOG_OVERHANG_M` past the far edge of the straight's line.
+ */
+const LOG_RADIUS_M = 0.4;
+const LOG_TIP_SHARE = 0.8;
+const LOG_SINK_M = 0.15;
+const LOG_OVERHANG_M = 1.2;
 /** How far before and after the chicane the original straight's line is taken from. */
 const CHORD_REACH_M = 12;
 
 /**
- * THE CHICANE BLOCKERS: rocks and logs on the side a driver would cut, pure in the
- * track. A chicane's middle stands `CHICANE_SHIFT_MIN_M` or more off its straight's line
- * (layout.ts), so every straight cut — from the entry straight's asphalt to the exit
- * straight's — crosses the sand under the middle apex. A WALL of boulders stands there,
- * across that line, from just inside the apex out past the straight line's far edge,
- * spaced so their solid cores overlap; and a LINING of smaller rocks and logs follows
- * the middle arcs' inside, which closes the shallower cuts across one half. Everything
- * stands at least `BLOCKER_CLEAR_M` beyond the asphalt's edge, so a car on the asphalt
- * and its curbs touches none of it.
+ * THE CHICANE BLOCKERS: exactly ONE ROCK AND ONE LOG per chicane, pure in the track.
+ * A chicane's middle stands `CHICANE_SHIFT_MIN_M` or more off its straight's line
+ * (layout.ts), so a straight cut — from the entry straight's asphalt to the exit
+ * straight's, at any laterals — crosses the perpendicular through the middle apex
+ * within a half width of that line, on the sand inside the middle. That is where
+ * cutting pays most, and both stand on that perpendicular:
+ *
+ *  - the LOG lies ALONG it, across the cut line, from against the rock out to
+ *    `LOG_OVERHANG_M` past the line's far edge: every straight cut meets it;
+ *  - the ROCK stands at the other key point, between the log's inner end and the
+ *    middle's asphalt, `BLOCKER_CLEAR_M` beyond the edge: it closes the shallower cut
+ *    that clips the middle apex's inside, so the gap left beside it is the kerb.
+ *
+ * Both stand at least `BLOCKER_CLEAR_M` beyond every stretch's asphalt (the log is
+ * shortened from its outer end when another stretch comes near), so a car on the
+ * asphalt and its curbs touches neither. Each is collided as what is drawn: the rock
+ * a `Rock` trimesh of its boulder, the log a solid box round its trunk.
  */
 export function chicaneBlockers(track: RaceTrack): ChicaneBlocker[] {
   const blockers: ChicaneBlocker[] = [];
   const hw = track.halfWidth;
-  const clear = hw + BLOCKER_CLEAR_M;
-  const point = { x: 0, y: 0, z: 0 };
+  const reach = hw + track.runoffM;
+  // The ground under a point: the plane of the stretch nearest it, carried across the run-off.
+  const ground = (x: number, z: number): number => {
+    const at = track.project(x, z);
+    return track.surfaceY(at.s, Math.max(-reach, Math.min(reach, at.lateral)));
+  };
+  // Nearest a capsule's outline comes to any stretch's asphalt edge, metres.
+  const margin = (x0: number, z0: number, x1: number, z1: number, radius: number): number => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0)));
+    let worst = Infinity;
+    for (let k = 0; k <= steps; k++) {
+      const at = track.project(x0 + ((x1 - x0) * k) / steps, z0 + ((z1 - z0) * k) / steps);
+      worst = Math.min(worst, Math.abs(at.lateral) - radius - hw);
+    }
+    return worst;
+  };
   trackChicanes(track).forEach((chicane, index) => {
-    let serial = 0;
-    const roll = (): number => hash01(track.postIndex, BLOCKER_DOMAIN, index, serial++);
-    const place = (kind: 'rock' | 'log', x: number, z: number, scale: number, yaw: number, hintS: number): void => {
-      const at = track.project(x, z, hintS);
-      const rock = kind === 'rock';
-      const radius = (rock ? ROCK_REACH : LOG_REACH) * scale;
-      if (Math.abs(at.lateral) - radius < clear) return;
-      track.offsetPoint(at.s, at.lateral, point);
-      blockers.push({
-        kind,
-        chicane: index,
-        s: at.s,
-        lateral: at.lateral,
-        x: point.x,
-        z: point.z,
-        scale,
-        yaw,
-        halfLength: rock ? 0 : LOG_HALF * scale,
-        radius,
-        solid: (rock ? ROCK_SOLID : LOG_SOLID) * scale,
-      });
-    };
-
     // The straight's line, and its normal toward the displaced middle.
     const entry = track.sampleAt(chicane.startS - CHORD_REACH_M);
     const exit = track.sampleAt(chicane.startS + chicane.length + CHORD_REACH_M);
@@ -795,59 +819,84 @@ export function chicaneBlockers(track: RaceTrack): ChicaneBlocker[] {
     const midS = chicane.startS + chicane.length / 2;
     const mid = track.sampleAt(midS);
     const shift = (mid.x - entry.x) * nx + (mid.z - entry.z) * nz;
-    // The wall: from inside the middle apex back across the straight's whole line.
-    for (let t = clear + ROCK_REACH * WALL_SCALE_MAX; t <= shift + hw + 1 + WALL_PITCH_M / 2; t += WALL_PITCH_M) {
-      const scale = WALL_SCALE_MIN + (WALL_SCALE_MAX - WALL_SCALE_MIN) * roll();
-      place('rock', mid.x - nx * t, mid.z - nz * t, scale, roll() * Math.PI * 2, midS);
-    }
-    // The lining: low rocks and logs along the inside of the two middle arcs.
-    const inside = -chicane.side;
-    let log = false;
-    for (let s = chicane.startS + chicane.length * 0.25 + 1; s <= chicane.startS + chicane.length * 0.75 - 1; s += LINING_PITCH_M) {
-      const at = track.sampleAt(s);
-      const scale = log ? 0.95 + 0.25 * roll() : 0.7 + 0.25 * roll();
-      // A log is straight and the arc is not, and it lies a little skew: its ends come up
-      // to 0.2 m nearer the asphalt than its middle, so it stands that much farther out.
-      const lateral = inside * (clear + (log ? LOG_REACH : ROCK_REACH) * scale + (log ? 0.25 : 0.05));
-      track.offsetPoint(s, lateral, point);
-      const yaw = log ? at.heading - Math.PI / 2 + (roll() - 0.5) * 0.12 : roll() * Math.PI * 2;
-      place(log ? 'log' : 'rock', point.x, point.z, scale, yaw, s);
-      log = !log;
-    }
+    // `u`: metres from the middle's centreline back toward the straight's line.
+    const ux = (u: number): number => mid.x - nx * u;
+    const uz = (u: number): number => mid.z - nz * u;
+
+    const rockU = hw + BLOCKER_CLEAR_M + ROCK_REACH * ROCK_SCALE;
+    const rockAt = track.project(ux(rockU), uz(rockU), midS);
+    blockers.push({
+      kind: 'rock',
+      chicane: index,
+      s: rockAt.s,
+      lateral: rockAt.lateral,
+      x: ux(rockU),
+      z: uz(rockU),
+      y: ground(ux(rockU), uz(rockU)),
+      scale: ROCK_SCALE,
+      yaw: hash01(track.postIndex, BLOCKER_DOMAIN, index) * Math.PI * 2,
+      pitch: 0,
+      halfLength: 0,
+      radius: ROCK_REACH * ROCK_SCALE,
+      solid: ROCK_SOLID * ROCK_SCALE,
+    });
+
+    // The log, its inner end against the rock's core, pulled in from its outer end
+    // while it comes nearer another stretch's asphalt than the clearance.
+    const inner = rockU + ROCK_SOLID * ROCK_SCALE * 0.8;
+    let outer = shift + hw + LOG_OVERHANG_M;
+    while (outer - inner > 2 && margin(ux(inner), uz(inner), ux(outer), uz(outer), LOG_RADIUS_M) < BLOCKER_CLEAR_M) outer -= 0.25;
+    const centre = (inner + outer) / 2;
+    const half = (outer - inner) / 2;
+    const yInner = ground(ux(inner), uz(inner));
+    const yOuter = ground(ux(outer), uz(outer));
+    const logAt = track.project(ux(centre), uz(centre), midS);
+    blockers.push({
+      kind: 'log',
+      chicane: index,
+      s: logAt.s,
+      lateral: logAt.lateral,
+      x: ux(centre),
+      z: uz(centre),
+      y: (yInner + yOuter) / 2,
+      scale: 1,
+      // Its +X end is the inner one: along +n from the middle, i.e. (nx, nz).
+      yaw: Math.atan2(-nz, nx),
+      pitch: Math.atan2(yInner - yOuter, 2 * half),
+      halfLength: half,
+      radius: LOG_RADIUS_M,
+      solid: LOG_RADIUS_M * LOG_TIP_SHARE,
+    });
   });
   return blockers;
 }
 
-/** Each chicane's blockers as a palette soup, origin-relative, stood on the track's plane carried across the run-off. */
-function blockerSoups(track: RaceTrack, ox: number, oz: number): PaletteSoup[] {
-  const parts = propTemplates();
-  const soups = trackChicanes(track).map(() => new PaletteSoup());
-  const matrix = new THREE.Matrix4();
-  const reach = track.halfWidth + track.runoffM;
-  for (const blocker of chicaneBlockers(track)) {
-    const rock = blocker.kind === 'rock';
-    const ground = track.surfaceY(blocker.s, Math.max(-reach, Math.min(reach, blocker.lateral)));
-    const part = rock ? (blocker.scale >= WALL_SCALE_MIN ? parts.boulder : parts.boulderLow) : parts.trunk;
-    matrix.compose(
-      scratchVertex.set(blocker.x - ox, ground - (rock ? ROCK_SINK : LOG_SINK) * blocker.scale, blocker.z - oz),
-      scratchTurn.setFromAxisAngle(UP, blocker.yaw),
-      scratchScale.setScalar(blocker.scale),
-    );
-    soups[blocker.chicane]!.add(part, matrix, null);
-  }
-  return soups;
+/** A blocker's placement, origin-relative: the boulder on its foot, the log's axis on the sand. */
+function blockerMatrix(blocker: ChicaneBlocker, ox: number, oz: number, matrix: THREE.Matrix4): THREE.Matrix4 {
+  const rock = blocker.kind === 'rock';
+  scratchTurn.setFromAxisAngle(UP, blocker.yaw);
+  if (!rock) scratchTurn.multiply(scratchPitch.setFromAxisAngle(FORWARD_Z, blocker.pitch));
+  return matrix.compose(
+    scratchVertex.set(blocker.x - ox, rock ? blocker.y - ROCK_SINK * blocker.scale : blocker.y + LOG_RADIUS_M - LOG_SINK_M, blocker.z - oz),
+    scratchTurn,
+    rock ? scratchScale.setScalar(blocker.scale) : scratchScale.set(blocker.halfLength, LOG_RADIUS_M, LOG_RADIUS_M),
+  );
 }
 
-/** A soup's triangles as one static `Rock` trimesh. */
-function addSoupCollider(physics: PhysicsWorld, soup: PaletteSoup, enabled: boolean, bodies: RAPIER.RigidBody[], colliders: RAPIER.Collider[]): void {
-  if (soup.indices.length === 0) return;
-  addTrimesh(physics, Float32Array.from(soup.positions), Uint32Array.from(soup.indices), SurfaceType.Rock, enabled, bodies, colliders);
+/** Every chicane's rock and log drawn into `soup`, origin-relative. */
+function addBlockers(soup: PaletteSoup, track: RaceTrack, ox: number, oz: number): void {
+  const parts = propTemplates();
+  const matrix = new THREE.Matrix4();
+  for (const blocker of chicaneBlockers(track)) {
+    soup.add(blocker.kind === 'rock' ? parts.boulder : parts.log, blockerMatrix(blocker, ox, oz, matrix), null);
+  }
 }
 
 /**
- * The chicane blockers' colliders (one static `Rock` trimesh per chicane), origin-relative,
- * for a caller that builds the track's ground itself (tools/racelapworld.ts); the
- * provider adds the same from the soups it draws.
+ * The chicane blockers' colliders, origin-relative: each rock a static `Rock` trimesh
+ * of its boulder as drawn, each log a solid `Rock` box round its trunk (its core,
+ * `LOG_TIP_SHARE` of its radius, either side of the axis). The provider and a caller
+ * that builds the track's ground itself (tools/racelapworld.ts) both add these.
  */
 export function addChicaneBlockerColliders(
   physics: PhysicsWorld,
@@ -858,7 +907,133 @@ export function addChicaneBlockerColliders(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
 ): void {
-  for (const soup of blockerSoups(track, originX, originZ)) addSoupCollider(physics, soup, enabled, bodies, colliders);
+  const parts = propTemplates();
+  const matrix = new THREE.Matrix4();
+  for (const blocker of chicaneBlockers(track)) {
+    blockerMatrix(blocker, originX, originZ, matrix);
+    if (blocker.kind === 'rock') {
+      const soup = new PaletteSoup();
+      soup.add(parts.boulder, matrix, null);
+      addTrimesh(physics, Float32Array.from(soup.positions), Uint32Array.from(soup.indices), SurfaceType.Rock, enabled, bodies, colliders);
+      continue;
+    }
+    const core = LOG_RADIUS_M * LOG_TIP_SHARE;
+    const collider = physics.addStaticBox(
+      { x: blocker.halfLength, y: core, z: core },
+      { x: blocker.x - originX, y: blocker.y + LOG_RADIUS_M - LOG_SINK_M, z: blocker.z - originZ },
+      scratchTurn,
+      SurfaceType.Rock,
+    );
+    if (!enabled) collider.setEnabled(false);
+    colliders.push(collider);
+    const body = collider.parent();
+    if (body) bodies.push(body);
+  }
+}
+
+/**
+ * THE CHECKPOINT GATES: two posts and a banner beam at every checkpoint, collided as
+ * drawn (solid boxes, `Concrete`). The posts stand `GATE_POST_OUT_M` beyond the
+ * asphalt's edge — their inner faces just past it, on the lip — so a car on the
+ * asphalt never meets one and one that runs wide does. The beam's underside is
+ * `GATE_CLEARANCE_M` over the HIGHEST point of the surface between the posts (a banked
+ * gate's high side), above the tallest load on the road (the tented trucks, about
+ * 3.5 m), and collided at that height too. Checkpoints never fall in a chicane
+ * (track.ts), so no post stands by a blocker.
+ */
+const GATE_POST_OUT_M = 1.0;
+const GATE_POST_HALF_M = 0.17;
+const GATE_POST_SINK_M = 0.3;
+const GATE_CLEARANCE_M = 5.2;
+const GATE_BANNER_M = 0.8;
+const GATE_BANNER_DEPTH_M = 0.12;
+const GATE_BLOCKS = 9;
+
+/** One box of a gate, absolute: its middle, half extents along its own axes, turn about +Y. */
+export interface GateBox {
+  readonly gate: number;
+  readonly part: 'post' | 'beam';
+  readonly s: number;
+  /** The box's middle off the centreline (lateral positive LEFT). */
+  readonly lateral: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Half extents: x across the lap, y up, z along it. */
+  readonly halfX: number;
+  readonly halfY: number;
+  readonly halfZ: number;
+  readonly yaw: number;
+}
+
+/** Every checkpoint gate's posts and beam, pure in the track (see `GATE_POST_OUT_M`). */
+export function checkpointGates(track: RaceTrack): GateBox[] {
+  const boxes: GateBox[] = [];
+  const point = { x: 0, y: 0, z: 0 };
+  const postLateral = track.halfWidth + GATE_POST_OUT_M;
+  track.checkpoints.forEach((s, gate) => {
+    const yaw = track.sampleAt(s).heading;
+    // The plane is linear across, so its highest point between the posts is at one of them.
+    const high = Math.max(track.surfaceY(s, -postLateral), track.surfaceY(s, postLateral));
+    const bannerY = high + GATE_CLEARANCE_M + GATE_BANNER_M / 2;
+    for (const sign of [-1, 1]) {
+      const foot = track.surfaceY(s, sign * postLateral) - GATE_POST_SINK_M;
+      const height = bannerY + GATE_BANNER_M / 2 - foot;
+      track.offsetPoint(s, sign * postLateral, point);
+      boxes.push({
+        gate,
+        part: 'post',
+        s,
+        lateral: sign * postLateral,
+        x: point.x,
+        y: foot + height / 2,
+        z: point.z,
+        halfX: GATE_POST_HALF_M,
+        halfY: height / 2,
+        halfZ: GATE_POST_HALF_M,
+        yaw,
+      });
+    }
+    track.offsetPoint(s, 0, point);
+    boxes.push({
+      gate,
+      part: 'beam',
+      s,
+      lateral: 0,
+      x: point.x,
+      y: bannerY,
+      z: point.z,
+      halfX: postLateral + GATE_POST_HALF_M,
+      halfY: GATE_BANNER_M / 2,
+      halfZ: GATE_BANNER_DEPTH_M / 2,
+      yaw,
+    });
+  });
+  return boxes;
+}
+
+/** The gates' colliders, origin-relative: one static box per post and beam. */
+export function addGateColliders(
+  physics: PhysicsWorld,
+  track: RaceTrack,
+  originX: number,
+  originZ: number,
+  enabled: boolean,
+  bodies: RAPIER.RigidBody[],
+  colliders: RAPIER.Collider[],
+): void {
+  for (const box of checkpointGates(track)) {
+    const collider = physics.addStaticBox(
+      { x: box.halfX, y: box.halfY, z: box.halfZ },
+      { x: box.x - originX, y: box.y, z: box.z - originZ },
+      scratchTurn.setFromAxisAngle(UP, box.yaw),
+      SurfaceType.Concrete,
+    );
+    if (!enabled) collider.setEnabled(false);
+    colliders.push(collider);
+    const body = collider.parent();
+    if (body) bodies.push(body);
+  }
 }
 
 /**
@@ -939,10 +1114,19 @@ function pushStripIndices(sheet: Sheet, rows: number, columns: number, side: num
 }
 
 /**
- * The access lane: a gravel strip draped on the DRAWN ground, the highest ground across
- * it per station, held over a few stations and averaged back down (so it never dips
- * under the sand), its shoulders tucked into the sand. Its first row is the lay-by's
- * own edge height and its last the paddock's, so both joins are flush.
+ * The access lane: a gravel strip draped on the DRAWN ground. Per station the ground
+ * across the top is fitted with a line — the lane's cross-fall, up to `LANE_CROSS_MAX`
+ * — and the top raised until no ground sample at the station or halfway to either
+ * neighbour stands above it (the strip is straight between stations, so it never dips
+ * under the sand), then smoothed along without coming down: both edges lie on the
+ * ground rather than one of them standing proud of it, and on a slope the top follows
+ * it instead of being held up by the higher stations. The SHOULDERS fall from the top's
+ * edges to `LANE_TUCK_M` under the drawn ground `LANE_SHOULDER_M` out; the whole sheet,
+ * shoulders included, is the collider (`addSheetColliders` over every column), so what
+ * a wheel stands on is what is drawn and leaving the edge is a slope, not a step. Its
+ * first row is the lay-by's own edge height and its last the paddock's, both level
+ * across, so both joins are flush; the cross-fall eases in from them over
+ * `LANE_CROSS_EASE_M`.
  */
 function buildLane(ctx: ChunkContext, track: RaceTrack, roadDistance: RoadDistance, colour: THREE.Color, shoulder: THREE.Color): Sheet {
   const sheet = newSheet();
@@ -950,60 +1134,121 @@ function buildLane(ctx: ChunkContext, track: RaceTrack, roadDistance: RoadDistan
   const ground = tileGroundSampler({ seed: ctx.world.seed, road: ctx.road, terrain: ctx.terrain, roadDistance });
   const g: DrawnGroundSample = { height: 0, detail: 0, nx: 0, ny: 1, nz: 0 };
   const hw = track.laneHalfWidth;
-  const across = [-(hw + 1), -hw, hw, hw + 1];
+  const across = [-(hw + LANE_SHOULDER_M), -hw, hw, hw + LANE_SHOULDER_M];
   const n = lane.length;
   const dirX = new Float64Array(n);
   const dirZ = new Float64Array(n);
-  const raw = new Float64Array(n);
+  const samples = new Float64Array(n * 5);
+  // The same five across halfway from each station to the next.
+  const halfway = new Float64Array(Math.max(0, n - 1) * 5);
+  const rawFall = new Float64Array(n);
+  const reach = hw + 0.5;
   for (let i = 0; i < n; i++) {
     const a = lane[Math.max(0, i - 1)]!;
     const b = lane[Math.min(n - 1, i + 1)]!;
     const length = Math.hypot(b.x - a.x, b.z - a.z) || 1;
     dirX[i] = (b.x - a.x) / length;
     dirZ[i] = (b.z - a.z) / length;
-    let high = -Infinity;
+    // Five samples across, u = -reach..reach, and their least-squares slope, clamped.
+    let moment = 0;
     for (let k = -2; k <= 2; k++) {
-      const u = (k / 2) * (hw + 0.5);
+      const u = (k / 2) * reach;
       // Left of the lane's direction (dx, dz) is (dz, -dx).
       ground(lane[i]!.x + dirZ[i]! * u, lane[i]!.z - dirX[i]! * u, g);
-      high = Math.max(high, g.height);
+      samples[i * 5 + k + 2] = g.height;
+      moment += g.height * u;
     }
-    raw[i] = high;
+    // Sum of u² over the five samples: reach² (1/4 + 1 + 1/4 + 1) = 2.5 reach².
+    rawFall[i] = Math.max(-LANE_CROSS_MAX, Math.min(LANE_CROSS_MAX, moment / (2.5 * reach * reach)));
   }
-  const held = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    let high = -Infinity;
-    for (let k = Math.max(0, i - LANE_SMOOTH_ROWS); k <= Math.min(n - 1, i + LANE_SMOOTH_ROWS); k++) high = Math.max(high, raw[k]!);
-    held[i] = high;
+  for (let i = 0; i + 1 < n; i++) {
+    const mx = (lane[i]!.x + lane[i + 1]!.x) / 2;
+    const mz = (lane[i]!.z + lane[i + 1]!.z) / 2;
+    const sx = (dirX[i]! + dirX[i + 1]!) / 2;
+    const sz = (dirZ[i]! + dirZ[i + 1]!) / 2;
+    for (let k = -2; k <= 2; k++) {
+      const u = (k / 2) * reach;
+      ground(mx + sz * u, mz - sx * u, g);
+      halfway[i * 5 + k + 2] = g.height;
+    }
   }
   // The lay-by's edge (the pad is level across, `Terrain.laybySurfaceY`) and the paddock's.
   const padProjection = ctx.road.project(lane[0]!.x, lane[0]!.z, track.postS);
   const padY = ctx.terrain.laybySurfaceY(padProjection.s, padProjection.lateral, track.side);
   const gate = track.paddock;
   const paddockY = track.centreY((gate.s0 + gate.s1) / 2) + TRACK_LIFT_M;
-  let along = 0;
+  // The cross-fall: averaged along, eased to level at both ends.
+  const alongs = new Float64Array(n);
+  for (let i = 1; i < n; i++) alongs[i] = alongs[i - 1]! + Math.hypot(lane[i]!.x - lane[i - 1]!.x, lane[i]!.z - lane[i - 1]!.z);
+  const total = alongs[n - 1]!;
+  const falls = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    if (i > 0) along += Math.hypot(lane[i]!.x - lane[i - 1]!.x, lane[i]!.z - lane[i - 1]!.z);
+    let sum = 0;
+    let count = 0;
+    for (let k = Math.max(0, i - LANE_SMOOTH_ROWS); k <= Math.min(n - 1, i + LANE_SMOOTH_ROWS); k++) {
+      sum += rawFall[k]!;
+      count++;
+    }
+    falls[i] = (sum / count) * Math.min(1, alongs[i]! / LANE_CROSS_EASE_M, (total - alongs[i]!) / LANE_CROSS_EASE_M);
+  }
+  // The top's centre height with that fall: over every sample at the station and
+  // halfway to its neighbours, then smoothed along but never brought under that.
+  const over = (i: number, from: Float64Array, k: number): number => {
+    let high = -Infinity;
+    for (let j = -2; j <= 2; j++) high = Math.max(high, from[k * 5 + j + 2]! - falls[i]! * (j / 2) * reach);
+    return high;
+  };
+  const held = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let high = over(i, samples, i);
+    if (i > 0) high = Math.max(high, over(i, halfway, i - 1));
+    if (i + 1 < n) high = Math.max(high, over(i, halfway, i));
+    held[i] = high;
+  }
+  for (let i = 0; i < n; i++) {
+    const along = alongs[i]!;
+    const fall = falls[i]!;
     let sum = 0;
     let count = 0;
     for (let k = Math.max(0, i - LANE_SMOOTH_ROWS); k <= Math.min(n - 1, i + LANE_SMOOTH_ROWS); k++) {
       sum += held[k]!;
       count++;
     }
-    let y = sum / count + LANE_LIFT_M;
+    let y = Math.max(sum / count, held[i]!) + LANE_LIFT_M;
     // Off the pad: never under the road's shoulder strip, which falls from the pad's edge.
     if (along < 6) y = Math.max(y, padY - 0.04 * along);
     if (i === 0) y = padY;
     if (i === n - 1) y = paddockY;
+    const ends = i === 0 || i === n - 1;
     for (let c = 0; c < across.length; c++) {
-      const u = across[c]!;
       const shoulderColumn = c === 0 || c === across.length - 1;
+      let u = across[c]!;
+      if (shoulderColumn && !ends) {
+        // As wide as it takes to come down to the sand at `LANE_SHOULDER_SLOPE`.
+        const side = Math.sign(u);
+        ground(lane[i]!.x + dirZ[i]! * side * hw, lane[i]!.z - dirX[i]! * side * hw, g);
+        const drop = y + fall * side * hw - g.height;
+        u = side * (hw + Math.min(LANE_SHOULDER_MAX_M, Math.max(LANE_SHOULDER_M, drop / LANE_SHOULDER_SLOPE)));
+      }
       const x = lane[i]!.x + dirZ[i]! * u;
       const z = lane[i]!.z - dirX[i]! * u;
-      let vy = y;
-      if (shoulderColumn && i > 0 && i < n - 1) {
-        ground(x, z, g);
-        vy = Math.min(y, g.height) - 0.05;
+      let vy = y + fall * (shoulderColumn ? Math.sign(u) * hw : u);
+      if (shoulderColumn && !ends) {
+        // Its outer edge is a chord from station to station: lowered by however far the
+        // ground halfway to either neighbour lies under that chord, so the shoulder
+        // meets the sand there too instead of standing proud of it.
+        const at = (k: number): number => {
+          ground(lane[k]!.x + dirZ[k]! * u, lane[k]!.z - dirX[k]! * u, g);
+          return g.height;
+        };
+        const here = at(i);
+        let sag = 0;
+        for (const k of [i - 1, i + 1]) {
+          const there = at(k);
+          ground((x + lane[k]!.x + dirZ[k]! * u) / 2, (z + lane[k]!.z - dirX[k]! * u) / 2, g);
+          sag = Math.max(sag, (here + there) / 2 - g.height);
+        }
+        vy = here - LANE_TUCK_M - sag;
       }
       sheet.positions.push(x - ctx.originX, vy, z - ctx.originZ);
       const tint = shoulderColumn ? shoulder : colour;
@@ -1125,9 +1370,10 @@ export class RaceTrackProvider implements ChunkProvider {
         dirt: new THREE.Color(DIRT_COLOUR).multiplyScalar(gain),
       };
       const sandTone = sand.clone().multiplyScalar(gain);
-      const addMesh = (geometry: THREE.BufferGeometry, material: THREE.Material, casts: boolean): void => {
+      const addMesh = (geometry: THREE.BufferGeometry, material: THREE.Material, casts: boolean, name = ''): void => {
         geometries.push(geometry);
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = name;
         mesh.castShadow = casts;
         mesh.receiveShadow = true;
         trackGroup.add(mesh);
@@ -1150,7 +1396,7 @@ export class RaceTrackProvider implements ChunkProvider {
       addMesh(sheetGeometry(paddock, true), roadAsphaltMaterial(), false);
       yield;
       const lane = buildLane(ctx, track, this.roadDistance, tones.gravel, tones.gravel.clone().lerp(sandTone, LIP_SAND));
-      addMesh(sheetGeometry(lane, true), roadAsphaltMaterial(), false);
+      addMesh(sheetGeometry(lane, true), roadAsphaltMaterial(), false, 'racetrack-lane');
       yield;
 
       addMesh(yield* paintSteps(track, trackPaintRects(track), ox, oz), roadMarkingMaterial(), false);
@@ -1164,17 +1410,18 @@ export class RaceTrackProvider implements ChunkProvider {
         yield* ribbonColliderSteps(ctx.physics, ribbon, false, bodies, colliders);
         yield;
         addSheetColliders(ctx.physics, paddock, 3, SurfaceType.Concrete, 0, 2, bodies, colliders);
-        // The lane's top only: its shoulders are under the sand, which carries the wheel there.
-        addSheetColliders(ctx.physics, lane, 4, SurfaceType.Gravel, 1, 2, bodies, colliders);
+        // The lane as drawn, shoulders and all (see `buildLane`): its shoulders are what
+        // carries a wheel off its edge down onto the sand.
+        addSheetColliders(ctx.physics, lane, 4, SurfaceType.Gravel, 0, 3, bodies, colliders);
         yield;
         for (const wall of props.walls) {
           addTrimesh(ctx.physics, wall.vertices, wall.indices, SurfaceType.Rock, false, bodies, colliders);
           yield;
         }
-        for (const blockers of props.blockers) {
-          addSoupCollider(ctx.physics, blockers, false, bodies, colliders);
-          yield;
-        }
+        addChicaneBlockerColliders(ctx.physics, track, ox, oz, false, bodies, colliders);
+        yield;
+        addGateColliders(ctx.physics, track, ox, oz, false, bodies, colliders);
+        yield;
       }
     }
     if (!group) return null;

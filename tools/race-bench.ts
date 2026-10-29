@@ -6,8 +6,8 @@
  *
  * Checked, not just printed:
  *
- *  - LAPS (race/laps.ts) on a track's own centreline, no physics: a clean run of three
- *    laps counts three; a lap that leaves the track area over a checkpoint's window does
+ *  - LAPS (race/laps.ts) on a track's own centreline, no physics: a clean run of
+ *    `RACE_LAPS` laps counts them all; a lap that leaves the track area over a checkpoint's window does
  *    not count and is begun again; backing over the line after it undoes the lap; the
  *    grid's first crossing only starts lap 1; a car relocated back onto the lap (the
  *    return key, a rival's recovery) keeps its laps and crosses nothing. The player's
@@ -19,22 +19,25 @@
  *    written mid-race (`migrateState` of its JSON) keeps the stake and drops the race's
  *    cars, and the refund gives the same shells back once.
  *  - THE FIELD (race/rival.ts): the candidates are the nearest by power to weight, a plan
- *    is a pure function of the seed, post and round, four rivals sorted quickest first,
+ *    is a pure function of the seed, post and round, three rivals all at the top skill,
  *    as many different cars as the candidates allow, about a third of the rounds are
  *    trailer races.
  *  - THE SKILLS: the frantic racer alone in the player's car at skill 0, 0.5 and 1 (grip
  *    share and pace, race/rival.ts `driverFor`), one flying lap after a standing one: the
  *    lap times must come out in that order.
- *  - WHOLE RACES: on the first `races` tracks of the seed, FIVE cars from the grid: a
+ *  - WHOLE RACES: on the first `races` tracks of the seed, FOUR cars from the grid: a
  *    stand-in for the player (the starting car, the frantic racer at skill 0.6) in the
  *    back box and the field drawn for round 0 in front of it, held through the lights,
- *    three laps on the real collider with the chicanes' rocks and logs
- *    (tools/racelapworld.ts), every car's laps counted by `RaceSession`, the rivals'
+ *    `RACE_LAPS` laps on the real collider with the chicanes' rock and log and the gates'
+ *    posts (tools/racelapworld.ts), every car's laps counted by `RaceSession`, the rivals'
  *    recoveries as the director does them (race/recovery.ts; a put-back car is a ghost
- *    to the other racers for 3 s). The second race is run as a trailer race, every car
- *    towing the same load. Every car must take the flag; the stake is taken before and
- *    settled for the stand-in's place after, and the jar must show it. The order, the
- *    times, the recoveries, and the cost of a step of five drivers are printed.
+ *    to the other racers for 3 s) and their wheel loop at the traffic's rate as the
+ *    director runs it. The second race is run as a trailer race, every car towing the
+ *    same load. The race is over the step the stand-in takes the flag (no waiting: a
+ *    rival still running then has a projected time); the bench drives the rest on to
+ *    their own flag, and every car must take it. The stake is taken before and settled
+ *    for the stand-in's place after, and the jar must show it. The order, the times, the
+ *    recoveries, and the cost of a step of four drivers are printed.
  */
 
 import * as THREE from 'three';
@@ -50,7 +53,7 @@ import { PLAYER_SLOT } from '../src/race/director';
 import { raceRivalId, raceTrailerId } from '../src/race/ids';
 import { LapCounter } from '../src/race/laps';
 import { recoverAt, RecoveryWatch } from '../src/race/recovery';
-import { carClassOf, classDistance, driverFor, fieldPlan, FIELD_SIZE, modelClassOf, nearestModels } from '../src/race/rival';
+import { carClassOf, classDistance, driverFor, fieldPlan, FIELD_SIZE, modelClassOf, nearestModels, RIVAL_SKILL } from '../src/race/rival';
 import { AWAY_FORFEIT_M, RACE_LAPS, RaceSession } from '../src/race/session';
 import { canStake, RACE_PRIZES, RACE_STAKE, racePrize, refundStake, settleStake, takeStake } from '../src/race/stake';
 import { migrateState } from '../src/save/save';
@@ -58,6 +61,7 @@ import { Autopilot } from '../src/vehicle/autopilot';
 import { CAR_MODELS, carModel, DEFAULT_CAR_MODEL_ID } from '../src/vehicle/carmodels';
 import { Trailer, TRAILER_MODEL_FIT, TRAILER_SPAWN_HEIGHT } from '../src/vehicle/trailer';
 import { Vehicle } from '../src/vehicle/vehicle';
+import { TRAFFIC_WHEEL_SUBSTEPS } from '../src/vehicle/vehicletuning';
 import { WorldOrigin } from '../src/world/origin';
 import { TRACK_LIFT_M } from '../src/world/racetrack/mesh';
 import { postHasTrack } from '../src/world/racetrack/site';
@@ -138,7 +142,7 @@ console.log('\nlaps (race/laps.ts), driven along the centreline in 4 m steps');
   const clean = new LapCounter(track);
   clean.reset(grid.x, grid.z);
   const cleanCounted = drive(clean, grid.s, L * (RACE_LAPS + 1) + 10, () => grid.lateral);
-  check('three clean laps count three', clean.completed === RACE_LAPS && cleanCounted === RACE_LAPS, `${clean.completed} completed (${cleanCounted} counted), lap ${clean.lap}`);
+  check(`${RACE_LAPS} clean laps count ${RACE_LAPS}`, clean.completed === RACE_LAPS && cleanCounted === RACE_LAPS, `${clean.completed} completed (${cleanCounted} counted), lap ${clean.lap}`);
 
   // Out wide (past the run-off) over the whole window of the third checkpoint, on lap 1.
   const cut = new LapCounter(track);
@@ -296,7 +300,7 @@ const playerClass = carClassOf(createServiceableCarState('p', PLAYER_MODEL, 0, 0
     `${PLAYER_MODEL} (${((playerClass.powerKw * 1000) / playerClass.massKg).toFixed(1)} W/kg): ${near.map((d) => `${d.id} ${((modelClassOf(d).powerKw * 1000) / d.mass).toFixed(1)} W/kg`).join(', ')}`,
   );
   let trailerRounds = 0;
-  const levels = { steady: 0, fast: 0, wild: 0 };
+  let allTop = true;
   const rounds = 300;
   let pure = true;
   let shaped = true;
@@ -305,15 +309,15 @@ const playerClass = carClassOf(createServiceableCarState('p', PLAYER_MODEL, 0, 0
     const plan = fieldPlan(SEED, 9, round, playerClass);
     const again = fieldPlan(SEED, 9, round, playerClass);
     pure &&= JSON.stringify(plan) === JSON.stringify(again);
-    shaped &&= plan.rivals.length === FIELD_SIZE && plan.rivals.every((r, i) => i === 0 || r.skill <= plan.rivals[i - 1]!.skill);
+    shaped &&= plan.rivals.length === FIELD_SIZE;
+    allTop &&= plan.rivals.every((r) => r.skill === RIVAL_SKILL && r.gripShare === 1 && r.pace === 1);
     distinct += new Set(plan.rivals.map((r) => r.modelId)).size;
     if (plan.trailer) trailerRounds++;
-    levels[plan.level]++;
   }
   check(
-    'plans are seeded, four rivals quickest first, about a third trailer races',
-    pure && shaped && trailerRounds > rounds * 0.25 && trailerRounds < rounds * 0.42,
-    `${trailerRounds} of ${rounds} trailer rounds; levels ${JSON.stringify(levels)}`,
+    `plans are seeded, ${FIELD_SIZE} rivals all at the top skill, about a third trailer races`,
+    pure && shaped && allTop && trailerRounds > rounds * 0.25 && trailerRounds < rounds * 0.42,
+    `${trailerRounds} of ${rounds} trailer rounds`,
   );
   check(
     'a field is as varied as the candidates allow',
@@ -414,7 +418,7 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// Whole races: five cars.
+// Whole races: four cars.
 // ---------------------------------------------------------------------------
 console.log(`\nwhole races (${RACE_LAPS} laps, ${FIELD_SIZE + 1} cars; player stand-in ${PLAYER_MODEL} at skill ${PLAYER_SKILL} in the back box)`);
 
@@ -452,13 +456,15 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
     const state = createServiceableCarState(id, driver.modelId, slot.x, slot.y + 1.2, slot.z, slot.heading);
     world.state.cars[id] = state;
     const car = new Vehicle(physics, world, state, scene, origin);
+    // The rivals' wheel loop at the traffic's rate, as the director runs it.
+    if (i > 0) car.setWheelSubsteps(TRAFFIC_WHEEL_SUBSTEPS);
     setGroups(car, RACER_GROUPS);
     const pilot = new Autopilot(track.road, physics);
     pilot.setMode('frantic');
     pilot.setGripShare(driver.gripShare);
     pilot.setPace(driver.pace);
     return {
-      name: i === 0 ? 'PLAYER' : `${driver.modelId} ${driver.skill.toFixed(2)}`,
+      name: i === 0 ? 'PLAYER' : driver.modelId,
       modelId: driver.modelId,
       car,
       pilot,
@@ -524,7 +530,17 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
   let driveSteps = 0;
   let worstStepMs = 0;
   const started = performance.now();
-  while (session.phase !== 'finished' && session.clock < RACE_LIMIT_S) {
+  // The race is over the step the stand-in is done; the rivals still running are driven
+  // on to their own flag (`flagAt`), which the game does not wait for.
+  const flagAt = new Float64Array(racers.length).fill(Number.NaN);
+  let overAt = Number.NaN;
+  let projectedAtOver = '';
+  const home = (i: number): boolean => !Number.isNaN(flagAt[i]!);
+  // Every car's laps, in the race and on the run-on, from the green.
+  const lapList: number[][] = racers.map(() => []);
+  const lapAt = new Float64Array(racers.length);
+  let runOnS = 0;
+  while (!racers.every((_, i) => home(i)) && session.clock + runOnS < RACE_LIMIT_S) {
     const t0 = performance.now();
     racers.forEach((r, i) => {
       if (session.held) {
@@ -532,7 +548,7 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
         return;
       }
       if (!r.pilot.engaged) r.pilot.setEngaged(true);
-      if (session.finished(i) && r.pilot.mode !== 'sleeper') {
+      if (home(i) && r.pilot.mode !== 'sleeper') {
         // Home: the cool-down lap, a ghost to the cars still racing (the director's way).
         r.pilot.setMode('sleeper');
         r.pilot.setGripShare(1);
@@ -557,8 +573,38 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
     const lights = String(session.lights);
     if (!lightsSeen.endsWith(lights)) lightsSeen += lights;
     if (session.held) for (const r of racers) movedInCountdown = Math.max(movedInCountdown, r.car.speedKmh);
-    session.step(FIXED_DT, xs, zs);
+    if (session.phase !== 'finished') {
+      if (session.step(FIXED_DT, xs, zs)) {
+        overAt = session.raceTime;
+        projectedAtOver = session
+          .standings()
+          .filter((i) => !session.finished(i))
+          .map((i) => `${racers[i]!.name} ~${session.projectedTime(i).toFixed(1)} s`)
+          .join(', ');
+        // The stand-in is done, finished or out: nothing more to wait for from it.
+        if (!session.finished(0)) flagAt[0] = Number.POSITIVE_INFINITY;
+      }
+      racers.forEach((_, i) => {
+        if (!home(i) && session.finished(i)) flagAt[i] = session.finishTimes[i]!;
+      });
+    } else {
+      // Run on: the cars still out counted to their own flag on the session's counters.
+      runOnS += FIXED_DT;
+      racers.forEach((_, i) => {
+        if (home(i)) return;
+        const counter = session.counters[i]!;
+        counter.update(FIXED_DT, xs[i]!, zs[i]!);
+        if (counter.completed >= RACE_LAPS) flagAt[i] = overAt + runOnS;
+      });
+    }
     if (session.held) continue;
+    const clock = session.raceTime + runOnS;
+    racers.forEach((_, i) => {
+      const done = session.counters[i]!.completed;
+      if (done <= lapList[i]!.length || done > RACE_LAPS) return;
+      lapList[i]!.push(clock - lapAt[i]!);
+      lapAt[i] = clock;
+    });
     if (shove && !shoved && session.raceTime > 40) {
       shoved = true;
       const c = session.counters[1]!;
@@ -570,7 +616,7 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
     }
     // Recoveries and ghosts, as the director has them (the bench has no camera: no wait for the view).
     racers.forEach((r, i) => {
-      if (session.finished(i)) return;
+      if (home(i)) return;
       if (r.ghostS > 0) {
         r.ghostFor += FIXED_DT;
         r.ghostS -= FIXED_DT;
@@ -595,16 +641,19 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
   const paid = settleStake(world, session.end === 'laps' ? place : 0);
   const jarAfter = purseTotal(world.state.player.shells);
   const wall = ((performance.now() - started) / 1000).toFixed(0);
-  const allHome = racers.every((_, i) => session.finished(i));
-  const laps = (i: number): string => Array.from({ length: RACE_LAPS }, (_, lap) => session.lapTime(i, lap)).map((t) => (Number.isFinite(t) ? t.toFixed(1) : '—')).join(' / ');
+  const allHome = racers.every((_, i) => Number.isFinite(flagAt[i]!));
+  const laps = (i: number): string => lapList[i]!.map((t) => t.toFixed(1)).join(' / ') || '—';
   console.log(
-    `  ${track.id} ${track.lengthM.toFixed(0)} m, ${plan.level}${plan.trailer ? `, TRAILERS ${TRAILER_KG} kg` : ''}: over at ${session.raceTime.toFixed(1)} s (${wall} s wall); ` +
-      `5 drivers + cars ${(driveMs / Math.max(1, driveSteps)).toFixed(2)} ms a step (worst ${worstStepMs.toFixed(1)} ms)`,
+    `  ${track.id} ${track.lengthM.toFixed(0)} m${plan.trailer ? `, TRAILERS ${TRAILER_KG} kg` : ''}: over at ${overAt.toFixed(1)} s, the stand-in ${session.end}; ` +
+      `run on to ${(overAt + runOnS).toFixed(1)} s (${wall} s wall); ` +
+      `${racers.length} drivers + cars ${(driveMs / Math.max(1, driveSteps)).toFixed(2)} ms a step (worst ${worstStepMs.toFixed(1)} ms)`,
   );
+  console.log(`      results at the flag: ${projectedAtOver ? `still running ${projectedAtOver}` : 'everybody in'}`);
   for (const i of session.standings()) {
     const r = racers[i]!;
+    const flag = flagAt[i]!;
     console.log(
-      `      ${session.position(i)}. ${r.name.padEnd(24)} ${session.finished(i) ? session.finishTimes[i]!.toFixed(1).padStart(6) : '   DNF'} s  laps ${laps(i)}  best ${session.bestLap(i).toFixed(1)}  recoveries ${r.recoveries}  (${carModel(r.modelId).label})`,
+      `      ${session.position(i)}. ${r.name.padEnd(16)} ${Number.isFinite(flag) ? flag.toFixed(1).padStart(6) : '   DNF'} s  laps ${laps(i)}  best ${Math.min(...lapList[i]!).toFixed(1)}  recoveries ${r.recoveries}  (${carModel(r.modelId).label})`,
     );
   }
   check(
@@ -612,12 +661,17 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
     lightsSeen.startsWith('1234') && movedInCountdown < 3,
     `lights ${lightsSeen}, fastest in the countdown ${movedInCountdown.toFixed(1)} km/h`,
   );
-  check(`${track.id}: every car of the five takes the flag`, allHome, `${racers.filter((_, i) => session.finished(i)).length} of ${racers.length} home`);
+  check(
+    `${track.id}: the results are up the step the stand-in is done`,
+    session.phase === 'finished' && (session.end !== 'laps' || overAt === session.finishTimes[0]) && !projectedAtOver.includes('NaN'),
+    `over at ${overAt.toFixed(1)} s, stand-in ${session.end} at ${session.finishTimes[0]!.toFixed(1)} s`,
+  );
+  check(`${track.id}: every car of the four takes the flag`, allHome, `${racers.filter((_, i) => Number.isFinite(flagAt[i]!)).length} of ${racers.length} home`);
   if (shove) {
     check(
       `${track.id}: a rival thrown off and one on its roof are put back and finish`,
-      racers[1]!.recoveries >= 1 && racers[2]!.recoveries >= 1 && session.finished(1) && session.finished(2),
-      `thrown: ${racers[1]!.recoveries} recoveries, ${session.finished(1) ? 'home' : 'not home'}; roof: ${racers[2]!.recoveries} recoveries, ${session.finished(2) ? 'home' : 'not home'}`,
+      racers[1]!.recoveries >= 1 && racers[2]!.recoveries >= 1 && Number.isFinite(flagAt[1]!) && Number.isFinite(flagAt[2]!),
+      `thrown: ${racers[1]!.recoveries} recoveries, ${Number.isFinite(flagAt[1]!) ? 'home' : 'not home'}; roof: ${racers[2]!.recoveries} recoveries, ${Number.isFinite(flagAt[2]!) ? 'home' : 'not home'}`,
     );
   }
   check(

@@ -1170,7 +1170,7 @@ export function buildShell(frame: BodyFrame): ShellResult {
             q = along(b, t, glassTop);
           }
         }
-        const inset = kind === 'front' ? cabin.railInset : -cabin.railInset;
+        const inset = kind === 'front' ? (cabin.railRun?.front ?? cabin.railInset) : -(cabin.railRun?.rear ?? cabin.railInset);
         const u: Vec3 = P(side * frac * (cabin.railHalf - cabin.railInset), crownY + frame.roofDrop(top) + cabin.railRise - frame.roofDrop(top + inset), top + inset);
         return { b, k, q, t, u, kind, frac };
       });
@@ -1194,8 +1194,12 @@ export function buildShell(frame: BodyFrame): ShellResult {
         k = [lerp(b[0], t[0], kt), lerp(b[1], t[1], kt), frame.z(cabin.rearKnee.s)];
         q = along(k, t, t[1] - cabin.glassTop);
       }
-      const inset = i === 0 ? cabin.railInset : last ? -cabin.railInset : 0;
-      const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise - corner - frame.roofDrop(column.top + inset), column.top + inset);
+      // `railRun.front`: a column standing under the roof's long rise over the cab carries
+      // that share of the rail's chamfer (the A pillar none); the roof starts behind the rise.
+      const run = cabin.railRun?.front;
+      const share = run !== undefined && column.top < roofFront + run - 1e-6 ? (column.top - roofFront) / run : 1;
+      const inset = share < 1 ? 0 : i === 0 ? cabin.railInset : last ? -(cabin.railRun?.rear ?? cabin.railInset) : 0;
+      const u: Vec3 = P(side * (cabin.railHalf - cabin.railInset * share), cabin.rail + cabin.railRise * share - corner - frame.roofDrop(column.top + inset), column.top + inset);
       return { b, k, q, t, u, kind: 'side', frac: 1, column };
     });
     sideRing.forEach((a, i) => {
@@ -1319,8 +1323,19 @@ export function buildShell(frame: BodyFrame): ShellResult {
       // inside it, the tailgate's paint round it; above the top, the body's. Every piece is
       // cut by the same lines, so neighbours share their corners.
       const panes = cabin.rearPanes !== undefined && a.kind === 'rear' && b.kind === 'rear' ? cabin.rearPanes : undefined;
+      // A rounded side pane (`CabinColumn.glassRound`): the window band cut along the
+      // strip's whole pane (its columns' corners, through any bends between them), its
+      // corners the strip's paint.
+      const round = a.kind === 'side' && b.kind === 'side' && glass !== null ? a.column!.glassRound : undefined;
+      let roundEdges: ((p: Vec3) => number)[] | undefined;
+      if (round !== undefined) {
+        const i0 = sideRing.findIndex((r) => r.column === a.column);
+        const c0 = sideRing[i0]!;
+        const c1 = sideRing[i0 + 1]!;
+        roundEdges = roundedCorners([c0.k, c1.k, c1.q, c0.q], round);
+      }
       for (const [p0, p1, p2, p3, band] of bands) {
-        if (band === 3) {
+        if (band === 3 && !(panes && cabin.railRun?.rear !== undefined)) {
           quad([p0, p1, p2, p3], 'body', top, true);
         } else if (band === 4) {
           quad([p0, p1, p2, p3], 'body', 'paint', true);
@@ -1335,6 +1350,14 @@ export function buildShell(frame: BodyFrame): ShellResult {
             rest = clipPolygon(rest, edge, -1);
           }
           if (rest.length >= 3) shell.face(rest, glass ?? upper, glass === null ? strip : 'glass', false, glass === null && upper === 'body');
+        } else if (band === 1 && glass !== null && roundEdges) {
+          let rest = [p0, p1, p2, p3];
+          for (const edge of roundEdges) {
+            const out = clipPolygon(rest, edge, 1);
+            if (out.length >= 3) shell.face(out, upper, strip, false, upper === 'body');
+            rest = clipPolygon(rest, edge, -1);
+          }
+          if (rest.length >= 3) shell.face(rest, glass, 'glass');
         } else if (band === 1 && glass !== null) {
           shell.face([p0, p1, p2, p3], glass, 'glass');
         } else {
@@ -1360,13 +1383,23 @@ export function buildShell(frame: BodyFrame): ShellResult {
       cabin.rail + cabin.railRise + frame.crownAt(f) - (f >= cowlFracs[2]! ? cabin.rail + cabin.railRise - u[1] : frame.roofDrop(frame.zNose - u[2])),
       u[2],
     ];
-    for (let i = 0; i + 1 < sides.length; i++) {
+    // Under a long rise over the cab (`railRun.front`) the roof's rows start at its top,
+    // behind the columns under it; between the screen's outer top corner, those columns'
+    // tapered chamfers and the first row, the rise's corner is fanned from the row's outer end.
+    const run = cabin.railRun?.front;
+    const first = run === undefined ? 0 : sides.findIndex((r) => frame.zNose - r.u[2] >= roofFront + run - 1e-6);
+    const rise: Vec3 | undefined = run === undefined ? undefined : P(side * (cabin.railHalf - cabin.railInset), cabin.rail + cabin.railRise - frame.roofDrop(roofFront + run), roofFront + run);
+    if (rise) {
+      const chain = [ring.find((r) => r.kind === 'front' && r.frac === cowlFracs[2])!.u, ...sides.slice(0, first + 1).map((r) => r.u)];
+      for (let i = 0; i + 1 < chain.length; i++) shell.face([rise, chain[i]!, chain[i + 1]!], 'body', 'paint', false, true);
+    }
+    for (let i = first; i + 1 < sides.length; i++) {
       // The roof's front row follows a curved screen's top (`screenTop`), as the front
       // ring's roof edge does.
-      const front = i === 0 && cabin.screenTop !== undefined;
-      const u0 = sides[i]!.u;
+      const front = i === first && (cabin.screenTop !== undefined || rise !== undefined);
+      const u0 = rise && i === first ? rise : sides[i]!.u;
       const u1 = sides[i + 1]!.u;
-      const row0 = (f: number): Vec3 => roofPoint(front ? [u0[0], u0[1], frame.z(frame.screenTopS(f) + cabin.railInset)] : u0, f);
+      const row0 = (f: number): Vec3 => roofPoint(front ? [u0[0], u0[1], frame.z(frame.screenTopS(f) + (run ?? cabin.railInset))] : u0, f);
       for (let k = 0; k + 1 < fracs.length; k++) {
         quad([row0(fracs[k]!), roofPoint(u1, fracs[k]!), roofPoint(u1, fracs[k + 1]!), row0(fracs[k + 1]!)], 'body', cabin.softTop ? 'canvas' : 'paint', true);
       }
@@ -1395,6 +1428,52 @@ function paneEdges(pane: NonNullable<CabinSpec['rearPanes']>, side: number): ((p
       edges.push((p) => (side * p[0] - cx) * nx + (p[1] - cy) * ny - r);
     }
   }
+  return edges;
+}
+
+/**
+ * The corners of a side pane (`CabinColumn.glassRound`) as lines g, the pane where every
+ * g ≤ 0: at each corner of the quad, seen from the side (z, y), lines tangent to the arc
+ * of radius `r` touching both its edges, turning from one edge's direction to the next's.
+ */
+function roundedCorners(quad: readonly Vec3[], r: number): ((p: Vec3) => number)[] {
+  const pts = quad.map((p) => [p[2], p[1]] as const);
+  const cu = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+  const cv = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  // Each edge's outward unit normal and its line's offset (n·p = d on the edge).
+  const normals = pts.map((p, i) => {
+    const q = pts[(i + 1) % pts.length]!;
+    let nu = q[1] - p[1];
+    let nv = p[0] - q[0];
+    const len = Math.hypot(nu, nv) || 1;
+    nu /= len;
+    nv /= len;
+    if (nu * (cu - p[0]) + nv * (cv - p[1]) > 0) {
+      nu = -nu;
+      nv = -nv;
+    }
+    return [nu, nv, nu * p[0] + nv * p[1]] as const;
+  });
+  const edges: ((p: Vec3) => number)[] = [];
+  pts.forEach((_, i) => {
+    // The corner between edge i−1 and edge i; its arc's centre r inside both.
+    const [au, av, ad] = normals[(i + pts.length - 1) % pts.length]!;
+    const [bu, bv, bd] = normals[i]!;
+    const det = au * bv - av * bu;
+    if (Math.abs(det) < 1e-9) return;
+    const cx = ((ad - r) * bv - av * (bd - r)) / det;
+    const cy = (au * (bd - r) - (ad - r) * bu) / det;
+    const a0 = Math.atan2(av, au);
+    let da = Math.atan2(bv, bu) - a0;
+    if (da > Math.PI) da -= 2 * Math.PI;
+    if (da < -Math.PI) da += 2 * Math.PI;
+    for (let k = 1; k <= PANE_CORNER_STEPS; k++) {
+      const a = a0 + (k / (PANE_CORNER_STEPS + 1)) * da;
+      const nu = Math.cos(a);
+      const nv = Math.sin(a);
+      edges.push((p) => (p[2] - cx) * nu + (p[1] - cy) * nv - r);
+    }
+  });
   return edges;
 }
 

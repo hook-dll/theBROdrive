@@ -66,6 +66,8 @@ const LAY_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   passenger: ['seat'],
   'rear-left': ['bench_l', 'bench'],
   'rear-right': ['bench_r', 'bench'],
+  // A front bench's middle (the ZIL-130's): its one place, the passenger's third beside it.
+  middle: ['seat'],
 };
 /** And the places a thing is taken from through that door: seats first, then the floor. */
 const TAKE_FROM: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
@@ -73,6 +75,7 @@ const TAKE_FROM: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   passenger: ['seat', 'floor_front'],
   'rear-left': ['bench_l', 'bench', 'floor_rear_l', 'floor_rear'],
   'rear-right': ['bench_r', 'bench', 'floor_rear_r', 'floor_rear'],
+  middle: ['seat'],
 };
 
 /** The seat a place is reached from and sat on; the whole bench and rear floor answer to both. */
@@ -184,6 +187,7 @@ const SIT_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   passenger: ['seat'],
   'rear-left': ['bench_l'],
   'rear-right': ['bench_r'],
+  middle: ['seat'],
 };
 
 /** The one place a bench-only thing (the carpet) lies, through either rear door. */
@@ -192,6 +196,7 @@ const BENCH_ONLY: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   passenger: [],
   'rear-left': ['bench'],
   'rear-right': ['bench'],
+  middle: [],
 };
 
 /**

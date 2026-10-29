@@ -45,6 +45,7 @@ import { bootFreeAnchor, normalizeBoot, trunkCellCount } from '../vehicle/trunk'
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
+import { kitFrontBench } from '../carkit/specs';
 
 /**
  * A post's saved stock (contracts/offers.ts `postStock`): its slots' offers — three, and
@@ -537,8 +538,9 @@ export function migrateState(raw: unknown): WorldState {
     health: Math.min(1, Math.max(0, numOr(playerRaw.health, dp.health))),
     s: numOr(playerRaw.s, dp.s),
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
-    // Saves from before seats were always in the driver's.
-    seat: PLAYER_SEATS.includes(playerRaw.seat as PlayerSeat) ? (playerRaw.seat as PlayerSeat) : 'driver',
+    // Saves from before seats were always in the driver's; the middle is only on a car
+    // with a front bench (`frontBenchCar`), else the passenger's.
+    seat: seatOf(playerRaw.seat, playerRaw.drivingCarId, carsRaw),
     lastDrivenCarId: typeof playerRaw.lastDrivenCarId === 'string' ? playerRaw.lastDrivenCarId : null,
     carried,
     carriedSelected: Math.min(
@@ -936,6 +938,21 @@ function worldModelId(saved: unknown): string {
   if (CAR_MODELS.some((model) => model.id === id)) return id;
   const twin = `kit_${id.slice(id.indexOf('_') + 1)}`;
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
+}
+
+/** The saved seat; 'middle' only in a car whose front seat is a bench (`frontBenchCar`), else the passenger's. */
+function seatOf(saved: unknown, carId: unknown, carsRaw: Record<string, unknown>): PlayerSeat {
+  if (!PLAYER_SEATS.includes(saved as PlayerSeat)) return 'driver';
+  if (saved !== 'middle') return saved as PlayerSeat;
+  const car = typeof carId === 'string' ? carsRaw[carId] : undefined;
+  const modelId = typeof car === 'object' && car !== null ? (car as Record<string, unknown>).modelId : undefined;
+  return frontBenchCar(worldModelId(modelId)) ? 'middle' : 'passenger';
+}
+
+/** The world model's front seat is a bench with a middle place (carkit/specs.ts `kitFrontBench`). */
+function frontBenchCar(modelId: string): boolean {
+  const kit = carModel(modelId).kit;
+  return kit !== undefined && kitFrontBench(kit);
 }
 
 function migrateCar(raw: Record<string, unknown>, version: number): CarState {

@@ -104,6 +104,11 @@ const CAR_HALF_LENGTH = 2.5;
  */
 const EXIT_SPEED_LIMIT_KMH = 5;
 /**
+ * From a front bench's middle, how far the look must turn to a side (the dot of the look
+ * with the car's left) to leave by that side's door; less is the passenger's door.
+ */
+const MIDDLE_EXIT_LOOK = 0.3;
+/**
  * Slack around a kit door's opening for the entry test, metres: the eye ray may cross
  * the door plane a hand's width outside the shut door's outline (the seal, the
  * pillar's edge) and still count as aimed through the opening.
@@ -959,7 +964,7 @@ export class Interaction {
       if (pressed) {
         if (aimed && active && rig) this.workKitPart(active.vehicle, rig, aimed.control);
         else if (seat) this.moveSeat(seat);
-        else this.tryExit(roadS);
+        else this.tryExit(roadS, dirX, dirY, dirZ);
       }
       return {
         prompt: null,
@@ -2000,15 +2005,19 @@ export class Interaction {
   /**
    * The seat a kit car's surface belongs to, or null: a front seat by its parts' channel
    * (`seat_fl` and the back and headrest riding on it are the driver's, on the left),
-   * the bench by its group, halved down the car's centre line: the rear seats', or a
-   * truck's front ones (`kitFrontBench`, carkit/interior.ts `KIT_BENCH_NODE`).
+   * the bench by its group, halved down the car's centre line: the rear seats'; a
+   * truck's front bench (`kitFrontBench`, carkit/interior.ts `KIT_BENCH_NODE`) in thirds
+   * of its width (`kitBenchHalf`): the driver's, the middle place's, the passenger's.
    */
   private kitSeatOf(hit: THREE.Intersection): PlayerSeat | null {
     for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
       if (node.name === KIT_BENCH_NODE) {
-        const left = node.worldToLocal(this.kitEye.copy(hit.point)).x > 0;
-        if (node.userData.kitFrontBench === true) return left ? 'driver' : 'passenger';
-        return left ? 'rear-left' : 'rear-right';
+        const x = node.worldToLocal(this.kitEye.copy(hit.point)).x;
+        if (node.userData.kitFrontBench === true) {
+          const third = (node.userData.kitBenchHalf as number) / 3;
+          return x > third ? 'driver' : x < -third ? 'passenger' : 'middle';
+        }
+        return x > 0 ? 'rear-left' : 'rear-right';
       }
       const id = (node.userData.kitControl as KitControl | undefined)?.id;
       if (id === undefined) continue;
@@ -3189,13 +3198,22 @@ export class Interaction {
    * (`speedKmh` is absolute, so reversing at speed too), or it is a kit car whose door by
    * his seat is shut, which answers with the refusal knock.
    */
-  private tryExit(roadS: number): void {
+  private tryExit(roadS: number, dirX: number, dirY: number, dirZ: number): void {
     const carId = this.world.state.player.drivingCarId;
     if (!carId) return;
     const active = this.getVehicle();
     if (!active || active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return;
     const rig = active.vehicle.kit;
-    const door = rig ? this.kitExitDoor(rig, active.vehicle, this.world.state.player.seat) : null;
+    const seat = this.world.state.player.seat;
+    // The middle of a front bench is left by the door on the side he looks to, the
+    // passenger's when he looks ahead or back (+X is the car's left).
+    let left = seat === 'driver' || seat === 'rear-left';
+    if (seat === 'middle') {
+      active.vehicle.chassis.rotation(this.qScratch);
+      const side = this.vScratch.set(1, 0, 0).applyQuaternion(this.qScratch);
+      left = side.x * dirX + side.y * dirY + side.z * dirZ > MIDDLE_EXIT_LOOK;
+    }
+    const door = rig ? this.kitExitDoor(rig, active.vehicle, seat, left) : null;
     if (rig && door && rig.get(door.id) <= 0.5) {
       this.sound = 'refused';
       return;
@@ -3215,12 +3233,11 @@ export class Interaction {
   }
 
   /**
-   * The door `seat` is left by, open or shut: the front door on its side for a front
-   * seat; for a rear seat the rear door on its side, or the front one on a car without
+   * The door `seat` is left by, open or shut, on the `left` or right side: the front door
+   * for a front seat; for a rear seat the rear door, or the front one on a car without
    * rear doors. Null for a kit car without doors found, which is left by its flank.
    */
-  private kitExitDoor(rig: KitRig, vehicle: Vehicle, seat: PlayerSeat): KitDoor | null {
-    const left = seat === 'driver' || seat === 'rear-left';
+  private kitExitDoor(rig: KitRig, vehicle: Vehicle, seat: PlayerSeat, left: boolean): KitDoor | null {
     const rear = seat === 'rear-left' || seat === 'rear-right';
     let front: KitDoor | null = null;
     for (const door of this.kitDoors(rig, vehicle)) {

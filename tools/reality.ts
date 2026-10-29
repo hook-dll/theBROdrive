@@ -617,7 +617,7 @@ const TARGETS: Readonly<Record<string, Target>> = {
   },
   kit_gaz3221: {
     wheelbase: 2.9, track: 1.7, radius: 0.34, top: 115, to100: null,
-    loadKg: 1500, load: 'gross mass (eight passengers, driver and luggage), the GAZ catalogue\'s condition', turn: 5.5, lat: null, hz: 1.3,
+    loadKg: 1500, load: 'gross mass (thirteen passengers, driver and luggage: the GAZ-32213), the GAZ catalogue\'s condition', turn: 5.5, lat: null, hz: 1.3,
     brake80: null, grossKg: 3500,
     source: 'GAZ-3221: autoopt.ru encyclopedia/car/gaz/mark/gaz-3221 (115 km/h, 5.5 m, gross 3500); drom.ru catalog/lcv/gaz/gazelle/272273; geometry kit_gaz3221 row',
   },

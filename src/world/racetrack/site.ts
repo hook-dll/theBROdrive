@@ -38,23 +38,27 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
  *  - some stretch of it lies farther than `CHUNK_SPREAD_M` along the road from the
  *    rest, so no one chunk could stream it (world/racetrack/mesh.ts);
  *  - the ground is too far from the track's own plane at the run-off's edge to blend
- *    back without a wall (`FIT_MAX_M` over the `SKIRT_M` skirt: 30% added at most) even
- *    with the profile's features scaled away.
+ *    back without a wall (`FIT_MAX_M` over the `SKIRT_M` skirt: about 33% added at most, and the desert half way out the skirt within `SKIRT_FIT_MAX_M`) even
+ *    with the profile's relief scaled away.
  *
  * Desert POIs keep off the track instead (`terrain.raceTracks.covers`, world/poi.ts),
  * as the scatter and the desert tiles' props do: the track is the bigger thing.
  *
  * THE HEIGHTS. The lap's profile is the ground under it smoothed along the loop over
  * `PROFILE_SIGMA_M` — so the track follows the land and the skirt has little to do —
- * plus authored features sized to the lap: a HILL over a quarter to two fifths of it,
- * often a shorter SWELL of the other sign, one or two CRESTS on straights and a DIP. A
- * crest is a raised cosine whose vertical radius is held at `CREST_RADIUS_M` or more (a
- * car at 100 km/h keeps half its weight over it, and the lap's straights are short
- * enough that little arrives faster); the whole profile is held under `MAX_GRADE`.
- * Where two stretches of the loop pass near each other their heights are held within
- * `PAIR_SLOPE` of their gap, so the sand between them is a bank and not a wall, and the
- * plane stands within `FIT_MAX_M` of the desert at the run-off's edges. Features that
- * break any rule are scaled down until they do not.
+ * plus an authored RELIEF: two or three MOUNDS and HOLLOWS 11-18 m high laid in plan (a
+ * raised cosine 180-350 m round each, never steeper than `MOUND_SLOPE`), so the lap
+ * climbs onto a rise and drops into a bowl and two stretches that pass near each other
+ * share one slope; and one or two CRESTS on straights and a DIP along the lap. A crest
+ * is a raised cosine whose vertical radius is held at `CREST_RADIUS_M` or more (a car
+ * at 100 km/h keeps half its weight over it, and the lap's straights are short enough
+ * that little arrives faster); the whole profile is held under `MAX_GRADE`, 11% (`limitGrade` takes any steeper ground down), which
+ * a truck with a trailer still climbs. Where two stretches of the loop pass near each
+ * other their facing run-off edges are held within `PAIR_SLOPE` of their gap, so the sand between
+ * them is a bank and not a wall, and the plane stands within `FIT_MAX_M` of the desert
+ * at the run-off's edges: the relief is earthworks, an embankment up to 13 m over a
+ * hollow of the desert or a cutting through a rise of it. A relief that breaks any
+ * rule is scaled down (`RELIEF_SCALES`) until it does not.
  *
  * THE GROUND: A RASTER, BLENDED IN `Terrain.openBase`. Inside the CORE — the track,
  * its `RUNOFF_M` of sand either side, and the paddock — the ground IS the track's plane
@@ -88,8 +92,11 @@ const HALF_WIDTH_MIN_M = 4.3;
 const HALF_WIDTH_MAX_M = 5.0;
 /** Level graded sand beyond each asphalt edge. */
 export const RUNOFF_M = 10;
-/** Ground beyond the run-off that smoothsteps back into the desert. */
-export const SKIRT_M = 40;
+/**
+ * Ground beyond the run-off that smoothsteps back into the desert: wide enough that the
+ * relief's embankments and cuttings (`FIT_MAX_M`) are a bank and not a wall.
+ */
+export const SKIRT_M = 60;
 /** Nearest the skirt's outer edge comes to the road's centreline. */
 const SETTLEMENT_CLEAR_M = 75;
 /** Start straight's centreline off the road, range. */
@@ -119,24 +126,50 @@ const LANE_GATE_APPROACH_M = 12;
 const LANE_MIN_RADIUS_M = 14;
 const LANE_STEP_M = 3;
 
-/** Profile and its rules. */
+/**
+ * Profile and its rules. `MAX_GRADE` is what a loaded truck with a trailer still climbs
+ * at race pace (the rivals' autopilot drives the lap as a road).
+ */
 const PROFILE_SIGMA_M = 55;
-const MAX_GRADE = 0.14;
+const MAX_GRADE = 0.11;
 const CREST_RADIUS_M = 170;
+const CREST_GRADE = 0.035;
 const PAIR_SLOPE = 0.3;
 /**
- * Most the track's plane may stand off the desert at the run-off's edge. Smoothstepped
- * over the skirt, the steepest the blend itself adds is 1.5 x this / `SKIRT_M`: 30%.
+ * The relief's mounds (see `profile`): height range, the steepest slope one has, and the
+ * shares of it tried in turn until the rules hold (the last, none, is the ground alone).
  */
-const FIT_MAX_M = SKIRT_M * 0.2;
+const MOUND_MIN_M = 11;
+const MOUND_MAX_M = 18;
+const MOUND_SLOPE = 0.08;
+const RELIEF_SCALES = [1, 0.85, 0.7, 0.55, 0.4, 0.25, 0.25, 0];
+/** The grade limiter's rounding (`limitGrade`), and the share of `MAX_GRADE` it aims at. */
+const GRADE_EASE_M = 16;
+const GRADE_AIM = 0.97;
+/**
+ * Most the track's plane may stand off the desert at the run-off's edge: the relief's
+ * embankment or cutting. Smoothstepped over the skirt, the steepest the blend itself
+ * adds is 1.5 x this / `SKIRT_M`: 33%. Half way out the skirt, where the blend is
+ * steepest, the desert may stand no farther than `SKIRT_FIT_MAX_M` off the plane carried
+ * flat — on a hillside a cutting deepens across the skirt, and that is what makes a wall.
+ */
+const FIT_MAX_M = SKIRT_M * 0.22;
+const SKIRT_FIT_MAX_M = SKIRT_M * 0.2;
 
 /**
- * Raster lattice and the soft-minimum's length, and the extra excess a segment is
- * charged per metre a node lies beyond its end (see `buildRaster`).
+ * Raster lattice (3 m: a banked bowl's run-off plane is read within centimetres) and
+ * the soft-minimum's length, which grows by `SKIRT_TAU_SHARE` of a node's own excess
+ * out across the skirt; the extra excess a segment is charged per metre a node lies
+ * beyond its end; and how fast a node inside a core stops listening to other
+ * stretches: their excess over its own is multiplied by `1 + depth / CORE_HOLD_M`,
+ * depth being how far inside the core it lies, so a banked bowl's run-off is its own
+ * plane and not a few per cent of the next leg's (see `buildRaster`).
  */
-const RASTER_CELL_M = 4;
+const RASTER_CELL_M = 3;
 const SOFT_TAU_M = 3;
+const SKIRT_TAU_SHARE = 0.5;
 const PAST_END_WEIGHT = 1.5;
+const CORE_HOLD_M = 2;
 /** The lane's keep-clear margin beyond its own half width (scatter, props). */
 const LANE_CLEAR_M = 5;
 
@@ -277,6 +310,36 @@ function smoothPeriodic(values: Float64Array, step: number, sigma: number): Floa
   return out;
 }
 
+/**
+ * A closed profile (`step` metres a row) brought under `grade` with the least change in
+ * shape: the mean of its upper and lower `grade`-Lipschitz envelopes (the highest such
+ * profile under it and the lowest over it — equal to it wherever it is already gentle
+ * enough, half way between a spike and the cone over it elsewhere), then Gaussian
+ * smoothed over `GRADE_EASE_M`, which keeps the bound and rounds every change of
+ * grade the envelopes leave into a vertical curve of `CREST_RADIUS_M` or more.
+ */
+function limitGrade(ys: Float64Array, step: number, grade: number): Float64Array {
+  const n = ys.length;
+  const rise = grade * step;
+  const upper = Float64Array.from(ys);
+  const lower = Float64Array.from(ys);
+  // Two rounds of a forward and a backward sweep carry every bound once round the loop.
+  for (let round = 0; round < 2; round++) {
+    for (let i = 0; i < n; i++) {
+      const p = (i + n - 1) % n;
+      upper[i] = Math.min(upper[i]!, upper[p]! + rise);
+      lower[i] = Math.max(lower[i]!, lower[p]! - rise);
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      const q = (i + 1) % n;
+      upper[i] = Math.min(upper[i]!, upper[q]! + rise);
+      lower[i] = Math.max(lower[i]!, lower[q]! - rise);
+    }
+  }
+  for (let i = 0; i < n; i++) upper[i] = (upper[i]! + lower[i]!) / 2;
+  return smoothPeriodic(upper, step, GRADE_EASE_M);
+}
+
 /** A loop turned and slid into the world, its table re-based to the finish line. */
 interface Placed {
   readonly count: number;
@@ -400,11 +463,20 @@ interface Feature {
   readonly amplitude: number;
 }
 
+/** A MOUND of the relief (see `profile`): a raised cosine in plan, `radius` round (x, z). */
+interface Mound {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly amplitude: number;
+}
+
 /**
- * The lap's heights: the ground smoothed along the loop, plus the authored hill, crests
- * and dip, scaled down until the grade, the passing-stretches rule and the fit to the
- * desert at the run-off's edges (`edges`: the ground there, both sides, every
- * `groundStep` rows) all hold. Null when the ground alone breaks them.
+ * The lap's heights: the ground smoothed along the loop, plus the authored relief —
+ * mounds and hollows in PLAN, and crests and a dip on straights along the lap — scaled
+ * down until the grade, the passing-stretches rule and the fit to the desert at the
+ * run-off's edges (`edges`: the ground there, both sides, every `groundStep` rows) all
+ * hold. Null when the ground alone breaks them.
  */
 function profile(
   placed: Placed,
@@ -438,23 +510,43 @@ function profile(
   const straightHalf = (placed.straightEnd + length - placed.straightStart) / 2 + 20;
   const clearOfStart = (centre: number, width: number): boolean => wrapDistance(centre, straightMid) > straightHalf + width / 2;
   const features: Feature[] = [];
-  const placeFeature = (width: number, amplitude: number): void => {
-    for (let tries = 0; tries < 8; tries++) {
-      const centre = rand() * length;
-      if (!clearOfStart(centre, width)) continue;
-      features.push({ centre, width, amplitude });
-      return;
-    }
-  };
 
-  // The hill: a long rise (sometimes a long hollow) over a third of the lap or so, and
-  // often a shorter swell of the other sign elsewhere.
-  let hillSign = 1;
-  if (rand() < 0.9) {
-    hillSign = rand() < 0.8 ? 1 : -1;
-    placeFeature(Math.max(260, length * between(rand, 0.25, 0.42)), hillSign * between(rand, 3, 7));
+  // THE RELIEF: two or three mounds and hollows laid in PLAN, not along the lap. Two
+  // stretches that pass near each other (a hairpin's legs) stand on the same slope of
+  // the same mound, so they differ by its gradient times their gap — which the
+  // passing-stretches rule allows at `MOUND_SLOPE` — where a rise laid along the lap
+  // would put the legs of a hairpin metres apart and be scaled away. A mound's radius
+  // is held at `amplitude / MOUND_SLOPE x pi/2` or more, so that is also its steepest
+  // grade. Each stands with the start straight's middle on its outer fifth, where it is
+  // nearly level, so the grid stays level-ish; the second is the first's opposite: a
+  // rise and a hollow.
+  const startX = placed.xs[Math.round(straightMid / step) % count]!;
+  const startZ = placed.zs[Math.round(straightMid / step) % count]!;
+  const mounds: Mound[] = [];
+  const moundCount = rand() < 0.45 ? 3 : 2;
+  let sign = rand() < 0.75 ? 1 : -1;
+  for (let m = 0; m < moundCount; m++) {
+    const amplitude = between(rand, MOUND_MIN_M, MOUND_MAX_M) * (m === 2 ? 0.6 : 1);
+    const radius = Math.max((amplitude * Math.PI) / (2 * MOUND_SLOPE), between(rand, 180, 300));
+    for (let tries = 0; tries < 30; tries++) {
+      const i = Math.floor(rand() * count);
+      const angle = rand() * Math.PI * 2;
+      const off = rand() * radius * 0.4;
+      const x = placed.xs[i]! + Math.cos(angle) * off;
+      const z = placed.zs[i]! + Math.sin(angle) * off;
+      if (Math.hypot(x - startX, z - startZ) < radius * 0.75) continue;
+      if (mounds.some((other) => Math.hypot(x - other.x, z - other.z) < (radius + other.radius) * 0.4)) continue;
+      mounds.push({ x, z, radius, amplitude: sign * amplitude });
+      break;
+    }
+    sign = -sign;
   }
-  if (rand() < 0.6) placeFeature(Math.max(160, length * between(rand, 0.14, 0.22)), -hillSign * between(rand, 2, 4));
+  const relief = new Float64Array(count);
+  for (let i = 0; i < count; i++) {
+    let y = 0;
+    for (const mound of mounds) y += mound.amplitude * bump(Math.hypot(placed.xs[i]! - mound.x, placed.zs[i]! - mound.z), 2 * mound.radius);
+    relief[i] = y;
+  }
   // Crests on the longer straights, a dip on one more.
   const straights = placed.corners.filter((c) => c.kind === 'straight' && c.length >= 70);
   let crests = 0;
@@ -463,7 +555,9 @@ function profile(
     const width = Math.min(straight.length - 16, 130);
     const centre = (straight.startS + straight.length / 2) % length;
     if (!clearOfStart(centre, width)) continue;
-    const limit = (width * width) / (2 * Math.PI * Math.PI * CREST_RADIUS_M);
+    // Held under `CREST_RADIUS_M` of vertical radius and `CREST_GRADE` of slope: the
+    // grade budget is the relief's (see `MOUND_SLOPE`).
+    const limit = Math.min((width * width) / (2 * Math.PI * Math.PI * CREST_RADIUS_M), (CREST_GRADE * width) / Math.PI);
     if (crests < 2 && rand() < 0.7) {
       features.push({ centre, width, amplitude: Math.min(3, limit) * between(rand, 0.7, 1) });
       crests++;
@@ -493,7 +587,9 @@ function profile(
       const i = k * groundStep;
       for (let side = 0; side < 2; side++) {
         const lateral = (side === 0 ? -1 : 1) * core;
-        if (Math.abs(ys[i]! - placed.banks[i]! * lateral - edges[k * 2 + side]!) > FIT_MAX_M) return false;
+        if (Math.abs(ys[i]! - placed.banks[i]! * lateral - edges[k * 4 + side]!) > FIT_MAX_M) return false;
+        // Half way out the skirt: the plane carried flat from the run-off's edge.
+        if (Math.abs(ys[i]! - placed.banks[i]! * lateral - edges[k * 4 + 2 + side]!) > SKIRT_FIT_MAX_M) return false;
       }
     }
     for (let i = 0; i < count; i += stride) {
@@ -505,7 +601,15 @@ function profile(
             if (j <= i || Math.min(j - i, count - (j - i)) * step < NEIGHBOUR_S_M) continue;
             const d = Math.hypot(placed.xs[j]! - placed.xs[i]!, placed.zs[j]! - placed.zs[i]!);
             if (d >= reach) continue;
-            if (Math.abs(ys[i]! - ys[j]!) > PAIR_SLOPE * Math.max(0, d - 2 * core) + 0.5) return false;
+            // The run-off edges that face each other, with their banking: the sand
+            // between them is what must be a bank.
+            const hi = placed.headings[i]!;
+            const hj = placed.headings[j]!;
+            const ex = placed.xs[j]! - placed.xs[i]!;
+            const ez = placed.zs[j]! - placed.zs[i]!;
+            const edgeI = ys[i]! - placed.banks[i]! * Math.sign(ex * Math.cos(hi) - ez * Math.sin(hi)) * core;
+            const edgeJ = ys[j]! + placed.banks[j]! * Math.sign(ex * Math.cos(hj) - ez * Math.sin(hj)) * core;
+            if (Math.abs(edgeI - edgeJ) > PAIR_SLOPE * Math.max(0, d - 2 * core) + 0.5) return false;
           }
         }
       }
@@ -513,19 +617,21 @@ function profile(
     return true;
   };
 
-  for (let pass = 0; pass < 6; pass++) {
-    // Passes 0-3 shrink the features; 4 smooths the ground harder; 5 drops the features.
-    const scale = pass >= 5 ? 0 : 0.6 ** Math.min(pass, 3);
-    if (pass === 4) {
+  for (let pass = 0; pass < RELIEF_SCALES.length; pass++) {
+    // The relief shrinks pass by pass; the last but one also smooths the ground harder,
+    // the last drops the relief altogether.
+    const scale = RELIEF_SCALES[pass]!;
+    if (pass === RELIEF_SCALES.length - 2) {
       smooth = smoothPeriodic(ground, groundStep * step, PROFILE_SIGMA_M * 2);
       upsample(smooth);
     }
     for (let i = 0; i < count; i++) {
-      let y = base[i]!;
+      let y = base[i]! + relief[i]! * scale;
       const s = i * step;
       for (const feature of features) y += feature.amplitude * scale * bump(wrapDistance(s, feature.centre), feature.width);
       ys[i] = y;
     }
+    ys.set(limitGrade(ys, step, MAX_GRADE * GRADE_AIM));
     if (holds()) return ys;
   }
   return null;
@@ -611,8 +717,12 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
               if (e < excess[node]!) excess[node] = e;
               continue;
             }
-            const over = e - excess[node]!;
-            if (over > SOFT_TAU_M * 12) continue;
+            const over = (e - excess[node]!) * (1 + Math.max(0, -excess[node]!) / CORE_HOLD_M);
+            // Out in the skirt the soft-minimum widens, so where two stretches' skirts
+            // meet the ground goes from one's height to the other's over metres in
+            // proportion to the gap, not in a crease.
+            const tau = SOFT_TAU_M + SKIRT_TAU_SHARE * Math.max(0, excess[node]!);
+            if (over > tau * 12) continue;
             const lateral = Math.max(-strip.core, Math.min(strip.core, (fx * dz - fz * dx) * inv));
             // Heights carry on along the segment past its ends (up to the core's half
             // width), so a strip's open end — the paddock's — keeps the lap's grade
@@ -623,7 +733,9 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
             // Charged for lying past the segment's end (see the header): its own segment's
             // banking, not an average over the ramp either side.
             const past = Math.abs(along - t) * Math.sqrt(lengthSq);
-            const k = Math.exp(-(over + PAST_END_WEIGHT * past) / SOFT_TAU_M);
+            // Faded to nothing at the skirt's outer edge, where the segment stops being
+            // visited: a wide soft-minimum would otherwise switch it on as a step.
+            const k = Math.exp(-(over + PAST_END_WEIGHT * past) / tau) * (1 - smoothstep01(Math.max(0, e) / SKIRT_M));
             sumK[node] += k;
             sumKH[node] += k * (y - bank * lateral);
           }
@@ -853,21 +965,22 @@ function tryLoop(
     }
     if (!clear) continue;
 
-    // The ground under the centreline and at the run-off's edges, then the heights. The
-    // edges are held to the chunk spread too: where the road bends round a track, an edge
-    // can lie nearer another stretch of road than its centreline does.
+    // The ground under the centreline, at the run-off's edges and at the skirt's middle
+    // either side, then the heights. The edges are held to the chunk spread too: where
+    // the road bends round a track, an edge can lie nearer another stretch of road than
+    // its centreline does.
     const ground = new Float64Array(samples);
-    const edges = new Float64Array(samples * 2);
+    const edges = new Float64Array(samples * 4);
     for (let k = 0; k < samples; k++) {
       const i = k * groundStep;
       ground[k] = world.natural(xs[i]!, zs[i]!, roadDist[k]!, roadS[k]!);
-      for (let side = 0; side < 2; side++) {
-        const lateral = (side === 0 ? -1 : 1) * core;
+      for (let side = 0; side < 4; side++) {
+        const lateral = (side % 2 === 0 ? -1 : 1) * (side < 2 ? core : core + SKIRT_M / 2);
         const x = xs[i]! + Math.cos(placed.headings[i]!) * lateral;
         const z = zs[i]! - Math.sin(placed.headings[i]!) * lateral;
         near.measure(x, z);
-        if (Math.abs(near.s - chunkS) > CHUNK_SPREAD_M) clear = false;
-        edges[k * 2 + side] = world.natural(x, z, near.dist, near.s);
+        if (side < 2 && Math.abs(near.s - chunkS) > CHUNK_SPREAD_M) clear = false;
+        edges[k * 4 + side] = world.natural(x, z, near.dist, near.s);
       }
     }
     if (!clear) continue;

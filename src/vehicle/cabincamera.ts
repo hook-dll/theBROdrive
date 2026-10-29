@@ -5,7 +5,8 @@
  * a seated eye height, see carkit/interior.ts), or the bonnet mount on a body that has no
  * seat. The front passenger's is the driver's mirrored across the car. The rear seats'
  * come from the bench the same way (`CarModelMeasure.rearEye`, the left one; the right is
- * its mirror).
+ * its mirror). A front bench's middle place has its own, on the centre line
+ * (`CarModelMeasure.middleEye`), else the driver's moved onto it.
  * All in chassis-local metres: +X the car's left, +Y up, +Z forward.
  */
 
@@ -20,10 +21,15 @@ export class CabinCamera {
   /** The eye the cabin view uses for `seat` in `modelId`; see the notes above. */
   eyeFor(modelId: string, seat: PlayerSeat): Eye {
     if (seat === 'driver') return driverEye(modelId);
-    const from = seat === 'passenger' ? driverEye(modelId) : carModelMeasure(modelId).rearEye ?? driverEye(modelId);
+    if (seat === 'middle') {
+      const middle = carModelMeasure(modelId).middleEye;
+      if (middle) return middle;
+    }
+    const front = seat === 'passenger' || seat === 'middle';
+    const from = front ? driverEye(modelId) : carModelMeasure(modelId).rearEye ?? driverEye(modelId);
     // Mirrored for the right-hand seats, into one scratch: the view reads it every frame.
     const mirror = seat === 'passenger' || seat === 'rear-right';
-    this.seatEye[0] = mirror ? -from[0] : from[0];
+    this.seatEye[0] = seat === 'middle' ? 0 : mirror ? -from[0] : from[0];
     this.seatEye[1] = from[1];
     this.seatEye[2] = from[2];
     return this.seatEye;

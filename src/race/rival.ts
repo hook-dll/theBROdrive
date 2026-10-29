@@ -7,7 +7,7 @@ import { CAR_MODELS, carModel, modelEngine, type CarModelDef } from '../vehicle/
 /**
  * WHO WAITS AT THE GRID: the field of rivals, their cars and how hard each is driven.
  *
- * A FIELD OF `FIELD_SIZE` RIVALS races the player round every track, five cars on the
+ * A FIELD OF `FIELD_SIZE` RIVALS races the player round every track, four cars on the
  * grid. Each round at a track (`raceRounds`) is one field, a pure function of the seed,
  * the post, the round and the car the player came in, so the same round in the same car
  * is always the same field and the next round is (usually) another one.
@@ -21,47 +21,31 @@ import { CAR_MODELS, carModel, modelEngine, type CarModelDef } from '../vehicle/
  * an empty cell falls back to the model's own) over his model's kerb mass. Power to
  * weight decides who is quicker on a straight, so it is the term that matters; mass only
  * breaks ties. The candidates are dealt out in a seeded order, so a field is as varied
- * as the catalogue round the player's class allows: four different cars when there are
- * four near enough, the nearest ones again only past that.
+ * as the catalogue round the player's class allows: three different cars when there are
+ * three near enough, the nearest ones again only past that.
  *
  * EVERY RIVAL IS A RACER: the autopilot's `frantic` driver (vehicle/autopilot.ts), the
  * racing line, late braking and the car's power its only limit on a straight. What sets
- * one rival apart from another is its SKILL, 0..1, which is two of the autopilot's
- * racing knobs: `gripShare` (the share of the frantic driver's own tyre budget it dares
- * to corner and brake on: 0.80 at skill 0, the full frantic driver at 1) and `pace` (the
- * share of its cruise it holds on a straight). On laps of a kilometre and a bit, the
- * corners and not the straights set the time, so the grip share is the knob that tells.
- * The sleeper and hurried characters are not racers (90 and 105 km/h, half the tyres):
- * a field of them was beaten by anybody who kept going, which is no race.
+ * one rival apart from another is only its CAR: every rival drives at the top SKILL
+ * (`RIVAL_SKILL`, 1). A skill, 0..1, is two of the autopilot's racing knobs: `gripShare`
+ * (the share of the frantic driver's own tyre budget it dares to corner and brake on:
+ * 0.80 at skill 0, the full frantic driver at 1) and `pace` (the share of its cruise it
+ * holds on a straight). Fields of mixed skills (0..1, mostly the slow end) were too easy
+ * to beat (owner, second round), so the whole field is as good as the old pole sitter;
+ * the lower skills stay in `driverFor` for the benches' skill ladder. The sleeper and
+ * hurried characters are not racers (90 and 105 km/h, half the tyres): a field of them
+ * was beaten by anybody who kept going, which is no race.
  *
- * THE ROUND'S LEVEL is the headline the board shows (race/visuals.ts): STEADY, FAST or
- * WILD, mostly steady and now and then wild (`LEVEL_SHARES`). It sets the band the field's
- * skills are drawn from (`LEVEL_SKILL`), each rival its own draw inside it, so a FAST
- * field has a quick car or two and one the player can catch, and the bands overlap a
- * little. The grid is sorted by skill: the quickest rival on pole.
+ * The grid is in the deal's order: the first car dealt is on pole.
  *
  * Nothing about a rival follows the race: there is NO rubber-banding.
  */
 
-export type RivalLevel = 'steady' | 'fast' | 'wild';
+/** Rivals in a field: with the player, four cars on the grid. */
+export const FIELD_SIZE = 3;
 
-/** Rivals in a field: with the player, five cars on the grid. */
-export const FIELD_SIZE = 4;
-
-/** Share of rounds at each level, in order: mostly steady, now and then wild. */
-const LEVEL_SHARES: readonly [RivalLevel, number][] = [
-  ['steady', 0.45],
-  ['fast', 0.35],
-  ['wild', 0.2],
-];
-
-/** The band of skills each level's rivals are drawn from; see THE ROUND'S LEVEL. */
-const LEVEL_SKILL: Readonly<Record<RivalLevel, readonly [number, number]>> = {
-  steady: [0, 0.4],
-  fast: [0.35, 0.75],
-  wild: [0.7, 1],
-};
-
+/** The skill every rival drives at; see EVERY RIVAL IS A RACER. */
+export const RIVAL_SKILL = 1;
 /** A skill's two racing knobs (see EVERY RIVAL IS A RACER): grip share and pace, at skill 0 and 1. */
 const GRIP_SHARE_AT = [0.8, 1] as const;
 const PACE_AT = [0.62, 1] as const;
@@ -73,11 +57,9 @@ const CANDIDATES = 6;
 /** Share of rounds that are trailer races. */
 export const TRAILER_RACE_SHARE = 1 / 3;
 
-/** Domain tags of the draws: 'RVM1' models, 'RVL1' level, 'RVT1' trailer, 'RVS1' skills. */
+/** Domain tags of the draws: 'RVM1' models, 'RVT1' trailer. */
 const MODEL_DOMAIN = 0x52564d31;
-const LEVEL_DOMAIN = 0x52564c31;
 const TRAILER_DOMAIN = 0x52565431;
-const SKILL_DOMAIN = 0x52565331;
 
 /** One rival of a field: its car and its driving. */
 export interface RivalDriver {
@@ -89,11 +71,10 @@ export interface RivalDriver {
   readonly pace: number;
 }
 
-/** What one round at one track is: the field, its headline level, and whether trailers are on. */
+/** What one round at one track is: the field, and whether trailers are on. */
 export interface FieldPlan {
-  readonly level: RivalLevel;
   readonly trailer: boolean;
-  /** `FIELD_SIZE` rivals, quickest first: grid order. */
+  /** `FIELD_SIZE` rivals in grid order, pole first. */
   readonly rivals: readonly RivalDriver[];
 }
 
@@ -143,30 +124,15 @@ export function driverFor(modelId: string, skill: number): RivalDriver {
 
 /**
  * Round `round` at the track of post `postIndex`, against a player in a car of class
- * `player`: the field, its level, and whether it is a trailer race.
+ * `player`: the field, and whether it is a trailer race.
  */
 export function fieldPlan(seed: number, postIndex: number, round: number, player: CarClass): FieldPlan {
-  const u = hash01(seed, LEVEL_DOMAIN, postIndex, round);
-  let level: RivalLevel = 'steady';
-  let acc = 0;
-  for (const [name, share] of LEVEL_SHARES) {
-    acc += share;
-    if (u < acc) {
-      level = name;
-      break;
-    }
-  }
   // The candidates in a seeded order (each one's own draw), dealt round the field.
   const candidates = nearestModels(player)
     .map((def, i) => ({ id: def.id, key: hash01(seed, MODEL_DOMAIN, postIndex, round, i) }))
     .sort((a, b) => a.key - b.key);
-  const [lo, hi] = LEVEL_SKILL[level];
   const rivals: RivalDriver[] = [];
-  for (let k = 0; k < FIELD_SIZE; k++) {
-    const skill = lo + (hi - lo) * hash01(seed, SKILL_DOMAIN, postIndex, round, k);
-    rivals.push(driverFor(candidates[k % candidates.length]!.id, skill));
-  }
-  rivals.sort((a, b) => b.skill - a.skill);
+  for (let k = 0; k < FIELD_SIZE; k++) rivals.push(driverFor(candidates[k % candidates.length]!.id, RIVAL_SKILL));
   const trailer = hash01(seed, TRAILER_DOMAIN, postIndex, round) < TRAILER_RACE_SHARE;
-  return { level, trailer, rivals };
+  return { trailer, rivals };
 }

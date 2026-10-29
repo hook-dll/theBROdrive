@@ -57,7 +57,7 @@ export interface CabinOpenness {
  * turned round to look back, 0 looking out of a side window.
  */
 export function cabinOpenness(rig: KitRig, seat: PlayerSeat, earAlong: number, out: CabinOpenness): void {
-  const row = seat === 'driver' || seat === 'passenger' ? 0 : 1;
+  const row = seat === 'rear-left' || seat === 'rear-right' ? 1 : 0;
   // Shut shares per car side, multiplied: what is left of the cabin's seal.
   let shutLeft = 1;
   let shutRight = 1;

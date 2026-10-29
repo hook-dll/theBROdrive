@@ -18,9 +18,9 @@ import { RACE_PRIZES, RACE_STAKE } from './stake';
  *
  * THE BOARD is for a boy who can barely read: pictures first, few words. "RACE ME!" across
  * the top; three shells, an arrow and nine shells (the stake, and what the winner takes);
- * the field's level as one, two or three chevrons in green, orange or red with its word
- * under them; and the haul sign's car-and-trailer pictogram when this round is a trailer
- * race. It stands on a post outside the asphalt beside the player's box, a little ahead
+ * and the haul sign's car-and-trailer pictogram when this round is a trailer race. Every
+ * field drives at the top skill (race/rival.ts), so there is no level to show. It stands
+ * on a post outside the asphalt beside the player's box, a little ahead
  * of it, its face turned back down the lap to the cars coming onto the grid. ONE board,
  * built with the visuals and repainted on its own canvas for each field (a new round is
  * a new field): a repaint is a texture upload, never a new material or program.
@@ -49,9 +49,6 @@ const CANVAS_W = 512;
 const CANVAS_H = Math.round((CANVAS_W * BOARD_H) / BOARD_W);
 const BOARD_BG = '#fff3d6';
 const BOARD_FG = '#7a1f1f';
-const LEVEL_COLOURS = { steady: '#2f8a3c', fast: '#d9831f', wild: '#c42a22' } as const;
-const LEVEL_CHEVRONS = { steady: 1, fast: 2, wild: 3 } as const;
-const LEVEL_WORDS = { steady: 'EASY', fast: 'FAST', wild: 'WILD' } as const;
 
 /** Lens colours: dark glass, and the two lit ones with their glow. */
 const LENS_OFF = 0x1a1414;
@@ -197,29 +194,7 @@ function paintBoard(material: THREE.MeshStandardMaterial, plan: FieldPlan): void
   g.font = `bold ${Math.round(h * 0.075)}px sans-serif`;
   g.fillText('WIN!', w * 0.9, row);
 
-  // The level: chevrons in its colour, its word under them.
-  const colour = LEVEL_COLOURS[plan.level];
-  const chevrons = LEVEL_CHEVRONS[plan.level];
-  const cy = h * 0.66;
-  const size = h * 0.09;
-  const cx = plan.trailer ? w * 0.27 : w * 0.5;
-  g.strokeStyle = colour;
-  g.lineWidth = size * 0.45;
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-  for (let i = 0; i < chevrons; i++) {
-    const x = cx + (i - (chevrons - 1) / 2) * size * 1.3;
-    g.beginPath();
-    g.moveTo(x - size * 0.4, cy - size);
-    g.lineTo(x + size * 0.4, cy);
-    g.lineTo(x - size * 0.4, cy + size);
-    g.stroke();
-  }
-  g.fillStyle = colour;
-  g.font = `bold ${Math.round(h * 0.1)}px sans-serif`;
-  g.fillText(LEVEL_WORDS[plan.level], cx, h * 0.86);
-
   // A trailer race: the car with its loaded trailer.
-  if (plan.trailer) drawPictogram(g, 'trailer', w * 0.72, h * 0.7, h * 0.2);
+  if (plan.trailer) drawPictogram(g, 'trailer', w * 0.5, h * 0.7, h * 0.2);
   texture.needsUpdate = true;
 }

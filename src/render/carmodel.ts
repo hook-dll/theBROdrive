@@ -57,7 +57,7 @@ import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
 import { bakeCarShadowHull, carShadowHullMesh } from './carshadowhull';
 import { attachKitDraw, attachKitWheels, bakeKitWheels, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
-import { KIT_DRIVER_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
+import { KIT_DRIVER_EYE_NODE, KIT_MIDDLE_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
 import { BONNET_SLOT_KINDS } from '../vehicle/bonnet';
@@ -191,6 +191,8 @@ export interface CarModelMeasure {
   readonly cabinEye?: readonly [number, number, number];
   /** The rear left passenger's, the same way (`KIT_REAR_EYE_NODE`); absent with `cabinEye`. */
   readonly rearEye?: readonly [number, number, number];
+  /** A front bench's middle place's (`KIT_MIDDLE_EYE_NODE`); absent without a front bench. */
+  readonly middleEye?: readonly [number, number, number];
   /**
    * The bonnet's service cells in chassis-local metres, in `BONNET_SLOT_KINDS` order:
    * the kit bay's cell markers (`KIT_BONNET_CELL_NODE`) after the body fit, each at its
@@ -1578,6 +1580,7 @@ async function buildTemplate(def: CarModelDef, scene: THREE.Group): Promise<Temp
   };
   const cabinEye = anchorAt(KIT_DRIVER_EYE_NODE)?.centre;
   const rearEye = anchorAt(KIT_REAR_EYE_NODE)?.centre;
+  const middleEye = anchorAt(KIT_MIDDLE_EYE_NODE)?.centre;
   const filler = anchorAt(KIT_FILLER_NODE);
   // All four cells or none: the bonnet's grid is indexed by kind.
   const cellBoxes = BONNET_SLOT_KINDS.map((kind) => anchorAt(`${KIT_BONNET_CELL_NODE}:${kind}`));
@@ -1606,6 +1609,7 @@ async function buildTemplate(def: CarModelDef, scene: THREE.Group): Promise<Temp
     visualOffset: [-centre.x, -centre.y, -centre.z],
     cabinEye,
     rearEye,
+    middleEye,
     bonnetCells,
     filler,
   };
