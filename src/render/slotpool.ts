@@ -143,13 +143,6 @@ export class FadingSlotPool {
     return t * t * (3 - 2 * t);
   }
 
-  /** Slots asked for this frame, held or not: what the pool would need to refuse none. */
-  get demand(): number {
-    let need = 0;
-    for (const entry of this.requested) need += entry.need;
-    return need;
-  }
-
   /** Forgets every holder. */
   clear(): void {
     this.entries.clear();

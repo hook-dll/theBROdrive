@@ -39,8 +39,6 @@ import { HEAD_MOTION, type CameraRig } from '../render/cameras';
 import { LakeWater } from '../render/lakewater';
 import type { Sky } from '../render/sky';
 import type { VehicleLightRig } from '../render/vehiclelights';
-import type { FadingSlotPool } from '../render/slotpool';
-import type { LampPoolField, LampView } from '../render/lamppools';
 import type { VistaMesh } from '../render/vista';
 import { carModel } from '../vehicle/carmodels';
 import {
@@ -123,12 +121,6 @@ export interface DevToolsContext {
   readonly audio: GameAudio;
   readonly origin: WorldOrigin;
   readonly vehicleLights: VehicleLightRig;
-  /** Who holds the rig's slots (`demand`: slots asked for this frame). */
-  readonly beamPool: FadingSlotPool;
-  /** The ground pools of the lamps without a slot. */
-  readonly lampPools: LampPoolField;
-  /** What the player sees of each lamp, as the headlamp slots are ranked by. */
-  readonly lampView: LampView;
   readonly worldWork: WorldWorkScheduler;
   readonly streamer: ChunkStreamer;
   readonly desert: DesertTileStreamer;
@@ -665,9 +657,6 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
     audio: ctx.audio,
     origin: ctx.origin,
     vehicleLights: ctx.vehicleLights,
-    beamPool: ctx.beamPool,
-    lampPools: ctx.lampPools,
-    lampView: ctx.lampView,
     worldWork: ctx.worldWork,
     streamer: ctx.streamer,
     desert: ctx.desert,

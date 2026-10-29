@@ -43,31 +43,6 @@
   so a fast spin through the catalogue builds only where it stops. No new material: the
   model is on the kit palette material and the boards on the sign atlas, both linked at
   boot.
-- EVERY LIT LAMP LIGHTS THE GROUND, AND THE SPOT SLOTS GO TO THE LIGHT THE PLAYER SEES
-  (`render/lamppools.ts`, `vehicle/vehiclelamps.ts` `syncLampPool`/`headlampViewScore`,
-  `main.ts`). A lamp without a spotlight slot used to lay no light at all. Now it lays a
-  ground POOL instead: a soft additive patch under its beam, all of them in one draw. The
-  patch is shaded per pixel with three's spot cone, falloff and incidence, on asphalt or
-  on the desert's sand by the road's half-width, and fogged. Its near rows lie on the
-  car's tyre plane; its far rows travel with the beam at the terrain's height, sampled
-  within a per-frame allowance that goes round every car (main.ts starts the walk at a
-  different car each frame), and the pool's depth is pulled toward the eye (0.3 m at
-  10 m, 1.3 m at 75 m) so the coarse grid never sinks under a crown, a crest or a race
-  track's raised asphalt. A beam not yet sampled waits rather than lying on the tyre
-  plane: that plane, run 75 m out, stood as a flat lit sheet over dips and dived under
-  rises (owner, 2026-10-29). The ground's up is the normal, not the grid's facets, so
-  the light does not step from facet to facet. Other cars' tail, stop and reversing lamps are always pools (red behind
-  the car, brighter braking, white reversing). Other cars' headlamps ask for a slot by
-  their light on the ground in view plus their light on the player's own car and cabin.
-  A car close behind keeps its slot, oncoming beams in view win over cars driving away,
-  and a beam below the floor stays a pool. Slots still hand over by fading; the lamp's
-  pool fades the other way. The driven car's lamps, courtesy lamp and torch are
-  unchanged. Light count and visibility are fixed, and one new boot-compiled program
-  (`lamp-pool`, in the scene from boot) is added. Measured, blessing 2560×1440, night,
-  normal traffic, 150-240 s per seed: slots asked p50 5/9 (was 23/31 beams wanted),
-  frames that ask beyond the 11 slots 33%/25% (was 83%/99%). Pools cost 0.04-0.08 ms
-  of GPU at a staged pose with 9 pools.
-
 - In a race the throttle and brake keys are plain pedals (`PedalLever.step` `plain`,
   `InputReader.setPlainPedals`): a tap no longer sets a cruise notch.
 
@@ -187,52 +162,6 @@
   moved to zilfront.ts with all its sizes as data in zil.ts (the ZIL identical).
 
 ### Changed
-
-- NEAR TRAFFIC HEADLAMPS GET A REAL SLOT FIRST, AND THE TOP RUNG HAS 15 (`main.ts`
-  `NEAR_SLOT_RANGE_SQ`, `game/settings.ts` blessing `vehicleLightSlots`). A pool lights
-  the ground only, so a near car's beam on a post, a wall or a parked car showed only
-  when it happened to win a slot by view score. Every other car's headlamps within 80 m
-  of the eye whose light reaches any ground in view or the player's own car now ask for
-  a slot before any farther beam, best view score first; the farther beams follow in
-  the existing ranking, and whatever gets no slot stays a pool, handed over by the same
-  fade. Blessing goes from 11 to 15 spot slots (desktop; the phone keeps 8, other rungs
-  unchanged), still fixed for the session and compiled behind the loading cover. The
-  driven car's lamps (headlamps, tail and reversing lamps), courtesy lamp and the hand
-  torch stay pinned slots. Not measured at 15 slots.
-
-- LAMP POOLS LIGHT LIKE THE LAMP THEY STAND FOR, CARS IN ANY BEAM CAST SHADOWS, AND A
-  POOLED BEAM LIGHTS THE CARS IT REACHES (`render/lamppools.ts`, new
-  `render/lampoccluders.ts`, `vehicle/vehiclelamps.ts` `syncLampShade`,
-  `render/materials.ts` `setCarPoolLight`).
-  - Brightness. A headlamp pool now covers the whole cone out to 85% of the beam's
-    cutoff (8 x 5 grid, was 6 x 3 to 75 m with its sides faded from 70%), takes the
-    ground's own shading term by term (Lambert on the ground's normal at each grid
-    vertex, the backscatter of `render/groundlight.ts`, the shoulder's stone and the
-    verge's fall, a spread of normals for the relief a grazing beam catches), and the
-    asphalt and sand reflectances were refitted by reading the scene target, same lamp as
-    slot and as pool at one pose, 266 points from 8 to 200 m. Slot/pool light, sum per
-    band, before -> after: asphalt <30 m 1.44 -> 0.96, 30-60 m 1.60 -> 1.01, 60-120 m
-    pool dark -> 0.95, >120 m pool dark -> 1.08; sand <30 m 1.69 -> 1.10, 30-60 m 1.75
-    -> 0.97, 60-120 m pool dark -> 0.95, >120 m pool dark -> 1.28; the verge 0.5-0.8 near
-    (was 0.5-0.7) and still darker than a slot past 60 m.
-  - Shadows. The eight cars nearest the eye are oriented boxes (their chassis box); a
-    pool's light is cut by the boxes its cone reaches, with a penumbra that widens away
-    from the car. A lamp that holds a spotlight slot lays a SHADE pool: the same light
-    with its colour negated, only in the wedge behind the boxes in its beam, where they
-    stop it. Only the driven car's one shadowed headlamp still has a shadow map.
-  - Light on cars. Each car's kit body and glass take the pooled beam that puts the most
-    light on it (the others' share folded in, up to x3) as one more lamp pair evaluated
-    per pixel with the spot cone and range, like a slot (`lightOn`). Posts and walls are
-    still lit by slots only.
-  - Cost, blessing 2560x1440, M2 Pro, frozen frame, 4 lit cars round the player: all
-    pools 0.7-1.0 ms chase, 0.8 ms cabin; light on cars 0.04 ms chase, 0.66 ms cabin (the
-    car behind lights the cabin); shade pools with every beam a slot 0.45 ms chase, 0.8 ms
-    cabin. The box test first sat in the ground's spot loop: 0.75 ms with no box in any
-    beam and 3.5 ms with ten slots, so it moved to the pools. A `flat` varying on the
-    pool shader cost 18 ms from the cabin on ANGLE/Metal and is gone.
-  - Programs: the lamp-pool program changes, the kit body (`-kit-v4`) and kit glass
-    (`-panes-v3`) keys move on; no program is added and none links mid-drive (three night
-    drives, seeds 3869760056, 2320391776, 1017765800: 92 programs throughout).
 
 - A LAY-BY ON WIDENED ROAD JOINS THE ASPHALT AGAIN (`world/roadsurface.ts`
   `WIDE_SECTION_LATERALS`). The ribbon's open-road cross-section still ended in 5.8 m
@@ -1783,12 +1712,11 @@
   decay 1.7. Pressed after the change: 0 programs linked, the torch frame identical
   apart from star and grass sparkle and the held torch's swing. The spot count stays
   the tier's, so the torch costs no extra slot when it is off.
-- A LIT SPOT SLOT NO LONGER SHADES WHERE ITS BEAM DOES NOT REACH (render/lightshader.ts
-  `installSpotLightDormantGuard`; render/comic.ts takes the ground's slope-normal
-  derivatives before the loop). `RE_Direct` used to run for every fragment of a live slot,
-  even outside the cone or past the range, where three's light is exactly zero. Now it
-  runs only where `directLight.visible`. Blessing 2560x1440, one page and pose, 10 lit
-  traffic beams: 9.37 -> 9.01 ms, the frame identical to the pixel.
+- Tried and reverted (2026-10-30, with the lamp pools and the 15 slots, at the owner's
+  call after a GPU-bound stutter appeared): skipping `RE_Direct` outside a lit slot's
+  beam, the two-tier lamps (ground pools for unslotted lamps, box shadows, pooled light
+  on cars) and blessing's 15 slots. The light code is back to its state before them,
+  but for the torch fix above.
 - Tried and reverted: CLUSTERED SPOT LIGHTING (a per-cell beam mask in a texture, read
   by a dynamic loop over the cell's beams) and an unrolled loop with a per-fragment bit
   test. Both were measured in one page, blessing 2560x1440, a fixed night pose with

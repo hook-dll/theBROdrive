@@ -35,7 +35,7 @@ import * as THREE from 'three';
  * tens of degrees by the cos^8 falloff, so a driver's own beams read a little brighter
  * and nothing turns into a hot spot.
  */
-export const GROUND_BACKSCATTER_GAIN = 0.2;
+const BACKSCATTER_GAIN = 0.2;
 
 const GROUND_LIGHT_GLSL = /* glsl */ `#include <lights_physical_pars_fragment>
 void RE_Direct_Ground( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
@@ -45,7 +45,7 @@ void RE_Direct_Ground( const in IncidentLight directLight, const in vec3 geometr
 	behind *= behind;
 	behind *= behind;
 	behind *= behind;
-	reflectedLight.directDiffuse += irradiance * ( 1.0 + ${GROUND_BACKSCATTER_GAIN.toFixed(3)} * behind ) * BRDF_Lambert( material.diffuseContribution );
+	reflectedLight.directDiffuse += irradiance * ( 1.0 + ${BACKSCATTER_GAIN.toFixed(3)} * behind ) * BRDF_Lambert( material.diffuseContribution );
 }
 void RE_IndirectSpecular_Ground( const in vec3 radiance, const in vec3 irradiance, const in vec3 clearcoatRadiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
 	reflectedLight.indirectDiffuse += material.diffuseContribution * irradiance * RECIPROCAL_PI;

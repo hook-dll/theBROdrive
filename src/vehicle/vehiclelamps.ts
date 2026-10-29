@@ -10,19 +10,7 @@
 
 import * as THREE from 'three';
 import type { CarState, GameWorld } from '../game/state';
-import {
-  POOL_COLS,
-  POOL_GRID_STRIDE,
-  POOL_LIFT_M,
-  POOL_ROWS,
-  POOL_VERTS,
-  poolGridNormals,
-  spotIrradiance,
-  type LampPoolField,
-  type LampView,
-  type PoolRoadFrame,
-} from '../render/lamppools';
-import { LAMP_EXPOSURE, type VehicleLightRig } from '../render/vehiclelights';
+import type { VehicleLightRig } from '../render/vehiclelights';
 
 /**
  * A vehicle's lamps as the light pool sees them: each group is lit or dark as a
@@ -193,83 +181,6 @@ const REVERSE_LIGHT_BEAM = {
 /** 90 flashes per minute, with equal on/off halves. */
 const BLINKER_PERIOD_S = 2 / 3;
 
-/**
- * A lamp group's ground pool (render/lamppools.ts): its grid's rows, metres from the
- * lamps along the beam, covering where the beam reads on the ground. A headlamp's near
- * rows are these; its far rows (`headlampPoolRows`) run on out to `POOL_FAR_SHARE` of the
- * beam's cutoff, where a slot's light still showed on the sand (2026-10-30). A rear
- * lamp's run to its cutoff.
- */
-const LOW_POOL_ROWS: readonly number[] = [-1.5, 2.5, 10, 24, 45];
-const HIGH_POOL_ROWS: readonly number[] = [-1.5, 2.5, 12, 30, 60];
-const TAIL_POOL_ROWS: readonly number[] = [-0.5, 0.4, 1.2, 2.2, 3.3, 4.4, 5.4, 6.4];
-const REVERSE_POOL_ROWS: readonly number[] = [-0.5, 0.8, 2, 3.5, 5.2, 7, 8.8, 10.6];
-const POOL_FAR_SHARE = 0.85;
-/**
- * A headlamp pool's first row laid on the terrain, sampled; the row before it, behind the
- * lamps, lies on the car's own tyre contact plane, which is exact under the car and costs
- * nothing. The row 2.5 m out is sampled too: a car on the sand beside a road on its
- * embankment has the asphalt half a metre above its own plane there, and a pool on the
- * plane lit it three times as bright as a slot does. A rear pool lies on the plane
- * throughout: it ends within ten metres of the car.
- */
-const FIRST_SAMPLED_ROW = 1;
-/** How far a car may move, or turn, before its pool's terrain rows are sampled again. */
-const POOL_RESAMPLE_M = 1;
-const POOL_RESAMPLE_RAD = 0.035;
-/**
- * A pool's half-width at a row, as a share of the cone's own spread there: all of it, so
- * the spot's own penumbra is the pool's edge, as it is a slot's.
- */
-const POOL_SPREAD = 1.02;
-const POOL_MIN_HALF_WIDTH_M = 0.6;
-
-/**
- * The headlamp footprint `headlampViewScore` samples: metres ahead, and the depth of road
- * each row stands for. Three samples a row, on the axis and at 0.6 of the cone's spread.
- */
-const SCORE_ROWS: readonly number[] = [3, 8, 15, 27, 45];
-const SCORE_ROW_DEPTH: readonly number[] = [4, 6, 9, 15, 22];
-const SCORE_ACROSS: readonly number[] = [-0.6, 0, 0.6];
-/**
- * Light on the player's own car counts double: it is the inside of his cabin, his
- * bonnet and his mirrors, and no pool can put it there (owner, 2026-10-29).
- */
-const CAR_LIGHT_WEIGHT = 2;
-
-const _poolGrid = new Float32Array(POOL_VERTS * POOL_GRID_STRIDE);
-const _poolRoadSample: PoolRoadFrame = { s: 0, lateral: 0, heading: 0, halfWidth: 0 };
-const _poolNormals = new Float32Array(POOL_VERTS * 3);
-const _poolLampA = new THREE.Vector3();
-const _poolLampB = new THREE.Vector3();
-const _poolAxis = new THREE.Vector3();
-const _poolPoint = new THREE.Vector3();
-const _poolUp = new THREE.Vector3();
-const _poolForward = new THREE.Vector3();
-const _poolAcross = new THREE.Vector3();
-const _poolSector = { min: 0, max: 0 };
-const _poolColor = new THREE.Color();
-const _poolRows: number[] = new Array<number>(POOL_ROWS).fill(0);
-
-/**
- * A headlamp pool's rows: `near` (`LOW_POOL_ROWS`, `HIGH_POOL_ROWS`), then rows spaced
- * by a constant ratio out to `POOL_FAR_SHARE` of the beam's `cutoff`, into `_poolRows`.
- */
-function headlampPoolRows(near: readonly number[], cutoff: number): readonly number[] {
-  const last = near[near.length - 1];
-  const far = Math.max(last * 1.5, cutoff * POOL_FAR_SHARE);
-  const steps = POOL_ROWS - near.length;
-  for (let row = 0; row < POOL_ROWS; row++) {
-    _poolRows[row] = row < near.length ? near[row] : last * (far / last) ** ((row - near.length + 1) / steps);
-  }
-  return _poolRows;
-}
-
-/** The colour a lit group's light lands in: the filament's warmth, red, or white. */
-function beamColor(group: BeamGroup): number {
-  return group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
-}
-
 /** An authored lamp lens: the node is named by a selector, or its material is. */
 function isLampLens(selectors: ReadonlySet<string>, mesh: THREE.Mesh, source: THREE.Material): boolean {
   return selectors.has(mesh.name) || selectors.has(source.name);
@@ -374,21 +285,6 @@ export class VehicleLamps {
   private winkElapsed = -1;
   /** Dust on the lenses, 0..1: dims what they show and what they throw. */
   private grime = 0;
-  /** The settled tyre contact plane, chassis-local y: what a pool's near rows lie on. */
-  private contactPlaneY = 0;
-  /**
-   * The headlamp pool's terrain rows (`FIRST_SAMPLED_ROW` on): per vertex the ground's
-   * absolute height and its road lateral less the car's, kept between samples; and the
-   * pose and beam they were sampled for (x NaN: none).
-   */
-  private readonly poolSamples = new Float64Array(POOL_VERTS * POOL_GRID_STRIDE);
-  private poolSampledX = NaN;
-  private poolSampledZ = NaN;
-  private poolSampledHeading = 0;
-  private poolSampledMode: HeadlightMode = 'off';
-  /** The car's road frame, taken once a frame it lays a pool (`poolFrameId`). */
-  private readonly poolRoad: PoolRoadFrame = { s: NaN, lateral: 0, heading: 0, halfWidth: 0 };
-  private poolFrameId = -1;
 
   constructor(ctx: VehicleLampsContext) {
     this.ctx = ctx;
@@ -607,8 +503,16 @@ export class VehicleLamps {
     if (!(gain > 0)) return;
     const { mounts, intensity } = this.beamGroup(group);
     if (mounts.length === 0 || !(intensity > 0)) return;
-    const shape = this.beamShape(group);
-    const color = beamColor(group);
+    const shape: ProjectedBeamShape =
+      group === 'front'
+        ? this.headlightMode === 'high'
+          ? HEADLIGHT_HIGH
+          : HEADLIGHT_LOW
+        : group === 'tail'
+          ? TAILLIGHT_BEAM
+          : REVERSE_LIGHT_BEAM;
+    const color =
+      group === 'front' ? HEADLIGHT_BEAM_TINT : group === 'tail' ? TAILLIGHT_EMISSIVE : REVERSE_LIGHT_EMISSIVE;
     const distanceScale = group === 'front' ? rig.headlightDistanceScale : 1;
     let shadowMount: VehicleBeamMount | null = null;
     if (shadowed) {
@@ -646,274 +550,6 @@ export class VehicleLamps {
     );
   }
 
-  /** The beam a lit group projects, by group and, for the headlamps, by mode. */
-  private beamShape(group: BeamGroup): ProjectedBeamShape {
-    if (group === 'front') return this.headlightMode === 'high' ? HEADLIGHT_HIGH : HEADLIGHT_LOW;
-    return group === 'tail' ? TAILLIGHT_BEAM : REVERSE_LIGHT_BEAM;
-  }
-
-  /** `point` in chassis-local coordinates, moved to the scene through the render pose. */
-  private toScene(point: THREE.Vector3): THREE.Vector3 {
-    return point.applyQuaternion(this.ctx.rootGroup.quaternion).add(this.ctx.rootGroup.position);
-  }
-
-  /**
-   * How much of this car's headlamp light the player sees: render/lamppools.ts
-   * `LampView` says what the score is and why. Zero while the headlamps are dark.
-   * `distanceScale` is the rig's headlamp reach scale.
-   */
-  headlampViewScore(view: LampView, distanceScale: number): number {
-    const { mounts, intensity } = this.beamGroup('front');
-    if (mounts.length === 0 || !(intensity > 0)) return 0;
-    const shape = this.beamShape('front');
-    const first = mounts[0];
-    const last = mounts[mounts.length - 1];
-    const midX = (first.sourceLocal.x + last.sourceLocal.x) / 2;
-    const midZ = (first.sourceLocal.z + last.sourceLocal.z) / 2;
-    const lamp = this.toScene(_poolLampA.copy(first.sourceLocal).add(last.sourceLocal).multiplyScalar(0.5));
-    const axis = _poolAxis
-      .subVectors(first.aimLocal, first.sourceLocal)
-      .applyQuaternion(this.ctx.rootGroup.quaternion)
-      .normalize();
-    const up = _poolUp.set(0, 1, 0).applyQuaternion(this.ctx.rootGroup.quaternion);
-    const coneCos = Math.cos(shape.angle);
-    const penumbraCos = Math.cos(shape.angle * (1 - shape.penumbra));
-    const cutoff = shape.distance * distanceScale;
-    const spread = Math.tan(shape.angle) * POOL_SPREAD;
-    let score = 0;
-    for (let row = 0; row < SCORE_ROWS.length; row++) {
-      const ahead = SCORE_ROWS[row];
-      // Each sample stands for a third of the row's width.
-      const area = (SCORE_ROW_DEPTH[row] * 2 * ahead * spread) / SCORE_ACROSS.length;
-      for (const across of SCORE_ACROSS) {
-        const point = this.toScene(_poolPoint.set(midX + across * ahead * spread, this.contactPlaneY, midZ + ahead));
-        const weight = view.groundWeight(point, area);
-        if (weight > 0) {
-          score += weight * spotIrradiance(lamp, axis, point, up, coneCos, penumbraCos, shape.decay, cutoff);
-        }
-      }
-    }
-    const car = view.carTarget();
-    if (car !== null) {
-      const weight = view.carWeight();
-      if (weight > 0) {
-        score +=
-          CAR_LIGHT_WEIGHT * weight * spotIrradiance(lamp, axis, car, null, coneCos, penumbraCos, shape.decay, cutoff);
-      }
-    }
-    return score * intensity * mounts.length;
-  }
-
-  /**
-   * Lays one LIT lamp group's light on the ground as a pool (render/lamppools.ts), for
-   * a group that holds no spotlight slot, or as the rest of one fading between the two:
-   * `gain` is the range fade times the share the slot does not show.
-   *
-   * The grid follows the beam: from the lamps out along the car's own axis, as wide as
-   * the cone. Its near rows lie on the tyre contact plane, rebuilt every frame from the
-   * render pose; a headlamp's far rows lie where the beam is this frame, at the terrain
-   * height sampled when the car had last moved a metre or turned two degrees, as the
-   * field's per-frame allowance goes round (main.ts starts its walk at a different car
-   * each frame). The pool's depth is pulled toward the eye (render/lamppools.ts), so the
-   * chords between rows, a road's crown and a race track's raised asphalt never bury it.
-   */
-  syncLampPool(field: LampPoolField, group: BeamGroup, gain: number): void {
-    this.layPool(field, group, gain, 'light');
-  }
-
-  /**
-   * Lays the headlamps' SHADE pool (render/lamppools.ts): the shadows the cars in their
-   * beam cast in the light their spotlight slots throw, `gain` being what the slots
-   * carry. `besideShadowed`: the driver's side lamp has the rig's shadowed beam
-   * (`syncProjectedLights` with `shadowed`), whose map draws its shadows, so only the
-   * other lamp's are laid.
-   */
-  syncLampShade(field: LampPoolField, gain: number, besideShadowed: boolean): void {
-    this.layPool(field, 'front', gain, besideShadowed ? 'shade-other' : 'shade');
-  }
-
-  /** `syncLampPool`, `syncLampShade`: the pool of either kind. */
-  private layPool(field: LampPoolField, group: BeamGroup, gain: number, kind: 'light' | 'shade' | 'shade-other'): void {
-    if (!(gain > 0)) return;
-    const { mounts, intensity } = this.beamGroup(group);
-    if (mounts.length === 0 || !(intensity > 0)) return;
-    const shape = this.beamShape(group);
-    const front = group === 'front';
-    const cutoff = shape.distance * (front ? field.headlightDistanceScale : 1);
-    const rows = front
-      ? headlampPoolRows(this.headlightMode === 'high' ? HIGH_POOL_ROWS : LOW_POOL_ROWS, cutoff)
-      : group === 'tail'
-        ? TAIL_POOL_ROWS
-        : REVERSE_POOL_ROWS;
-    const first = mounts[0];
-    const last = mounts[mounts.length - 1];
-    const midX = (first.sourceLocal.x + last.sourceLocal.x) / 2;
-    const midZ = (first.sourceLocal.z + last.sourceLocal.z) / 2;
-    const halfSpacing = Math.abs(last.sourceLocal.x - first.sourceLocal.x) / 2;
-    const spread = Math.tan(shape.angle) * POOL_SPREAD;
-    const along = front ? 1 : -1;
-    const quaternion = this.ctx.rootGroup.quaternion;
-    let lampA = this.toScene(_poolLampA.copy(first.sourceLocal));
-    let lampB = this.toScene(_poolLampB.copy(last.sourceLocal));
-    const axis = _poolAxis.subVectors(first.aimLocal, first.sourceLocal).applyQuaternion(quaternion).normalize();
-    const coneCos = Math.cos(shape.angle);
-    const reach = rows[POOL_ROWS - 1] * Math.hypot(1, spread);
-    const mid = this.toScene(_poolPoint.set(midX, first.sourceLocal.y, midZ));
-    const occluders = field.occluderMask(this.ctx.rootGroup, mid, axis, coneCos, reach);
-    // A shade pool covers only the wedge behind the boxes in its beam, as seen from the
-    // lamps (render/lampoccluders.ts `sector`): the rest of its cone has no shadow to lay.
-    let lowSlope = -Infinity;
-    let highSlope = Infinity;
-    if (kind !== 'light') {
-      if (occluders === 0) return;
-      const forward = _poolForward.set(0, 0, along).applyQuaternion(quaternion);
-      const across = _poolAcross.set(1, 0, 0).applyQuaternion(quaternion);
-      if (field.occluderSector(occluders, mid, forward, across, halfSpacing, _poolSector)) {
-        lowSlope = _poolSector.min;
-        highSlope = _poolSector.max;
-      }
-    }
-    if (front && !this.samplePoolTerrain(field, rows, midX, midZ, halfSpacing, spread)) return;
-    const grid = _poolGrid;
-    // Near rows: the car's own lateral, carried across the road by the offset from it.
-    const road = this.roadFrameAt(field);
-    const root = this.ctx.rootGroup.position;
-    const cos = Math.cos(road.heading);
-    const sin = Math.sin(road.heading);
-    const midColumn = (POOL_COLS - 1) / 2;
-    const samples = this.poolSamples;
-    for (let row = 0; row < POOL_ROWS; row++) {
-      const ahead = rows[row];
-      const halfWidth = halfSpacing + Math.max(POOL_MIN_HALF_WIDTH_M, ahead * spread);
-      // The row's lateral span as shares of its half-width: the light's whole width, or
-      // the shade's wedge (its slopes are local x over the distance out along the beam).
-      const reachAhead = Math.max(ahead, 0);
-      const low = Math.min(1, Math.max(-1, (lowSlope * reachAhead) / halfWidth));
-      const high = Math.min(1, Math.max(-1, (highSlope * reachAhead) / halfWidth));
-      const sampled = front && row >= FIRST_SAMPLED_ROW;
-      for (let column = 0; column < POOL_COLS; column++) {
-        const v = (row * POOL_COLS + column) * POOL_GRID_STRIDE;
-        const share = Number.isFinite(lowSlope) ? low + ((high - low) * column) / (POOL_COLS - 1) : (column - midColumn) / midColumn;
-        const point = this.toScene(
-          _poolPoint.set(midX + share * halfWidth, this.contactPlaneY + POOL_LIFT_M, midZ + along * ahead),
-        );
-        grid[v] = point.x;
-        grid[v + 2] = point.z;
-        if (sampled) {
-          // Where the car's beam is NOW, at the ground's height sampled a frame or a few
-          // ago: the grid travels with the car and never lags or snaps across the road.
-          // A shade pool's narrower columns lie between the sampled ones.
-          const at = (share + 1) * midColumn;
-          const c0 = Math.min(POOL_COLS - 2, Math.floor(at));
-          const t = at - c0;
-          const s0 = (row * POOL_COLS + c0) * POOL_GRID_STRIDE;
-          const s1 = s0 + POOL_GRID_STRIDE;
-          grid[v + 1] = samples[s0] + (samples[s1] - samples[s0]) * t;
-          grid[v + 3] = road.lateral + samples[s0 + 1] + (samples[s1 + 1] - samples[s0 + 1]) * t;
-        } else {
-          grid[v + 1] = point.y;
-          grid[v + 3] = road.lateral + (point.x - root.x) * cos - (point.z - root.z) * sin;
-        }
-      }
-    }
-    // Two lamps per group by construction; any more are carried by the outer pair.
-    let scale = intensity * gain * LAMP_EXPOSURE * (mounts.length / 2);
-    if (kind === 'shade-other') {
-      // The lamp beside the shadowed one (the smaller local x, `syncProjectedLights`),
-      // as both of the pool's lamps at half the light each.
-      if (first.sourceLocal.x > last.sourceLocal.x) lampA = lampB;
-      else lampB = lampA;
-      scale *= 0.5;
-    }
-    const color = _poolColor.set(beamColor(group));
-    const normals = _poolNormals;
-    poolGridNormals(
-      grid,
-      road.halfWidth,
-      front ? FIRST_SAMPLED_ROW : POOL_ROWS,
-      _poolUp.set(0, 1, 0).applyQuaternion(quaternion),
-      normals,
-    );
-    field.add(
-      this.ctx.rootGroup,
-      kind !== 'light',
-      occluders,
-      grid,
-      normals,
-      road,
-      lampA,
-      lampB,
-      axis,
-      color.r * scale,
-      color.g * scale,
-      color.b * scale,
-      coneCos,
-      Math.cos(shape.angle * (1 - shape.penumbra)),
-      shape.decay,
-      cutoff,
-    );
-  }
-
-  /** The car's road frame this frame, taken at most once a frame. */
-  private roadFrameAt(field: LampPoolField): PoolRoadFrame {
-    if (this.poolFrameId !== field.frameId) {
-      this.poolFrameId = field.frameId;
-      const root = this.ctx.rootGroup.position;
-      field.roadFrame(root.x + field.originX, root.z + field.originZ, this.poolRoad.s, this.poolRoad);
-    }
-    return this.poolRoad;
-  }
-
-  /**
-   * Brings the headlamp pool's terrain rows up to date if the car has moved on and the
-   * field still has samples this frame. @returns false when this beam has never been
-   * sampled: the pool waits a frame or two for its turn rather than lying on the tyre
-   * plane, which ran 75 m out ahead and dived under the first rise (owner, 2026-10-29).
-   */
-  private samplePoolTerrain(
-    field: LampPoolField,
-    rows: readonly number[],
-    midX: number,
-    midZ: number,
-    halfSpacing: number,
-    spread: number,
-  ): boolean {
-    const root = this.ctx.rootGroup;
-    const x = root.position.x + field.originX;
-    const z = root.position.z + field.originZ;
-    const forward = _poolPoint.set(0, 0, 1).applyQuaternion(root.quaternion);
-    const heading = Math.atan2(forward.x, forward.z);
-    const turn = heading - this.poolSampledHeading;
-    const moved = Math.hypot(x - this.poolSampledX, z - this.poolSampledZ);
-    const sameBeam = this.poolSampledMode === this.headlightMode && Number.isFinite(this.poolSampledX);
-    const fresh =
-      sameBeam && moved <= POOL_RESAMPLE_M && Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn))) <= POOL_RESAMPLE_RAD;
-    if (fresh || !field.takeSamples((POOL_ROWS - FIRST_SAMPLED_ROW) * POOL_COLS)) return sameBeam;
-    const car = this.roadFrameAt(field);
-    const at = _poolRoadSample;
-    const samples = this.poolSamples;
-    const midColumn = (POOL_COLS - 1) / 2;
-    for (let row = FIRST_SAMPLED_ROW; row < POOL_ROWS; row++) {
-      const ahead = rows[row];
-      const halfWidth = halfSpacing + Math.max(POOL_MIN_HALF_WIDTH_M, ahead * spread);
-      for (let column = 0; column < POOL_COLS; column++) {
-        const point = this.toScene(
-          _poolPoint.set(midX + ((column - midColumn) / midColumn) * halfWidth, this.contactPlaneY, midZ + ahead),
-        );
-        const sx = point.x + field.originX;
-        const sz = point.z + field.originZ;
-        field.roadFrame(sx, sz, car.s, at);
-        const v = (row * POOL_COLS + column) * POOL_GRID_STRIDE;
-        samples[v] = field.groundHeight(sx, sz, at.s) + POOL_LIFT_M;
-        samples[v + 1] = at.lateral - car.lateral;
-      }
-    }
-    this.poolSampledX = x;
-    this.poolSampledZ = z;
-    this.poolSampledHeading = heading;
-    this.poolSampledMode = this.headlightMode;
-    return true;
-  }
 
   /**
    * Rebinds the model's authored lamp materials and rebuilds every beam mount off
@@ -923,8 +559,6 @@ export class VehicleLamps {
    * contact plane: a pack with no lamp metadata places its headlights from those.
    */
   build(halfExtents: readonly [number, number, number], contactPlaneY: number): void {
-    this.contactPlaneY = contactPlaneY;
-    this.poolSampledX = NaN;
     this.bindVehicleLights();
     this.buildHeadlightMounts(halfExtents, contactPlaneY);
     this.buildRearLightMounts(this.taillightLensMeshes, TAILLIGHT_BEAM, this.taillightMounts);

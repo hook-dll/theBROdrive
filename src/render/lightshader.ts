@@ -44,17 +44,11 @@ export const SPOT_REACH_ALL = -1;
  *    each lit beam's cone against the car). Everyone else's is `true`.
  *
  * The slot count, the shadowed slot (index 0 while `NUM_SPOT_LIGHT_SHADOWS` is 1) and the
- * program are unchanged: the shadow lookup and the light map sit inside the branch exactly
- * as three wrote them, so a skipped slot contributes what a dormant one did (nothing
- * visible) and a live one exactly what it did before.
- *
- * Inside a live slot the light itself is skipped per fragment where three's
- * `getSpotLightInfo` found none (`directLight.visible` false: outside the outer cone, past
- * the range, colour exactly zero), where `RE_Direct` would add zero. Measured on blessing
- * at 2560x1440 with 10 lit traffic beams, one page and pose: 9.37 -> 9.01 ms, the frame
- * identical to the pixel. That branch differs between neighbouring fragments, so nothing
- * in `RE_Direct` may take screen derivatives: the ground's slope normal (render/comic.ts)
- * takes them before the loop.
+ * program are unchanged: the shadow lookup, the light map and `directLight.visible` all
+ * sit inside the branch exactly as three wrote them, so a skipped slot contributes what a
+ * dormant one did (nothing visible) and a live one exactly what it did before. Being
+ * uniform, the branch keeps screen derivatives defined inside it (the ground's slope-
+ * normal spot call, render/comic.ts).
  *
  * DRIVER RISK, stated plainly. The dormant intensity is nonzero because some drivers
  * specialized the first executed program around an exactly-zero light contribution and
@@ -69,7 +63,7 @@ function installSpotLightDormantGuard(): void {
   const chunk = THREE.ShaderChunk.lights_fragment_begin;
   if (chunk.includes('SPOT_REACH(')) return;
 
-  const spotLoop = /(#pragma unroll_loop_start\s+for \( int i = 0; i < NUM_SPOT_LIGHTS; i \+\+ \) \{\s*)(spotLight = spotLights\[ i \];[\s\S]*?)(RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);)(\s*\}\s*#pragma unroll_loop_end)/;
+  const spotLoop = /(#pragma unroll_loop_start\s+for \( int i = 0; i < NUM_SPOT_LIGHTS; i \+\+ \) \{\s*)(spotLight = spotLights\[ i \];[\s\S]*?RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);)(\s*\}\s*#pragma unroll_loop_end)/;
   if (!spotLoop.test(chunk)) throw new Error('Three spot-light shader layout changed');
   const live = `max3( spotLights[ i ].color ) >= ${SPOT_LIGHT_LIVE_MIN.toExponential()}`;
   THREE.ShaderChunk.lights_fragment_begin = chunk.replace(
@@ -77,7 +71,7 @@ function installSpotLightDormantGuard(): void {
     `#ifndef SPOT_REACH
 	#define SPOT_REACH( index ) true
 	#endif
-	$1if ( ${live} && SPOT_REACH( UNROLLED_LOOP_INDEX ) ) {\n\t\t$2if ( directLight.visible ) $3\n\t\t}$4`,
+	$1if ( ${live} && SPOT_REACH( UNROLLED_LOOP_INDEX ) ) {\n\t\t$2\n\t\t}$3`,
   );
 }
 
