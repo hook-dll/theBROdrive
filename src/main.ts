@@ -2939,7 +2939,12 @@ async function boot(): Promise<void> {
       if (share > 0) driving.syncDomeLight(vehicleLights, share);
     }
     lampPools.beginFrame(activeS);
-    for (let i = 0; i < litVehicles.length; i++) {
+    // The walk starts at a different car each frame, so the pools' terrain samples
+    // (render/lamppools.ts `takeSamples`) go round every car instead of the first few.
+    const lit = litVehicles.length;
+    const litStart = lit > 0 ? lampPools.frameId % lit : 0;
+    for (let k = 0; k < lit; k++) {
+      const i = (litStart + k) % lit;
       const vehicle = litVehicles[i];
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         const share = beamPool.share(vehicle, g);

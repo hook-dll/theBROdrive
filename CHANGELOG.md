@@ -10,8 +10,14 @@
   ground POOL instead: a soft additive patch under its beam, all of them in one draw. The
   patch is shaded per pixel with three's spot cone, falloff and incidence, on asphalt or
   on the desert's sand by the road's half-width, and fogged. Its near rows lie on the
-  car's tyre plane and its far rows on the terrain, sampled within a per-frame
-  allowance. Other cars' tail, stop and reversing lamps are always pools (red behind
+  car's tyre plane; its far rows travel with the beam at the terrain's height, sampled
+  within a per-frame allowance that goes round every car (main.ts starts the walk at a
+  different car each frame), and the pool's depth is pulled toward the eye (0.3 m at
+  10 m, 1.3 m at 75 m) so the coarse grid never sinks under a crown, a crest or a race
+  track's raised asphalt. A beam not yet sampled waits rather than lying on the tyre
+  plane: that plane, run 75 m out, stood as a flat lit sheet over dips and dived under
+  rises (owner, 2026-10-29). The ground's up is the normal, not the grid's facets, so
+  the light does not step from facet to facet. Other cars' tail, stop and reversing lamps are always pools (red behind
   the car, brighter braking, white reversing). Other cars' headlamps ask for a slot by
   their light on the ground in view plus their light on the player's own car and cabin.
   A car close behind keeps its slot, oncoming beams in view win over cars driving away,

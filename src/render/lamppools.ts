@@ -22,8 +22,9 @@ import type { RebaseShift, WorldOrigin } from '../world/origin';
  * geometry, rewritten each frame in place like the contact patches
  * (render/contactpatches.ts); the draw range says how many are live. The grid lies on the
  * ground: the rows near the car on its own tyre contact plane, the far rows of a
- * headlamp's pool on the terrain itself, sampled by the caller (`takeSamples`,
- * `groundAt`) and kept in world space between samples.
+ * headlamp's pool where the beam is this frame at the terrain's height, sampled by the
+ * caller (`takeSamples`, `groundHeight`) when the car has moved on, and the whole pool's
+ * depth pulled toward the eye so the coarse grid never sinks into what it lights.
  *
  * WHAT IT LIGHTS. A pool adds light, so it carries the reflectance of the ground under
  * it, and the ground under a headlamp's pool is two: dark asphalt and the sand either
@@ -49,6 +50,12 @@ const STRIDE = 21;
 export const POOL_GRID_STRIDE = 4;
 /** Lift off the ground, metres, besides the polygon offset: the far rows are chords. */
 export const POOL_LIFT_M = 0.05;
+/**
+ * The depth pull toward the eye (see the vertex shader): this much at the eye plus this
+ * share of the distance, so 0.3 m at 10 m, 0.6 m at 30 m and 1.3 m at 75 m.
+ */
+const POOL_PULL_NEAR_M = 0.15;
+const POOL_PULL_PER_M = 0.015;
 /**
  * The reflectance a pool's light lands on, asphalt and sand, as the ground's own shading
  * shows a spotlight's at night (the comic banding, render/comic.ts, takes about half of a
@@ -108,7 +115,14 @@ void main() {
   vShape = beamShape;
   vRoad = roadFrame;
   vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-  gl_Position = projectionMatrix * mvPosition;
+  // THE DEPTH IS PULLED TOWARD THE EYE along the view ray (POOL_PULL_*): the screen
+  // position is unchanged, but a pool drawn as chords between rows 20-30 m apart, over a
+  // road's crown or a race track's asphalt raised over the ground the terrain reports,
+  // still lies in front of the ground it lights instead of under it. Anything standing
+  // on that ground is metres in front of it along a ray this shallow, and still hides it.
+  float eyeDistance = max( length( mvPosition.xyz ), 1e-3 );
+  float pull = min( 0.5 * eyeDistance, ${POOL_PULL_NEAR_M.toFixed(2)} + ${POOL_PULL_PER_M.toFixed(3)} * eyeDistance );
+  gl_Position = projectionMatrix * vec4( mvPosition.xyz * ( 1.0 - pull / eyeDistance ), 1.0 );
   #include <fog_vertex>
 }`;
 
@@ -138,10 +152,10 @@ float lampLight( vec3 toLamp, vec3 normal ) {
 }
 
 void main() {
-  // The grid's own facet: the far rows follow the terrain, so a pool up a rise is lit
-  // as a rise.
-  vec3 normal = normalize( cross( dFdx( vToA ), dFdy( vToA ) ) );
-  if ( normal.y < 0.0 ) normal = -normal;
+  // The ground's own up, not the grid's facets: rows 20-30 m apart made each facet's
+  // light a step of its own, and a facet tipped as its rows were resampled. The light
+  // under a lamp is the ground's; a pool only reads where the ground is nearly level.
+  vec3 normal = vec3( 0.0, 1.0, 0.0 );
   float light = lampLight( vToA, normal ) + lampLight( vToB, normal );
   // The grid only covers where the beam reads; its rim is faded so it never shows.
   float rim = ( 1.0 - smoothstep( 0.7, 1.0, abs( vQuad.y ) ) ) * ( 1.0 - smoothstep( 0.8, 1.0, vQuad.x ) );
@@ -285,7 +299,7 @@ export class LampPoolField {
 
   /**
    * Claims `count` terrain samples from this frame's allowance; false when it is spent.
-   * Callers offer their pools nearest first, so the nearest grids stay fresh.
+   * The callers' walk starts at a different car each frame (main.ts), so it goes round.
    */
   takeSamples(count: number): boolean {
     if (this.samplesLeft < count) return false;

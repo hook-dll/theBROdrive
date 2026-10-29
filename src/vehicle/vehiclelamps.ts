@@ -210,8 +210,6 @@ const FIRST_SAMPLED_ROW = 2;
 /** How far a car may move, or turn, before its pool's terrain rows are sampled again. */
 const POOL_RESAMPLE_M = 1;
 const POOL_RESAMPLE_RAD = 0.035;
-/** Past this the old samples are somebody else's ground: the pool lies on the plane. */
-const POOL_STALE_M = 25;
 /** A pool's half-width at a row, as a share of the cone's own spread there. */
 const POOL_SPREAD = 0.95;
 const POOL_MIN_HALF_WIDTH_M = 0.6;
@@ -350,9 +348,9 @@ export class VehicleLamps {
   /** The settled tyre contact plane, chassis-local y: what a pool's near rows lie on. */
   private contactPlaneY = 0;
   /**
-   * The headlamp pool's terrain rows (`FIRST_SAMPLED_ROW` on), absolute world x, y, z
-   * and road lateral, kept between samples; and the pose and beam they were sampled for
-   * (x NaN: none).
+   * The headlamp pool's terrain rows (`FIRST_SAMPLED_ROW` on): per vertex the ground's
+   * absolute height and its road lateral less the car's, kept between samples; and the
+   * pose and beam they were sampled for (x NaN: none).
    */
   private readonly poolSamples = new Float64Array(POOL_VERTS * POOL_GRID_STRIDE);
   private poolSampledX = NaN;
@@ -684,10 +682,11 @@ export class VehicleLamps {
    *
    * The grid follows the beam: from the lamps out along the car's own axis, as wide as
    * the cone. Its near rows lie on the tyre contact plane, rebuilt every frame from the
-   * render pose; a headlamp's far rows lie on the terrain, sampled when the car has moved
-   * a metre or turned two degrees since, as far as the field's per-frame allowance goes,
-   * and held in world space in between. The light itself is shaded per pixel from where
-   * the lamps are this frame, so a grid a frame or two old only moves its rim.
+   * render pose; a headlamp's far rows lie where the beam is this frame, at the terrain
+   * height sampled when the car had last moved a metre or turned two degrees, as the
+   * field's per-frame allowance goes round (main.ts starts its walk at a different car
+   * each frame). The pool's depth is pulled toward the eye (render/lamppools.ts), so the
+   * chords between rows, a road's crown and a race track's raised asphalt never bury it.
    */
   syncLampPool(field: LampPoolField, group: BeamGroup, gain: number): void {
     if (!(gain > 0)) return;
@@ -709,10 +708,8 @@ export class VehicleLamps {
     const halfSpacing = Math.abs(last.sourceLocal.x - first.sourceLocal.x) / 2;
     const spread = Math.tan(shape.angle) * POOL_SPREAD;
     const along = front ? 1 : -1;
-    const sampledFrom = front ? this.samplePoolTerrain(field, rows, midX, midZ, halfSpacing, spread) : POOL_ROWS;
+    if (front && !this.samplePoolTerrain(field, rows, midX, midZ, halfSpacing, spread)) return;
     const grid = _poolGrid;
-    const originX = field.originX;
-    const originZ = field.originZ;
     // Near rows: the car's own lateral, carried across the road by the offset from it.
     const road = this.roadFrameAt(field);
     const root = this.ctx.rootGroup.position;
@@ -721,22 +718,23 @@ export class VehicleLamps {
     for (let row = 0; row < POOL_ROWS; row++) {
       const ahead = rows[row];
       const halfWidth = halfSpacing + Math.max(POOL_MIN_HALF_WIDTH_M, ahead * spread);
+      const sampled = front && row >= FIRST_SAMPLED_ROW;
       for (let column = 0; column < POOL_COLS; column++) {
         const v = (row * POOL_COLS + column) * POOL_GRID_STRIDE;
-        if (row >= sampledFrom) {
-          grid[v] = this.poolSamples[v] - originX;
-          grid[v + 1] = this.poolSamples[v + 1];
-          grid[v + 2] = this.poolSamples[v + 2] - originZ;
-          grid[v + 3] = this.poolSamples[v + 3];
-          continue;
-        }
         const point = this.toScene(
           _poolPoint.set(midX + (column - 1) * halfWidth, this.contactPlaneY + POOL_LIFT_M, midZ + along * ahead),
         );
         grid[v] = point.x;
-        grid[v + 1] = point.y;
         grid[v + 2] = point.z;
-        grid[v + 3] = road.lateral + (point.x - root.x) * cos - (point.z - root.z) * sin;
+        if (sampled) {
+          // Where the car's beam is NOW, at the ground's height sampled a frame or a few
+          // ago: the grid travels with the car and never lags or snaps across the road.
+          grid[v + 1] = this.poolSamples[v];
+          grid[v + 3] = road.lateral + this.poolSamples[v + 1];
+        } else {
+          grid[v + 1] = point.y;
+          grid[v + 3] = road.lateral + (point.x - root.x) * cos - (point.z - root.z) * sin;
+        }
       }
     }
     const lampA = this.toScene(_poolLampA.copy(first.sourceLocal));
@@ -776,8 +774,9 @@ export class VehicleLamps {
 
   /**
    * Brings the headlamp pool's terrain rows up to date if the car has moved on and the
-   * field still has samples this frame. @returns the first row to take from
-   * `poolSamples`: `POOL_ROWS` (none) when there are no samples near enough to use.
+   * field still has samples this frame. @returns false when this beam has never been
+   * sampled: the pool waits a frame or two for its turn rather than lying on the tyre
+   * plane, which ran 75 m out ahead and dived under the first rise (owner, 2026-10-29).
    */
   private samplePoolTerrain(
     field: LampPoolField,
@@ -786,7 +785,7 @@ export class VehicleLamps {
     midZ: number,
     halfSpacing: number,
     spread: number,
-  ): number {
+  ): boolean {
     const root = this.ctx.rootGroup;
     const x = root.position.x + field.originX;
     const z = root.position.z + field.originZ;
@@ -794,34 +793,30 @@ export class VehicleLamps {
     const heading = Math.atan2(forward.x, forward.z);
     const turn = heading - this.poolSampledHeading;
     const moved = Math.hypot(x - this.poolSampledX, z - this.poolSampledZ);
-    const sameBeam = this.poolSampledMode === this.headlightMode;
+    const sameBeam = this.poolSampledMode === this.headlightMode && Number.isFinite(this.poolSampledX);
     const fresh =
       sameBeam && moved <= POOL_RESAMPLE_M && Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn))) <= POOL_RESAMPLE_RAD;
-    if (!fresh && field.takeSamples((POOL_ROWS - FIRST_SAMPLED_ROW) * POOL_COLS)) {
-      const hint = this.roadFrameAt(field).s;
-      const at = _poolRoadSample;
-      for (let row = FIRST_SAMPLED_ROW; row < POOL_ROWS; row++) {
-        const ahead = rows[row];
-        const halfWidth = halfSpacing + Math.max(POOL_MIN_HALF_WIDTH_M, ahead * spread);
-        for (let column = 0; column < POOL_COLS; column++) {
-          const point = this.toScene(_poolPoint.set(midX + (column - 1) * halfWidth, this.contactPlaneY, midZ + ahead));
-          const sx = point.x + field.originX;
-          const sz = point.z + field.originZ;
-          field.roadFrame(sx, sz, hint, at);
-          const v = (row * POOL_COLS + column) * POOL_GRID_STRIDE;
-          this.poolSamples[v] = sx;
-          this.poolSamples[v + 1] = field.groundHeight(sx, sz, at.s) + POOL_LIFT_M;
-          this.poolSamples[v + 2] = sz;
-          this.poolSamples[v + 3] = at.lateral;
-        }
+    if (fresh || !field.takeSamples((POOL_ROWS - FIRST_SAMPLED_ROW) * POOL_COLS)) return sameBeam;
+    const car = this.roadFrameAt(field);
+    const at = _poolRoadSample;
+    for (let row = FIRST_SAMPLED_ROW; row < POOL_ROWS; row++) {
+      const ahead = rows[row];
+      const halfWidth = halfSpacing + Math.max(POOL_MIN_HALF_WIDTH_M, ahead * spread);
+      for (let column = 0; column < POOL_COLS; column++) {
+        const point = this.toScene(_poolPoint.set(midX + (column - 1) * halfWidth, this.contactPlaneY, midZ + ahead));
+        const sx = point.x + field.originX;
+        const sz = point.z + field.originZ;
+        field.roadFrame(sx, sz, car.s, at);
+        const v = (row * POOL_COLS + column) * POOL_GRID_STRIDE;
+        this.poolSamples[v] = field.groundHeight(sx, sz, at.s) + POOL_LIFT_M;
+        this.poolSamples[v + 1] = at.lateral - car.lateral;
       }
-      this.poolSampledX = x;
-      this.poolSampledZ = z;
-      this.poolSampledHeading = heading;
-      this.poolSampledMode = this.headlightMode;
-      return FIRST_SAMPLED_ROW;
     }
-    return sameBeam && moved <= POOL_STALE_M ? FIRST_SAMPLED_ROW : POOL_ROWS;
+    this.poolSampledX = x;
+    this.poolSampledZ = z;
+    this.poolSampledHeading = heading;
+    this.poolSampledMode = this.headlightMode;
+    return true;
   }
 
   /**
