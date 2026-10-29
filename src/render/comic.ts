@@ -115,7 +115,7 @@ export const COMIC_STIPPLE_KEEP = '0.22';
 export function comicStippleCall(keepBelow: string): string {
   return `comicStipple( stippleUv, stippleDx, stippleDy, stippleStretch, ${keepBelow} )`;
 }
-const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v2';
+const GROUND_SPOT_PROGRAM_KEY = 'ground-slope-spot-v1';
 const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
 const DIRECT_CALL =
   'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
@@ -126,8 +126,8 @@ vec3 groundSlopeNormal( vec3 dx, vec3 dy, vec3 flatNormal ) {
 }
 `;
 /**
- * The derivatives, taken once before the spot loops in uniform control flow: they are
- * undefined inside the clustered loop. The normal itself is still made per lit light.
+ * The screen derivatives, taken once before the spot loop where every fragment runs
+ * them: inside it a slot's branch may differ between neighbouring fragments.
  */
 const SLOPE_SPOT_DERIVATIVES =
   'vec3 groundSpotDx = dFdx( geometryPosition );\nvec3 groundSpotDy = dFdy( geometryPosition );\n';
@@ -137,10 +137,8 @@ const SLOPE_SPOT_CALL =
 /**
  * Ground uses authored upward normals for uniform sun colour. Spotlights need the
  * real geometric slope, however: on an uphill face the car is below a world-up
- * normal's horizon and Lambert rejects the beam completely. Replace the spot loops'
- * direct-light calls (the fixed slots' and the clustered one's, render/lightshader.ts)
- * with a derivative normal, from screen derivatives taken before the loops in uniform
- * control flow; sun and hemisphere stay flat.
+ * normal's horizon and Lambert rejects the beam completely. Replace the spot loop's
+ * direct-light calls with a derivative normal; sun and hemisphere stay flat.
  *
  * `onBeforeCompile` receives the shader before Three expands ShaderChunk includes,
  * so patch the stock lighting chunk and splice it in at its include site.
@@ -150,9 +148,7 @@ function patchGroundSpotNormal(fragmentShader: string): string {
   const spotLoop = lightsChunk.indexOf('#if ( NUM_SPOT_LIGHTS > 0 )');
   const spotLoopEnd = lightsChunk.indexOf('#if ( NUM_DIR_LIGHTS > 0 )', spotLoop);
   const spotSection = spotLoop >= 0 && spotLoopEnd > spotLoop ? lightsChunk.slice(spotLoop, spotLoopEnd) : '';
-  if (!spotSection.includes(DIRECT_CALL)) {
-    throw new Error('Three spotlight shader layout changed');
-  }
+  if (!spotSection.includes(DIRECT_CALL)) throw new Error('Three spotlight shader layout changed');
   const patchedLightsChunk =
     lightsChunk.slice(0, spotLoop) +
     SLOPE_SPOT_DERIVATIVES +

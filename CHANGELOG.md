@@ -1550,6 +1550,33 @@
 
 ### Fixed
 
+- THE FIRST TORCH PRESS NO LONGER RELINKS THE WORLD'S PROGRAMS (`render/vehiclelights.ts`
+  `addTorchBeam`, main.ts `TORCH_BEAM_OWNER`; the renderer's own torch spotlight is gone).
+  The hand torch was a scene spotlight toggled `visible`, and three counts visible spots
+  in every lit program's key: measured on blessing, the first press linked 21 programs
+  mid-walk (a freeze on ANGLE), and while lit the kit car's spot-reach masks were off. It
+  is now a pool beam: while lit it asks the lamp pool for one pinned slot and is
+  projected from the eye with the same colour, 52 cd, 65 m, 0.32 rad, penumbra 0.58,
+  decay 1.7. Pressed after the change: 0 programs linked, the torch frame identical
+  apart from star and grass sparkle and the held torch's swing. The spot count stays
+  the tier's, so the torch costs no extra slot when it is off.
+- A LIT SPOT SLOT NO LONGER SHADES WHERE ITS BEAM DOES NOT REACH (render/lightshader.ts
+  `installSpotLightDormantGuard`; render/comic.ts takes the ground's slope-normal
+  derivatives before the loop). `RE_Direct` used to run for every fragment of a live slot,
+  even outside the cone or past the range, where three's light is exactly zero. Now it
+  runs only where `directLight.visible`. Blessing 2560x1440, one page and pose, 10 lit
+  traffic beams: 9.37 -> 9.01 ms, the frame identical to the pixel.
+- Tried and reverted: CLUSTERED SPOT LIGHTING (a per-cell beam mask in a texture, read
+  by a dynamic loop over the cell's beams) and an unrolled loop with a per-fragment bit
+  test. Both were measured in one page, blessing 2560x1440, a fixed night pose with
+  traffic beams. Either one cost more than the unrolled loop at the same number of lit
+  beams: 11.6 ms and 10.2 ms with 10 lit, against 7.96 ms for the unrolled loop. Two
+  reasons. A lit beam in the unrolled loop costs only about 0.05 ms. And the headlamps'
+  432 m range with 49-degree cones reaches nearly every cell, so the culling has little
+  to cut. Per-draw reach masks for ground and terrain were not built either: their
+  ceiling is the whole cost of 10 lit beams, 0.54 ms, and three r185 has no per-draw
+  uniform hook.
+
 - THE 65-90 MS ROAD CHUNK STALL AND THE 25-30 MS SETTLEMENT STALL ARE GONE
   (`world/racetrack/site.ts` `RaceTrackField.prepareSteps`, `placeTrackSteps`;
   `world/racetrack/mesh.ts` `RaceTrackSiteProvider`; `world/racetrack/layout.ts`

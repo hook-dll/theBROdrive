@@ -432,16 +432,6 @@ export class Renderer {
    * `waitForFrameShaders`, being in no scene the boot compile walks.
    */
   private cloudShadowPass: { draw(): void; compile(): Promise<unknown> } | null = null;
-  /**
-   * The spot cluster grid (render/spotclusters.ts): built for the game's camera right
-   * before the scene pass and switched off after it. A mirror (`renderMirror`) shades
-   * every lit slot, the ending every slot.
-   */
-  private spotClusterPass: {
-    begin(camera: THREE.PerspectiveCamera, width: number, height: number): void;
-    beginOther(): void;
-    end(): void;
-  } | null = null;
 
   private quality: GraphicsQuality;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
@@ -1056,12 +1046,6 @@ export class Renderer {
     this.cloudShadowPass = pass;
   }
 
-  /** Installs the spot cluster grid's pass; see `spotClusterPass`. */
-  setSpotClusterPass(pass: Renderer['spotClusterPass']): void {
-    this.spotClusterPass?.end();
-    this.spotClusterPass = pass;
-  }
-
   /**
    * Draws the game's scene once more, from `camera` into `target`: a live mirror, right
    * after the frame. Every material keeps its program: any render target gives the same
@@ -1077,13 +1061,10 @@ export class Renderer {
     shadows.autoUpdate = false;
     shadows.needsUpdate = false;
     this.scene.matrixWorldAutoUpdate = false;
-    const clusters = this.spotClusterPass;
-    clusters?.beginOther();
     try {
       this.renderer.setRenderTarget(target);
       this.renderer.render(this.scene, camera);
     } finally {
-      clusters?.end();
       this.renderer.setRenderTarget(null);
       this.scene.matrixWorldAutoUpdate = matrices;
       shadows.autoUpdate = autoUpdate;
@@ -1164,17 +1145,10 @@ export class Renderer {
     // present pass shrinks it onto the canvas (see `resize`).
     //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
-    // cutscene's ground does not read it. The spot cluster grid likewise, for this
-    // camera's scene pass alone (render/spotclusters.ts).
-    const clusters = scene === this.scene ? this.spotClusterPass : null;
+    // cutscene's ground does not read it.
     if (scene === this.scene) this.cloudShadowPass?.draw();
     this.renderer.setRenderTarget(this.hazeTarget);
-    clusters?.begin(camera, this.hazeTarget.width, this.hazeTarget.height);
-    try {
-      this.renderer.render(scene, camera);
-    } finally {
-      clusters?.end();
-    }
+    this.renderer.render(scene, camera);
     if (this.shrinking) {
       this.renderer.setRenderTarget(this.frameTarget);
       this.renderer.render(this.hazeScene, this.hazeCamera);

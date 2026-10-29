@@ -85,6 +85,8 @@ import { BEAM_GROUPS } from './vehicle/vehiclelamps';
 const LAMP_HANDOVER_S = 0.75;
 /** The beam pool's group for the courtesy lamp, after the lamp groups (`BEAM_GROUPS`). */
 const DOME_BEAM_GROUP = BEAM_GROUPS.length;
+/** The beam pool's owner for the hand torch (render/vehiclelights.ts `addTorchBeam`). */
+const TORCH_BEAM_OWNER = {};
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -407,8 +409,6 @@ async function boot(): Promise<void> {
   // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
   // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
-  // Each frame's spot cluster grid is built for the scene pass's camera (render/spotclusters.ts).
-  renderer.setSpotClusterPass(vehicleLights.clusterPass);
   // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
   let spotReachCar: Vehicle | null = null;
   // Contact shadows are not a night effect and are not gated on the light rig: they are
@@ -2845,6 +2845,10 @@ async function boot(): Promise<void> {
     // ten times dearer) and the other lamp a pinned pool slot.
     const shadowedHeadlamps = vehicleLights.hasShadowBeam;
     beamPool.begin();
+    // The hand torch takes a pool slot of its own while lit, pinned ahead of everything:
+    // the player is on foot and it is the light he walks by. A slot rather than a light
+    // of its own, so lighting it never changes the program.
+    if (usingTorchlight) beamPool.request(TORCH_BEAM_OWNER, 0, 1, true);
     // The courtesy lamp of the car the player sits in lights its cabin with one pool
     // beam, pinned after the headlamps and before the tail and reversing lamps: from the
     // seat it is the light that is seen. On a four-slot tier at night the tail lamps'
@@ -2869,6 +2873,7 @@ async function boot(): Promise<void> {
     }
     beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
+    if (beamPool.share(TORCH_BEAM_OWNER, 0) > 0) vehicleLights.addTorchBeam(renderer.camera);
     if (driving && driving.hasLitLamps && shadowedHeadlamps) {
       driving.syncProjectedLights(vehicleLights, 'front', 1, true);
     }
@@ -3220,8 +3225,6 @@ async function boot(): Promise<void> {
       usingBinoculars,
       usingCamera,
     );
-    // The torch is a slot of the light rig, aimed from the eye about to be drawn.
-    vehicleLights.setTorch(usingTorchlight, renderer.camera);
     if (pendingPhotoCamera !== null) {
       const cameraItem = pendingPhotoCamera;
       pendingPhotoCamera = null;

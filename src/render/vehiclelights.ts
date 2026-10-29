@@ -6,8 +6,7 @@ import {
   vehicleLightSlotsFor,
   type GraphicsQuality,
 } from '../game/settings';
-import { SPOT_CLUSTER_MAX_LIGHTS, SPOT_LIGHT_LIVE_MIN, SPOT_REACH_ALL } from './lightshader';
-import { SpotClusterPass } from './spotclusters';
+import { SPOT_LIGHT_LIVE_MIN, SPOT_REACH_ALL } from './lightshader';
 
 /**
  * Renderer spotlights for the vehicle lamps that are LIT, wherever they are.
@@ -30,8 +29,8 @@ import { SpotClusterPass } from './spotclusters';
  *  - Slots are lit by INTENSITY alone. Unclaimed slots stay in the scene at a
  *    visually black, nonzero intensity, so cycling headlights, braking or driving
  *    away remains a uniform write without a zero-to-lit driver specialization. The
- *    spot loop skips a slot that dark (render/lightshader.ts `installClusteredSpotLoop`,
- *    which states what that does and does not risk).
+ *    spot loop skips a slot that dark by a uniform branch (render/lightshader.ts
+ *    `installSpotLightDormantGuard`, which states what that does and does not risk).
  *  - The pool NEVER changes size. It was grown on demand, on the argument that a
  *    second lit car is rare enough to pay for when it happens. Measured, that
  *    payment is 4.5 SECONDS of blocked main thread on this scene the moment the
@@ -132,12 +131,13 @@ function limitShadowRange(light: THREE.SpotLight): void {
   };
 }
 
+const _axis = new THREE.Vector3();
+const _toCentre = new THREE.Vector3();
+
 /**
- * The hand torch, a slot of this rig like the lamps, so lighting it is an intensity write:
- * as its own scene light toggled `visible`, the first press changed three's spot count and
- * relinked every lit program mid-walk. Retuned with the lamps (`LAMP_EXPOSURE`): 150 was
- * authored against the old linear-encoded frame, 52 is the screen value, so it is not
- * scaled again.
+ * The hand torch (`addTorchBeam`), a pool beam projected from the eye. Retuned with the
+ * lamps: 150 was authored against the old linear-encoded frame, and 52 is the value after
+ * that, so `LAMP_EXPOSURE` is not applied to it again.
  */
 const TORCH_COLOR = 0xffedbd;
 const TORCH_INTENSITY = 52;
@@ -145,11 +145,9 @@ const TORCH_DISTANCE_M = 65;
 const TORCH_ANGLE = 0.32;
 const TORCH_PENUMBRA = 0.58;
 const TORCH_DECAY = 1.7;
-/** How far ahead of the eye the torch is aimed, metres (only its direction matters). */
+/** How far ahead of the eye the torch is aimed, metres (only the direction matters). */
 const TORCH_AIM_M = 25;
-const _forward = new THREE.Vector3();
-const _axis = new THREE.Vector3();
-const _toCentre = new THREE.Vector3();
+const _torchForward = new THREE.Vector3();
 
 /**
  * Whether spot `light` puts any light on a sphere (world `centre`, `radius`). Exact where
@@ -200,20 +198,6 @@ export class VehicleLightRig {
    */
   private readonly shadowLight: THREE.SpotLight | null;
   private shadowClaimed = false;
-  /** The hand torch (`TORCH_INTENSITY`): always in the scene, dormant while off. */
-  private readonly torch: THREE.SpotLight;
-  /**
-   * The clustered spotlights in three's order, the torch then the pool: bit `b` of a
-   * cluster word (render/spotclusters.ts) is `clusterLights[b]`. Three numbers spots
-   * shadow-casting first, then in scene order, which holds while this rig's lights are
-   * the only spotlights drawn (`ownsEverySpot`).
-   */
-  private readonly clusterLights: THREE.SpotLight[];
-  private readonly ownLights: Set<THREE.Object3D>;
-  /** Builds the per-frame cluster grid; core/renderer.ts runs it around the scene pass. */
-  readonly clusterPass: SpotClusterPass;
-  /** Whether no spotlight but this rig's was visible in the scene at `endFrame`. */
-  private ownsEverySpot = true;
   private readonly scene: THREE.Scene;
   /** Slots claimed so far this frame; also the next free index. */
   private used = 0;
@@ -225,7 +209,7 @@ export class VehicleLightRig {
   ) {
     this.headlightDistanceScale = HEADLIGHT_DISTANCE_SCALE[quality];
     // The count is compiled into every lit material, so it is decided here and never
-    // again: see `vehicleLightSlots` for what it costs per pixel.
+    // again: see `mobileVehicleLightSlots` for what it costs per pixel.
     let slots = vehicleLightSlotsFor(quality, mobilePresentation);
     // The rung's default, not `Settings.shadows`: a shadowed lamp is a light that can
     // never be added or removed later, and the player's choice may change mid-drive.
@@ -247,30 +231,12 @@ export class VehicleLightRig {
     } else {
       this.shadowLight = null;
     }
-    const torch = new THREE.SpotLight(
-      TORCH_COLOR,
-      DORMANT_INTENSITY,
-      TORCH_DISTANCE_M,
-      TORCH_ANGLE,
-      TORCH_PENUMBRA,
-      TORCH_DECAY,
-    );
-    torch.castShadow = false;
-    scene.add(torch, torch.target);
-    this.torch = torch;
-    // Every spot is one bit of a 32-bit word: the kit car's `SPOT_REACH` mask names them
-    // all, a cluster word (render/spotclusters.ts) the torch and the pool.
-    slots = Math.min(slots, SPOT_CLUSTER_MAX_LIGHTS - 1 - (this.shadowLight === null ? 0 : 1));
     for (let i = 0; i < slots; i++) {
       const light = new THREE.SpotLight(0xffffff, DORMANT_INTENSITY);
       light.castShadow = false;
       scene.add(light, light.target);
       this.lights.push(light);
     }
-    this.clusterLights = [torch, ...this.lights];
-    this.ownLights = new Set<THREE.Object3D>(this.clusterLights);
-    if (this.shadowLight !== null) this.ownLights.add(this.shadowLight);
-    this.clusterPass = new SpotClusterPass(this.clusterLights, () => this.ownsEverySpot);
     this.scene = scene;
   }
 
@@ -343,9 +309,9 @@ export class VehicleLightRig {
     if (!(intensity > 0)) return false;
     if (this.used >= this.lights.length) return false;
     const light = this.lights[this.used++];
+    light.color.set(color);
     light.position.copy(sourceWorld);
     light.target.position.copy(targetWorld);
-    light.color.set(color);
     light.intensity = intensity * LAMP_EXPOSURE;
     light.distance = distance;
     light.angle = angle;
@@ -355,19 +321,26 @@ export class VehicleLightRig {
   }
 
   /**
-   * Lights the hand torch from `camera`'s eye along its view, or darkens it. Its own slot,
-   * so it never takes a lamp's light and never changes the program.
+   * Projects the hand torch from `camera`'s eye along its view, into a pool slot like a
+   * lamp: the caller requests that slot from its `FadingSlotPool` first, pinned, so it is
+   * free. A slot rather than a light of its own, so lighting it is a uniform write: as a
+   * scene light toggled `visible`, the first press changed three's spot count and relinked
+   * every lit program mid-walk, and while lit it switched off the kit car's reach masks.
+   * @returns whether a slot was assigned.
    */
-  setTorch(on: boolean, camera: THREE.Camera): void {
-    const torch = this.torch;
-    if (!on) {
-      torch.intensity = DORMANT_INTENSITY;
-      return;
-    }
-    torch.intensity = TORCH_INTENSITY;
-    torch.position.copy(camera.position);
-    camera.getWorldDirection(_forward);
-    torch.target.position.copy(camera.position).addScaledVector(_forward, TORCH_AIM_M);
+  addTorchBeam(camera: THREE.Camera): boolean {
+    if (this.used >= this.lights.length) return false;
+    const light = this.lights[this.used++];
+    light.position.copy(camera.position);
+    camera.getWorldDirection(_torchForward);
+    light.target.position.copy(camera.position).addScaledVector(_torchForward, TORCH_AIM_M);
+    light.color.set(TORCH_COLOR);
+    light.intensity = TORCH_INTENSITY;
+    light.distance = TORCH_DISTANCE_M;
+    light.angle = TORCH_ANGLE;
+    light.penumbra = TORCH_PENUMBRA;
+    light.decay = TORCH_DECAY;
+    return true;
   }
 
   /**
@@ -386,14 +359,6 @@ export class VehicleLightRig {
       if (!this.shadowClaimed) shadowLight.intensity = DORMANT_INTENSITY;
       shadowLight.shadow.autoUpdate = this.shadowClaimed || shadowLight.shadow.map === null;
     }
-    // A spotlight of anyone else's would shift three's numbering under the masks.
-    this.ownsEverySpot = true;
-    for (const child of this.scene.children) {
-      if ((child as THREE.SpotLight).isSpotLight && child.visible && !this.ownLights.has(child)) {
-        this.ownsEverySpot = false;
-        break;
-      }
-    }
   }
 
   /**
@@ -401,16 +366,18 @@ export class VehicleLightRig {
    * mask a kit car's body and glass skip the rest by (render/materials.ts
    * `setCarSpotReach`, render/lightshader.ts `SPOT_REACH`). Call after `endFrame`.
    *
-   * Bit `i` is the renderer's spot light `i`: the shadowed beam 0, then the torch and the
-   * pool (`clusterLights`). While a spotlight not of this rig is visible every bit is set.
+   * Bit `i` is the renderer's spot light `i`. Three numbers them shadow-casting first,
+   * then in scene order, so the shadowed beam is 0 and the pool follows in its own order:
+   * which holds while this rig's lights are the only spotlights in the scene, the hand
+   * torch included (`addTorchBeam`). Past 31 slots every bit is set.
    */
   spotReachMask(centre: THREE.Vector3, radius: number): number {
-    if (!this.ownsEverySpot) return SPOT_REACH_ALL;
     const offset = this.shadowLight === null ? 0 : 1;
+    if (this.lights.length + offset > 31) return SPOT_REACH_ALL;
     let mask = 0;
     if (this.shadowLight !== null && spotReaches(this.shadowLight, centre, radius)) mask |= 1;
-    for (let i = 0; i < this.clusterLights.length; i++) {
-      if (spotReaches(this.clusterLights[i], centre, radius)) mask |= 1 << (i + offset);
+    for (let i = 0; i < this.lights.length; i++) {
+      if (spotReaches(this.lights[i], centre, radius)) mask |= 1 << (i + offset);
     }
     return mask;
   }
@@ -423,7 +390,7 @@ export class VehicleLightRig {
 
   dispose(): void {
     this.clear();
-    for (const light of this.clusterLights) {
+    for (const light of this.lights) {
       this.scene.remove(light, light.target);
     }
     this.lights.length = 0;

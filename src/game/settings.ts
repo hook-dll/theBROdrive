@@ -249,7 +249,7 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // the mast huts, and the whole point-light path went with them. What is left is 11
     // spots — still on the cheap side of the cliff — so traffic beams and unmerged tail
     // lamps both fit.
-    vehicleLightSlots: 32,
+    vehicleLightSlots: 11,
     // Two thirds of a desktop again; the phone's spots are cut the same way, 8 where the
     // desktop spends 11.
     mobileVehicleLightSlots: 8,

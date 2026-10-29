@@ -4,7 +4,7 @@ import * as THREE from 'three';
  * Keep every light slot and its program variant, but skip exactly black uniforms.
  * Install globally before compilation so ordinary, comic and loaded car materials
  * agree. The condition is uniform across fragments; all active-light/shadow operations
- * remain untouched. (The spot loop has its own, `installClusteredSpotLoop`.)
+ * remain untouched. (The spot loop has its own guard, `installSpotLightDormantGuard`.)
  */
 function installPointLightZeroGuard(): void {
   const guard = 'if ( any( notEqual( pointLights[ i ].color, vec3( 0.0 ) ) ) )';
@@ -32,152 +32,53 @@ export const SPOT_LIGHT_LIVE_MIN = 1e-6;
 export const SPOT_REACH_ALL = -1;
 
 /**
- * THE CLUSTERED SPOT LOOP. Three draws spotlights as a loop over every slot, unrolled, so
- * a lit fragment paid for every slot the tier compiled: pixels x slots, the measured
- * 13-slot cliff (game/settings.ts), and the reason far traffic lamps lost their light.
- * Here a fragment shades only the beams that can reach it:
+ * The spot loop skips every slot that cannot light this fragment's material, by a branch
+ * on uniforms alone, the same for every fragment of the draw:
  *
- *  - FIXED slots, the ones three gives a shadow map or a light map (the driven car's
- *    shadowed headlamp, index 0 while `NUM_SPOT_LIGHT_SHADOWS` is 1; a lamp in the room
- *    scene), keep three's unrolled body as three wrote it: the samplers need a constant
- *    index. Each is skipped by a uniform branch when DORMANT (`SPOT_LIGHT_LIVE_MIN`) or out
- *    of reach (`SPOT_REACH`, below).
- *  - Every other slot is CLUSTERED. render/spotclusters.ts cuts the scene pass's view
- *    frustum into `SPOT_CLUSTER_TILES_X` x `_Y` screen tiles by `SPOT_CLUSTER_SLICES`
- *    depth slices and writes, per cell, a bit for each beam that can light any point of
- *    it (render/vehiclelights.ts `spotReaches`, the test the kit car's mask uses). The
- *    fragment reads its cell's word from `spotClusterMap` and loops over the set bits,
- *    each a dynamic index into three's own `spotLights`, through three's own
- *    `getSpotLightInfo` and `RE_Direct`. A beam left out of a cell is one whose cone or
- *    range ends before the cell, so its light there was exactly zero: the picture is the
- *    same, and only the beams that reach a pixel cost it anything.
- *  - With the grid off (`spotClusterGrid.x` 0: the ending, any other scene) the word is
- *    every clustered slot, each still skipped when dormant, which is the old loop's light
- *    in a loop of one body. `spotClusterGrid.x` below 0 says no clustered slot is lit at
- *    all (noon, or a mirror while every lamp is off): the word is 0 before the lookup.
+ *  - DORMANT slots (`SPOT_LIGHT_LIVE_MIN`). At noon every slot is dormant, and the loop
+ *    still ran the whole physical light for each: on the driven car seen from the cabin,
+ *    8.4 ms of its 8.65 ms at 1440 lines on the M2 Pro (11 slots; 0.25 ms with none).
+ *  - Slots out of reach (`SPOT_REACH`, a macro a material defines before this chunk:
+ *    render/materials.ts gives a kit car's body and glass a per-car mask, which main.ts
+ *    fills for the occupied car from render/vehiclelights.ts `spotReachMask`, a test of
+ *    each lit beam's cone against the car). Everyone else's is `true`.
  *
- * `SPOT_REACH` is a macro a material may define before this chunk: render/materials.ts
- * gives a kit car's body and glass a per-car mask of slots (bit `i` for spot `i`), which
- * main.ts fills for the occupied car from render/vehiclelights.ts `spotReachMask`.
- * Everyone else's is `true`.
+ * The slot count, the shadowed slot (index 0 while `NUM_SPOT_LIGHT_SHADOWS` is 1) and the
+ * program are unchanged: the shadow lookup and the light map sit inside the branch exactly
+ * as three wrote them, so a skipped slot contributes what a dormant one did (nothing
+ * visible) and a live one exactly what it did before.
  *
- * The program is fixed: the slot count, the shadowed slot and the grid size are the same
- * all session; the cluster map and grid are uniforms. The loop body is compiled once, not
- * once per slot. Derivatives must not be taken inside the clustered loop (its trip count
- * differs between neighbouring cells): the ground's slope normal (render/comic.ts) is
- * taken before it.
+ * Inside a live slot the light itself is skipped per fragment where three's
+ * `getSpotLightInfo` found none (`directLight.visible` false: outside the outer cone, past
+ * the range, colour exactly zero), where `RE_Direct` would add zero. Measured on blessing
+ * at 2560x1440 with 10 lit traffic beams, one page and pose: 9.37 -> 9.01 ms, the frame
+ * identical to the pixel. That branch differs between neighbouring fragments, so nothing
+ * in `RE_Direct` may take screen derivatives: the ground's slope normal (render/comic.ts)
+ * takes them before the loop.
  *
  * DRIVER RISK, stated plainly. The dormant intensity is nonzero because some drivers
  * specialized the first executed program around an exactly-zero light contribution and
- * stalled for seconds when a slot first lit (vehiclelights.ts). No slot's uniforms ever
- * reach exactly zero, and the bodies are in the program from the boot; a driver that
- * specializes on uniform VALUES could still fold a never-taken branch away. The first
- * headlamp of a session on Windows/ANGLE is the moment to watch for a hitch.
+ * stalled for seconds when a slot first lit (vehiclelights.ts). That rule still holds:
+ * no slot's uniforms ever reach exactly zero, and the guarded body is still in the
+ * program. What is new is a branch that is never taken until the first lamp lights. A
+ * driver that specializes on uniform VALUES could in principle fold that branch away the
+ * way it folded the zero light; nothing here can rule that out. The first headlamp of a
+ * session on Windows/ANGLE is the moment to watch for a hitch.
  */
-export const SPOT_CLUSTER_TILES_X = 16;
-export const SPOT_CLUSTER_TILES_Y = 9;
-export const SPOT_CLUSTER_SLICES = 24;
-/**
- * Depth slices are geometric, two per octave from `SPOT_CLUSTER_NEAR_M` (anything nearer
- * is slice 0) to `SPOT_CLUSTER_NEAR_M * 2^(SLICES / 2)`, 2048 m: a fragment beyond that
- * gets no clustered light, so the grid is used only while every live beam's reach ends
- * inside it (render/spotclusters.ts).
- */
-export const SPOT_CLUSTER_NEAR_M = 0.5;
-export const SPOT_CLUSTER_SLICES_PER_OCTAVE = 2;
-/** The most clustered slots one cell word can name. */
-export const SPOT_CLUSTER_MAX_LIGHTS = 32;
-
-/** A texture every lit material binds as the same object (three clones uniforms per material). */
-class SharedDataTexture extends THREE.DataTexture {
-  override clone(): this {
-    return this;
-  }
-}
-
-/** One `uint` per cell: bit `b` is spot `SPOT_FIXED_LIGHTS + b`. Written by render/spotclusters.ts. */
-export const spotClusterMap = new SharedDataTexture(
-  new Uint32Array(SPOT_CLUSTER_TILES_X * SPOT_CLUSTER_TILES_Y * SPOT_CLUSTER_SLICES),
-  SPOT_CLUSTER_TILES_X,
-  SPOT_CLUSTER_TILES_Y * SPOT_CLUSTER_SLICES,
-  THREE.RedIntegerFormat,
-  THREE.UnsignedIntType,
-);
-spotClusterMap.name = 'spot-clusters';
-spotClusterMap.needsUpdate = true;
-/**
- * Tiles per pixel (x, y) and the slice of a view depth `d`, `floor( log2( d ) * z + w )`.
- * `x` 0 turns the grid off (every clustered slot), below 0 says none is lit. A typed
- * array, so three's per-material uniform clone shares it rather than copying it.
- */
-export const spotClusterGrid = new Float32Array(4);
-
-const SPOT_CLUSTER_PARS = /* glsl */ `
-#define SPOT_FIXED_LIGHTS ( NUM_SPOT_LIGHT_SHADOWS + NUM_SPOT_LIGHT_MAPS - NUM_SPOT_LIGHT_SHADOWS_WITH_MAPS )
-#define SPOT_CLUSTER_LIGHTS ( NUM_SPOT_LIGHTS - SPOT_FIXED_LIGHTS )
-#if SPOT_CLUSTER_LIGHTS > 0
-uniform highp usampler2D spotClusterMap;
-uniform vec4 spotClusterGrid;
-uint spotClusterMask( const in vec3 viewPosition ) {
-	#if SPOT_CLUSTER_LIGHTS >= ${SPOT_CLUSTER_MAX_LIGHTS}
-	uint everyLight = 0xffffffffu;
-	#else
-	uint everyLight = ( 1u << uint( SPOT_CLUSTER_LIGHTS ) ) - 1u;
-	#endif
-	if ( spotClusterGrid.x < 0.0 ) return 0u;
-	if ( spotClusterGrid.x == 0.0 ) return everyLight;
-	int slice = int( floor( log2( max( - viewPosition.z, 1e-6 ) ) * spotClusterGrid.z + spotClusterGrid.w ) );
-	if ( slice >= ${SPOT_CLUSTER_SLICES} ) return 0u;
-	ivec2 tile = min( ivec2( gl_FragCoord.xy * spotClusterGrid.xy ), ivec2( ${SPOT_CLUSTER_TILES_X - 1}, ${SPOT_CLUSTER_TILES_Y - 1} ) );
-	tile.y += max( slice, 0 ) * ${SPOT_CLUSTER_TILES_Y};
-	return texelFetch( spotClusterMap, tile, 0 ).r & everyLight;
-}
-#endif`;
-
-/** The lit materials three builds from `ShaderLib` (the game draws no lit `ShaderMaterial`). */
-const LIT_SHADER_LIBS = ['standard', 'physical', 'lambert', 'phong', 'toon'] as const;
-
-function installClusteredSpotLoop(): void {
-  const pars = THREE.ShaderChunk.lights_pars_begin;
-  if (pars.includes('spotClusterMask')) return;
-  const spotUniform = 'uniform SpotLight spotLights[ NUM_SPOT_LIGHTS ];';
-  if (!pars.includes(spotUniform)) throw new Error('Three spot-light uniform layout changed');
+function installSpotLightDormantGuard(): void {
   const chunk = THREE.ShaderChunk.lights_fragment_begin;
-  const spotLoop = /(#pragma unroll_loop_start\s+for \( int i = 0; i < NUM_SPOT_LIGHTS; i \+\+ \) \{\s*)(spotLight = spotLights\[ i \];[\s\S]*?(RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);))(\s*\}\s*#pragma unroll_loop_end)/;
-  if (!spotLoop.test(chunk) || !chunk.includes('getSpotLightInfo( spotLight, geometryPosition, directLight );')) {
-    throw new Error('Three spot-light shader layout changed');
-  }
-  THREE.ShaderChunk.lights_pars_begin = pars.replace(spotUniform, `${spotUniform}\n${SPOT_CLUSTER_PARS}`);
-  const live = (light: string): string => `max3( ${light}.color ) >= ${SPOT_LIGHT_LIVE_MIN.toExponential()}`;
+  if (chunk.includes('SPOT_REACH(')) return;
+
+  const spotLoop = /(#pragma unroll_loop_start\s+for \( int i = 0; i < NUM_SPOT_LIGHTS; i \+\+ \) \{\s*)(spotLight = spotLights\[ i \];[\s\S]*?)(RE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);)(\s*\}\s*#pragma unroll_loop_end)/;
+  if (!spotLoop.test(chunk)) throw new Error('Three spot-light shader layout changed');
+  const live = `max3( spotLights[ i ].color ) >= ${SPOT_LIGHT_LIVE_MIN.toExponential()}`;
   THREE.ShaderChunk.lights_fragment_begin = chunk.replace(
     spotLoop,
     `#ifndef SPOT_REACH
 	#define SPOT_REACH( index ) true
 	#endif
-	$1#if ( UNROLLED_LOOP_INDEX < SPOT_FIXED_LIGHTS )
-		if ( ${live('spotLights[ i ]')} && SPOT_REACH( UNROLLED_LOOP_INDEX ) ) {
-		$2
-		}
-		#endif$4
-
-	#if SPOT_CLUSTER_LIGHTS > 0
-	for ( uint spotMask = spotClusterMask( geometryPosition ); spotMask != 0u; spotMask &= spotMask - 1u ) {
-		// The lowest set bit's index (GLSL ES 3.00 has no findLSB): the exponent of the
-		// float that power of two converts to, exactly.
-		int spotIndex = SPOT_FIXED_LIGHTS + int( ( floatBitsToUint( float( spotMask & ( ~ spotMask + 1u ) ) ) >> 23u ) - 127u );
-		spotLight = spotLights[ spotIndex ];
-		if ( ${live('spotLight')} && SPOT_REACH( spotIndex ) ) {
-			getSpotLightInfo( spotLight, geometryPosition, directLight );
-			$3
-		}
-	}
-	#endif`,
+	$1if ( ${live} && SPOT_REACH( UNROLLED_LOOP_INDEX ) ) {\n\t\t$2if ( directLight.visible ) $3\n\t\t}$4`,
   );
-  for (const id of LIT_SHADER_LIBS) {
-    const uniforms = THREE.ShaderLib[id].uniforms as Record<string, THREE.IUniform>;
-    uniforms.spotClusterMap = { value: spotClusterMap };
-    uniforms.spotClusterGrid = { value: spotClusterGrid };
-  }
 }
 
 /**
@@ -413,7 +314,7 @@ function installReversedPcfBias(): void {
 }
 
 installPointLightZeroGuard();
-installClusteredSpotLoop();
+installSpotLightDormantGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
 installReversedPcfBias();
