@@ -153,16 +153,26 @@ function queryNumber(query: URLSearchParams, key: string, fallback: number): num
   return query.has(key) && Number.isFinite(value) ? value : fallback;
 }
 
+/** The one car the cabin loops play from in the lab. */
+const MUSIC_CAR_ID = 'kit_vaz2101';
+
+/** The lab's cabin loop player: placed each frame from the camera and the music car. */
+interface CabinMusicPlayer {
+  update(camera: THREE.Camera, car: THREE.Object3D | null): void;
+}
+
 /**
- * The traffic's cabin loops (audio/cabinmusic.ts), played as they leave a shut car, to
- * judge them one by one. Its own AudioContext, made on the first pick (a user gesture);
- * the loops render once, then a pick swaps the playing source.
+ * The traffic's cabin loops (audio/cabinmusic.ts), played from inside the 2101 as they
+ * leave a shut car, to judge them one by one. Its own AudioContext, made on the first
+ * pick (a user gesture), the loop placed at the car by a panner with the lab camera as
+ * the listener (`update`, every frame), with the traffic voice's roll-off
+ * (audio/trafficaudio.ts). The loops render once, then a pick swaps the source.
  */
-function wireCabinMusicPlayer(root: HTMLElement): void {
+function cabinMusicPlayer(root: HTMLElement): CabinMusicPlayer {
   const select = root.querySelector<HTMLSelectElement>('[data-music="loop"]');
   const output = select?.parentElement?.querySelector('output');
-  if (!select || !output) return;
   let ctx: AudioContext | null = null;
+  let panner: PannerNode | null = null;
   let music: CabinMusic | null = null;
   let source: AudioBufferSourceNode | null = null;
   const stop = (): void => {
@@ -170,38 +180,67 @@ function wireCabinMusicPlayer(root: HTMLElement): void {
     source?.disconnect();
     source = null;
   };
-  select.addEventListener('change', () => {
+  select?.addEventListener('change', () => {
     stop();
     const index = select.value === '' ? -1 : Number(select.value);
-    output.textContent = '';
+    if (output) output.textContent = '';
     if (index < 0) return;
     ctx ??= new AudioContext();
     void ctx.resume();
+    if (!panner) {
+      panner = new PannerNode(ctx, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 7, rolloffFactor: 1.15, maxDistance: 900 });
+      panner.connect(ctx.destination);
+    }
     music ??= new CabinMusic();
     const play = (): void => {
-      if (Number(select.value) !== index || select.value === '') return;
+      if (select.value === '' || Number(select.value) !== index) return;
       const buffer = music!.loops[index];
       if (!buffer) {
-        output.textContent = '…';
+        if (output) output.textContent = '…';
         window.setTimeout(play, 100);
         return;
       }
-      output.textContent = `${CABIN_LOOPS[index]!.bpm}`;
+      if (output) output.textContent = `${CABIN_LOOPS[index]!.bpm}`;
       stop();
       source = new AudioBufferSourceNode(ctx!, { buffer, loop: true });
-      source.connect(ctx!.destination);
+      source.connect(panner!);
       source.start();
     };
     play();
   });
+  const at = new THREE.Vector3();
+  const forward = new THREE.Vector3();
+  return {
+    update(camera, car) {
+      if (!ctx || !panner || !source) return;
+      const listener = ctx.listener;
+      camera.getWorldPosition(at);
+      camera.getWorldDirection(forward);
+      listener.positionX.value = at.x;
+      listener.positionY.value = at.y;
+      listener.positionZ.value = at.z;
+      listener.forwardX.value = forward.x;
+      listener.forwardY.value = forward.y;
+      listener.forwardZ.value = forward.z;
+      listener.upX.value = camera.up.x;
+      listener.upY.value = camera.up.y;
+      listener.upZ.value = camera.up.z;
+      if (!car) return;
+      car.getWorldPosition(at);
+      panner.positionX.value = at.x;
+      panner.positionY.value = at.y + 0.9;
+      panner.positionZ.value = at.z;
+    },
+  };
 }
+
 
 function createInterface(
   state: LabState,
   cars: readonly LabCar[],
   apply: () => void,
   api: CarLabApi,
-): HTMLElement {
+): { root: HTMLElement; music: CabinMusicPlayer } {
   const root = document.createElement('aside');
   root.className = 'car-lab';
   const styleRow = CAR_FACTORIES.length > 1
@@ -233,10 +272,10 @@ function createInterface(
     ${unifiedRow}
     ${styleRow}
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.def.label}</option>`).join('')}</select>
-    <label><span>Музыка салона</span><select data-music="loop"><option value="">выкл</option>${CABIN_LOOPS.map((loop, i) => `<option value="${i}">${i + 1}. ${loop.name}</option>`).join('')}</select><output></output></label>
+    <label><span>Музыка в 2101</span><select data-music="loop"><option value="">выкл</option>${CABIN_LOOPS.map((loop, i) => `<option value="${i}">${i + 1}. ${loop.name}</option>`).join('')}</select><output></output></label>
     <div class="buttons"><button data-action="game">Вернуться в игру</button></div>`;
   document.body.appendChild(root);
-  wireCabinMusicPlayer(root);
+  const music = cabinMusicPlayer(root);
 
   const sync = (): void => {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-control]').forEach((input) => {
@@ -296,7 +335,7 @@ function createInterface(
     window.location.href = window.location.pathname;
   });
   sync();
-  return root;
+  return { root, music };
 }
 
 /** Driving inputs the kit panel offers as sliders: channel, label, range, step. */
@@ -658,7 +697,8 @@ export async function bootCarLab(): Promise<void> {
     },
     models: cars.map((car) => car.def.id),
   };
-  const interfaceRoot = createInterface(state, cars, apply, api);
+  const { root: interfaceRoot, music } = createInterface(state, cars, apply, api);
+  const musicCar = cars.find((car) => car.def.id === MUSIC_CAR_ID)?.anchor ?? null;
   const kitPanel = document.createElement('aside');
   kitPanel.className = 'car-lab';
   kitPanel.style.cssText = 'left:auto;right:14px;display:none;max-height:calc(100vh - 28px);overflow:auto';
@@ -670,6 +710,7 @@ export async function bootCarLab(): Promise<void> {
 
   const loop = (): void => {
     renderFrame();
+    music.update(renderer.camera, musicCar);
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
