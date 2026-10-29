@@ -1,7 +1,7 @@
 /**
  * Music from other cars' cabins, heard through their shut windows.
  *
- * A third of the traffic has something playing: the thump of a dance track, an
+ * Nearly half the traffic has something playing: the thump of a dance track, an
  * accordion waltz, somebody's tape of estrada, a talk station. From outside a closed
  * car none of it is music any more, only its bottom octaves and its beat, so the loops
  * are made that way: short (4-8 s), mono, at 16 kHz, each a few bars of a style built
@@ -25,7 +25,7 @@ const LOOP_RATE = 16000;
 const LOOP_RMS = 0.125;
 const LOOP_PEAK = 0.95;
 /** Share of cars with music playing. */
-const MUSIC_SHARE = 0.35;
+const MUSIC_SHARE = 0.45;
 
 type Vowel = 'a' | 'o' | 'u' | 'e' | 'm';
 /** First three formants, Hz, of a male voice; `m` is a hum through the nose. */
@@ -464,7 +464,7 @@ export function cabinMusicFor(id: string, out: CabinMusicPick): boolean {
   const rand = mulberry(h ^ 0x6d757369);
   if (rand() >= MUSIC_SHARE) return false;
   out.loop = Math.floor(rand() * CABIN_LOOPS.length);
-  out.level = 0.55 + 0.45 * rand();
+  out.level = 0.8 + 0.2 * rand();
   out.offset = rand();
   out.rate = 0.97 + 0.06 * rand();
   return true;

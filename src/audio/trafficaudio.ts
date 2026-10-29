@@ -50,10 +50,14 @@ const HRTF_WITHIN_M = 100;
 /** A panner target closer than this to the last one written is not written, metres. */
 const PLACE_EPS_M = 0.005;
 /**
- * A loop (-18 dBFS RMS) at a car's loudest, shut and standing: ~-25 dBFS into the
- * voice, a few dB under its engine at idle (-23 dBFS, measured offline).
+ * A car with music has it on LOUD: what gets out of a shut car is only the shell's
+ * muffled bottom (the loops have it baked in, cabinmusic.ts), and that is still plain to
+ * hear beside it. A loop (-18 dBFS RMS) at a car's loudest, shut: ~-13 dBFS into the
+ * voice, some 10 dB over its engine at idle (-23 dBFS, measured offline), so it carries
+ * over the engine and tyres at road speed. Was 0.45 (-25 dBFS), under the engine, and a
+ * drive alongside traffic heard next to none of it.
  */
-const CABIN_MUSIC_GAIN = 0.45;
+const CABIN_MUSIC_GAIN = 1.8;
 /**
  * Music at full within NEAR, gone by FAR, metres (on top of the panner's roll-off). Two
  * cars passing at 90 km/h each close 50 m a second, so a 25 m reach was a blip under a
@@ -61,11 +65,11 @@ const CABIN_MUSIC_GAIN = 0.45;
  */
 const MUSIC_NEAR_M = 20;
 const MUSIC_FAR_M = 45;
-/** Every window and door open: this much louder than shut (+10 dB). */
-const MUSIC_OPEN_BOOST = 2.2;
+/** Every window and door open: this much louder than shut (+7 dB). */
+const MUSIC_OPEN_BOOST = 1.2;
 /** By this speed the music is down by `MUSIC_SPEED_DROP` under the car's wind and engine, m/s. */
 const MUSIC_SPEED_MPS = 25;
-const MUSIC_SPEED_DROP = 0.35;
+const MUSIC_SPEED_DROP = 0.15;
 
 /** Initial values of the per-frame params, as built (`reuse` puts them back). */
 const AIR_HZ = 12000;
