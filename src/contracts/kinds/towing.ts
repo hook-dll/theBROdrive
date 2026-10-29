@@ -6,9 +6,10 @@
  * The car waits in the SOURCE post's pick-up slot (contracts/hauls.ts, contracts/world.ts
  * `spawnHaulLoad`), named after its contract, with NO ENGINE in its bay: it cannot idle,
  * it cannot be driven, and the only way to move it is the car-to-car tow bar of kind 17's
- * subsystem (`vehicle/cartow.ts`); putting it on the bar takes it. It is handed in by
- * backing it into the destination post's bay on the bar (contracts/haulbays.ts), which
- * drops the bar.
+ * subsystem (`vehicle/cartow.ts`), whose A-frame stands bolted to its front bumper;
+ * putting it on the bar takes it. It is handed in by parking all of it inside the
+ * destination post's hand-in slot, either way round (contracts/haulbays.ts), which drops
+ * the bar.
  *
  * How it got there is not judged: the bar may come off on the way and the car may
  * arrive battered. Delivered is delivered.

@@ -1,4 +1,5 @@
 import type { RaceReadout, RaceResults } from '../race/director';
+import { setGameText } from './shellsprites';
 
 /**
  * THE RACE ON THE HUD (race/director.ts `RaceReadout`), for a boy who can barely read:
@@ -95,7 +96,7 @@ export class RaceHud {
     }
     if (r.hint !== this.shownHint) {
       this.shownHint = r.hint;
-      this.hintEl.textContent = r.hint ?? '';
+      setGameText(this.hintEl, r.hint ?? '');
       this.hintEl.classList.toggle('is-hidden', r.hint === null);
     }
     if (r.results !== this.shownResults) {
@@ -127,10 +128,10 @@ export class RaceHud {
     }
     const prize = document.createElement('div');
     prize.className = 'hud-race-results-prize';
-    prize.textContent = results.prize;
+    setGameText(prize, results.prize);
     const hint = document.createElement('div');
     hint.className = 'hud-race-results-hint';
-    hint.textContent = `${results.hint} · drive away to leave`;
+    setGameText(hint, `${results.hint} · drive away to leave`);
     panel.append(head, table, prize, hint);
   }
 }

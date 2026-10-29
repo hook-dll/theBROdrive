@@ -7,6 +7,7 @@ import { formatClock, type ContractKind } from '../contracts/types';
 import { haulLoadId } from '../contracts/world';
 import { contractPay, formatPay } from '../economy/economy';
 import type { GameWorld } from '../game/state';
+import { fillGameText } from '../ui/shellsprites';
 import { contractKindOf, type ContractCargoItem } from '../items/items';
 import type { ChunkContext } from './chunks';
 import type { FixtureField, WorldFixture } from './fixturefield';
@@ -149,7 +150,7 @@ function paintBoard(material: THREE.MeshStandardMaterial, world: GameWorld, stop
   const km = (postStop(world.seed, offerDestinationIndex(haul)).s - stop.s) / 1000;
   const urgent = haul.urgentS === undefined ? '' : ` · URGENT ${formatClock(haul.urgentS)}`;
   g.font = `bold ${Math.round(h * 0.12)}px sans-serif`;
-  g.fillText(`${km.toFixed(1)} km · ${formatPay(contractPay(world.seed, haul))}${urgent}`, w * 0.5, h * 0.82, w - border * 6);
+  fillGameText(g, `${km.toFixed(1)} km · ${formatPay(contractPay(world.seed, haul))}${urgent}`, w * 0.5, h * 0.82, w - border * 6);
 }
 
 /** A side-on toy car, nose to +x, `s` long, its wheels' bottoms on `ground`: a body, a cabin, two wheels. */
@@ -174,8 +175,9 @@ function drawCar(g: CanvasRenderingContext2D, x: number, ground: number, s: numb
 
 /**
  * The kind's pictogram, centred on (`cx`, `cy`), `size` tall: a car pulling a loaded
- * trailer, a car pulling a car on a bar, or one car with its key. The race sign
- * (race/visuals.ts) draws the trailer one for a trailer race.
+ * trailer, or a car pulling a car on a bar (a car to tow and a car to bring over alike:
+ * both go on the bar). The race sign (race/visuals.ts) draws the trailer one for a
+ * trailer race.
  */
 export function drawPictogram(g: CanvasRenderingContext2D, kind: ContractKind, cx: number, cy: number, size: number): void {
   const ground = cy + size / 2;
@@ -200,8 +202,9 @@ export function drawPictogram(g: CanvasRenderingContext2D, kind: ContractKind, c
     g.beginPath();
     g.arc(boxX, ground - wheel, wheel, 0, Math.PI * 2);
     g.fill();
-  } else if (kind === 'towing') {
-    // The car ahead pulls the broken one on a bar.
+  } else {
+    // A haul's car, broken or whole, goes on a bar (contracts/world.ts `haulCarSeal`):
+    // the car ahead pulls it.
     const gap = car * 0.25;
     drawCar(g, cx + (car + gap) / 2, ground, car, BOARD_FG);
     drawCar(g, cx - (car + gap) / 2, ground, car, LOAD_COLOUR);
@@ -209,21 +212,6 @@ export function drawPictogram(g: CanvasRenderingContext2D, kind: ContractKind, c
     g.beginPath();
     g.moveTo(cx - gap / 2, barY);
     g.lineTo(cx + gap / 2, barY);
-    g.stroke();
-  } else {
-    // One car to drive over, and its key.
-    drawCar(g, cx - car * 0.15, ground, car * 1.2, LOAD_COLOUR);
-    const kx = cx + car * 0.85;
-    const ky = cy - size * 0.05;
-    const ring = size * 0.14;
-    g.beginPath();
-    g.arc(kx, ky, ring, 0, Math.PI * 2);
-    g.moveTo(kx + ring, ky);
-    g.lineTo(kx + ring + size * 0.4, ky);
-    g.moveTo(kx + ring + size * 0.28, ky);
-    g.lineTo(kx + ring + size * 0.28, ky + size * 0.12);
-    g.moveTo(kx + ring + size * 0.38, ky);
-    g.lineTo(kx + ring + size * 0.38, ky + size * 0.1);
     g.stroke();
   }
 }

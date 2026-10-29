@@ -3,7 +3,6 @@ import type { Item } from '../items/items';
 import type { EngineTempReadout } from '../vehicle/cooling';
 import type { AutopilotMode } from '../vehicle/autopilot';
 import { FUEL_RESERVE_FRACTION } from '../parts/registry';
-import type { ShellKind, ShellPurse } from '../economy/shells';
 import { installShellStyle, setGameText } from './shellsprites';
 import { MapScreen, type MapSource, type MapView } from './hudmap';
 import { ShellJar } from './hudjar';
@@ -391,8 +390,8 @@ export class Hud {
   }
 
   /** The player's shells in the jar: poured in as they come, lifted out as they go, the jar flashing into sight to show it. */
-  setShells(purse: Readonly<ShellPurse>): void {
-    this.jar.set(purse);
+  setShells(count: number): void {
+    this.jar.set(count);
   }
 
   /** The race at a track (race/director.ts): countdown, lap and place, result. */
@@ -400,14 +399,14 @@ export class Hud {
     this.race.set(readout);
   }
 
-  /** Shells of these kinds pushed out of the full jar by new ones: called just before the `setShells` that brings them in. */
-  spillShells(kinds: readonly ShellKind[]): void {
-    this.jar.spill(kinds);
+  /** `count` shells pushed out of the full jar by new ones: called just before the `setShells` that brings them in. */
+  spillShells(count: number): void {
+    this.jar.spill(count);
   }
 
-  /** Shells of these kinds taken by a fine (economy/economy.ts `fine`): called just before the `setShells` that takes them out. */
-  fineShells(kinds: readonly ShellKind[]): void {
-    this.jar.fine(kinds);
+  /** `count` shells taken by a fine (economy/economy.ts `fine`): called just before the `setShells` that takes them out. */
+  fineShells(count: number): void {
+    this.jar.fine(count);
   }
 
   /** The shell jar out in its corner (on foot on a lay-by, main.ts), or put away. */

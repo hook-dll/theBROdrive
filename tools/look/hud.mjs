@@ -36,16 +36,14 @@ try {
     await page.screenshot({ path: `${out}/${name}.png` });
     console.log(`${out}/${name}.png`);
   };
-  // Shells paid in (economy/economy.ts `credit`, random kinds) and a price taken out.
+  // Shells paid in (economy/economy.ts `credit`) and a price taken out.
   const pay = (n) => page.evaluate(async (count) => {
     const { credit } = await import('/src/economy/economy.ts');
     credit(window.__bro.world, count);
   }, n);
   const spendSome = (n) => page.evaluate(async (count) => {
     const { debit } = await import('/src/economy/economy.ts');
-    const shells = window.__bro.world.state.player.shells;
-    const kind = Object.keys(shells).reduce((a, b) => (shells[b] > shells[a] ? b : a));
-    debit(window.__bro.world, { kind, count: Math.min(count, shells[kind]) });
+    debit(window.__bro.world, Math.min(count, window.__bro.world.state.player.shells));
   }, n);
 
   await pay(12);
@@ -99,13 +97,13 @@ try {
   await shot('jar-after-spend');
   const cards = await page.evaluate(async () => {
     const { paintCardFace } = await import('/src/world/cardmachine.ts');
-    const { formatPay, formatPrice } = await import('/src/economy/economy.ts');
+    const { formatPay } = await import('/src/economy/economy.ts');
     const faces = [
-      { band: '#2d5d8a', bandText: 'PART', corner: '1/4', headline: 'gearbox', lines: [formatPrice({ kind: 'horn', count: 7 }), 'fits the bonnet'], footer: '' },
+      { band: '#2d5d8a', bandText: 'PART', corner: '1/4', headline: 'gearbox', lines: [formatPay(7), 'fits the bonnet'], footer: '' },
       { band: '#8a2d2d', bandText: 'JOB', corner: '2/5', headline: 'piano', lines: ['→ Dustwell · 6.2 km', `${formatPay(6)} · bulky`], footer: 'the pay goes into your jar' },
-      { band: '#3b6b35', bandText: 'GUM', corner: '3/4', headline: 'bubble gum', lines: [formatPrice({ kind: 'cowrie', count: 1 }), 'NOT ENOUGH COWRIE SHELLS'], footer: '' },
-      { band: '#4f6a3a', bandText: 'CAN', corner: '4/4', headline: 'can 20 L', lines: [formatPrice({ kind: 'scallop', count: 3 }), 'empty — fill it at a pump'], footer: '' },
-      { band: '#2f4f7a', bandText: 'PART', corner: '1/2', headline: 'engine', lines: [formatPrice({ kind: 'spiral', count: 10 }), 'a new engine'], footer: '' },
+      { band: '#3b6b35', bandText: 'GUM', corner: '3/4', headline: 'bubble gum', lines: [formatPay(1), 'NOT ENOUGH SHELLS'], footer: '' },
+      { band: '#4f6a3a', bandText: 'CAN', corner: '4/4', headline: 'can 20 L', lines: [formatPay(3), 'empty — fill it at a pump'], footer: '' },
+      { band: '#2f4f7a', bandText: 'PART', corner: '1/2', headline: 'engine', lines: [formatPay(10), 'a new engine'], footer: '' },
     ];
     return faces.map((face) => {
       const c = document.createElement('canvas');
@@ -119,14 +117,14 @@ try {
   // A toast and a prompt with a price in them, as the HUD paints them.
   await page.evaluate(async () => {
     const { setGameText } = await import('/src/ui/shellsprites.ts');
-    const { formatPrice } = await import('/src/economy/economy.ts');
+    const { formatPay } = await import('/src/economy/economy.ts');
     const toast = document.createElement('div');
     toast.className = 'hud-toast';
-    setGameText(toast, `petrol pump — fill ${formatPrice({ kind: 'spiral', count: 1 })}`);
+    setGameText(toast, `petrol pump — fill ${formatPay(1)}`);
     document.querySelector('.hud-toasts')?.append(toast);
     const prompt = document.querySelector('.hud-prompt');
     if (prompt) {
-      setGameText(prompt, `VAZ-2106 for sale — ${formatPrice({ kind: 'scallop', count: 6 })} · pay at the key box`);
+      setGameText(prompt, `VAZ-2106 for sale — ${formatPay(6)} · pay at the key box`);
       prompt.classList.remove('is-hidden');
     }
   });

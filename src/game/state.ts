@@ -1,5 +1,5 @@
 import { hash } from '../core/rng';
-import { emptyPurse, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
+import { JAR_CAPACITY } from '../economy/shells';
 import type { ContractCargoItem, FluidKind, Item, StickerKind, SunShadesItem } from '../items/items';
 import type { ThingId } from '../items/things';
 import type { PartInstance } from '../parts/registry';
@@ -180,8 +180,7 @@ export interface CarState {
   papers?: boolean;
   /**
    * Shells a car standing on a lot asks (world/carlot.ts `carShells`), flat across the
-   * road, in the one kind its key box takes (economy/economy.ts `carShellKind`). Present
-   * only while it is for sale: nobody drives it off before `car_buy` clears it.
+   * road. Present only while it is for sale: nobody drives it off before `car_buy` clears it.
    */
   lotPrice?: number;
   /**
@@ -255,17 +254,11 @@ export interface PlayerState {
   /** Shades currently on the player's face; absent from the carried pack while worn. */
   wornSunShades: SunShadesItem | null;
   /**
-   * The player's SHELLS by kind (economy/shells.ts), the jar's contents: never more than
-   * `JAR_CAPACITY` together. Not an item: machines take their price out of it and pay
+   * The player's SHELLS (economy/shells.ts), the jar's contents: a plain count, never
+   * more than `JAR_CAPACITY`. Not an item: machines take their price out of it and pay
    * goes into it directly while they are worked (economy/economy.ts `debit`, `credit`).
    */
-  shells: ShellPurse;
-  /**
-   * Shell draws made in the world so far — shells minted (economy/shells.ts
-   * `mintShells`) and shells taken by fines (`takeShells`) — the index of the next
-   * draw, so a reload or a replay mints and fines the same shells.
-   */
-  shellMint: number;
+  shells: number;
   /**
    * Metres ridden in a car (the odometer of the car he sits in, `car_odometer`) not yet
    * paid: below a kilometre once `payDriving` (economy/economy.ts) has run, which pays a
@@ -359,17 +352,20 @@ export interface HaulState {
  *    its sticker.
  *  - 9: races at the tracks (race/): each track's round (`raceRounds`) and the stake of
  *    a race under way (`raceStake`), refunded when a save holding one is loaded.
+ *  - 10: one kind of shell: `PlayerState.shells` and a race stake's `shells` are plain
+ *    counts. An older save's shells by kind (scallop, spiral, horn, cowrie) load as their
+ *    sum, and its `shellMint` is dropped.
  */
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 
 /**
  * The stake of a race under way (race/stake.ts): the shells taken out of the jar for it,
- * by kind, in the order they were taken, and the track and round it was taken for.
+ * and the track and round it was taken for.
  */
 export interface RaceStake {
   readonly postIndex: number;
   readonly round: number;
-  readonly shells: readonly ShellKind[];
+  readonly shells: number;
 }
 
 /**
@@ -463,8 +459,8 @@ export interface WorldState {
    */
   handedInLoads: Record<string, number>;
   /**
-   * The round of the teddy party each post's shelter is at (contracts/shelters.ts), by
-   * post index; absent, round 0. It moves on when that round's contract closes.
+   * The round of teddies each post's shelter is at (contracts/shelters.ts), by post
+   * index; absent, round 0. It moves on when the last teddy of that round gets off.
    */
   shelterRounds: Record<string, number>;
   /**
@@ -518,6 +514,8 @@ export type WorldDelta =
   | { t: 'car_box'; carId: string }
   /** A boxed car back into the world, standing at the given pose: `toyBox` → `cars`. */
   | { t: 'car_unbox'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
+  /** A car bought from the toy box's catalogue (world/toybox.ts): new, his, straight into `toyBox`. */
+  | { t: 'car_order'; car: CarState }
   /** `carId` is the TOWED car; `towerId` null drops the bar. */
   | { t: 'car_tow'; carId: string; towerId: string | null }
   | { t: 'car_transform'; carId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
@@ -564,21 +562,18 @@ export type WorldDelta =
    */
   | { t: 'haul_abandon'; contractId: string }
   /**
-   * A teddy in hand seated on a shelter's bench (contracts/shelters.ts): `delivered` at a
-   * destination (its own id recorded among the completed, with no kind: the ledger counts
-   * the party once), else put back at its source. `close` when it was the last of its
-   * party out: the party's contract closes, counted into `deliveriesByKind` when any of
-   * it was delivered, and shelter `sourcePost` moves past round `round`.
+   * A teddy got off at its destination's shelter bench (contracts/shelters.ts
+   * `teddyGetOff`): its contract closes delivered (its id among the completed, counted
+   * into `deliveriesByKind`), taken from the hands if it was there. `roundDone` when every
+   * other teddy of its round has closed: shelter `sourcePost` moves past round `round`.
    */
-  | {
-      t: 'teddy_seat';
-      teddyId: string;
-      partyId: string;
-      sourcePost: number;
-      round: number;
-      delivered: boolean;
-      close: 'delivered' | 'returned' | null;
-    }
+  | { t: 'teddy_seat'; teddyId: string; sourcePost: number; round: number; roundDone: boolean }
+  /**
+   * A teddy left lying on the ground `ABANDON_M` from the player (contracts/shelters.ts
+   * `abandonedTeddies`): its contract closes undelivered and it is gone from the world;
+   * `roundDone` as `teddy_seat`'s. The fine follows (economy/economy.ts `fine`).
+   */
+  | { t: 'teddy_abandon'; teddyId: string; sourcePost: number; round: number; roundDone: boolean }
   | { t: 'trailer_add'; trailer: TrailerState }
   | { t: 'trailer_remove'; trailerId: string }
   | { t: 'trailer_transform'; trailerId: string; x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
@@ -622,18 +617,16 @@ export type WorldDelta =
   | { t: 'lot_pay'; carId: string }
   /**
    * The player's jar is now `shells` (economy/economy.ts `debit`, `credit`, `fine`). A
-   * credit or a fine also moves the draw count on (`mint`), and a credit may leave the
-   * driving not yet paid (`driveM`); `spilled` names the shells a full jar lost over its
-   * rim on the way, and `fined` the shells a fine took out of it, for the jar to show
-   * (ui/hudjar.ts). Absent fields are unchanged.
+   * credit may leave the driving not yet paid (`driveM`); `spilled` counts the shells a
+   * full jar lost over its rim on the way, and `fined` the shells a fine took out of it,
+   * for the jar to show (ui/hudjar.ts). Absent fields are unchanged.
    */
   | {
       t: 'shells';
-      shells: ShellPurse;
-      mint?: number;
+      shells: number;
       driveM?: number;
-      spilled?: readonly ShellKind[];
-      fined?: readonly ShellKind[];
+      spilled?: number;
+      fined?: number;
     }
   /**
    * The stake of a race taken (`stake` set, after the `shells` fine that took it) or
@@ -678,8 +671,7 @@ export function newWorldState(seed: number): WorldState {
       carried: [],
       carriedSelected: 0,
       wornSunShades: null,
-      shells: emptyPurse(),
-      shellMint: 0,
+      shells: 0,
       driveM: 0,
     },
     cars: {},
@@ -894,6 +886,11 @@ export class GameWorld {
         s.player.lastDrivenCarId = delta.carId;
         break;
       }
+      case 'car_order':
+        // A new id only: an order never overwrites a car that exists, boxed or out.
+        if (s.cars[delta.car.id] || s.toyBox[delta.car.id]) break;
+        s.toyBox[delta.car.id] = { ...delta.car, papers: true };
+        break;
       case 'car_tow': {
         // A coupling to a car that is not there is not a coupling; the tower side
         // is derived from this field, so a dangling id would keep a ghost alive.
@@ -1143,10 +1140,7 @@ export class GameWorld {
         break;
       }
       case 'shells': {
-        for (const kind of SHELL_KINDS) {
-          s.player.shells[kind] = Math.max(0, Math.round(delta.shells[kind]));
-        }
-        if (delta.mint !== undefined) s.player.shellMint = delta.mint;
+        s.player.shells = Math.min(JAR_CAPACITY, Math.max(0, Math.round(delta.shells)));
         if (delta.driveM !== undefined) s.player.driveM = Math.max(0, delta.driveM);
         break;
       }
@@ -1195,16 +1189,21 @@ export class GameWorld {
         if (!s.completedContractIds.includes(delta.contractId)) s.completedContractIds.push(delta.contractId);
         break;
       case 'teddy_seat': {
-        if (s.completedContractIds.includes(delta.partyId)) break;
+        if (s.completedContractIds.includes(delta.teddyId)) break;
         const carried = s.player.carried.findIndex((item) => item.id === delta.teddyId);
         if (carried >= 0) s.player.carried.splice(carried, 1);
-        if (delta.delivered) s.completedContractIds.push(delta.teddyId);
-        if (delta.close) {
-          s.completedContractIds.push(delta.partyId);
-          if (delta.close === 'delivered') s.deliveriesByKind.teddy_passengers = (s.deliveriesByKind.teddy_passengers ?? 0) + 1;
-          const key = String(delta.sourcePost);
-          if ((s.shelterRounds[key] ?? 0) === delta.round) s.shelterRounds[key] = delta.round + 1;
-        }
+        s.completedContractIds.push(delta.teddyId);
+        s.deliveriesByKind.teddy_passengers = (s.deliveriesByKind.teddy_passengers ?? 0) + 1;
+        const key = String(delta.sourcePost);
+        if (delta.roundDone && (s.shelterRounds[key] ?? 0) === delta.round) s.shelterRounds[key] = delta.round + 1;
+        break;
+      }
+      case 'teddy_abandon': {
+        if (s.completedContractIds.includes(delta.teddyId)) break;
+        delete s.looseItems[delta.teddyId];
+        s.completedContractIds.push(delta.teddyId);
+        const key = String(delta.sourcePost);
+        if (delta.roundDone && (s.shelterRounds[key] ?? 0) === delta.round) s.shelterRounds[key] = delta.round + 1;
         break;
       }
       case 'sticker_place': {

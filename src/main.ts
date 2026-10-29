@@ -33,6 +33,7 @@ import {
 } from './items/items';
 import { RideMeter } from './trip/ride';
 import { trackPassengerRide } from './contracts/kinds/teddyPassengers';
+import { settleBenchTeddies } from './world/shelter';
 import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
@@ -51,8 +52,9 @@ import { MachineFocus } from './player/machinefocus';
 import { offerDestinationIndex } from './contracts/offers';
 import { ContractRuntime } from './contracts/runtime';
 import { isContractClosed } from './contracts/registry';
-import { type ContractWorldDeps } from './contracts/world';
+import { isContractCarId, type ContractWorldDeps } from './contracts/world';
 import { HaulBays } from './contracts/haulbays';
+import { BayMark } from './render/baymark';
 import { urgentRemainingS, type ContractPlace } from './contracts/types';
 import { CarTowField } from './vehicle/cartow';
 import { IMMOVABLE, Player } from './player/player';
@@ -724,9 +726,10 @@ async function boot(): Promise<void> {
     physics,
     world,
     renderer.scene,
-    origin,
     (carId) => vehicles.get(carId) ?? null,
     () => hud.setToast('the tow bar snapped'),
+    // A haul's car is only ever towed: its A-frame is bolted to its front bumper.
+    isContractCarId,
   );
   const frameProfiler = import.meta.env.DEV ? new FrameProfiler() : null;
   if (frameProfiler) (window as unknown as { __broSpikes: unknown }).__broSpikes = frameProfiler.spikes;
@@ -864,7 +867,11 @@ async function boot(): Promise<void> {
       // left standing in the scene either. The boot path awaits these and its cars
       // cannot vanish mid-load, so the disposed return is unreachable there.
       if (world.state.cars[car.id] === undefined) vehicle.dispose();
-      else vehicles.set(car.id, vehicle);
+      else {
+        vehicles.set(car.id, vehicle);
+        // A haul's car stands with its hazards on, wherever it is (contracts/world.ts).
+        if (isContractCarId(car.id)) vehicle.setIndicator('hazard');
+      }
       return vehicle;
     })().then(
       (vehicle) => {
@@ -1175,11 +1182,11 @@ async function boot(): Promise<void> {
     credit(world, START_SHELLS);
   }
   // A full jar's lost shells, for the jar to pop over its rim, and a fine's, to leap out
-  // of it with its sorry tune, before it takes the new purse.
+  // of it with its sorry tune, before it takes the new count.
   world.onDelta((delta) => {
     if (delta.t !== 'shells') return;
-    if (delta.spilled && delta.spilled.length > 0) hud.spillShells(delta.spilled);
-    if (delta.fined && delta.fined.length > 0) {
+    if (delta.spilled) hud.spillShells(delta.spilled);
+    if (delta.fined) {
       hud.fineShells(delta.fined);
       audio.foley('fine');
     }
@@ -1795,8 +1802,9 @@ async function boot(): Promise<void> {
 
   /**
    * The haul bays at work (contracts/haulbays.ts): a post's haul load stood in its pick-up
-   * slot until it is taken, accepted when it is reversed into another, judged when left
-   * behind. "Out of view" is out of the camera's frustum as last rendered.
+   * slot until it is taken, accepted when all of it stands inside another, judged when
+   * left behind. "Out of view" is out of the camera's frustum as last rendered. The slot
+   * a taken haul is bound for is marked on the ground (render/baymark.ts).
    */
   const contractWorldDeps: ContractWorldDeps = { world, road, terrain };
   const haulBays = new HaulBays(contractWorldDeps, {
@@ -1829,6 +1837,7 @@ async function boot(): Promise<void> {
     inView: inCameraView,
     toast: (text) => hud.setToast(text),
   });
+  const bayMark = new BayMark(renderer.scene, terrain);
 
   /**
    * The lowest post index any contract the player has on them (in hand, in the car being
@@ -2139,6 +2148,16 @@ async function boot(): Promise<void> {
     const injury = playerImpacts.resolve(driving);
     if (injury > 0 && vitals.dead) beginDeathSequence();
     loose.fixedUpdate(dt);
+    // A teddy dropped onto a shelter's bench and come to rest gets off there, or goes
+    // back on its own bench; one left lying far behind is fined and gone (world/shelter.ts).
+    {
+      const anchor = activeWorldAnchor();
+      const teddyNews = settleBenchTeddies(fixtures, loose, world, anchor.x, anchor.z, dt);
+      if (teddyNews) {
+        hud.setToast(teddyNews.text);
+        if (teddyNews.coin) audio.foley('coin');
+      }
+    }
 
     // Contracts walk after every controller and the physics step. `s` is the live
     // state; its clock was advanced at the top of this step.
@@ -3236,6 +3255,7 @@ async function boot(): Promise<void> {
       sky.dayFactor,
       renderer.camera.position,
     );
+    bayMark.update(haulBays.markedSlots(), origin.x, origin.z);
     machineGridView.updateFixed(
       interaction.engagedGrid(),
       origin.x,

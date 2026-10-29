@@ -17,7 +17,9 @@
  *    shells; three taken and recorded, a second take refused; a win pays nine once and a
  *    second settle nothing; third place gets the stake back, fourth nothing; a save
  *    written mid-race (`migrateState` of its JSON) keeps the stake and drops the race's
- *    cars, and the refund gives the same shells back once.
+ *    cars, and the refund gives the same count of shells back once. A save from before
+ *    one kind of shell (version 9: a jar by kind, a stake as a list of kinds) loads with
+ *    its totals.
  *  - THE FIELD (race/rival.ts): the candidates are the nearest by power to weight, a plan
  *    is a pure function of the seed, post and round, three rivals all at the top skill,
  *    as many different cars as the candidates allow, about a third of the rounds are
@@ -44,7 +46,6 @@ import * as THREE from 'three';
 import { emptyInput, type InputFrame } from '../src/core/input';
 import { FIXED_DT, PhysicsWorld } from '../src/core/physics';
 import { credit } from '../src/economy/economy';
-import { purseTotal } from '../src/economy/shells';
 import { createServiceableCarState } from '../src/game/spawn';
 import { GameWorld, newWorldState, type TrailerState } from '../src/game/state';
 import { carModelMeasure, carSpawnYAboveGround, preloadCarModels } from '../src/render/carmodel';
@@ -237,24 +238,24 @@ console.log('\nthe stake (race/stake.ts)');
 {
   const world = new GameWorld(newWorldState(SEED));
   credit(world, 2);
-  check('fewer than three shells: no race', !canStake(world) && !takeStake(world, 7, 0) && world.state.raceStake === null, `jar ${purseTotal(world.state.player.shells)}`);
+  check('fewer than three shells: no race', !canStake(world) && !takeStake(world, 7, 0) && world.state.raceStake === null, `jar ${world.state.player.shells}`);
   credit(world, 8);
-  const before = purseTotal(world.state.player.shells);
+  const before = world.state.player.shells;
   const took = takeStake(world, 7, 0);
   const second = takeStake(world, 7, 0);
   check(
     'the stake is taken once',
-    took && !second && purseTotal(world.state.player.shells) === before - RACE_STAKE && world.state.raceStake?.shells.length === RACE_STAKE,
-    `jar ${before} → ${purseTotal(world.state.player.shells)}, stake ${JSON.stringify(world.state.raceStake)}`,
+    took && !second && world.state.player.shells === before - RACE_STAKE && world.state.raceStake?.shells === RACE_STAKE,
+    `jar ${before} → ${world.state.player.shells}, stake ${JSON.stringify(world.state.raceStake)}`,
   );
   const won = settleStake(world, 1);
   const again = settleStake(world, 1);
   check(
     `a win pays ${RACE_PRIZES[0]}, once`,
-    won === RACE_PRIZES[0] && again === -1 && purseTotal(world.state.player.shells) === before - RACE_STAKE + RACE_PRIZES[0]! && world.state.raceStake === null,
-    `paid ${won}, then ${again}; jar ${purseTotal(world.state.player.shells)}`,
+    won === RACE_PRIZES[0] && again === -1 && world.state.player.shells === before - RACE_STAKE + RACE_PRIZES[0]! && world.state.raceStake === null,
+    `paid ${won}, then ${again}; jar ${world.state.player.shells}`,
   );
-  const jarThird = purseTotal(world.state.player.shells);
+  const jarThird = world.state.player.shells;
   takeStake(world, 7, 1);
   const third = settleStake(world, 3);
   takeStake(world, 7, 1);
@@ -263,12 +264,12 @@ console.log('\nthe stake (race/stake.ts)');
   const outPaid = settleStake(world, 0);
   check(
     'third gets the stake back, fourth and out nothing',
-    third === RACE_STAKE && fourth === 0 && outPaid === 0 && racePrize(2) === RACE_PRIZES[1] && purseTotal(world.state.player.shells) === jarThird - 2 * RACE_STAKE,
-    `3rd ${third}, 4th ${fourth}, out ${outPaid}; jar ${jarThird} → ${purseTotal(world.state.player.shells)}`,
+    third === RACE_STAKE && fourth === 0 && outPaid === 0 && racePrize(2) === RACE_PRIZES[1] && world.state.player.shells === jarThird - 2 * RACE_STAKE,
+    `3rd ${third}, 4th ${fourth}, out ${outPaid}; jar ${jarThird} → ${world.state.player.shells}`,
   );
 
   // A save mid-race: two rivals and their trailers in state, the stake out.
-  const jar = { ...world.state.player.shells };
+  const jar = world.state.player.shells;
   takeStake(world, 7, 2);
   const rivalIds = [raceRivalId(7, 0), raceRivalId(7, 1)];
   for (const id of rivalIds) world.apply({ t: 'car_add', car: createServiceableCarState(id, PLAYER_MODEL, 0, 1, 0, 0) });
@@ -282,8 +283,21 @@ console.log('\nthe stake (race/stake.ts)');
   );
   const back = refundStake(loaded);
   const twice = refundStake(loaded);
-  const same = Object.entries(jar).every(([kind, n]) => loaded.state.player.shells[kind as keyof typeof jar] === n);
-  check('...and the load refunds the same shells, once', back === RACE_STAKE && twice === -1 && same && loaded.state.raceStake === null, `refunded ${back}, then ${twice}; jar back to ${JSON.stringify(loaded.state.player.shells)}`);
+  check('...and the load refunds the same shells, once', back === RACE_STAKE && twice === -1 && loaded.state.player.shells === jar && loaded.state.raceStake === null, `refunded ${back}, then ${twice}; jar back to ${loaded.state.player.shells}`);
+
+  // A save from before one kind of shell (version 9): its jar by kind and its stake as a
+  // list of kinds load as their totals, nothing lost.
+  const old = JSON.parse(JSON.stringify(newWorldState(SEED)));
+  old.saveVersion = 9;
+  old.player.shells = { scallop: 4, spiral: 7, horn: 2, cowrie: 5 };
+  old.player.shellMint = 31;
+  old.raceStake = { postIndex: 7, round: 2, shells: ['horn', 'scallop', 'cowrie'] };
+  const migrated = migrateState(old);
+  check(
+    'an old save keeps its shells: 4+7+2+5 = 18 in the jar, a stake of 3',
+    migrated.player.shells === 18 && migrated.raceStake?.shells === 3 && !('shellMint' in migrated.player),
+    `jar ${JSON.stringify(migrated.player.shells)}, stake ${JSON.stringify(migrated.raceStake)}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +462,7 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
   const world = new GameWorld(newWorldState(SEED));
   const scene = new THREE.Scene();
   credit(world, 10);
-  const jarBefore = purseTotal(world.state.player.shells);
+  const jarBefore = world.state.player.shells;
   const drivers = [driverFor(PLAYER_MODEL, PLAYER_SKILL), ...plan.rivals];
   const racers: Racer[] = drivers.map((driver, i) => {
     const slot = track.startGrid[i === 0 ? PLAYER_SLOT : i - 1]!;
@@ -507,7 +521,7 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
     });
   }
   const staked = takeStake(world, track.postIndex, 0);
-  const jarStaked = purseTotal(world.state.player.shells);
+  const jarStaked = world.state.player.shells;
 
   const session = new RaceSession(track, racers.length);
   const xs = new Float64Array(racers.length);
@@ -639,7 +653,7 @@ for (const [raceIndex, { track, plan }] of plans.entries()) {
   }
   const place = session.position(0);
   const paid = settleStake(world, session.end === 'laps' ? place : 0);
-  const jarAfter = purseTotal(world.state.player.shells);
+  const jarAfter = world.state.player.shells;
   const wall = ((performance.now() - started) / 1000).toFixed(0);
   const allHome = racers.every((_, i) => Number.isFinite(flagAt[i]!));
   const laps = (i: number): string => lapList[i]!.map((t) => t.toFixed(1)).join(' / ') || '—';

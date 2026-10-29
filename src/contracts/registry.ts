@@ -7,7 +7,7 @@
  */
 
 import type { WorldState } from '../game/state';
-import { contractIdOf, contractKindOf, contractThing, isBrokenThing, type ContractCargoItem, type Item } from '../items/items';
+import { contractKindOf, contractThing, isBrokenThing, type ContractCargoItem, type Item } from '../items/items';
 import { carTransferKind } from './kinds/carTransfer';
 import { thingKind } from './kinds/thing';
 import { towingKind } from './kinds/towing';
@@ -22,13 +22,13 @@ export const ACTIVE_CONTRACT_LIMIT = 3;
 export const ACTIVE_HAUL_LIMIT = 1;
 
 /**
- * A contract item whose contract is closed: broken (`isBrokenThing`), or its contract
- * (`contractIdOf`) already completed or returned (`completedContractIds`). It is only a
+ * A contract item whose contract is closed: broken (`isBrokenThing`), or its id already
+ * among the completed or returned (`completedContractIds`). It is only a
  * souvenir: no post pays for it, it is not counted against the limit, and any post's
  * grid takes it to be rid of it.
  */
 export function isContractClosed(item: ContractCargoItem, completedIds: readonly string[]): boolean {
-  return isBrokenThing(item) || completedIds.includes(contractIdOf(item));
+  return isBrokenThing(item) || completedIds.includes(item.id);
 }
 
 /**
@@ -37,8 +37,8 @@ export function isContractClosed(item: ContractCargoItem, completedIds: readonly
  * or given into a post machine's grid and not taken out yet — that is not closed
  * (`isContractClosed`), and every haul taken and not yet
  * handed in or returned (`WorldState.hauls`: a haul has no item, its load is the
- * contract). A teddy party is one contract however many of its teddies are out. Returns
- * the active contracts' ids (`contractIdOf`), all of them and the hauls among them: their
+ * contract). Each teddy taken off a shelter's bench is a contract of its own. Returns
+ * the active contracts' ids (the item's id), all of them and the hauls among them: their
  * sizes are what `ACTIVE_CONTRACT_LIMIT` and `ACTIVE_HAUL_LIMIT` cap.
  */
 export function activeContracts(state: WorldState): { all: Set<string>; hauls: Set<string> } {
@@ -46,7 +46,7 @@ export function activeContracts(state: WorldState): { all: Set<string>; hauls: S
   const hauls = new Set<string>();
   const consider = (item: Item | null | undefined): void => {
     if (item?.type !== 'contract_cargo' || isContractClosed(item, state.completedContractIds)) return;
-    all.add(contractIdOf(item));
+    all.add(item.id);
   };
   state.player.carried.forEach(consider);
   for (const car of Object.values(state.cars)) {
@@ -80,11 +80,6 @@ const BY_KIND = Object.fromEntries(
  */
 function contractKindDef(item: ContractCargoItem): ContractKindDef {
   return BY_KIND[contractKindOf(item)] ?? thingKind;
-}
-
-/** Finishes a freshly generated offer with what its kind adds (a passenger party). */
-export function dressContractOffer(offer: ContractCargoItem): void {
-  contractKindDef(offer).dressOffer?.(offer);
 }
 
 /** True for every declared kind id, so a saved item's kind can be validated. */

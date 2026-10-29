@@ -251,7 +251,6 @@ async function makeTowRig(
     physics,
     world,
     scene,
-    origin,
     (carId) => vehicles.get(carId) ?? null,
     () => {
       rig.broke = true;
@@ -668,9 +667,13 @@ async function teleport(tower: string, towed: string): Promise<string> {
 /** True while the two bodies' own chassis colliders touch. */
 function touching(rig: TowRig): boolean {
   let touch = false;
-  rig.physics.world.contactPair(rig.tower.collisionCollider, rig.towed.collisionCollider, (manifold) => {
-    for (let i = 0; i < manifold.numContacts(); i++) if (manifold.contactDist(i) <= 0.01) touch = true;
-  });
+  for (const a of rig.tower.collisionColliders) {
+    for (const b of rig.towed.collisionColliders) {
+      rig.physics.world.contactPair(a, b, (manifold) => {
+        for (let i = 0; i < manifold.numContacts(); i++) if (manifold.contactDist(i) <= 0.01) touch = true;
+      });
+    }
+  }
   return touch;
 }
 

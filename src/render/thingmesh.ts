@@ -865,55 +865,116 @@ function mergedByColour(b: MeshBuilder, parts: MeshBuilder, key: string, scale: 
  */
 const TEDDY_SCALE = 1.094;
 
+/** Which of the teddy's parts `teddyParts` lays out: all, all but its waving arm, or that arm alone. */
+type TeddyCut = 'whole' | 'body' | 'arm';
+/** The side of the arm the teddy waves with: its own right (it faces +z). */
+const WAVE_SIDE = -1;
+/** The stubby arm's middle on side `sx` and its turn. */
+function teddyArm(sx: number): { at: Vec3; turn: Vec3 } {
+  return { at: [sx * 0.104, 0.165, 0.03], turn: [-0.55, 0, sx * 0.3] };
+}
+
 /**
  * A teddy sitting up, facing +z: a plump pear of a body with a pale belly patch, a round
  * head with a pale muzzle, a dark nose and a stitched smile, shiny eyes with a glint,
  * round ears with pale insides, stubby arms reaching forward and stubby legs stuck out
  * in front, every paw with a pale pad, and a red ribbon tied in a bow round the neck.
- * Five colours, so five draws however many parts (`mergedByColour`).
+ * Five colours, so five draws however many parts (`mergedByColour`). `cut` leaves out
+ * the waving arm, or lays out only it (`createWavingTeddy`).
  */
-function teddy(b: MeshBuilder): void {
+function teddyParts(p: MeshBuilder, cut: TeddyCut): void {
   const fur = flat(0x9a6638, 0.97);
   const pale = flat(0xdcbd94, 0.97);
   const dark = flat(0x1a120d, 0.35);
   const glint = flat(0xffffff, 0.3);
   const red = flat(0xb3262a, 0.8);
-  const p = new MeshBuilder();
-  // The body and its plump seat; the belly patch on its front.
-  ball(p, fur, [0.104, 0.12, 0.09], [0, 0.15, 0], ZERO, 20);
-  ball(p, fur, [0.114, 0.07, 0.095], [0, 0.075, -0.005], ZERO, 18);
-  ball(p, pale, [0.07, 0.08, 0.035], [0, 0.145, 0.062], ZERO, 16);
-  // The head, its muzzle, nose, smile and eyes.
-  ball(p, fur, [0.102, 0.092, 0.09], [0, 0.335, 0.005], ZERO, 20);
-  ball(p, pale, [0.048, 0.036, 0.034], [0, 0.31, 0.072], ZERO, 16);
-  ball(p, dark, [0.022, 0.015, 0.013], [0, 0.325, 0.102], ZERO, 12);
-  ball(p, dark, [0.003, 0.009, 0.003], [0, 0.305, 0.105], ZERO, 6);
-  // The ribbon round the neck, and its bow at the front.
-  p.push('thing_teddy_ribbon', () => new THREE.TorusGeometry(0.053, 0.008, 8, 28), red, [0, 0.255, 0.002], [Math.PI / 2, 0, 0]);
-  ball(p, red, [0.014, 0.013, 0.01], [0, 0.255, 0.062], ZERO, 10);
-  for (const sx of [-1, 1]) {
-    ball(p, dark, [0.0028, 0.008, 0.0028], [sx * 0.008, 0.299, 0.103], [0, 0, -sx * 1.1], 6);
-    ball(p, dark, [0.012, 0.014, 0.01], [sx * 0.038, 0.358, 0.082], ZERO, 12);
-    // The glint upper left on both eyes: one light falls on them.
-    ball(p, glint, [0.0035, 0.0035, 0.0025], [sx * 0.038 - 0.004, 0.363, 0.0905], ZERO, 6);
-    // A round ear, tipped out, its pale inside to the front.
-    const earTilt: Vec3 = [0, 0, -sx * 0.4];
-    ball(p, fur, [0.034, 0.034, 0.017], [sx * 0.074, 0.41, -0.005], earTilt, 14);
-    ball(p, pale, [0.021, 0.021, 0.008], [sx * 0.074, 0.407, 0.007], earTilt, 12);
-    // A stubby arm reaching down, forward and a little out; the pad on its paw's end.
-    const arm: Vec3 = [sx * 0.104, 0.165, 0.03];
-    const armTurn: Vec3 = [-0.55, 0, sx * 0.3];
-    ball(p, fur, [0.034, 0.068, 0.036], arm, armTurn, 14);
-    ball(p, pale, [0.02, 0.012, 0.02], turned(arm, armTurn, [0, -0.058, 0]), armTurn, 12);
-    // A stubby leg stuck out in front, toes a little out; the pad on its sole.
-    const leg: Vec3 = [sx * 0.061, 0.045, 0.07];
-    const legTurn: Vec3 = [0, sx * 0.15, 0];
-    ball(p, fur, [0.044, 0.04, 0.072], leg, legTurn, 14);
-    ball(p, pale, [0.026, 0.024, 0.014], turned(leg, legTurn, [0, -0.004, 0.06]), legTurn, 12);
-    // The bow's loop on this side, swept back round the neck and up.
-    ball(p, red, [0.03, 0.019, 0.01], [sx * 0.028, 0.258, 0.054], [0, sx * 0.3, sx * 0.25], 10);
+  const body = cut !== 'arm';
+  if (body) {
+    // The body and its plump seat; the belly patch on its front.
+    ball(p, fur, [0.104, 0.12, 0.09], [0, 0.15, 0], ZERO, 20);
+    ball(p, fur, [0.114, 0.07, 0.095], [0, 0.075, -0.005], ZERO, 18);
+    ball(p, pale, [0.07, 0.08, 0.035], [0, 0.145, 0.062], ZERO, 16);
+    // The head, its muzzle, nose, smile and eyes.
+    ball(p, fur, [0.102, 0.092, 0.09], [0, 0.335, 0.005], ZERO, 20);
+    ball(p, pale, [0.048, 0.036, 0.034], [0, 0.31, 0.072], ZERO, 16);
+    ball(p, dark, [0.022, 0.015, 0.013], [0, 0.325, 0.102], ZERO, 12);
+    ball(p, dark, [0.003, 0.009, 0.003], [0, 0.305, 0.105], ZERO, 6);
+    // The ribbon round the neck, and its bow at the front.
+    p.push('thing_teddy_ribbon', () => new THREE.TorusGeometry(0.053, 0.008, 8, 28), red, [0, 0.255, 0.002], [Math.PI / 2, 0, 0]);
+    ball(p, red, [0.014, 0.013, 0.01], [0, 0.255, 0.062], ZERO, 10);
   }
+  for (const sx of [-1, 1]) {
+    if (body) {
+      ball(p, dark, [0.0028, 0.008, 0.0028], [sx * 0.008, 0.299, 0.103], [0, 0, -sx * 1.1], 6);
+      ball(p, dark, [0.012, 0.014, 0.01], [sx * 0.038, 0.358, 0.082], ZERO, 12);
+      // The glint upper left on both eyes: one light falls on them.
+      ball(p, glint, [0.0035, 0.0035, 0.0025], [sx * 0.038 - 0.004, 0.363, 0.0905], ZERO, 6);
+      // A round ear, tipped out, its pale inside to the front.
+      const earTilt: Vec3 = [0, 0, -sx * 0.4];
+      ball(p, fur, [0.034, 0.034, 0.017], [sx * 0.074, 0.41, -0.005], earTilt, 14);
+      ball(p, pale, [0.021, 0.021, 0.008], [sx * 0.074, 0.407, 0.007], earTilt, 12);
+      // A stubby leg stuck out in front, toes a little out; the pad on its sole.
+      const leg: Vec3 = [sx * 0.061, 0.045, 0.07];
+      const legTurn: Vec3 = [0, sx * 0.15, 0];
+      ball(p, fur, [0.044, 0.04, 0.072], leg, legTurn, 14);
+      ball(p, pale, [0.026, 0.024, 0.014], turned(leg, legTurn, [0, -0.004, 0.06]), legTurn, 12);
+      // The bow's loop on this side, swept back round the neck and up.
+      ball(p, red, [0.03, 0.019, 0.01], [sx * 0.028, 0.258, 0.054], [0, sx * 0.3, sx * 0.25], 10);
+    }
+    // A stubby arm reaching down, forward and a little out; the pad on its paw's end.
+    // The waving one only in the whole teddy or alone; the other only with the body.
+    if (cut !== 'whole' && (cut === 'arm') !== (sx === WAVE_SIDE)) continue;
+    const arm = teddyArm(sx);
+    ball(p, fur, [0.034, 0.068, 0.036], arm.at, arm.turn, 14);
+    ball(p, pale, [0.02, 0.012, 0.02], turned(arm.at, arm.turn, [0, -0.058, 0]), arm.turn, 12);
+  }
+}
+
+function teddy(b: MeshBuilder): void {
+  const p = new MeshBuilder();
+  teddyParts(p, 'whole');
   mergedByColour(b, p, 'thing_teddy', TEDDY_SCALE);
+}
+
+/** A teddy that waves (world/shelter.ts): its model, and its waving arm hung on its shoulder. */
+export interface WavingTeddy {
+  /** The whole teddy, centred on its bounds like the item's model (`buildThingInto`). */
+  readonly root: THREE.Group;
+  /** The waving arm's shoulder: turned about its z it raises the arm out to the side. */
+  readonly shoulder: THREE.Group;
+}
+
+/** Which way `shoulder.rotation.z` raises the waving arm out to its side. */
+export const TEDDY_WAVE_SIDE = WAVE_SIDE;
+
+/**
+ * The teddy as the item's model draws it, its waving arm a part of its own on a shoulder
+ * pivot. Same flat materials as the item's: no new program.
+ */
+export function createWavingTeddy(): WavingTeddy {
+  const whole = new MeshBuilder();
+  teddyParts(whole, 'whole');
+  const centre = boundsOf(whole.instructions).getCenter(new THREE.Vector3());
+  const arm = teddyArm(WAVE_SIDE);
+  const pivot = turned(arm.at, arm.turn, [0, 0.05, 0]);
+  const build = (cut: TeddyCut): THREE.Group => {
+    const parts = new MeshBuilder();
+    teddyParts(parts, cut);
+    const merged = new MeshBuilder();
+    mergedByColour(merged, parts, `thing_teddy_${cut}`, TEDDY_SCALE);
+    return buildGroup(merged.instructions);
+  };
+  const root = new THREE.Group();
+  const body = build('body');
+  body.position.set(-centre.x * TEDDY_SCALE, -centre.y * TEDDY_SCALE, -centre.z * TEDDY_SCALE);
+  root.add(body);
+  const shoulder = new THREE.Group();
+  shoulder.position.set((pivot[0] - centre.x) * TEDDY_SCALE, (pivot[1] - centre.y) * TEDDY_SCALE, (pivot[2] - centre.z) * TEDDY_SCALE);
+  const hand = build('arm');
+  hand.position.set(-pivot[0] * TEDDY_SCALE, -pivot[1] * TEDDY_SCALE, -pivot[2] * TEDDY_SCALE);
+  shoulder.add(hand);
+  root.add(shoulder);
+  return { root, shoulder };
 }
 
 /**

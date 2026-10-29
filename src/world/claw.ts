@@ -3,8 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { hash01 } from '../core/rng';
 import { SurfaceType } from '../core/surfaces';
-import { formatPrice, PRICE_TABLE } from '../economy/economy';
-import { machineShellKind, type ShellPrice } from '../economy/shells';
+import { formatPay, PRICE_TABLE } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import type { Item, StickerFigurineItem } from '../items/items';
 import { STICKERS, type StickerKind } from '../items/stickercatalog';
@@ -33,8 +32,8 @@ import { addStatic, yawRotation } from './props/scatter';
  * Worked up close (player/machinefocus.ts): F frames it, and then
  *  - the claw moves over the heap with the movement keys (`WorldFixture.steer`) or with
  *    the joystick dragged by the cursor (`grab`);
- *  - DROP (a click on the button, or the jump key) takes one try's shells, two of the
- *    one kind the machine takes (`machineShellKind` of its id, `PRICE_TABLE.clawTry`), out
+ *  - DROP (a click on the button, or the jump key) takes one try's shells
+ *    (`PRICE_TABLE.clawTry`, two) out
  *    of the jar; short of them the button rattles and the claw stays. A try spent is
  *    spent, whatever it brings up. The claw goes down onto the heap, closes, rises, goes
  *    back over the chute and opens there.
@@ -550,7 +549,7 @@ class ClawMachine implements WorldFixture {
   private part: Part | null = null;
   private focused = false;
   private engaged = false;
-  private readonly price: ShellPrice;
+  private readonly price: number;
   /** The heap, its mesh, and the one figurine moving by itself (in the claw, falling): null out of the physics band. */
   private heap: ClawHeap | null = null;
   private batch: FigurineBatch | null = null;
@@ -604,7 +603,7 @@ class ClawMachine implements WorldFixture {
     live: boolean,
   ) {
     this.id = `claw:${poiIndex}`;
-    this.price = { kind: machineShellKind(world.seed, this.id), count: PRICE_TABLE.clawTry };
+    this.price = PRICE_TABLE.clawTry;
     this.cell[0] = world.state.machineGrids[this.id]?.find((item) => item !== null) ?? null;
     this.gridView = { layout: DOOR_LAYOUT, cells: this.cell, selectedCell: null, x, y, z, yaw };
     // Framed from in front and above the glass, looking down onto the heap with the ledge in view.
@@ -740,15 +739,15 @@ class ClawMachine implements WorldFixture {
     if (this.part === null) return null;
     const item = this.cell[0];
     if (this.part === 'door' && item) return `[F] take ${thingName(item)}`;
-    if (!this.focused) return `[F] CLAW · ${formatPrice(this.price)} a try`;
+    if (!this.focused) return `[F] CLAW · ${formatPay(this.price)} a try`;
     if (this.phase !== 'idle') return null;
     switch (this.part) {
       case 'stick':
         return 'drag the stick or WASD: move the claw';
       case 'button':
-        return `[click] DROP · ${formatPrice(this.price)}`;
+        return `[click] DROP · ${formatPay(this.price)}`;
       default:
-        return `WASD move the claw · Space or DROP: a try for ${formatPrice(this.price)}`;
+        return `WASD move the claw · Space or DROP: a try for ${formatPay(this.price)}`;
     }
   }
 
@@ -821,7 +820,7 @@ class ClawMachine implements WorldFixture {
       return this.refuse();
     }
     if (!ctx.debit(this.price)) {
-      ctx.toast(`not enough ${this.price.kind} shells: a try is ${formatPrice(this.price)}`);
+      ctx.toast(`not enough shells: a try is ${formatPay(this.price)}`);
       return this.refuse();
     }
     const seed = this.world.seed;

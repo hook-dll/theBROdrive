@@ -163,8 +163,8 @@ const TRAILER_SETTLE_CLEARANCE_M = 0.085;
  */
 const RACE_TRAFFIC_CAP = 6;
 
-const PROMPT_RACE = `[F] RACE! ${RACE_STAKE} shells → win ${RACE_PRIZES[0]}`;
-const PROMPT_POOR = `RACE ME! — need ${RACE_STAKE} shells`;
+const PROMPT_RACE = `[F] RACE! ${formatPay(RACE_STAKE)} → win ${formatPay(RACE_PRIZES[0]!)}`;
+const PROMPT_POOR = `RACE ME! — need ${formatPay(RACE_STAKE)}`;
 const PROMPT_HITCHED = 'RACE ME! — unhitch first';
 
 /** What the director needs of the running game (main.ts). */

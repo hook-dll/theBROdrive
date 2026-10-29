@@ -10,10 +10,13 @@
  * THE LOAD WAITS IN THE SOURCE PICK-UP SLOT. While the first slot of a post's parking
  * row (world/haulbay.ts) is empty, the post's waiting haul (contracts/hauls.ts) stands in
  * it nose out, as if reversed in (`spawnHaulLoad`, called by contracts/haulbays.ts as the
- * post streams in). It is free to hitch, tow, open and sit in: hitching it, putting it on
- * the tow bar or sitting at its wheel TAKES it (contracts/hauls.ts `takeHaulLoads`).
- * Handed in (`WorldState.handedInLoads`) it is LOCKED for good (`haulLoadLock`), until it
- * is cleared away.
+ * post streams in). It is free to hitch or tow: hitching it or putting it on the tow bar
+ * TAKES it (contracts/hauls.ts `takeHaulLoads`). Handed in (`WorldState.handedInLoads`)
+ * it is LOCKED for good (`haulLoadLock`), until it is cleared away.
+ *
+ * A HAUL'S CAR IS ONLY TOWED (`haulCarSeal`): its doors, bonnet, boot and flap stay shut
+ * and F at it only says so; it stands with its hazards on (main.ts) and its A-frame bolted
+ * to its front bumper (vehicle/cartow.ts `carriesFrame`), and goes on a tower's ball.
  */
 
 import { pick } from '../core/rng';
@@ -42,6 +45,8 @@ const TRAILER_SETTLE_CLEARANCE_M = 0.085;
 
 /** What a handed-in load says to a hand put on it (player/interaction.ts). */
 const HANDED_IN_TEXT = 'handed in — it stays with the post';
+/** What a haul's car says to a hand put on it (player/interaction.ts). */
+const SEALED_TEXT = 'sealed for the job — tow it on its bar';
 
 export interface ContractWorldDeps {
   readonly world: GameWorld;
@@ -79,6 +84,15 @@ export function isContractCarId(carId: string): boolean {
 /** A trailer or a car that is a haul's load. */
 export function isHaulLoadId(id: string): boolean {
   return id.startsWith(CONTRACT_TRAILER_PREFIX) || id.startsWith(CONTRACT_CAR_PREFIX);
+}
+
+/**
+ * Why a haul's car stays shut, or null for any other car: a car to tow or to drive over
+ * is moved on its tow bar only, so no door, lid or flap of it answers. Whatever else locks
+ * it (`haulLoadLock`) is told first.
+ */
+export function haulCarSeal(id: string): string | null {
+  return isContractCarId(id) ? SEALED_TEXT : null;
 }
 
 /** The taken haul bound to load `loadId`, or null. */

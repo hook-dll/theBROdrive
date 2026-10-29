@@ -1,5 +1,4 @@
-import { credit } from '../economy/economy';
-import { JAR_CAPACITY, purseTotal, takeShells, type ShellKind } from '../economy/shells';
+import { credit, fine } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 
 /**
@@ -16,7 +15,7 @@ import type { GameWorld } from '../game/state';
  * turn, so the autosave (a microtask) sees all of them or none.
  *
  * A RACE IS NEVER SAVED. A save written mid-race still holds the stake, and the game that
- * loads it pays it back on its first step (race/director.ts), the same shells by kind;
+ * loads it pays it back on its first step (race/director.ts), the same count of shells;
  * the race's cars are dropped on load (save/save.ts).
  */
 
@@ -36,22 +35,20 @@ export function racePrize(place: number): number {
   return RACE_PRIZES[place - 1] ?? 0;
 }
 
-/** Whether the jar holds a stake's worth of shells, whatever their kinds. */
+/** Whether the jar holds a stake's worth of shells. */
 export function canStake(world: GameWorld): boolean {
-  return purseTotal(world.state.player.shells) >= RACE_STAKE;
+  return world.state.player.shells >= RACE_STAKE;
 }
 
 /**
- * Takes the stake for round `round` at post `postIndex`'s track: `RACE_STAKE` shells drawn
- * out of the jar as a fine draws them (the jar's fine animation shows it), then recorded.
+ * Takes the stake for round `round` at post `postIndex`'s track: `RACE_STAKE` shells out
+ * of the jar as a fine takes them (the jar's fine animation shows it), then recorded.
  * False, and nothing taken, with a stake already out or fewer shells than it asks.
  */
 export function takeStake(world: GameWorld, postIndex: number, round: number): boolean {
   if (world.state.raceStake !== null || !canStake(world)) return false;
-  const player = world.state.player;
-  const taking = takeShells(world.seed, player.shellMint, player.shells, RACE_STAKE);
-  world.apply({ t: 'shells', shells: taking.purse, mint: taking.mint, fined: taking.taken });
-  world.apply({ t: 'race_stake', stake: { postIndex, round, shells: taking.taken } });
+  const taken = fine(world, RACE_STAKE);
+  world.apply({ t: 'race_stake', stake: { postIndex, round, shells: taken } });
   return true;
 }
 
@@ -70,27 +67,16 @@ export function settleStake(world: GameWorld, place: number): number {
 }
 
 /**
- * The race called off undecided: the stake's own shells back into the jar, by kind. A jar
- * filled meanwhile past `JAR_CAPACITY` loses what does not fit over the rim, as any pay
- * does. Returns the shells given back, or −1 with no stake out.
+ * The race called off undecided: the stake's shells back into the jar. A jar filled
+ * meanwhile past `JAR_CAPACITY` loses what does not fit over the rim, as any pay does.
+ * Returns the shells given back, or −1 with no stake out.
  */
 export function refundStake(world: GameWorld): number {
   const stake = world.state.raceStake;
   if (stake === null) return -1;
   world.apply({ t: 'race_stake', stake: null });
-  const purse = { ...world.state.player.shells };
-  const spilled: ShellKind[] = [];
-  let total = purseTotal(purse);
-  for (const kind of stake.shells) {
-    if (total < JAR_CAPACITY) {
-      purse[kind]++;
-      total++;
-    } else {
-      spilled.push(kind);
-    }
-  }
-  world.apply({ t: 'shells', shells: purse, spilled });
-  return stake.shells.length;
+  credit(world, stake.shells);
+  return stake.shells;
 }
 
 /** Post `postIndex`'s track moves past round `round`: the next rival is another draw. Idempotent. */

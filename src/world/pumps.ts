@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SurfaceType } from '../core/surfaces';
 import type { FoleyEvent } from '../audio/foley';
-import { debit, formatPrice, pumpPrice } from '../economy/economy';
-import type { ShellPrice } from '../economy/shells';
+import { debit, formatPay, PRICE_TABLE } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { canTakes, fillCan, litreText, type FluidKind } from '../items/items';
 import type { ChunkContext } from './chunks';
@@ -19,8 +18,8 @@ import { addStatic, yawRotation } from './props/scatter';
  * settlements, petrol, oil and water, each painted its own loud colour with white
  * reflector chips on its front, so the three read apart in head lamps and dust.
  *
- * A pump never runs dry and is paid by the fill: one shell, of the kind that pump takes
- * (`pumpPrice`, economy/economy.ts), shown on the board on its front, for as much as he
+ * A pump never runs dry and is paid by the fill: one shell (`PRICE_TABLE.pumpFill`,
+ * economy/economy.ts), shown on the board on its front, for as much as he
  * pours. It is taken as the first drop runs (`dispense`): from taking the nozzle until
  * it is hung back, or for one held fill of a can at the pump. Without that shell it does
  * not pour.
@@ -94,8 +93,8 @@ const POUR_EPSILON = 1e-4;
  */
 export interface PumpNozzle extends WorldFixture {
   readonly fluid: FluidKind;
-  /** The fill's price here (`pumpPrice`): one shell of the pump's kind. */
-  readonly price: ShellPrice;
+  /** The fill's price here, shells (`PRICE_TABLE.pumpFill`). */
+  readonly price: number;
   /**
    * The hand moved to ABSOLUTE (`x`, `y`, `z`), looking along (`dx`, `dz`): the nozzle
    * and the hose follow it. False, and nothing moved, when the hose does not reach.
@@ -148,7 +147,7 @@ export function buildPumpStand(
   FLUIDS.forEach((fluid, index) => {
     const lx = (1 - index) * SPACING;
     const fixtureId = `pump:${poi.index}:${fluid}`;
-    const price = pumpPrice(ctx.world.seed, fixtureId);
+    const price = PRICE_TABLE.pumpFill;
     const pump = new THREE.Group();
     pump.position.set(lx, 0, 0);
     root.add(pump);
@@ -162,7 +161,7 @@ export function buildPumpStand(
     plate.position.set(0, ISLAND_H + BODY_H + HEAD_H / 2, -HEAD_D / 2 - 0.006);
     plate.rotation.y = Math.PI;
     pump.add(plate);
-    const priceBoard = signMesh([`FILL ${formatPrice(price)}`], ...PRICE_BOARD);
+    const priceBoard = signMesh([`FILL ${formatPay(price)}`], ...PRICE_BOARD);
     priceBoard.scale.set(0.34, 0.13, 1);
     priceBoard.position.set(0, ISLAND_H + BODY_H - 0.16, FRONT_Z - 0.006);
     priceBoard.rotation.y = Math.PI;
@@ -347,7 +346,7 @@ class Pump implements WorldFixture, PumpNozzle {
   constructor(
     readonly id: string,
     readonly fluid: FluidKind,
-    readonly price: ShellPrice,
+    readonly price: number,
     /** The pump's base centre, ABSOLUTE world metres (the island's foot). */
     readonly x: number,
     private readonly y: number,
@@ -362,7 +361,7 @@ class Pump implements WorldFixture, PumpNozzle {
   ) {}
 
   private priceText(): string {
-    return `fill ${formatPrice(this.price)}`;
+    return `fill ${formatPay(this.price)}`;
   }
 
   aim(
@@ -399,7 +398,7 @@ class Pump implements WorldFixture, PumpNozzle {
     if (!canTakes(held, this.fluid)) return `${name} — not into a ${held.fluid} can`;
     const reading = `can ${held.litres.toFixed(1)}/${litreText(held.capacity)}`;
     if (held.litres >= held.capacity - CAN_FULL_EPSILON) return `${name} — ${reading}, full`;
-    if (!this.canPour(ctx.world)) return `${name} — ${this.priceText()} · no ${this.price.kind} shell, it does not pour`;
+    if (!this.canPour(ctx.world)) return `${name} — ${this.priceText()} · no shell, it does not pour`;
     return `[F] hold to fill — ${reading} · ${this.priceText()}`;
   }
 
@@ -446,7 +445,7 @@ class Pump implements WorldFixture, PumpNozzle {
   }
 
   canPour(world: GameWorld): boolean {
-    return this.paid || world.state.player.shells[this.price.kind] >= this.price.count;
+    return this.paid || world.state.player.shells >= this.price;
   }
 
   dispense(world: GameWorld, litres: number): number {

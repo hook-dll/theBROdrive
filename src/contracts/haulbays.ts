@@ -1,8 +1,8 @@
 /**
  * THE HAUL BAYS AT WORK (game-design2.md §7.8): a post's haul (contracts/hauls.ts) waits
  * in its PICK-UP slot (the first of its lay-by's parking row, world/haulbay.ts) until it
- * is taken, and is handed in by reversing it into another post's HAND-IN slot (the
- * second). Both are the "bays" below; the third slot is the car for sale's.
+ * is taken, and is handed in by parking it in another post's HAND-IN slot (the second).
+ * Both are the "bays" below; the third slot is the car for sale's.
  *
  * WAITING. While a post's machine is streamed in (the chunk is solid), the player is
  * within `SPAWN_M` and the pick-up slot is empty (`bayOccupied`: no car, trailer or
@@ -24,12 +24,9 @@
  *
  * THE HAND-IN, every tick for each taken haul's load while it is live:
  *  - it stands at a hand-in slot: its footprint (`loadFootprint`) within `NEAR_M` of it;
- *  - it ENTERED REVERSING: the moment its tail crossed into the slot, it was moving tail
- *    first (its motion along its own heading negative). A tail that leaves the slot
- *    forgets it; a load first seen with its tail already inside (a reload) has no entry
- *    and is neither accepted nor told off;
- *  - all of its footprint is inside the slot's lines and its heading is within
- *    `BAY_YAW_TOLERANCE` of nose out (`bayFit`);
+ *  - all of its footprint is inside the slot's lines, give or take `INSIDE_SLACK_M`
+ *    (`footprintInBay`). Which way it faces and how it came in are not judged: nose
+ *    out or nose in, reversed in or driven in, inside the grid is delivered;
  *  - its kind has no objection (contracts/kinds: step out of a car to hand it over, empty
  *    its boot and seats);
  *  - it has stood still (under `STILL_KMH`) for `ACCEPT_STILL_S`.
@@ -37,7 +34,11 @@
  * (`haul_close`) and the load stays in the slot locked for good (contracts/world.ts
  * `haulLoadLock`), until the player is `CLEAR_M` away and it is out of view: then it goes.
  *
- * DESTINATION OR RETURN. The same reverse-in at a post that may sign for the haul
+ * THE MARK. The hand-in slot each taken haul is bound for is marked on the ground with a
+ * pink grid, the boot grid's selected cell (`markedSlots`, drawn by render/baymark.ts
+ * `BayMark`).
+ *
+ * DESTINATION OR RETURN. The same hand-in at a post that may sign for the haul
  * (`contractDestinationRefusal`: any post past its source) is a DELIVERY and pays
  * `contractPay` (the route's kilometres in shells, twice that urgent and on time); at ANY
  * other post it is a RETURN TO SENDER: no pay, the contract closed undelivered and FINED
@@ -47,9 +48,9 @@
  * both: the destination always wins.
  *
  * While the load stands still at a hand-in slot and is not accepted, the reason is told
- * once in a toast (again after `RETELL_S`): back it in, straighten up, all the way in,
- * step out, empty it — and "not this job's trailer" for a trailer or towed car behind the
- * player's car that is not the load of the haul he has out.
+ * once in a toast (again after `RETELL_S`): all of it inside the lines, step out, empty
+ * it — and "not this job's trailer" for a trailer or towed car behind the player's car
+ * that is not the load of the haul he has out.
  */
 
 import { contractPay, credit, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
@@ -63,11 +64,15 @@ import { postStopsBetween } from '../world/poststops';
 import { waitingHaul } from './hauls';
 import { offerDestinationIndex } from './offers';
 import { contractDestinationRefusal, contractKindRefusal } from './registry';
-import type { DeliveryProbe } from './types';
+import { ABANDON_M, type DeliveryProbe } from './types';
 import { boundHaul, haulLoadId, isHaulLoadId, spawnHaulLoad, type ContractWorldDeps } from './world';
 
-/** How far off nose out a load may stand in the bay and be accepted, radians. */
-export const BAY_YAW_TOLERANCE = (20 * Math.PI) / 180;
+/**
+ * How far past a hand-in slot's lines a load's outline may reach and still be inside, m:
+ * the paint's own width and a little, so a trailer's ball over the back line or a
+ * bumper on a side line is in.
+ */
+const INSIDE_SLACK_M = 0.25;
 /** Still: slower than this, km/h. */
 const STILL_KMH = 0.5;
 const STILL_MPS = STILL_KMH / 3.6;
@@ -79,8 +84,6 @@ const TELL_STILL_S = 1;
 const RETELL_S = 6;
 /** A load is at a bay when its footprint comes this close to the bay's floor, m. */
 const NEAR_M = 1.5;
-/** The tail counts as inside the opening this far either side of the floor, m: a load backing in askew. */
-const TAIL_SLACK_M = 0.5;
 /** Bays this far along the road either way are looked at, m. */
 const BAY_REACH_M = 1200;
 /**
@@ -98,12 +101,8 @@ const SEEN_SPAWN_M = 200;
 const SCAN_S = 0.5;
 /** The floor counts as taken this far past its walls, m. */
 const OCCUPIED_MARGIN_M = 0.2;
-/** A taken load left this far from the player, straight line, is abandoned, m. */
-const ABANDON_M = 300;
 
-const BACK_IT_IN = 'back it in';
-const STRAIGHTEN = "doesn't fit — straighten up";
-const FURTHER = 'not all the way in — back it further';
+const ALL_INSIDE = 'not all of it inside the lines yet';
 
 /** Where a load stands: ABSOLUTE metres of its body's origin, its heading (+Z its nose) and velocity. */
 export interface LoadPose {
@@ -134,17 +133,6 @@ export interface BayRect {
   readonly halfDepth: number;
 }
 
-/**
- * How a load stands in a bay: `in`, all of it inside and within `BAY_YAW_TOLERANCE` of
- * nose out; `short`, square but its nose still out of the opening; `skewed`, turned off
- * nose out or out over a side; `nose-in`, turned round, its nose to the back wall.
- */
-export type BayFit = 'in' | 'short' | 'skewed' | 'nose-in';
-
-function wrapAngle(a: number): number {
-  return Math.atan2(Math.sin(a), Math.cos(a));
-}
-
 /** Heading of a body turned by a quaternion: its +Z on the ground. */
 export function yawOfQuaternion(qx: number, qy: number, qz: number, qw: number): number {
   return Math.atan2(2 * (qx * qz + qw * qy), 1 - 2 * (qx * qx + qy * qy));
@@ -172,20 +160,17 @@ function corner(pose: LoadPose, foot: Footprint, k: number, out: { x: number; z:
   out.z = pose.z - lx * s + lz * c;
 }
 
-/** How a load with footprint `foot` at `pose` stands in `bay`; see `BayFit`. */
-export function bayFit(bay: BayRect, pose: LoadPose, foot: Footprint): BayFit {
-  const off = wrapAngle(pose.yaw - bay.yaw);
-  if (Math.abs(off) > Math.PI / 2) return 'nose-in';
-  let across = false;
-  let along = false;
+/**
+ * Whether all of a load with footprint `foot` at `pose` is inside `bay`'s lines, give or
+ * take `INSIDE_SLACK_M`, whichever way it faces.
+ */
+export function footprintInBay(bay: BayRect, pose: LoadPose, foot: Footprint): boolean {
   for (let k = 0; k < 4; k++) {
     corner(pose, foot, k, scratch);
     toBay(bay, scratch.x, scratch.z, scratch);
-    if (Math.abs(scratch.x) > bay.halfWidth) across = true;
-    if (Math.abs(scratch.z) > bay.halfDepth) along = true;
+    if (Math.abs(scratch.x) > bay.halfWidth + INSIDE_SLACK_M || Math.abs(scratch.z) > bay.halfDepth + INSIDE_SLACK_M) return false;
   }
-  if (across || Math.abs(off) > BAY_YAW_TOLERANCE) return 'skewed';
-  return along ? 'short' : 'in';
+  return true;
 }
 
 /**
@@ -258,13 +243,6 @@ export interface HaulBayHost {
 interface Watch {
   /** The post whose bay it is at, or -1. */
   bay: number;
-  /** It entered that bay reversing (true), forwards (false), or its entry was not seen (null). */
-  reversed: boolean | null;
-  /** Its tail was outside the bay at the last tick; null before the first look. */
-  tailOut: boolean | null;
-  /** Its origin at the last tick, ABSOLUTE. */
-  px: number;
-  pz: number;
   /** Seconds it has stood still. */
   still: number;
   /** The reason last told, and how long ago. */
@@ -287,6 +265,8 @@ export class HaulBays {
   private readonly watches = new Map<string, Watch>();
   private scanIn = 0;
   private tickNo = 0;
+  /** The hand-in slots near the player that a taken haul is bound for; see `markedSlots`. */
+  private readonly marked: ParkingSlot[] = [];
   private readonly pose: LoadPose = { x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0 };
   private readonly other: LoadPose = { x: 0, y: 0, z: 0, yaw: 0, vx: 0, vz: 0 };
   private readonly probe: MutableProbe;
@@ -315,6 +295,14 @@ export class HaulBays {
   }
 
   /**
+   * THE MARK: the hand-in slots within `BAY_REACH_M` that a taken haul is bound for (its
+   * destination post's), refreshed every `SCAN_S`. render/baymark.ts `BayMark` draws them.
+   */
+  markedSlots(): readonly ParkingSlot[] {
+    return this.marked;
+  }
+
+  /**
    * One fixed step, after the physics and the contract walk: (`x`, `z`) is where the
    * player is, ABSOLUTE (his car when he drives), and `s` its arclength.
    */
@@ -327,6 +315,7 @@ export class HaulBays {
       this.spawnWaiting(x, z);
       this.clearAway(x, z);
       this.judgeLeftBehind(x, z);
+      this.refreshMarks();
     }
     if (this.bays.size === 0) {
       this.watches.clear();
@@ -353,6 +342,15 @@ export class HaulBays {
     }
     for (const index of this.bays.keys()) {
       if (!keep.has(index)) this.bays.delete(index);
+    }
+  }
+
+  /** The hand-in slots of the bays near the player that a taken haul is bound for. */
+  private refreshMarks(): void {
+    this.marked.length = 0;
+    for (const haul of Object.values(this.state.hauls)) {
+      const bays = this.bays.get(offerDestinationIndex(haul.contract));
+      if (bays && !this.marked.includes(bays.handIn)) this.marked.push(bays.handIn);
     }
   }
 
@@ -460,41 +458,23 @@ export class HaulBays {
   }
 
   /**
-   * Follows `id` at the bays this tick: which bay it is at, how its tail came in, how long
-   * it has stood. Null when it is not live or not at a bay.
+   * Follows `id` at the bays this tick: which bay it is at and how long it has stood.
+   * Null when it is not live or not at a bay.
    */
   private follow(dt: number, id: string, foot: Footprint): Watch | null {
     const pose = this.pose;
     if (!this.host.livePose(id, pose)) return null;
     let watch = this.watches.get(id);
     if (!watch) {
-      watch = { bay: -1, reversed: null, tailOut: null, px: pose.x, pz: pose.z, still: 0, told: null, toldAgo: 0, seen: 0 };
+      watch = { bay: -1, still: 0, told: null, toldAgo: 0, seen: 0 };
       this.watches.set(id, watch);
     }
     watch.seen = this.tickNo;
     const index = this.bayAt(pose, foot);
     if (index !== watch.bay) {
       watch.bay = index;
-      watch.reversed = null;
-      watch.tailOut = null;
       watch.told = null;
     }
-    if (index >= 0) {
-      const bay = this.bays.get(index)!.handIn;
-      const s = Math.sin(pose.yaw);
-      const c = Math.cos(pose.yaw);
-      toBay(bay, pose.x + s * foot.rear, pose.z + c * foot.rear, scratch);
-      const inside = scratch.z < bay.halfDepth && Math.abs(scratch.x) < bay.halfWidth + TAIL_SLACK_M;
-      if (inside && watch.tailOut === true) {
-        // The tail crossed into the bay this tick: which way along its own heading it moved.
-        watch.reversed = (pose.x - watch.px) * s + (pose.z - watch.pz) * c < 0;
-      } else if (!inside) {
-        watch.reversed = null;
-      }
-      watch.tailOut = !inside;
-    }
-    watch.px = pose.x;
-    watch.pz = pose.z;
     watch.still = Math.hypot(pose.vx, pose.vz) < STILL_MPS ? watch.still + dt : 0;
     watch.toldAgo += dt;
     return index >= 0 ? watch : null;
@@ -514,16 +494,11 @@ export class HaulBays {
     if (!foot) return;
     const watch = this.follow(dt, loadId, foot);
     if (!watch) return;
-    // Its entry not seen (a reload): nothing to judge.
-    if (watch.reversed === null) return;
     const bay = this.bays.get(watch.bay)!.handIn;
     const haul = this.state.hauls[contractId]!;
-    const fit = bayFit(bay, this.pose, foot);
-    let why: string | null;
-    if (fit === 'nose-in' || !watch.reversed) why = BACK_IT_IN;
-    else if (fit === 'skewed') why = STRAIGHTEN;
-    else if (fit === 'short') why = FURTHER;
-    else why = contractKindRefusal(haul.contract, this.probeAt(watch.bay, bay));
+    const why = footprintInBay(bay, this.pose, foot)
+      ? contractKindRefusal(haul.contract, this.probeAt(watch.bay, bay))
+      : ALL_INSIDE;
     if (why !== null) {
       this.tell(watch, why);
       return;

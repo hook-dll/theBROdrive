@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { SHELL_KINDS } from '../economy/shells';
+import { formatPay } from '../economy/economy';
 import { applyComicShading } from '../render/comic';
 import { makeFlatMaterial } from '../render/materials';
-import { shellSprite } from '../ui/shellsprites';
+import { fillGameText } from '../ui/shellsprites';
 import { drawPictogram } from '../world/haulsign';
 import { paintSign, SIGN_PLANE } from '../world/market';
 import { GANTRY_LAMPS, GANTRY_LENS_RADIUS_M, gantryLampPoint } from '../world/racetrack/mesh';
@@ -17,7 +17,7 @@ import { RACE_PRIZES, RACE_STAKE } from './stake';
  * gantry's housings (world/racetrack/mesh.ts draws the housings with the chunk).
  *
  * THE BOARD is for a boy who can barely read: pictures first, few words. "RACE ME!" across
- * the top; three shells, an arrow and nine shells (the stake, and what the winner takes);
+ * the top; "3", the shell, an arrow, "9" and the shell (the stake, and what the winner takes);
  * and the haul sign's car-and-trailer pictogram when this round is a trailer race. Every
  * field drives at the top skill (race/rival.ts), so there is no level to show. It stands
  * on a post outside the asphalt beside the player's box, a little ahead
@@ -177,22 +177,14 @@ function paintBoard(material: THREE.MeshStandardMaterial, plan: FieldPlan): void
   g.font = `bold ${Math.round(h * 0.17)}px sans-serif`;
   g.fillText('RACE ME!', w * 0.5, h * 0.15, w - border * 6);
 
-  // The stake and the prize: three shells → six shells.
-  const shell = h * 0.11;
-  const row = h * 0.38;
-  for (let i = 0; i < RACE_STAKE; i++) {
-    g.drawImage(shellSprite(SHELL_KINDS[i % SHELL_KINDS.length]!), w * 0.08 + i * shell * 0.9, row - shell / 2, shell, shell);
-  }
-  g.font = `bold ${Math.round(h * 0.14)}px sans-serif`;
-  g.fillText('→', w * 0.42, row);
-  // The winner's prize, in rows of three.
-  for (let i = 0; i < RACE_PRIZES[0]!; i++) {
-    const col = i % 3;
-    const line = Math.floor(i / 3);
-    g.drawImage(shellSprite(SHELL_KINDS[i % SHELL_KINDS.length]!), w * 0.55 + col * shell * 0.95, row - shell * 1.4 + line * shell * 0.95, shell, shell);
-  }
+  // The stake and the winner's prize, each its figure and the one shell: 3 → 9 WIN!
+  const row = h * 0.4;
+  g.font = `bold ${Math.round(h * 0.15)}px sans-serif`;
+  fillGameText(g, formatPay(RACE_STAKE), w * 0.22, row);
+  g.fillText('→', w * 0.44, row);
+  fillGameText(g, formatPay(RACE_PRIZES[0]!), w * 0.64, row);
   g.font = `bold ${Math.round(h * 0.075)}px sans-serif`;
-  g.fillText('WIN!', w * 0.9, row);
+  g.fillText('WIN!', w * 0.88, row);
 
   // A trailer race: the car with its loaded trailer.
   if (plan.trailer) drawPictogram(g, 'trailer', w * 0.5, h * 0.7, h * 0.2);

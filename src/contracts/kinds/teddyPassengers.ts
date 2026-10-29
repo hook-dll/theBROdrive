@@ -2,12 +2,12 @@
  * Teddy-bear passengers (game-design2.md §10, §11). Not people and not NPCs: stuffed
  * bears the boy imagines as passengers, with no lines and no voices.
  *
- * A party waits on the bench of a post's teddy shelter (contracts/shelters.ts,
- * world/shelter.ts): 1, 2 or 3 teddies rolled from the party's seed (`dressOffer`),
- * which the player cannot change. Each teddy taken off the bench is its own item
- * (`teddyItem`) with its own id and the party's id and size on it
- * (`ContractCargoItem.party`). The party is ONE contract however many of it are taken;
- * the party is paid once, and only if every teddy of it is seated at its destination (world/shelter.ts).
+ * Teddies wait on the bench of a post's teddy shelter (contracts/shelters.ts,
+ * world/shelter.ts): 1, 2 or 3 a round (`shelterTeddyCount`), rolled from the round's
+ * seed, which the player cannot change. EACH TEDDY IS ITS OWN CONTRACT (contracts/offers.ts
+ * `shelterTeddies`): its own id, destination, urgent clock and pay. Most ride to the next
+ * town or the one after, now and then one further (`teddyHop`), so teddies of one bench
+ * can be bound for different towns.
  *
  * Teddies ride only on passenger seats — the front passenger's and either half of the
  * rear bench (vehicle/cabin.ts `layPlace`) — never in the boot, under the bonnet, on the
@@ -24,29 +24,33 @@ import type { CarState } from '../../game/state';
 import type { ContractCargoItem, Item } from '../../items/items';
 import type { RideMeter } from '../../trip/ride';
 import { carModel, comfortFactor } from '../../vehicle/carmodels';
-import { defaultProgress, type ContractKindDef } from '../types';
+import type { ContractKindDef } from '../types';
 
-/** The party-size draw, from the offer's own seed. */
-const PARTY_DOMAIN = 0x54444231; // 'TDB1'
+/** A round's teddy count, from the round's seed: the draw the parties had, so a save's rounds keep their teddies. */
+const COUNT_DOMAIN = 0x54444231; // 'TDB1'
+/** A teddy's hop, from its own seed. */
+const HOP_DOMAIN = 0x54444832; // 'TDH2'
+/** Shares of the teddies riding one town on and two; the rest ride three. */
+const HOP_ONE_SHARE = 0.55;
+const HOP_TWO_SHARE = 0.35;
 
 /** Each harsh moment costs this share of the pay. */
 const HARSH_PAY_SHARE = 0.1;
 /** However a passenger was driven, a delivered teddy pays at least this share. */
 const PASSENGER_PAY_FLOOR = 0.4;
 
-/** How many teddies wait in this party: 1, 2 or 3, fixed by its seed. */
-export function teddyPartySize(seed: number): number {
-  return 1 + Math.min(2, Math.floor(hash01(seed, PARTY_DOMAIN) * 3));
+/** How many teddies wait on a shelter's bench in a round: 1, 2 or 3, fixed by the round's seed. */
+export function shelterTeddyCount(roundSeed: number): number {
+  return 1 + Math.min(2, Math.floor(hash01(roundSeed, COUNT_DOMAIN) * 3));
 }
 
-/** The id of the teddy on bench place `seat` of party `partyId`. Saved: never changed. */
-export function teddyId(partyId: string, seat: number): string {
-  return `${partyId}:teddy:${seat}`;
-}
-
-/** The teddy on bench place `seat` of `party` (a shelter's offer) as an item, its ride not begun. */
-export function teddyItem(party: ContractCargoItem, seat: number): ContractCargoItem {
-  return { ...party, id: teddyId(party.id, seat), progress: defaultProgress() };
+/**
+ * How many posts past its shelter a teddy rides, from its own seed: the next town
+ * (`HOP_ONE_SHARE`), the one after (`HOP_TWO_SHARE`), else the third.
+ */
+export function teddyHop(teddySeed: number): number {
+  const u = hash01(teddySeed, HOP_DOMAIN);
+  return u < HOP_ONE_SHARE ? 1 : u < HOP_ONE_SHARE + HOP_TWO_SHARE ? 2 : 3;
 }
 
 /**
@@ -99,7 +103,4 @@ export function isPassenger(item: Item | null | undefined): boolean {
 
 export const teddyPassengersKind: ContractKindDef = {
   kind: 'teddy_passengers',
-  dressOffer(offer) {
-    offer.party = { id: offer.id, size: teddyPartySize(offer.generatedSeed) };
-  },
 };

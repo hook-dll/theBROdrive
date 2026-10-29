@@ -1,52 +1,56 @@
 /**
- * THE TEDDY SHELTER'S RULES (game-design2.md §10): which party waits on a post's bench,
- * which of its teddies are still there, and what seating a teddy on a bench does. The
- * shelter itself — its roof, walls, bench, timetable and the teddies drawn on it — is
- * world/shelter.ts.
+ * THE TEDDY SHELTER'S RULES (game-design2.md §10): which teddies wait on a post's bench,
+ * and what putting a teddy on a bench does. The shelter itself — its roof, posts, bench,
+ * timetable, the teddies drawn on it and the goodbye wave — is world/shelter.ts.
  *
  * WAITING. Each post's shelter is at a ROUND (`WorldState.shelterRounds`, 0 when
- * absent); round `r`'s party is `shelterParty(seed, post, r)` (contracts/offers.ts):
- * 1–3 teddies, bound for the next post, maybe urgent, all drawn from
- * the seed. Nothing else about the bench is saved: a teddy is on it while its item
- * (`teddyItem`) is nowhere in the world — not in the hands, a car or on the ground — and
- * it has not been delivered (its own id among `completedContractIds`).
+ * absent); round `r`'s teddies are `shelterTeddies(seed, post, r)` (contracts/offers.ts):
+ * 1–3 of them, EACH ITS OWN CONTRACT with its own destination (mostly the next town or
+ * the one after), maybe urgent, all drawn from the seed. Nothing else about the bench is
+ * saved: a teddy is on it while its item is nowhere in the world — not in the hands, a
+ * car or on the ground — and it has not got off (its id among `completedContractIds`).
  *
- * TAKING. F on a teddy on the bench puts it in the hands. The first one taken makes the
- * party's contract active (one of `ACTIVE_CONTRACT_LIMIT`, refused at the limit); more
- * of the same party add nothing to the count. The player takes one, two or all of them;
- * those left keep waiting and can be taken while the contract is open.
+ * TAKING. F on a teddy on the bench puts it in the hands, and its contract is active
+ * (one of `ACTIVE_CONTRACT_LIMIT`, refused at the limit). Those left keep waiting.
  *
- * SEATING (F with a teddy in hand at a shelter, `teddySeating`):
- *  - at a post that may sign for it (`contractDestinationRefusal`: past its source) it
- *    is DELIVERED and paid there and then;
- *  - at its own source shelter it is PUT BACK: no pay, it waits on the bench again;
- *  - anywhere else it is refused: "this one rides on to …".
- * The contract closes when the last of its teddies out is seated, here or there:
- * DELIVERED when any of the party was delivered, else RETURNED; the source shelter then
- * moves to the next round, and its bench fills with the next party. Only a party seated
- * WHOLE at its destination pays; one that closes otherwise is fined (world/shelter.ts).
+ * GETTING OFF (`teddyGetOff`): a teddy put on a bench — set down with F at the shelter,
+ * or dropped anywhere on its seat — does what that bench is to it:
+ *  - its DESTINATION's: it gets off. Its contract is delivered and paid
+ *    (`teddy_seat`); it waves goodbye and is gone (world/shelter.ts);
+ *  - its own SOURCE's: it is put back, no pay; it waits on the bench again;
+ *  - any other: nothing. It stays where it was put.
+ *
+ * LEFT BEHIND (`abandonedTeddies`): a teddy lying on the ground anywhere — off its
+ * destination's bench and off its own, both of which take it at once — that the player
+ * is `ABANDON_M` from in a straight line, the haul loads' rule (contracts/haulbays.ts),
+ * live or streamed out (its saved place): its contract closes undelivered
+ * (`teddy_abandon`), it is gone from the world, and it is FINED `FINE_SHELLS`, in that
+ * order, so a reload finds it closed and never fines it twice (world/shelter.ts).
+ *
+ * When every teddy of a round has closed — got off at its destination or left behind —
+ * the round is done and the bench fills with the next round.
  */
 
-import type { WorldState } from '../game/state';
-import { contractIdOf, type ContractCargoItem, type Item } from '../items/items';
-import { isPassenger, teddyId } from './kinds/teddyPassengers';
-import { parseShelterPartyId, shelterParty } from './offers';
-import { contractDestinationRefusal } from './registry';
+import type { WorldDelta, WorldState } from '../game/state';
+import type { ContractCargoItem, Item } from '../items/items';
+import { isPassenger } from './kinds/teddyPassengers';
+import { offerDestinationIndex, parseShelterTeddyId, shelterTeddies, shelterTeddyId } from './offers';
+import { ABANDON_M } from './types';
 
-/** The party waiting at post `index`'s shelter now, and which of its bench places still hold a teddy. */
+/** The teddies of post `index`'s shelter's round now, by bench place, and which are still on it. */
 export interface ShelterBench {
-  /** The party's contract (`shelterParty`): destination, pay, urgent, `party.size`. */
-  readonly party: ContractCargoItem;
   readonly round: number;
-  /** One per teddy of the party, by bench place: true while it waits there. */
+  /** The round's teddies by bench place, each its own contract (`shelterTeddies`). */
+  readonly teddies: readonly ContractCargoItem[];
+  /** One per teddy, by bench place: true while it waits there. */
   readonly waiting: readonly boolean[];
 }
 
-/** Ids of the teddies of party `partyId` out in the world: in the hands, any car, on the ground. */
-function teddiesOut(state: WorldState, partyId: string): Set<string> {
+/** Of `ids`, those whose item is out in the world: in the hands, any car, on the ground. */
+function outInWorld(state: WorldState, ids: ReadonlySet<string>): Set<string> {
   const out = new Set<string>();
   const visit = (item: Item | null): void => {
-    if (item?.type === 'contract_cargo' && item.party?.id === partyId) out.add(item.id);
+    if (item?.type === 'contract_cargo' && ids.has(item.id)) out.add(item.id);
   };
   state.player.carried.forEach(visit);
   for (const car of Object.values(state.cars)) {
@@ -57,53 +61,65 @@ function teddiesOut(state: WorldState, partyId: string): Set<string> {
   return out;
 }
 
-/** Post `index`'s shelter: its party and who is still on the bench. */
+/** Post `index`'s shelter: its round's teddies and who is still on the bench. */
 export function shelterBench(state: WorldState, seed: number, index: number): ShelterBench {
   const round = state.shelterRounds[String(index)] ?? 0;
-  const party = shelterParty(seed, index, round);
-  const size = party.party?.size ?? 1;
-  const out = teddiesOut(state, party.id);
-  const waiting: boolean[] = [];
-  for (let seat = 0; seat < size; seat++) {
-    const id = teddyId(party.id, seat);
-    waiting.push(!out.has(id) && !state.completedContractIds.includes(id));
-  }
-  return { party, round, waiting };
+  const teddies = shelterTeddies(seed, index, round);
+  const out = outInWorld(state, new Set(teddies.map((teddy) => teddy.id)));
+  const waiting = teddies.map((teddy) => !out.has(teddy.id) && !state.completedContractIds.includes(teddy.id));
+  return { round, teddies, waiting };
 }
 
-/** What seating a teddy at a shelter does; see the header. */
-export type TeddySeating =
+/** What putting a teddy on a shelter's bench does; see the header. */
+export type TeddyGetOff =
   | {
-      readonly mode: 'deliver' | 'return';
-      /** The party's contract closes with this one: delivered or returned. */
-      readonly close: 'delivered' | 'returned' | null;
-      /** The source post and round of the party, whose shelter moves on when it closes. */
+      readonly mode: 'deliver';
+      /** The source post and round of the teddy, whose bench moves on when `roundDone`. */
       readonly sourcePost: number;
       readonly round: number;
+      /** Every other teddy of its round has got off already: this one closes the round. */
+      readonly roundDone: boolean;
     }
-  | { readonly mode: 'refuse'; readonly why: string };
+  | { readonly mode: 'return' }
+  | { readonly mode: 'stay' };
 
-/** What seating `item` (a teddy in hand) on post `index`'s bench does now. */
-export function teddySeating(state: WorldState, item: ContractCargoItem, index: number): TeddySeating {
-  const partyId = contractIdOf(item);
-  const from = parseShelterPartyId(partyId);
-  if (!isPassenger(item) || !from || state.completedContractIds.includes(partyId)) {
-    return { mode: 'refuse', why: 'its ride is over' };
+/** What putting `item` (a teddy) on post `index`'s bench does now. */
+export function teddyGetOff(state: WorldState, seed: number, item: ContractCargoItem, index: number): TeddyGetOff {
+  const from = parseShelterTeddyId(item.id);
+  if (!isPassenger(item) || !from || state.completedContractIds.includes(item.id)) return { mode: 'stay' };
+  if (index === item.sourceCourierIndex) {
+    // Back on its own bench only while its round is the one waiting there.
+    return (state.shelterRounds[String(index)] ?? 0) === from.round ? { mode: 'return' } : { mode: 'stay' };
   }
-  let mode: 'deliver' | 'return';
-  if (index === item.sourceCourierIndex) mode = 'return';
-  else if (contractDestinationRefusal(item, index) === null) mode = 'deliver';
-  else {
-    return { mode: 'refuse', why: `this one rides on to ${item.destination ?? 'the next post'}` };
+  if (index !== offerDestinationIndex(item)) return { mode: 'stay' };
+  return { mode: 'deliver', sourcePost: from.index, round: from.round, roundDone: closesRound(state, seed, from) };
+}
+
+/** Whether every other teddy of the round of shelter teddy `from` has closed already. */
+function closesRound(state: WorldState, seed: number, from: { index: number; round: number; seat: number }): boolean {
+  const size = shelterTeddies(seed, from.index, from.round).length;
+  for (let seat = 0; seat < size; seat++) {
+    if (seat !== from.seat && !state.completedContractIds.includes(shelterTeddyId(from.index, from.round, seat))) return false;
   }
-  const others = teddiesOut(state, partyId);
-  others.delete(item.id);
-  let close: 'delivered' | 'returned' | null = null;
-  if (others.size === 0) {
-    const size = item.party?.size ?? 1;
-    let delivered = mode === 'deliver';
-    for (let seat = 0; seat < size && !delivered; seat++) delivered = state.completedContractIds.includes(teddyId(partyId, seat));
-    close = delivered ? 'delivered' : 'returned';
+  return true;
+}
+
+/**
+ * The open teddies lying on the ground `ABANDON_M` or more from the player at ABSOLUTE
+ * (`x`, `z`), by their saved place: left behind. Close each with `teddyAbandon`.
+ */
+export function abandonedTeddies(state: WorldState, x: number, z: number): ContractCargoItem[] {
+  const out: ContractCargoItem[] = [];
+  for (const loose of Object.values(state.looseItems)) {
+    const teddy = loose.item;
+    if (teddy.type !== 'contract_cargo' || !isPassenger(teddy) || state.completedContractIds.includes(teddy.id)) continue;
+    if (parseShelterTeddyId(teddy.id) && Math.hypot(loose.x - x, loose.z - z) >= ABANDON_M) out.push(teddy);
   }
-  return { mode, close, sourcePost: from.index, round: from.round };
+  return out;
+}
+
+/** The `teddy_abandon` that closes `teddy` (a shelter teddy) left behind, read from the state now. */
+export function teddyAbandon(state: WorldState, seed: number, teddy: ContractCargoItem): Extract<WorldDelta, { t: 'teddy_abandon' }> {
+  const from = parseShelterTeddyId(teddy.id)!;
+  return { t: 'teddy_abandon', teddyId: teddy.id, sourcePost: from.index, round: from.round, roundDone: closesRound(state, seed, from) };
 }

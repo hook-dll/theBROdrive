@@ -45,10 +45,23 @@ within reach (3.5 m), even where nothing on it answers. Then, first match wins:
 6. getting in otherwise (a car's body); a seat that refuses, or a kit car's bare body
    beside a door, knocks.
 
+A haul's car (a car to tow or to bring over, hazards blinking, its A-frame on the ground
+before its nose) is sealed: no door, lid or flap of it answers, and F at it only knocks
+with a short toast saying so. It moves on its tow bar only: back a car's tail up to its
+nose and press F standing at the join (the tow bar between two cars, above). Its own
+tail never goes on a ball.
+
 An aim that shows nothing gives the press to the held item
 (`InteractionResult.useHeld`, `src/main.ts`): binoculars and the torch toggle, the camera
 raises its viewfinder and then takes a photo, the medicine is taken, the pocket watch winds
 four hours on, sun shades go on. A held item is never used from a seat.
+
+**Teddies** (`src/world/shelter.ts`): F on a teddy waiting on a shelter's bench takes it
+("F - to <town>, please"). A teddy in hand is put on a bench with F at the shelter, or
+dropped with `Q` anywhere on the bench's seat. On its own town's bench it gets off: it
+waves a paw goodbye and is gone, paid. On the bench it was taken from it waits again. On
+any other bench nothing happens: F does nothing there, and a dropped one stays lying.
+A teddy left lying on the ground 300 m behind is lost: its job closes with a 3-shell fine.
 
 **Seated**, first match wins: the kit car's part in the aim (a door, a switch, a stalk,
 the hazard button, the radio knob, a mirror), another seat in the aim (cabin view only),
@@ -68,6 +81,11 @@ lets go (`src/player/machinefocus.ts`). The CLAW machine keeps the movement keys
 the arrows move the claw (so does its joystick, dragged with the mouse), Space or a click
 on DROP drops it for a try; only Escape and the right button let go. Its prize door is
 emptied with F where the player stands, without framing (`src/world/claw.ts`).
+
+THE TOY BOX's handwheel (dragged round, the mouse wheel, or a click) runs through the
+boxed cars and then the catalogue, every car of the game, cheapest first; the button
+under the plaque is TAKE OUT for a boxed car and BUY for a catalogue one, which takes the
+price out of the jar and puts a new car into the box (`src/world/toybox.ts`).
 
 ## Cars: doors, getting in and out
 

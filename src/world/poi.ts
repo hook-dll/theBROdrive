@@ -16,7 +16,7 @@ import {
   isCarModelLoaded,
   loadCarModel,
 } from '../render/carmodel';
-import { carShellKind, carShells } from '../economy/economy';
+import { carShells } from '../economy/economy';
 import type { ChunkContext, ChunkContent, ChunkProvider } from './chunks';
 import { buildParkingRow, postParkingSlots, type ParkingSlot } from './haulbay';
 import { buildHaulSign } from './haulsign';
@@ -598,8 +598,7 @@ function buildLot(
 
   // The price board, facing the road, and the key box on its post beside it, the same
   // way round (world/keybox.ts); only while the car is still for sale.
-  const priceBoard = (shells: number): void => {
-    const price = { kind: carShellKind(ctx.world.seed, carId), count: shells };
+  const priceBoard = (price: number): void => {
     const out = next * (slot.halfWidth + LOT_BOARD_OUT_M);
     const at = { x: slot.x + Math.cos(slot.yaw) * out, z: slot.z - Math.sin(slot.yaw) * out };
     const y = ctx.terrain.heightAt(at.x, at.z, slot.s);

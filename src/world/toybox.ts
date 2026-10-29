@@ -2,15 +2,20 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { isContractClosed } from '../contracts/registry';
+import { carShells, formatPay } from '../economy/economy';
 import { poseOnGround } from '../game/spawn';
 import type { CarState, GameWorld, WorldState } from '../game/state';
 import type { Item } from '../items/items';
+import { oilCapacity } from '../parts/registry';
 import { carModelMeasure, carSpawnYAboveGround } from '../render/carmodel';
 import { makeFlatPaletteMaterial } from '../render/materials';
 import { fillGameText } from '../ui/shellsprites';
-import { DieCastShop, dieCastGeometry, dieCastShopAvailable } from '../ui/diecastshop';
-import { carModel, hasCarModel } from '../vehicle/carmodels';
-import { visiblePaintHex } from '../vehicle/carpaint';
+import { DieCastShop, dieCastGeometry, dieCastShopAvailable, type DieCastOrder } from '../ui/diecastshop';
+import { bonnetWaterCapacity, createBonnetStorage } from '../vehicle/bonnet';
+import { emptyCabin } from '../vehicle/cabin';
+import { CAR_MODELS, carModel, hasCarModel, modelEngine } from '../vehicle/carmodels';
+import { factoryPaintHex, visiblePaintHex } from '../vehicle/carpaint';
+import { COLD_SOAK_C } from '../vehicle/cooling';
 import { TRAILER_BALL_Z, TRAILER_HALF_WIDTH } from '../vehicle/trailer';
 import { trunkCellCount } from '../vehicle/trunk';
 import type { ChunkContext } from './chunks';
@@ -47,16 +52,25 @@ import {
  *
  * Worked up close as the card machines are (player/machinefocus.ts): F frames it, and
  *  - the HANDWHEEL on its front, turning about the axis that faces the viewer, is dragged
- *    round by the cursor without end; every sixth of a turn is the next boxed car,
- *    clockwise forward. The mouse wheel turns it a car at a time, and so does a click.
- *  - the TURNTABLE shows the selected car as a die-cast model (ui/diecastshop.ts, built in
- *    a worker, in the car's own visible paint), turning slowly. A new selection sinks the
- *    model into the stand and brings the next one up with a quick spin. An empty box
- *    turns bare.
- *  - the brass PLAQUE says what the car is (model, comfort, boot cells, stickers, fuel,
- *    its place in the box) and what TAKE OUT will do now, or why it will not; with the
- *    box empty, what the box is for.
- *  - the TAKE OUT button swaps the selected car for the one in the bay.
+ *    round by the cursor without end; every sixth of a turn is the next entry, clockwise
+ *    forward. The mouse wheel turns it an entry at a time, and so does a click. The
+ *    entries are the boxed cars, then THE CATALOGUE (`TOY_CATALOGUE`): every car of the
+ *    game, cheapest first, round to the boxed cars again.
+ *  - the TURNTABLE shows the selected entry as a die-cast model (ui/diecastshop.ts, built
+ *    in a worker, in the car's own visible paint; a catalogue car in the factory colour
+ *    the next one bought of it will have), turning slowly. A new selection sinks the
+ *    model into the stand and brings the next one up with a quick spin. The models are
+ *    one cache for every stand (`modelCache`), the selection and its two neighbours
+ *    ordered and any other order still waiting dropped, so a fast turn through the
+ *    catalogue builds only what it stops at.
+ *  - the brass PLAQUE says what the car is (model, comfort, boot cells; a boxed car's
+ *    stickers, fuel and place in the box and what TAKE OUT will do now, or why it will
+ *    not; a catalogue car's price in shells and whether the jar holds it).
+ *  - the BUTTON, named under it for what it does: TAKE OUT swaps the selected boxed car
+ *    for the one in the bay; BUY takes a catalogue car's price (`carShells`, the lot
+ *    price) out of the jar and puts a new car of that model into the box
+ *    (`orderCatalogueCar`, `car_order`), selected at once for TAKE OUT. Short of shells,
+ *    the button rattles and nothing is taken.
  *
  * THE BAY (`toyBay`) is a yellow rectangle painted along the lay-by in front of the post
  * and the stand, between them and the parking line, a car's length and a little more,
@@ -76,8 +90,9 @@ import {
  *    on its lay-by from then on (`PlayerState.lastDrivenCarId`).
  *
  * A boxed car is out of the world: in `WorldState.toyBox`, not in `cars`, so nothing
- * streams it, draws it or counts it (`car_box`, `car_unbox`). Only the player's own
- * cars (`CarState.papers`) go in; a haul's car and a lot car never do.
+ * streams it, draws it or counts it (`car_box`, `car_unbox`; a bought one arrives there,
+ * `car_order`). Only the player's own cars (`CarState.papers`) go in; a haul's car and
+ * a lot car never do.
  */
 
 /**
@@ -247,14 +262,167 @@ function quaternionYaw(q: { readonly qx: number; readonly qy: number; readonly q
   return Math.atan2(2 * (q.qx * q.qz + q.qw * q.qy), 1 - 2 * (q.qx * q.qx + q.qy * q.qy));
 }
 
+/**
+ * THE CATALOGUE on every stand's wheel, after the boxed cars: every car of the game
+ * (`CAR_MODELS`), cheapest first (`carShells`, the lot price) and by name within a price.
+ */
+export const TOY_CATALOGUE: readonly string[] = [...CAR_MODELS]
+  .sort((a, b) => carShells(a.id) - carShells(b.id) || a.label.localeCompare(b.label))
+  .map((def) => def.id);
+
+/**
+ * The id the next `modelId` bought from the catalogue gets: the first free
+ * `car:toy:<seed>:<model>:<k>`, boxed or out. Its factory colour is hashed from it
+ * (vehicle/carpaint.ts), so the turntable shows the very paint the car will have.
+ */
+export function catalogueCarId(seed: number, state: WorldState, modelId: string): string {
+  for (let k = 0; ; k++) {
+    const id = `car:toy:${seed.toString(36)}:${modelId}:${k}`;
+    if (!state.cars[id] && !state.toyBox[id]) return id;
+  }
+}
+
+/** Litres of a new car's tank it comes with, as a share: enough to reach a pump. */
+const CATALOGUE_FUEL_SHARE = 0.25;
+
+/**
+ * A car new from the catalogue, boxed: clean and unscratched, nothing on the odometer,
+ * its water and oil topped, a fresh air filter, an empty boot, a quarter of a tank. Its
+ * pose is the box's: `car_unbox` gives it one.
+ */
+export function makeCatalogueCar(carId: string, modelId: string): CarState {
+  const def = carModel(modelId);
+  const bonnet = createBonnetStorage(carId, def.engineId);
+  return {
+    id: carId,
+    modelId,
+    papers: true,
+    stickers: [],
+    headlightMode: 'off',
+    taillightsOn: false,
+    reverseLightsOn: false,
+    dirt: 0,
+    scratches: 0,
+    paint: null,
+    fuelLitres: def.tankLitres * CATALOGUE_FUEL_SHARE,
+    waterLitres: bonnetWaterCapacity(bonnet),
+    oilLitres: oilCapacity(modelEngine(def)),
+    engineTempC: COLD_SOAK_C,
+    storage: new Array<Item | null>(trunkCellCount(def.trunkGrid)).fill(null),
+    bonnet,
+    cabin: emptyCabin(),
+    odometer: 0,
+    x: 0,
+    y: 0,
+    z: 0,
+    qx: 0,
+    qy: 0,
+    qz: 0,
+    qw: 1,
+  };
+}
+
+/**
+ * BUY: `pay` takes `modelId`'s price (`carShells`) out of the jar in one go, and a new
+ * car of it goes into the toy box (`car_order`). Its id, or null with nothing taken
+ * when the jar is short.
+ */
+export function orderCatalogueCar(world: GameWorld, modelId: string, pay: (count: number) => boolean): string | null {
+  const carId = catalogueCarId(world.seed, world.state, modelId);
+  if (!pay(carShells(modelId))) return null;
+  world.apply({ t: 'car_order', car: makeCatalogueCar(carId, modelId) });
+  return carId;
+}
+
+/** A model ready to stand on a turntable: its geometry (floor-centred) and its size at 1:1. */
+interface Model {
+  readonly geometry: THREE.BufferGeometry;
+  readonly halfWidth: number;
+  readonly halfLength: number;
+  readonly height: number;
+}
+
 /** The world's one die-cast shop for the stands, opened on the first order; null headless. */
 let toyShop: DieCastShop | null | undefined;
+/**
+ * Every stand's built models by `modelId:paint`, oldest first: about 1.3 MB of arrays
+ * each, so the oldest no turntable shows is let go past `MODEL_CACHE_MAX`.
+ */
+const MODEL_CACHE_MAX = 8;
+const modelCache = new Map<string, Model>();
+/** How many turntables show each cached model now: those are never let go. */
+const modelsShown = new Map<string, number>();
+/** The orders waiting or being built, by key. */
+const modelOrders = new Map<string, DieCastOrder>();
+/** The live stands, each with the keys it wants built (its selection and neighbours). */
+const modelWants = new Map<object, ReadonlySet<string>>();
+
+/** `key`'s model, marked the most recently used. */
+function cachedModel(key: string): Model | undefined {
+  const model = modelCache.get(key);
+  if (model) {
+    modelCache.delete(key);
+    modelCache.set(key, model);
+  }
+  return model;
+}
+
+function showModel(key: string, delta: 1 | -1): void {
+  const count = (modelsShown.get(key) ?? 0) + delta;
+  if (count > 0) modelsShown.set(key, count);
+  else modelsShown.delete(key);
+}
+
+/** Drops every waiting order no live stand wants any more. */
+function dropUnwantedOrders(): void {
+  for (const [key, order] of modelOrders) {
+    if ([...modelWants.values()].some((keys) => keys.has(key))) continue;
+    if (toyShop?.cancel(order)) modelOrders.delete(key);
+  }
+}
+
+/**
+ * Stand `who` wants `wants` built (`modelId`, `paint` and key each), null when it is
+ * gone: orders the missing ones and drops every waiting order no live stand wants.
+ */
+function wantModels(who: object, wants: ReadonlyArray<{ readonly key: string; readonly modelId: string; readonly paint: number }> | null): void {
+  if (wants) modelWants.set(who, new Set(wants.map((want) => want.key)));
+  else modelWants.delete(who);
+  dropUnwantedOrders();
+  for (const { key, modelId, paint } of wants ?? []) {
+    if (modelCache.has(key) || modelOrders.has(key) || !hasCarModel(modelId)) continue;
+    if (toyShop === undefined) toyShop = dieCastShopAvailable() ? new DieCastShop('toy box', false) : null;
+    if (!toyShop) return;
+    const order: DieCastOrder = {
+      modelId,
+      color: paint,
+      scale: 1,
+      done: (arrays) => {
+        modelOrders.delete(key);
+        const geometry = dieCastGeometry(arrays);
+        geometry.computeBoundingBox();
+        const { min, max } = geometry.boundingBox!;
+        // Its floor at the origin, its middle on the axle.
+        geometry.translate(-(min.x + max.x) / 2, -min.y, -(min.z + max.z) / 2);
+        modelCache.set(key, { geometry, halfWidth: (max.x - min.x) / 2, halfLength: (max.z - min.z) / 2, height: max.y - min.y });
+        for (const old of modelCache.keys()) {
+          if (modelCache.size <= MODEL_CACHE_MAX) break;
+          if (modelsShown.has(old) || old === key) continue;
+          modelCache.get(old)!.geometry.dispose();
+          modelCache.delete(old);
+        }
+      },
+    };
+    modelOrders.set(key, order);
+    toyShop.order(order);
+  }
+}
 
 /**
  * Builds stop `stop`'s toy box on its settlement spot `at`, its front to the road, and
  * paints its bay. In the physics band it is solid, registers its fixture (id pushed to
  * `registered`) and orders its model; beyond it, it is only seen. `disposers` gets the
- * plaque and the models.
+ * plaque and the stand's model orders (the built models stay in the shared cache).
  */
 export function buildToyBox(
   ctx: ChunkContext,
@@ -296,27 +464,32 @@ const RISE_S = 0.55;
 const RISE_TURNS = 1;
 const FOCUS_FOV = 50;
 
-/** A model ready to stand on the turntable: its geometry (floor-centred) and its size at 1:1. */
-interface Model {
-  readonly geometry: THREE.BufferGeometry;
-  readonly halfWidth: number;
-  readonly halfLength: number;
-  readonly height: number;
-}
-
 type Part = 'body' | 'wheel' | 'button' | 'plaque';
 
-/** The plaque's footer band: TAKE OUT will work, or will not. */
+/** The plaque's footer band: the button will work, or will not. */
 const READY_BAND = '#2f5a2a';
 const REFUSED_BAND = '#7a2a1a';
+
+/** What the wheel selects: a boxed car (`carId`), or a catalogue model (`carId` null). */
+interface Entry {
+  readonly carId: string | null;
+  readonly modelId: string;
+}
+
+/** An entry's model as the turntable shows it: its model, its paint and its cache key. */
+interface EntryModel {
+  readonly key: string;
+  readonly modelId: string;
+  readonly paint: number;
+}
 
 class ToyBox implements WorldFixture {
   readonly id: string;
   private part: Part | null = null;
   private focused = false;
-  /** The boxed cars, in the box's order, and the one the wheel has selected (-1: none). */
-  private boxed: string[] = [];
-  private selected = -1;
+  /** The boxed cars in the box's order, then the catalogue; the one the wheel has selected. */
+  private entries: Entry[] = [];
+  private selected = 0;
   /** The bay as last read (on focus, after a press): the plaque's last lines. */
   private swap: BaySwap = { inCarId: null, refusal: null };
   /** The handwheel's angle, where it is easing to, and the detent it last counted. */
@@ -329,15 +502,13 @@ class ToyBox implements WorldFixture {
   private refuseT = 0;
   /** The turntable's angle. */
   private turn = 0;
-  /** Built models by `modelId:paint`, and the ones ordered. */
-  private readonly models = new Map<string, Model>();
-  private readonly ordered = new Set<string>();
   /** The model the selection wants on the turntable, the one standing there, and how far up it is (0 sunk, 1 up). */
   private wanted: string | null = null;
   private shown: string | null = null;
   private rise = 0;
   private mesh: THREE.Mesh | null = null;
-  private disposed = false;
+  /** How many entries are boxed cars: the rest is the catalogue. */
+  private boxedCount = 0;
   private readonly layout: StandLayout;
   private readonly focusPose: FixtureFocus;
 
@@ -364,9 +535,8 @@ class ToyBox implements WorldFixture {
     );
     const [lookX, lookY, lookZ] = this.absolute(look);
     this.focusPose = { eyeX, eyeY, eyeZ, lookX, lookY, lookZ, fov: FOCUS_FOV };
-    this.boxed = Object.keys(world.state.toyBox);
-    this.selected = this.boxed.length > 0 ? 0 : -1;
-    this.selectionChanged();
+    this.listEntries();
+    this.selectionChanged(false);
   }
 
   /** A point of the stand's frame in ABSOLUTE metres. */
@@ -376,11 +546,11 @@ class ToyBox implements WorldFixture {
     return [this.parts.x + c * p[0] + s * p[2], this.parts.y + p[1], this.parts.z - s * p[0] + c * p[2]];
   }
 
-  /** The chunk went: the models' geometry with it, and nothing ordered lands afterwards. */
+  /** The chunk went: its models stay in the cache for the next stand, its waiting orders go. */
   dispose(): void {
-    this.disposed = true;
-    for (const model of this.models.values()) model.geometry.dispose();
-    this.models.clear();
+    if (this.shown !== null) showModel(this.shown, -1);
+    this.shown = null;
+    wantModels(this, null);
   }
 
   focus(): FixtureFocus {
@@ -394,52 +564,53 @@ class ToyBox implements WorldFixture {
     else if (!was) this.refresh(ctx);
   }
 
+  /** The boxed cars then the catalogue, the selection kept on the entry it was on, else on `select`. */
+  private listEntries(select?: string): void {
+    const current = this.entries[this.selected];
+    const toyBox = this.world.state.toyBox;
+    const boxed = Object.keys(toyBox).map((carId): Entry => ({ carId, modelId: toyBox[carId]!.modelId }));
+    this.boxedCount = boxed.length;
+    this.entries = [...boxed, ...TOY_CATALOGUE.map((modelId): Entry => ({ carId: null, modelId }))];
+    const keep = this.entries.findIndex((entry) =>
+      select !== undefined ? entry.carId === select : current !== undefined && entry.carId === current.carId && entry.modelId === current.modelId,
+    );
+    // A car gone out of the box: the entry that took its place.
+    this.selected = keep >= 0 ? keep : current === undefined ? 0 : Math.min(this.selected, this.entries.length - 1);
+  }
+
   /** The box's cars and the bay read again, the plaque repainted and the neighbours' models ordered. */
   private refresh(ctx: FixtureContext, select?: string): void {
-    const current = this.boxed[this.selected];
-    this.boxed = Object.keys(this.world.state.toyBox);
-    const keep = this.boxed.indexOf(select ?? current ?? '');
-    this.selected = this.boxed.length === 0 ? -1 : keep >= 0 ? keep : Math.min(Math.max(0, this.selected), this.boxed.length - 1);
+    this.listEntries(select);
     this.swap = this.readSwap(ctx);
-    this.selectionChanged();
-    // The cars a turn either way, so the next one is there when it is asked for.
-    const count = this.boxed.length;
-    for (const k of count > 1 ? [1, -1] : []) {
-      const car = this.world.state.toyBox[this.boxed[(this.selected + k + count) % count]!];
-      if (car) this.order(car);
+    this.selectionChanged(true);
+  }
+
+  /** Entry `index`'s model: a boxed car in its visible paint, a catalogue car in the next one's factory paint. */
+  private entryModel(index: number): EntryModel {
+    const { carId, modelId } = this.entries[index]!;
+    const car = carId === null ? undefined : this.world.state.toyBox[carId];
+    const paint = car ? visiblePaintHex(car.paint, modelId, car.id) : factoryPaintHex(modelId, catalogueCarId(this.world.seed, this.world.state, modelId));
+    return { key: `${modelId}:${paint}`, modelId, paint };
+  }
+
+  /**
+   * The selection or what the plaque says changed: repaint it, name the button, and ask
+   * for the model; with `neighbours`, the entries a turn either way too, so the next one
+   * is there when it is asked for.
+   */
+  private selectionChanged(neighbours: boolean): void {
+    const count = this.entries.length;
+    const wanted = this.entryModel(this.selected);
+    this.wanted = wanted.key;
+    if (this.live) {
+      const wants = [wanted];
+      if (neighbours) wants.push(this.entryModel((this.selected + 1) % count), this.entryModel((this.selected + count - 1) % count));
+      wantModels(this, wants);
     }
-  }
-
-  /** The selection or what the plaque says changed: repaint it, and ask for the model. */
-  private selectionChanged(): void {
-    const car = this.world.state.toyBox[this.boxed[this.selected] ?? ''];
-    this.wanted = car ? this.order(car) : null;
+    const buying = this.entries[this.selected]!.carId === null;
+    this.parts.takeOutLabel.visible = !buying;
+    this.parts.buyLabel.visible = buying;
     this.paintPlaque();
-  }
-
-  /** Orders `car`'s model in its visible paint unless it is built or on its way; its key. */
-  private order(car: CarState): string {
-    const paint = visiblePaintHex(car.paint, car.modelId, car.id);
-    const key = `${car.modelId}:${paint}`;
-    if (!this.live || this.models.has(key) || this.ordered.has(key) || !hasCarModel(car.modelId)) return key;
-    if (toyShop === undefined) toyShop = dieCastShopAvailable() ? new DieCastShop('toy box', false) : null;
-    if (!toyShop) return key;
-    this.ordered.add(key);
-    toyShop.order({
-      modelId: car.modelId,
-      color: paint,
-      scale: 1,
-      done: (arrays) => {
-        if (this.disposed) return;
-        const geometry = dieCastGeometry(arrays);
-        geometry.computeBoundingBox();
-        const { min, max } = geometry.boundingBox!;
-        // Its floor at the origin, its middle on the axle.
-        geometry.translate(-(min.x + max.x) / 2, -min.y, -(min.z + max.z) / 2);
-        this.models.set(key, { geometry, halfWidth: (max.x - min.x) / 2, halfLength: (max.z - min.z) / 2, height: max.y - min.y });
-      },
-    });
-    return key;
   }
 
   /** The scale `model` stands at: as large as the variant allows, inside its reach and clear of its pole. */
@@ -461,7 +632,7 @@ class ToyBox implements WorldFixture {
     if (!g) return;
     const w = canvas.width;
     const h = canvas.height;
-    const car = this.world.state.toyBox[this.boxed[this.selected] ?? ''];
+    const entry = this.entries[this.selected]!;
     g.save();
     // A brass plate with an engraved border and four screws.
     const brass = g.createLinearGradient(0, 0, w, h);
@@ -483,39 +654,40 @@ class ToyBox implements WorldFixture {
     g.fillStyle = '#3a2a10';
     g.font = `bold ${Math.round(h * 0.075)}px sans-serif`;
     g.textAlign = 'left';
-    g.fillText('TOY BOX', w * 0.08, h * 0.13, w * 0.5);
+    const model = carModel(entry.modelId);
+    const car = entry.carId === null ? undefined : this.world.state.toyBox[entry.carId];
+    const ordinal = car ? `${this.selected + 1}/${this.boxedCount}` : `${this.selected - this.boxedCount + 1}/${TOY_CATALOGUE.length}`;
+    g.fillText(car ? 'TOY BOX' : 'CATALOGUE', w * 0.08, h * 0.13, w * 0.5);
     g.textAlign = 'right';
-    if (car) g.fillText(`${this.selected + 1}/${this.boxed.length}`, w * 0.92, h * 0.13, w * 0.3);
+    g.fillText(ordinal, w * 0.92, h * 0.13, w * 0.3);
     g.fillRect(w * 0.06, h * 0.2, w * 0.88, 3);
 
-    let headline: string;
-    let lines: string[];
+    const headline = model.label;
+    const lines = [`comfort ${model.comfort} · boot ${trunkCellCount(model.trunkGrid)} cells`];
     let footer: string;
     let refused: boolean;
-    if (!car) {
-      headline = 'THE BOX IS EMPTY';
-      lines = ['the cars you buy wait in here;', 'drive yours into the yellow bay', 'and TAKE OUT swaps it for one'];
-      footer = 'nothing to take out yet';
-      refused = true;
-    } else {
-      const model = carModel(car.modelId);
+    if (car) {
       const stickers = car.stickers.length;
       const inCar = this.swap.inCarId ? this.world.state.cars[this.swap.inCarId] : undefined;
-      headline = model.label;
-      lines = [
-        `comfort ${model.comfort} · boot ${trunkCellCount(model.trunkGrid)} cells`,
+      lines.push(
         `${stickers} sticker${stickers === 1 ? '' : 's'} · ${Math.round(car.fuelLitres)} l of fuel`,
         this.swap.refusal ?? (inCar ? `your ${carModel(inCar.modelId).label} goes into the box` : 'the bay is clear'),
-      ];
+      );
       refused = this.swap.refusal !== null;
       footer = refused ? 'TAKE OUT will not work now' : 'TAKE OUT: it comes out in the bay';
+    } else {
+      const price = carShells(entry.modelId);
+      const have = this.world.state.player.shells;
+      refused = have < price;
+      lines.push(`a new one: ${formatPay(price)}`, refused ? `${formatPay(price - have)} short` : 'it waits in the box, to take out');
+      footer = refused ? 'BUY will not work: too few shells' : 'BUY: a new one into your box';
     }
     g.textAlign = 'left';
     g.font = `bold ${Math.round(h * 0.12)}px sans-serif`;
     fillGameText(g, headline, w * 0.08, h * 0.32, w * 0.84);
     g.font = `${Math.round(h * 0.07)}px sans-serif`;
     lines.forEach((line, i) => fillGameText(g, line, w * 0.08, h * (0.47 + i * 0.105), w * 0.84));
-    // The footer engraved on a band of its own: green when TAKE OUT will work, red when not.
+    // The footer engraved on a band of its own: green when the button will work, red when not.
     g.fillStyle = refused ? REFUSED_BAND : READY_BAND;
     g.fillRect(w * 0.06, h * 0.79, w * 0.88, h * 0.12);
     g.fillStyle = '#f2e6c4';
@@ -549,14 +721,10 @@ class ToyBox implements WorldFixture {
   }
 
   /** TAKE OUT: the bay's car into the box and the selected one out into the bay, or a refusal. */
-  private takeOut(ctx: FixtureContext): FoleyEvent {
+  private takeOut(ctx: FixtureContext, outId: string): FoleyEvent {
     const state = this.world.state;
-    const outId = this.boxed[this.selected];
-    const out = outId ? state.toyBox[outId] : undefined;
-    if (!outId || !out) {
-      ctx.toast('the box is empty');
-      return this.refuse();
-    }
+    const out = state.toyBox[outId];
+    if (!out) return this.refuse();
     const swap = this.readSwap(ctx);
     if (swap.refusal) {
       ctx.toast(swap.refusal);
@@ -579,6 +747,22 @@ class ToyBox implements WorldFixture {
     // Let go, so the player sees it standing there.
     ctx.stepBack();
     return 'mount';
+  }
+
+  /**
+   * BUY: a new `modelId` into the box for its price, selected at once so TAKE OUT is the
+   * next press; the turntable keeps the model, which was already in the bought car's paint.
+   */
+  private buy(ctx: FixtureContext, modelId: string): FoleyEvent {
+    const label = carModel(modelId).label;
+    const carId = orderCatalogueCar(this.world, modelId, (count) => ctx.debit(count));
+    if (!carId) {
+      ctx.toast(`the ${label} is ${formatPay(carShells(modelId))}: too few shells`);
+      return this.refuse();
+    }
+    ctx.toast(`the ${label} is yours: it waits in the box`);
+    this.refresh(ctx, carId);
+    return 'coin';
   }
 
   private refuse(): FoleyEvent {
@@ -634,11 +818,13 @@ class ToyBox implements WorldFixture {
 
   press(ctx: FixtureContext): FoleyEvent | null {
     switch (this.part) {
-      case 'button':
+      case 'button': {
         this.buttonT = 0;
-        return this.takeOut(ctx);
+        const entry = this.entries[this.selected]!;
+        return entry.carId === null ? this.buy(ctx, entry.modelId) : this.takeOut(ctx, entry.carId);
+      }
       case 'wheel':
-        // A click without a drag still turns it one car.
+        // A click without a drag still turns it one entry.
         return this.turnBy(1);
       default:
         return null;
@@ -686,17 +872,15 @@ class ToyBox implements WorldFixture {
     return this.countDetents();
   }
 
-  /** A car on for every spoke the wheel's target has passed since the last count. */
+  /** An entry on for every spoke the wheel's target has passed since the last count. */
   private countDetents(): FoleyEvent | null {
     const detent = Math.round(this.wheelTarget / DETENT);
     const steps = detent - this.detent;
     if (steps === 0) return null;
     this.detent = detent;
-    const count = this.boxed.length;
-    if (count > 0) {
-      this.selected = (((this.selected + steps) % count) + count) % count;
-      this.selectionChanged();
-    }
+    const count = this.entries.length;
+    this.selected = (((this.selected + steps) % count) + count) % count;
+    this.selectionChanged(true);
     return 'click';
   }
 
@@ -740,10 +924,12 @@ class ToyBox implements WorldFixture {
       if (this.shown !== null && this.rise > 0) {
         this.rise = Math.max(0, this.rise - dt / SINK_S);
       } else {
-        const model = this.wanted === null ? undefined : this.models.get(this.wanted);
+        const model = this.wanted === null ? undefined : cachedModel(this.wanted);
         if (model) this.stand(model);
         else if (this.mesh) this.mesh.visible = false;
+        if (this.shown !== null) showModel(this.shown, -1);
         this.shown = model ? this.wanted : null;
+        if (this.shown !== null) showModel(this.shown, 1);
       }
     } else if (this.shown !== null && this.rise < 1) {
       this.rise = Math.min(1, this.rise + dt / RISE_S);
@@ -752,7 +938,7 @@ class ToyBox implements WorldFixture {
     }
     this.turn = (this.turn + spin * dt) % (Math.PI * 2);
     this.parts.turntable.rotation.y = this.turn;
-    const model = this.shown === null ? undefined : this.models.get(this.shown);
+    const model = this.shown === null ? undefined : modelCache.get(this.shown);
     if (this.mesh && model) {
       const depth = model.height * this.mesh.scale.x + 0.02;
       const eased = this.rise * this.rise * (3 - 2 * this.rise);

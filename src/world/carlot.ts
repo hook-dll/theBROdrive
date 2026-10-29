@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../core/rng';
 import type { CarState } from '../game/state';
-import { carShells, formatPrice } from '../economy/economy';
-import type { ShellPrice } from '../economy/shells';
+import { carShells, formatPay } from '../economy/economy';
 import { oilCapacity, variant } from '../parts/registry';
 import { CAR_MODELS, type CarModelDef } from '../vehicle/carmodels';
 import { trunkCellCount } from '../vehicle/trunk';
@@ -23,7 +22,7 @@ import { emptyCabin } from '../vehicle/cabin';
  * stands on it is a pure function of the seed, the stop and its km band. The car itself
  * is a real car in world state from the moment its chunk enters the physics band
  * (`car_add`), carrying `lotPrice` (shells) until it is bought: its key box takes the price
- * out of the player's jar in the one kind that box takes (`lot_pay`, `lotPaid`), and taking
+ * out of the player's jar (`lot_pay`, `lotPaid`), and taking
  * the key from its drawer is `car_buy`: it is his from then on, and the car he had goes
  * into the toy box (world/toybox.ts). Nobody sits in it before that. Car prices are flat
  * (`carShells`, 5 to 10 shells by model); what changes down the road is which models
@@ -113,15 +112,15 @@ export function makeLotCar(
 
 /**
  * The price board beside a lot car: a post and a painted board, its face turned by
- * `faceYaw` (the board faces local +Z), showing `price` (its key box's kind and the
- * car's `lotPrice`). Registered with the market so buying the car takes it down at once.
+ * `faceYaw` (the board faces local +Z), showing `price` (the car's `lotPrice`, shells).
+ * Registered with the market so buying the car takes it down at once.
  */
 export function buildLotSign(
   ctx: ChunkContext,
   group: THREE.Group,
   carId: string,
   def: CarModelDef,
-  price: ShellPrice,
+  price: number,
   x: number,
   y: number,
   z: number,
@@ -137,7 +136,7 @@ export function buildLotSign(
   box(root, [0.68, 0.46, 0.03], [0, 1.2, -0.02], C.white);
   const board = new THREE.Mesh(
     SIGN_PLANE,
-    signMaterial(['FOR SALE', def.label, formatPrice(price)], '#f2e6c4', '#7a1f12', 512, 340),
+    signMaterial(['FOR SALE', def.label, formatPay(price)], '#f2e6c4', '#7a1f12', 512, 340),
   );
   board.scale.set(0.64, 0.42, 1);
   board.position.set(0, 1.2, 0);

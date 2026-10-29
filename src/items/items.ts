@@ -237,27 +237,17 @@ export interface ContractCargoItem {
    */
   readonly destination?: string;
   /**
-   * A passenger contract's party (contracts/kinds/teddyPassengers.ts): the contract's id,
-   * shared by every teddy of it, and how many teddies wait on the shelter's bench for it
-   * (contracts/shelters.ts). Absent on every other contract.
+   * The index of the post it is bound for (contracts/offers.ts `offerDestinationIndex`),
+   * when that is not the next one past its source: a teddy riding two or three towns on
+   * (contracts/kinds/teddyPassengers.ts `teddyHop`). Absent: the next post.
    */
-  party?: CargoParty;
+  readonly destinationIndex?: number;
   /**
    * Contract state, saved on the item so it travels with every physical move.
    * Written by the contract runtime (`contracts/runtime.ts`) and, for a passenger's
    * ride, by `trackPassengerRide`.
    */
   progress: ContractProgress;
-}
-
-export interface CargoParty {
-  readonly id: string;
-  readonly size: number;
-}
-
-/** The contract an item belongs to: its party's id for a passenger, its own id otherwise. */
-export function contractIdOf(item: ContractCargoItem): string {
-  return item.party?.id ?? item.id;
 }
 
 /** The catalogue entry of a contract's thing. */
@@ -401,7 +391,7 @@ export function itemLabel(item: Item): string {
       const to = item.destination ? ` → ${item.destination}` : '';
       const left = urgentRemainingS(item);
       const clock = left === null ? '' : ` · ${formatClock(left)}`;
-      const name = item.party ? 'teddy passenger' : thing.name;
+      const name = item.thing === 'teddies' ? 'teddy passenger' : thing.name;
       return `${name}${to}${clock}${worn}`;
     }
     case 'sticker_figurine':

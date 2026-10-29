@@ -7,7 +7,7 @@ import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { formatClock, urgentRemainingS, type ContractKind, type DeliveryProbe } from '../contracts/types';
 import { contractPay, fine, FINE_SHELLS, formatFine, formatPay } from '../economy/economy';
 import type { GameWorld } from '../game/state';
-import { contractIdOf, contractKindOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { contractKindOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
 import { thingCard, type PostCard, type ThingDef } from '../items/things';
 import { buildCardMachineSteps, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, thingName, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
@@ -407,7 +407,7 @@ class PostMachine extends CardMachine {
    * already (broken) is only taken off his hands.
    */
   private takeBack(ctx: FixtureContext, item: ContractCargoItem): FoleyEvent {
-    const contractId = contractIdOf(item);
+    const contractId = item.id;
     const open = !this.world.state.completedContractIds.includes(contractId);
     const closed = isContractClosed(item, this.world.state.completedContractIds);
     const fined = !closed && item.sourceCourierIndex !== this.stop.index;

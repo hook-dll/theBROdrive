@@ -14,7 +14,6 @@ import type { BirdFlock } from '../agents/birds';
 import { STICKERS } from '../items/stickercatalog';
 import { makeContract } from '../contracts/offers';
 import { shelterBench } from '../contracts/shelters';
-import { teddyItem } from '../contracts/kinds/teddyPassengers';
 import { haulLoadId, spawnHaulLoad } from '../contracts/world';
 import { isThingId, THINGS } from '../items/things';
 import { uprightStickerRoll } from '../render/stickers';
@@ -161,7 +160,7 @@ export interface DevTools {
   seatInNearestCar(): void;
   /** Puts the player on the road side of one lake site. */
   jumpToLake(index: number): void;
-  /** Pays `DEV_SHELLS` shells of random kinds into the player's jar. */
+  /** Pays `DEV_SHELLS` shells into the player's jar. */
   giveShells(): void;
   /** Puts the player and the driven car on the road at a kilometre; see `__bro.jumpTo`. */
   jumpTo(km: number): void;
@@ -781,8 +780,8 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
    * 'tv_set', 'carpet', 'piano') signed out at the post nearest the player and bound for
    * the next, dropped loose in front of him (the post machine itself gives into its grid).
    * A haul is stood in that post's pick-up slot, the first of its parking row (whatever
-   * stands there already), and taken there and then, as hitching, towing or sitting at
-   * its wheel would take the slot's own haul (contracts/hauls.ts), past the limits; the
+   * stands there already), and taken there and then, as hitching or towing would take
+   * the slot's own haul (contracts/hauls.ts), past the limits; the
    * slot's own round is left as it is. `urgent` gives it the urgent clock. The teddies
    * wait in a shelter: see `teddies`. Returns the contract id.
    */
@@ -806,18 +805,16 @@ export function installDevTools(ctx: DevToolsContext): DevTools {
   /**
    * `teddies(count?)`: takes up to `count` (all when omitted) of the teddies waiting in the
    * shelter of the post nearest the player (contracts/shelters.ts), as F on the bench
-   * would, past the limit, and drops them in front of him. Returns the party's contract id.
+   * would, past the limit, and drops them in front of him. Returns their contract ids;
+   * each teddy is its own contract, bound for its own town.
    */
-  dev['teddies'] = (count?: number): string => {
+  dev['teddies'] = (count?: number): string[] => {
     const source = nearestPost();
     const bench = shelterBench(ctx.world.state, ctx.world.seed, source);
-    const items: Item[] = [];
-    bench.waiting.forEach((waits, seat) => {
-      if (waits && (count === undefined || items.length < count)) items.push(teddyItem(bench.party, seat));
-    });
+    const items = bench.teddies.filter((_, seat) => bench.waiting[seat]).slice(0, count);
     dropInFront(items);
-    ctx.hud.setToast(`took ${items.length} ${items.length === 1 ? 'teddy' : 'teddies'} → ${bench.party.destination} from the shelter at post ${source}`);
-    return bench.party.id;
+    ctx.hud.setToast(`took ${items.map((teddy) => `teddy → ${teddy.destination}`).join(', ') || 'no teddy'} from the shelter at post ${source}`);
+    return items.map((teddy) => teddy.id);
   };
   /**
    * Sticks `count` stickers on car `id` (the catalog's kinds in turn), replacing what it

@@ -5,12 +5,12 @@
  * The thing is drawn evenly among the things its card offers: every thing a card may
  * offer comes up as often as any other, none is rare (§12: stickers buy nothing at the
  * post). The teddies are no card's: they wait in the shelter (contracts/shelters.ts),
- * whose party is made here too (`makeContract`). Nor are the HAULS (a trailer, a towed
+ * whose teddies are made here too (`shelterTeddies`). Nor are the HAULS (a trailer, a towed
  * car, a car to drive over): each post's pick-up slot holds one by itself, round after
  * round (`postHaul`, contracts/hauls.ts).
  *
- * The offer is a plain `contract_cargo` item with its thing, destination (always the
- * next post), seed and fresh progress already on it.
+ * The offer is a plain `contract_cargo` item with its thing, destination (the next post;
+ * a shelter's teddy its own, `shelterTeddies`), seed and fresh progress already on it.
  * URGENT is a modifier on any card: `URGENT_SHARE` of the offers (never the drive's
  * first) carry a clock (`urgentDeadlineS`) in simulation seconds from TAKE.
  *
@@ -29,7 +29,7 @@ import type { ContractCargoItem, Item } from '../items/items';
 import { cardThings, POST_CARDS, THINGS, type ThingDef, type ThingId } from '../items/things';
 import { placeNameAt } from '../world/placenames';
 import { postId, postStop } from '../world/poststops';
-import { dressContractOffer } from './registry';
+import { shelterTeddyCount, teddyHop } from './kinds/teddyPassengers';
 import { defaultProgress } from './types';
 
 /** Offer draws stay on the courier domain the base system already used. */
@@ -71,9 +71,9 @@ function parseOfferId(index: number, id: string): { slot: number; round: number 
   return { slot: Number(match[2]), round: match[3] === undefined ? 0 : Number(match[3]) };
 }
 
-/** The post an offer is bound for: always the next one. */
+/** The post a contract is bound for: the next one, unless it names another (a teddy's, `teddyHop`). */
 export function offerDestinationIndex(item: ContractCargoItem): number {
-  return item.sourceCourierIndex + 1;
+  return item.destinationIndex ?? item.sourceCourierIndex + 1;
 }
 
 /** An urgent contract's clock from post `source` to post `destination`, seconds; see `URGENT_KMH`. */
@@ -83,9 +83,9 @@ export function urgentDeadlineS(seed: number, source: number, destination: numbe
 }
 
 /**
- * A fresh contract for `thing` sent from post `courierIndex` to the next one, under `id`,
- * its draws from `generatedSeed`. The one way an offer is made: the post's slots and the
- * dev tools (app/devtools.ts).
+ * A fresh contract for `thing` sent from post `courierIndex` to post `destinationIndex`
+ * (the next one by default), under `id`, its draws from `generatedSeed`. The one way an
+ * offer is made: the post's slots, the shelters and the dev tools (app/devtools.ts).
  */
 export function makeContract(
   seed: number,
@@ -94,6 +94,7 @@ export function makeContract(
   thing: ThingId,
   generatedSeed: number,
   urgent = false,
+  destinationIndex = courierIndex + 1,
 ): ContractCargoItem {
   const item: ContractCargoItem = {
     type: 'contract_cargo',
@@ -101,11 +102,11 @@ export function makeContract(
     sourceCourierIndex: courierIndex,
     thing,
     generatedSeed,
-    destination: placeNameAt(seed, postStop(seed, courierIndex + 1).s),
+    destination: placeNameAt(seed, postStop(seed, destinationIndex).s),
+    ...(destinationIndex === courierIndex + 1 ? {} : { destinationIndex }),
     progress: defaultProgress(),
   };
-  if (urgent) item.urgentS = urgentDeadlineS(seed, courierIndex, courierIndex + 1);
-  dressContractOffer(item);
+  if (urgent) item.urgentS = urgentDeadlineS(seed, courierIndex, destinationIndex);
   return item;
 }
 
@@ -169,39 +170,40 @@ export function postHaul(seed: number, courierIndex: number, round: number): Con
   return makeContract(seed, postHaulId(courierIndex, round), courierIndex, thing.id, hash(seed, OFFER_DOMAIN, HAUL_DOMAIN, courierIndex, round), urgent);
 }
 
-/** The shelter's party draws, apart from every card's. */
+/** The shelter's draws, apart from every card's. */
 const SHELTER_DOMAIN = 0x53484c31; // 'SHL1'
 
 /**
- * The contract id of round `round` of post `index`'s teddy shelter party: every teddy of
- * it carries it (`CargoParty.id`). Saved: never changed.
+ * The contract id of the teddy on bench place `seat` in round `round` of post `index`'s
+ * shelter. Saved: never changed (the ids the parties' teddies had).
  */
-export function shelterPartyId(index: number, round: number): string {
-  return `shelter:${index}:${round}`;
+export function shelterTeddyId(index: number, round: number, seat: number): string {
+  return `shelter:${index}:${round}:teddy:${seat}`;
 }
 
-/** The (post, round) a shelter party's id names, or null for any other id. */
-export function parseShelterPartyId(id: string): { index: number; round: number } | null {
-  const match = /^shelter:(\d+):(\d+)$/.exec(id);
-  return match ? { index: Number(match[1]), round: Number(match[2]) } : null;
+/** The (post, round, seat) a shelter teddy's id names, or null for any other id. */
+export function parseShelterTeddyId(id: string): { index: number; round: number; seat: number } | null {
+  const match = /^shelter:(\d+):(\d+):teddy:(\d+)$/.exec(id);
+  return match ? { index: Number(match[1]), round: Number(match[2]), seat: Number(match[3]) } : null;
 }
 
 /**
- * Round `round` of the teddy party waiting in post `courierIndex`'s shelter (§10): 1–3
- * teddies (kinds/teddyPassengers.ts `dressOffer`), bound for the next post, urgent or
- * not at the cards' share. The drive's very first party is plain.
+ * Round `round` of the teddies waiting in post `courierIndex`'s shelter (§10), by bench
+ * place: 1–3 of them (`shelterTeddyCount`), EACH ITS OWN CONTRACT, with its own seed, its
+ * own destination (`teddyHop`: mostly the next town or the one after) and its own urgent
+ * clock at the cards' share. The drive's very first round is plain.
  */
-export function shelterParty(seed: number, courierIndex: number, round: number): ContractCargoItem {
+export function shelterTeddies(seed: number, courierIndex: number, round: number): ContractCargoItem[] {
   const first = courierIndex === 0 && round === 0;
-  const urgent = !first && hash01(seed, URGENT_DOMAIN, SHELTER_DOMAIN, courierIndex, round) < URGENT_SHARE;
-  return makeContract(
-    seed,
-    shelterPartyId(courierIndex, round),
-    courierIndex,
-    'teddies',
-    hash(seed, OFFER_DOMAIN, SHELTER_DOMAIN, courierIndex, round),
-    urgent,
-  );
+  const count = shelterTeddyCount(hash(seed, OFFER_DOMAIN, SHELTER_DOMAIN, courierIndex, round));
+  const teddies: ContractCargoItem[] = [];
+  for (let seat = 0; seat < count; seat++) {
+    const teddySeed = hash(seed, OFFER_DOMAIN, SHELTER_DOMAIN, courierIndex, round, seat);
+    const urgent = !first && hash01(seed, URGENT_DOMAIN, SHELTER_DOMAIN, courierIndex, round, seat) < URGENT_SHARE;
+    const id = shelterTeddyId(courierIndex, round, seat);
+    teddies.push(makeContract(seed, id, courierIndex, 'teddies', teddySeed, urgent, courierIndex + teddyHop(teddySeed)));
+  }
+  return teddies;
 }
 
 /** A post's stock as the machine reads it: its offers by slot, and anything else left in it. */

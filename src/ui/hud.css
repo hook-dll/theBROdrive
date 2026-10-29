@@ -583,34 +583,30 @@ body.is-machine-focus .hud-crosshair {
   stroke-linecap: square;
 }
 
-/* THE SHELLS in a line of game text (ui/shellsprites.ts `setGameText`): toasts, the
-   prompt. Up to five shells in a row; more, the figure and one shell; none, one faded. */
+/* THE SHELL in a line of game text (ui/shellsprites.ts `setGameText`): toasts, the
+   prompt. Every amount is its figure and one shell; none, "0" and the shell faded. */
 .shell {
   display: inline-block;
   flex: none;
   width: 1.15em;
   height: 1.15em;
-  background: center / contain no-repeat;
+  background: var(--shell) center / contain no-repeat;
   filter: drop-shadow(0 0.06em 0.06em rgba(0, 0, 0, 0.4));
 }
 
-.shell + .shell { margin-left: -0.02em; }
-
-.shell--scallop { background-image: var(--shell-scallop); }
-.shell--spiral { background-image: var(--shell-spiral); }
-.shell--horn { background-image: var(--shell-horn); }
-.shell--cowrie { background-image: var(--shell-cowrie); }
-
+/* The figure sits on the line's baseline like any word; the shell hangs a little below
+   it, as a glyph with a descender would. */
 .shell-row {
-  display: inline-flex;
-  align-items: flex-end;
+  white-space: nowrap;
   margin: 0 0.12em;
-  vertical-align: -0.25em;
+}
+
+.shell-row .shell {
+  vertical-align: -0.3em;
 }
 
 .shell-figure {
-  margin-right: 0.12em;
-  align-self: center;
+  margin-right: 0.08em;
 }
 
 .shell-row.is-zero .shell {

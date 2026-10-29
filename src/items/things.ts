@@ -108,7 +108,7 @@ export const THINGS: readonly ThingDef[] = [
   { id: 'bed', name: 'bed', tags: ['bulky'], massKg: 90, place: 'trailer', trailerLoad: [0.57, 0.28, 1.0] },
   { id: 'broken_toy_car', name: 'broken toy car', tags: [], massKg: 0, place: 'tow' },
   { id: 'toy_car', name: 'toy car', tags: [], massKg: 0, place: 'transfer' },
-  // A party is one teddy item each, paid once for the whole party (world/shelter.ts).
+  // One teddy item each, each its own contract, paid when it gets off (world/shelter.ts).
   { id: 'teddies', name: 'teddy passengers', tags: [], massKg: 0.6, place: 'seats' },
   // The boy's dearest things, once the sticker days' special card's (§12); on the
   // ordinary cards now like the rest, by their own property.
@@ -139,7 +139,7 @@ export function hasTag(def: ThingDef, tag: ThingTag): boolean {
   return def.tags.includes(tag);
 }
 
-/** A haul: a trailer, a towed car or a driven car, handed in by reversing it into a post's bay. */
+/** A haul: a trailer or a car on the tow bar, handed in by parking it inside a post's bay. */
 export function isHaulThing(def: ThingDef): boolean {
   return def.place === 'trailer' || def.place === 'tow' || def.place === 'transfer';
 }

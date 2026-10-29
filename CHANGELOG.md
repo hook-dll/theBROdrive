@@ -4,6 +4,45 @@
 
 ### Added
 
+- HAUL CARS ARE TOWED ONLY, THE HAND-IN SLOT IS MARKED, AND ANY WAY ROUND IS IN
+  (game-design2.md §7.8; `contracts/haulbays.ts` `footprintInBay`, `markedSlots`;
+  `render/baymark.ts` `BayMark`; `contracts/world.ts` `haulCarSeal`;
+  `vehicle/cartow.ts` `carriesFrame`).
+  - The destination post's hand-in slot of a taken haul is marked on the asphalt with a
+    grid of pink cells in the boot and bonnet grids' selected-cell look (the colours now
+    shared from `render/trunkview.ts`): translucent, unlit, a little over the paint with a
+    polygon offset, the trunk grid's own program (no new one).
+  - A load is handed in when all of it stands inside the slot's lines (0.25 m slack for
+    the paint) and has stood still 2 s. Which way it faces and whether it came in
+    reversing are no longer judged; "back it in", "straighten up" and `BAY_YAW_TOLERANCE`
+    are gone, and a reloaded load already in the slot is judged too.
+  - A haul's car (towing and car transfer alike) blinks its hazards from the moment it is
+    materialised, and is sealed: no door, bonnet, boot or flap answers, F at it knocks
+    with the toast "sealed for the job — tow it on its bar", and no trailer hitches to
+    it. It carries its A-frame bolted to its front bumper, the coupler resting on the
+    ground, until the bar goes on a tower's ball (then the live bar is drawn instead).
+    Only its nose takes the ball and it never pulls. The haul sign shows the tow picture
+    for both car kinds (the car-and-key picture is gone).
+
+- THE TOY BOX SELLS THE WHOLE CATALOGUE (`world/toybox.ts` `TOY_CATALOGUE`,
+  `catalogueCarId`, `makeCatalogueCar`, `orderCatalogueCar`; `world/toystand.ts`;
+  `ui/diecastshop.ts` `cancel`; delta `car_order`; `tools/toybox-check.ts`). After the
+  boxed cars the stand's handwheel runs through every car of the game (`CAR_MODELS`, 31),
+  cheapest first, and round to the box again. The plaque reads CATALOGUE n/N, the model,
+  comfort, boot cells and its price in shells (`carShells`, the lot price), and how many
+  the jar is short; the button's name under it switches between TAKE OUT and BUY (two
+  atlas boards, one shown). BUY takes the price out of the jar and puts a new car of that
+  model into the box, his: clean, unscratched, no kilometres, oil and water topped, a
+  fresh filter and a quarter of a tank. Its id (`car:toy:<seed>:<model>:<k>`) picks its
+  factory colour, and the turntable shows the catalogue model in that very colour, so
+  the bought car is the one on the stand; it is selected at once, and the next press is
+  TAKE OUT. Short of shells the button rattles and nothing is taken. Autosaved on
+  `car_order`. The models are one cache for every stand (8 at most, about 1.3 MB of
+  arrays each, never one a turntable shows), the selection and its two neighbours built
+  in the die-cast worker, any order still waiting that no stand wants any more dropped,
+  so a fast spin through the catalogue builds only where it stops. No new material: the
+  model is on the kit palette material and the boards on the sign atlas, both linked at
+  boot.
 - EVERY LIT LAMP LIGHTS THE GROUND, AND THE SPOT SLOTS GO TO THE LIGHT THE PLAYER SEES
   (`render/lamppools.ts`, `vehicle/vehiclelamps.ts` `syncLampPool`/`headlampViewScore`,
   `main.ts`). A lamp without a spotlight slot used to lay no light at all. Now it lays a
@@ -148,6 +187,49 @@
   moved to zilfront.ts with all its sizes as data in zil.ts (the ZIL identical).
 
 ### Changed
+
+- EACH TEDDY IS ITS OWN CONTRACT, AND WAVES GOODBYE (`contracts/offers.ts`
+  `shelterTeddies`, `contracts/shelters.ts` `teddyGetOff`, `world/shelter.ts`
+  `settleBenchTeddies`, `render/thingmesh.ts` `createWavingTeddy`). The teddies on a
+  shelter's bench are no longer one party: each has its own id, its own town — the next
+  one (~55%), the one after (~35%) or the third (`teddyHop`, saved as
+  `ContractCargoItem.destinationIndex`, absent for the next post) — its own urgent clock
+  and its own pay (the km of its route). One taken is one active contract. F on a
+  waiting teddy reads "F - to <town>, please"; the timetable lists every teddy waiting.
+  A teddy is put on a bench with F at the shelter or by dropping it (Q) anywhere on the
+  seat (`LoosePartField.forEachRestingItem`, looked at every 0.25 s once it lies still):
+  on its own town's bench it gets off — delivered and paid, it sits up, raises a paw,
+  waves (2.4 Hz, ~1.75 s) and shrinks away; on its source bench it waits again; on any
+  other bench nothing happens and a dropped one stays lying. A teddy LEFT LYING on the
+  ground anywhere is abandoned like a haul's load: once the player is `ABANDON_M` (300 m,
+  straight line, now shared in `contracts/types.ts` with `contracts/haulbays.ts`) from
+  its saved place, its contract closes undelivered (delta `teddy_abandon`, autosaved),
+  it is gone, and it is fined `FINE_SHELLS` ("left the teddy for <town> behind — −3";
+  `contracts/shelters.ts` `abandonedTeddies`, `teddyAbandon`). The bench moves to its
+  next round when every teddy of the round has got off or been left behind. Gone: the party (`CargoParty`,
+  `contractIdOf`, `dressOffer`/`dressContractOffer`, `shelterParty`, `teddySeating`),
+  its pay-once-whole rule and its fine; `teddy_seat` now records one teddy getting off.
+  An older save's party teddy loads as its own contract bound for the next post.
+  `__bro.teddies(count?)` returns the teddies' ids. Check: `bun tools/teddy-shelter.ts`.
+
+- ONE SHELL. The money is one kind of shell with one picture, a coral scallop
+  (`ui/shellsprites.ts` `shellSprite`); the spiral, horn and cowrie are gone, and so is
+  a machine taking only "its" kind. `PlayerState.shells` is a plain count, every price,
+  pay, fine, stake and prize a whole number (`economy/economy.ts` `debit(world, count)`,
+  `itemShells`, `PRICE_TABLE.pumpFill`/`clawTry`; `ShellKind`, `ShellPrice`,
+  `machineShellKind`, `carShellKind`, `itemPrice`, `pumpPrice`, `formatPrice` and the
+  `shellMint` draw counter removed). Any amount in game text is `formatPay(count)`,
+  drawn everywhere — machine cards, pump, lot and key-box signs, haul signs, toasts, the
+  prompt, the race's RACE ME! board (`race/visuals.ts`), its offer prompt
+  (`race/director.ts` `PROMPT_RACE`/`PROMPT_POOR`), results panel and hint
+  (`ui/hudrace.ts`, now through `setGameText`) — as the figure on the text's baseline and
+  that one shell (`fillGameText`, `shellRow`; hud.css `.shell` reads one `--shell`). In the jar
+  (`ui/hudjar.ts`) every shell is the same picture, each a little bigger or smaller
+  (0.88-1.12 of the old size, drawn as it comes in) only for life. `SAVE_VERSION` 10: a
+  save from versions 5-9 kept the jar by kind and a race stake as a list of kinds; it
+  loads as their sum (`save.ts` `savedWallet`, `migrateRaceStake`), nothing lost —
+  `tools/race-bench.ts` checks a version-9 jar of 4+7+2+5 loads as 18 and a stake of
+  three kinds as 3.
 
 - SUN VISORS SWING DOWN PARALLEL TO THE WINDSCREEN, ON EVERY KIT CAR (`carkit/interior.ts`
   `Cabin.headliner`, `Layout.visor`; `carkit/specs.ts` `VISOR_SAMARA`). They turned a

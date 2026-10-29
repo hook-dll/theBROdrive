@@ -18,7 +18,7 @@ import { COLD_SOAK_C } from '../vehicle/cooling';
 import { sanitizeSettings } from '../game/settings';
 import { hasVariant, type PartInstance } from '../parts/registry';
 import { carShells } from '../economy/economy';
-import { emptyPurse, isShellKind, JAR_CAPACITY, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
+import { JAR_CAPACITY } from '../economy/shells';
 import {
   CAMERA_FRAME_LIMIT,
   isHaul,
@@ -195,15 +195,17 @@ export function installVehicleAutosave(
       case 'claw_try':
       case 'lot_pay':
       case 'car_buy':
-      // A car into or out of the toy box (world/toybox.ts).
+      // A car into or out of the toy box, or bought from its catalogue (world/toybox.ts).
       case 'car_box':
       case 'car_unbox':
+      case 'car_order':
       // A haul's load taken, handed in or left behind (contracts/hauls.ts, contracts/haulbays.ts).
       case 'haul_take':
       case 'haul_close':
       case 'haul_abandon':
-      // A teddy seated on a shelter's bench (contracts/shelters.ts).
+      // A teddy got off at a shelter's bench, or left behind (contracts/shelters.ts).
       case 'teddy_seat':
+      case 'teddy_abandon':
         if (world.state.player.drivingCarId) return;
         break;
       default:
@@ -749,7 +751,8 @@ function migrateRounds(raw: unknown, field: string): Record<string, number> {
 
 /**
  * The stake of a race cut off by the save (race/stake.ts), kept so the runtime can pay it
- * back; anything malformed is dropped (its shells are not invented).
+ * back; anything malformed is dropped (its shells are not invented). A save before
+ * version 10 kept the stake as a list of shell kinds: it loads as their count.
  */
 function migrateRaceStake(raw: unknown): RaceStake | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
@@ -757,10 +760,9 @@ function migrateRaceStake(raw: unknown): RaceStake | null {
   const { postIndex, round, shells } = obj;
   if (typeof postIndex !== 'number' || !Number.isInteger(postIndex) || postIndex < 0) return null;
   if (typeof round !== 'number' || !Number.isInteger(round) || round < 0) return null;
-  if (!Array.isArray(shells) || shells.length > JAR_CAPACITY) return null;
-  const kinds: ShellKind[] = [];
-  for (const kind of shells) if (isShellKind(kind)) kinds.push(kind);
-  return { postIndex, round, shells: kinds };
+  const count = Array.isArray(shells) ? shells.filter((kind) => LEGACY_SHELL_KINDS.includes(kind)).length : shells;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || count > JAR_CAPACITY) return null;
+  return { postIndex, round, shells: count };
 }
 
 /**
@@ -1189,24 +1191,26 @@ function withoutHaulPapers(cells: (Item | null)[]): (Item | null)[] {
   return cells.map((item) => (item?.type === 'contract_cargo' && isHaul(item) ? null : item));
 }
 
+/** The kinds of shell saves before version 10 kept the jar by: they all load as one shell each. */
+const LEGACY_SHELL_KINDS: readonly unknown[] = ['scallop', 'spiral', 'horn', 'cowrie'];
+
 /**
- * The jar, the mint count and the driving not yet paid of a saved player. A save from
- * before version 5 kept the old money: its jar starts empty and its mint at 0. The shells are
- * whole and never negative, and a jar somehow over `JAR_CAPACITY` loses the excess.
+ * The jar and the driving not yet paid of a saved player. A save from before version 5
+ * kept the old money: its jar starts empty. A save from version 5 to 9 kept the jar by
+ * kind (`LEGACY_SHELL_KINDS`): every shell of every kind is one shell now, so the jar
+ * keeps its total. The shells are whole and never negative, and a jar somehow over
+ * `JAR_CAPACITY` loses the excess. An old save's `shellMint` is dropped.
  */
-function savedWallet(playerRaw: Record<string, unknown>, version: number): { shells: ShellPurse; shellMint: number; driveM: number } {
-  const shells = emptyPurse();
-  if (version < 5) return { shells, shellMint: 0, driveM: 0 };
-  const saved = typeof playerRaw.shells === 'object' && playerRaw.shells !== null ? (playerRaw.shells as Record<string, unknown>) : {};
-  let room = JAR_CAPACITY;
-  for (const kind of SHELL_KINDS) {
-    const count = Math.min(room, Math.max(0, Math.trunc(numOr(saved[kind], 0))));
-    shells[kind] = count;
-    room -= count;
+function savedWallet(playerRaw: Record<string, unknown>, version: number): { shells: number; driveM: number } {
+  if (version < 5) return { shells: 0, driveM: 0 };
+  const saved = playerRaw.shells;
+  let total = 0;
+  if (typeof saved === 'number') total = Math.trunc(saved);
+  else if (typeof saved === 'object' && saved !== null) {
+    for (const kind of LEGACY_SHELL_KINDS) total += Math.max(0, Math.trunc(numOr((saved as Record<string, unknown>)[kind as string], 0)));
   }
   return {
-    shells,
-    shellMint: Math.max(0, Math.trunc(numOr(playerRaw.shellMint, 0))),
+    shells: Math.min(JAR_CAPACITY, Math.max(0, total)),
     driveM: Math.max(0, numOr(playerRaw.driveM, 0)),
   };
 }
@@ -1388,14 +1392,12 @@ function migrateItem(raw: unknown, where: string): Item {
         ...(typeof obj.destination === 'string' ? { destination: obj.destination } : {}),
         ...(typeof obj.urgentS === 'number' && Number.isFinite(obj.urgentS) && obj.urgentS > 0 ? { urgentS: obj.urgentS } : {}),
       };
-      // A passenger's party: its contract id and 1–3 teddies. Anything else is dropped,
-      // and the teddy then delivers as a party of its own.
-      const party = typeof obj.party === 'object' && obj.party !== null ? (obj.party as Record<string, unknown>) : null;
-      const partySize = typeof party?.size === 'number' ? Math.trunc(party.size) : 0;
-      if (party && typeof party.id === 'string' && partySize >= 1 && partySize <= 3) {
-        item.party = { id: party.id, size: partySize };
-      }
-      return item;
+      // The post it is bound for, when not the next one (a teddy's). Anything not past its
+      // source is dropped: it is then bound for the next post. A teddy of an older save's
+      // party (its `party` is not read) is its own contract now, bound for the next post
+      // as the party was.
+      const destinationIndex = typeof obj.destinationIndex === 'number' ? Math.trunc(obj.destinationIndex) : -1;
+      return destinationIndex > sourceCourierIndex + 1 ? { ...item, destinationIndex } : item;
     }
     // The sticker envelope of a save before version 8 is the figurine of its sticker now:
     // the claw machine's prize, worked the same way in hand (world/claw.ts).

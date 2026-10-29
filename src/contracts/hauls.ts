@@ -2,13 +2,15 @@
  * THE PICK-UP SLOT'S HAUL (game-design2.md §7.8): no post card offers a haul. Each post's
  * pick-up slot (world/haulbay.ts) holds one by itself, at a ROUND
  * (`WorldState.haulRounds`, 0 when absent): round `r`'s haul is `postHaul(seed, post, r)`
- * (contracts/offers.ts), a trailer load, a broken car to tow or a car to drive over,
+ * (contracts/offers.ts), a trailer load, a broken car to tow or a car to tow over,
  * bound for the next post. Its load stands in the slot while it is empty
  * (contracts/haulbays.ts), and a sign beside the slot says where it goes
  * (world/haulsign.ts).
  *
- * TAKE IS PHYSICAL: hitching the waiting trailer to a car, putting the waiting car on the
- * tow bar, or sitting at its wheel binds the haul to its load there and then
+ * TAKE IS PHYSICAL: hitching the waiting trailer to a car or putting the waiting car on
+ * the tow bar (a haul's car is sealed and only towed, contracts/world.ts `haulCarSeal`;
+ * a save from before that may still have the player sitting in one, and his move to its
+ * wheel takes it) binds the haul to its load there and then
  * (`takeHaulLoads`, player/interaction.ts) — the `haul_take` that moves the post on to its
  * next round, whose load appears once the slot is empty again. Refused at
  * `ACTIVE_CONTRACT_LIMIT` jobs out or `ACTIVE_HAUL_LIMIT` hauls out: the action does not

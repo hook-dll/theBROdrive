@@ -31,7 +31,8 @@ import { addStatic, yawRotation } from './props/scatter';
  * box's `SERVICE_HALF`), its back on the footprint's back, and carries the same CONTROL
  * FACE on a vertical front: the brass PLAQUE on top (a canvas the toy box repaints), the
  * HANDWHEEL under it on the viewer's right, turning about the axis that faces the viewer
- * (local Z), and the TAKE OUT button on the left. Local metres: base centre at the
+ * (local Z), and the button on the left, named TAKE OUT or BUY under it as the
+ * selection is a boxed car or a catalogue one. Local metres: base centre at the
  * origin, front facing -Z, the viewer's left local +X, as the card machines'.
  */
 
@@ -62,6 +63,7 @@ const TITLE_BOARD = ['#f2ecd8', '#7a3a1a', 512, 128] as const;
 const BUTTON_BOARD = ['#f2ecd8', '#26221c', 256, 64] as const;
 registerAtlasSign(['TOY BOX'], ...TITLE_BOARD);
 registerAtlasSign(['TAKE OUT'], ...BUTTON_BOARD);
+registerAtlasSign(['BUY'], ...BUTTON_BOARD);
 
 /** An axis-aligned box in the stand's frame: centre and half extents. */
 export interface StandBox {
@@ -93,6 +95,9 @@ export interface ToyStandParts {
   /** Turns about local Z; its origin on the axle. */
   readonly wheel: THREE.Object3D;
   readonly buttonCap: THREE.Object3D;
+  /** The button's two names under it: one shown, as the selection is a boxed car or a catalogue one. */
+  readonly takeOutLabel: THREE.Object3D;
+  readonly buyLabel: THREE.Object3D;
   /** Turns about local Y; its origin on the floor at the axle, where the model is added. */
   readonly turntable: THREE.Object3D;
   readonly plaque: THREE.MeshStandardMaterial;
@@ -137,9 +142,14 @@ function torus(parent: THREE.Object3D, radius: number, tube: number, arc: number
 
 /**
  * The control face at `face`: the plaque in a brass frame, the handwheel on its boss,
- * the button and its plate. Returns the moving parts and the plaque's material.
+ * the button, its plate and its two names (TAKE OUT shown, BUY hidden). Returns the
+ * moving parts and the plaque's material.
  */
-function controlFace(root: THREE.Group, face: V3, disposers: Array<() => void>): { wheel: THREE.Object3D; buttonCap: THREE.Object3D; plaque: THREE.MeshStandardMaterial } {
+function controlFace(
+  root: THREE.Group,
+  face: V3,
+  disposers: Array<() => void>,
+): { wheel: THREE.Object3D; buttonCap: THREE.Object3D; takeOutLabel: THREE.Object3D; buyLabel: THREE.Object3D; plaque: THREE.MeshStandardMaterial } {
   const [fx, fy, fz] = face;
   // The plaque: a brass frame standing proud, the canvas on it.
   box(root, [PLAQUE_W + 0.05, PLAQUE_H + 0.05, 0.014], [fx, fy + PLAQUE_DY, fz - 0.007], BRASS);
@@ -183,12 +193,20 @@ function controlFace(root: THREE.Group, face: V3, disposers: Array<() => void>):
   cylinder(buttonCap, 0.03, 0.03, 0.04, 12, [0, 0, 0.0], C.darkMetal, [Math.PI / 2, 0, 0]);
   cylinder(buttonCap, 0.06, 0.064, 0.035, 20, [0, 0, -0.035], BUTTON_COLOUR, [Math.PI / 2, 0, 0]);
   root.add(buttonCap);
-  const label = signMesh(['TAKE OUT'], ...BUTTON_BOARD);
-  label.scale.set(0.16, 0.04, 1);
-  label.position.set(bx, by - 0.11, fz - 0.003);
-  label.rotation.y = Math.PI;
-  root.add(label);
-  return { wheel, buttonCap, plaque };
+  const label = (text: string): THREE.Mesh => {
+    const mesh = signMesh([text], ...BUTTON_BOARD);
+    mesh.scale.set(0.16, 0.04, 1);
+    mesh.position.set(bx, by - 0.11, fz - 0.003);
+    mesh.rotation.y = Math.PI;
+    // Shown and hidden on its own: never merged.
+    mesh.userData.kitKeep = true;
+    root.add(mesh);
+    return mesh;
+  };
+  const takeOutLabel = label('TAKE OUT');
+  const buyLabel = label('BUY');
+  buyLabel.visible = false;
+  return { wheel, buttonCap, takeOutLabel, buyLabel, plaque };
 }
 
 /** A turntable group at `floor`, for the model and whatever turns with it. */

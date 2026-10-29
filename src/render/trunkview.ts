@@ -48,6 +48,14 @@ const _centre = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 
 /**
+ * The selected cell's look: a pink panel under a light pink outline. A haul's hand-in
+ * slot is marked on the ground in the same (world/haulbay.ts `BayMark`).
+ */
+export const SELECTED_CELL_COLOR = 0xe58bb0;
+export const SELECTED_CELL_OPACITY = 0.48;
+export const SELECTED_BORDER_COLOR = 0xffbad7;
+
+/**
  * World-space storage cells with real item meshes and no labels: the trunk's grid plane
  * behind the car, or the bonnet's cells lying in the engine bay at their parts' places.
  * One instance draws one grid at a time; a card machine's opening (world/cardmachine.ts)
@@ -71,16 +79,16 @@ export class TrunkView {
     side: THREE.DoubleSide,
   });
   private readonly selectedPanelMaterial = new THREE.MeshBasicMaterial({
-    color: 0xe58bb0,
+    color: SELECTED_CELL_COLOR,
     transparent: true,
-    opacity: 0.48,
+    opacity: SELECTED_CELL_OPACITY,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
   // Both borders share one program (transparent, as the plain one), so the first aimed
   // cell links nothing mid-drive: an opaque selected border was a program of its own.
   private readonly borderMaterial = new THREE.LineBasicMaterial({ color: 0xd9c8ad, transparent: true, opacity: 0.8 });
-  private readonly selectedBorderMaterial = new THREE.LineBasicMaterial({ color: 0xffbad7, transparent: true, opacity: 1 });
+  private readonly selectedBorderMaterial = new THREE.LineBasicMaterial({ color: SELECTED_BORDER_COLOR, transparent: true, opacity: 1 });
   private readonly panels: THREE.Mesh[] = [];
   private readonly borders: THREE.LineLoop[] = [];
   private readonly itemHolders: THREE.Group[] = [];

@@ -18,7 +18,7 @@ import { hasTag } from '../items/things';
  *   since the last one began (Infinity before the first).
  *
  * Accounting, for contracts (teddy passengers). Keys are the caller's own, e.g. a
- * passenger party's id:
+ * teddy's contract id:
  * - `track(key, comfort?, harsh?, scale?)`: starts accounting under `key`, from the ride
  *   already had (full comfort, no harsh moment by default; no-op if tracked). `scale` is
  *   how much of the ride reaches it: the carrying car's comfort factor

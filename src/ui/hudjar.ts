@@ -1,4 +1,4 @@
-import { JAR_CAPACITY, purseTotal, SHELL_KINDS, type ShellKind, type ShellPurse } from '../economy/shells';
+import { JAR_CAPACITY } from '../economy/shells';
 import { shellSprite } from './shellsprites';
 
 /**
@@ -8,10 +8,13 @@ import { shellSprite } from './shellsprites';
  * paid and spent (main.ts `setShellsShown`) — and put away elsewhere. There is no figure
  * on it anywhere: what the jar holds is read by looking at it.
  *
+ * Every shell is the same shell (ui/shellsprites.ts), each a little bigger or smaller
+ * than the next (`SIZE_MIN`..`SIZE_MAX`), as real shells are.
+ *
  *  - Shells coming in are POURED through the neck, a shell at a time, and roll and
  *    settle on the rest.
- *  - Shells going out are LIFTED out of the neck, the topmost of the kind first, and
- *    fade as they rise.
+ *  - Shells going out are LIFTED out of the neck, the topmost first, and fade as they
+ *    rise.
  *  - The jar holds `JAR_CAPACITY` and not one more: a shell pushed out by a new one in a
  *    full jar (`spill`) POPS up out over the rim and falls away past the jar.
  *  - Shells a FINE takes (`fine`, economy/economy.ts) LEAP out of the jar on their own,
@@ -23,14 +26,17 @@ import { shellSprite } from './shellsprites';
  * seconds after the last of it and fades away (hud.css `.hud-jar.is-flash`).
  *
  * The shells are a small 2D simulation — gravity, the jar's walls, the shells on each
- * other, each a disc of one size — stepped at `STEP_S` while anything moves; and every
- * couple of seconds, while the jar is out and still, it is given a little shake so the
- * shells shift in it. Out of sight nothing runs: the first purse is laid in settled, and
- * whatever was still moving when the jar went away is laid in settled too.
+ * other, each a disc of its own size — stepped at `STEP_S` while anything moves; and
+ * every couple of seconds, while the jar is out and still, it is given a little shake so
+ * the shells shift in it. Out of sight nothing runs: the first count is laid in settled,
+ * and whatever was still moving when the jar went away is laid in settled too.
  */
 
 /** A shell's size in the jar, em (hud.css `.hud-jar` sets the em): `JAR_CAPACITY` of them lie in the belly with room to tumble. */
 const DIAMETER = 1.05;
+/** Each shell's size, drawn when it comes into the jar, as a share of `DIAMETER`: only for life, every shell is worth one. */
+const SIZE_MIN = 0.88;
+const SIZE_MAX = 1.12;
 /** The sprite is drawn a little past the disc the shell is simulated as: its shape does not fill the disc. */
 const SPRITE_OVER = 1.12;
 
@@ -95,7 +101,6 @@ const ROLL = 0.6;
 const FLASH_HOLD_MS = 2500;
 
 interface Shell {
-  readonly kind: ShellKind;
   readonly r: number;
   x: number;
   y: number;
@@ -116,19 +121,13 @@ interface Shell {
 }
 
 /** What the jar is to do next: a shell poured in, lifted out, popped over the rim, or leaping out to a fine. */
-interface JarOp {
-  readonly t: 'pour' | 'take' | 'pop' | 'fine';
-  readonly kind: ShellKind;
-}
+type JarOp = 'pour' | 'take' | 'pop' | 'fine';
 
-const OP_MS: Readonly<Record<JarOp['t'], number>> = { pour: POUR_MS, take: TAKE_MS, pop: POP_MS, fine: FINE_MS };
+const OP_MS: Readonly<Record<JarOp, number>> = { pour: POUR_MS, take: TAKE_MS, pop: POP_MS, fine: FINE_MS };
 
-/** The purse in words, the jar's label: "12 shells: 4 scallop, 3 spiral, 5 horn". */
-function purseWords(purse: Readonly<ShellPurse>): string {
-  const total = purseTotal(purse);
-  if (total === 0) return 'No shells';
-  const kinds = SHELL_KINDS.filter((kind) => purse[kind] > 0).map((kind) => `${purse[kind]} ${kind}`);
-  return `${total} shell${total === 1 ? '' : 's'}: ${kinds.join(', ')}`;
+/** The count in words, the jar's label: "12 shells". */
+function countWords(count: number): string {
+  return count === 0 ? 'No shells' : `${count} shell${count === 1 ? '' : 's'}`;
 }
 
 const CX = MARGIN_X + JAR_W / 2;
@@ -207,12 +206,12 @@ export class ShellJar {
   private readonly shells: Shell[] = [];
   /** What is still to be done, in order. */
   private readonly ops: JarOp[] = [];
-  /** The purse last set, or null before the first. */
-  private purse: ShellPurse | null = null;
-  /** Shells gone over the rim since the last `set`, by kind. */
-  private readonly spilled: ShellPurse = { scallop: 0, spiral: 0, horn: 0, cowrie: 0 };
-  /** Shells a fine took since the last `set`, by kind: the purse's drop leaps out instead of being lifted. */
-  private readonly fined: ShellPurse = { scallop: 0, spiral: 0, horn: 0, cowrie: 0 };
+  /** The count last set, or null before the first. */
+  private count: number | null = null;
+  /** Shells gone over the rim since the last `set`. */
+  private spilled = 0;
+  /** Shells a fine took since the last `set`: the count's drop leaps out instead of being lifted. */
+  private fined = 0;
   private nextActionMs = 0;
   private nextShakeMs = 0;
   private flashUntilMs = 0;
@@ -261,68 +260,50 @@ export class ShellJar {
   }
 
   /**
-   * Shells of these kinds went over the rim of the full jar as new ones came in: called
-   * before the `set` that brings the new purse, which pops them out as it pours.
+   * `count` shells went over the rim of the full jar as new ones came in: called before
+   * the `set` that brings the new count, which pops them out as it pours.
    */
-  spill(kinds: readonly ShellKind[]): void {
-    if (this.purse === null) return;
-    for (const kind of kinds) this.spilled[kind]++;
-    if (kinds.length > 0) this.flash();
+  spill(count: number): void {
+    if (this.count === null || count <= 0) return;
+    this.spilled += count;
+    this.flash();
   }
 
   /**
-   * Shells of these kinds were taken by a fine: called before the `set` that brings the
-   * new purse, which has them leap out of the jar rather than be lifted out.
+   * `count` shells were taken by a fine: called before the `set` that brings the new
+   * count, which has them leap out of the jar rather than be lifted out.
    */
-  fine(kinds: readonly ShellKind[]): void {
-    if (this.purse === null) return;
-    for (const kind of kinds) this.fined[kind]++;
-    if (kinds.length > 0) this.flash();
+  fine(count: number): void {
+    if (this.count === null || count <= 0) return;
+    this.fined += count;
+    this.flash();
   }
 
-  /** The shells now: the change poured in, lifted out and popped where it can be seen; the first purse laid in settled. */
-  set(purse: Readonly<ShellPurse>): void {
-    const before = this.purse;
-    // Called every frame: nothing changed, nothing to do (and nothing allocated).
-    if (before !== null) {
-      let same = true;
-      for (const kind of SHELL_KINDS) same &&= purse[kind] === before[kind] && this.spilled[kind] === 0 && this.fined[kind] === 0;
-      if (same) return;
-    }
-    this.purse = { ...purse };
-    this.el.setAttribute('aria-label', purseWords(purse));
+  /** The shells now: the change poured in, lifted out and popped where it can be seen; the first count laid in settled. */
+  set(count: number): void {
+    const before = this.count;
+    // Called every frame: nothing changed, nothing to do.
+    if (before !== null && count === before && this.spilled === 0 && this.fined === 0) return;
+    this.count = count;
+    this.el.setAttribute('aria-label', countWords(count));
     if (before === null) {
       this.layIn();
       return;
     }
-    // Per kind: the spilled ones came in and went out again, so pour them as well as pop
-    // them; of what went out, the fined ones leap and the rest (spent) are lifted.
-    const pours: ShellKind[] = [];
-    const pops: ShellKind[] = [];
-    const fines: ShellKind[] = [];
-    const takes: ShellKind[] = [];
-    for (const kind of SHELL_KINDS) {
-      const spilled = this.spilled[kind];
-      const net = purse[kind] - before[kind] + spilled;
-      const fined = Math.min(this.fined[kind], Math.max(0, -net));
-      for (let i = 0; i < Math.max(0, net); i++) pours.push(kind);
-      for (let i = 0; i < fined; i++) fines.push(kind);
-      for (let i = 0; i < Math.max(0, -net) - fined; i++) takes.push(kind);
-      for (let i = 0; i < spilled; i++) pops.push(kind);
-      this.spilled[kind] = 0;
-      this.fined[kind] = 0;
-    }
-    if (pours.length + pops.length + fines.length + takes.length === 0) return;
-    // The new shells in a mixed handful, as they were paid; then what the full jar loses,
-    // then what a fine takes, in the order it took them, then what is spent.
-    for (let i = pours.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pours[i], pours[j]] = [pours[j]!, pours[i]!];
-    }
-    for (const kind of pours) this.ops.push({ t: 'pour', kind });
-    for (const kind of pops) this.ops.push({ t: 'pop', kind });
-    for (const kind of fines) this.ops.push({ t: 'fine', kind });
-    for (const kind of takes) this.ops.push({ t: 'take', kind });
+    // The spilled ones came in and went out again, so pour them as well as pop them; of
+    // what went out, the fined ones leap and the rest (spent) are lifted.
+    const spilled = this.spilled;
+    const net = count - before + spilled;
+    const fined = Math.min(this.fined, Math.max(0, -net));
+    const takes = Math.max(0, -net) - fined;
+    this.spilled = 0;
+    this.fined = 0;
+    if (Math.max(0, net) + spilled + fined + takes === 0) return;
+    // The new shells, then what the full jar loses, then what a fine takes, then what is spent.
+    for (let i = 0; i < net; i++) this.ops.push('pour');
+    for (let i = 0; i < spilled; i++) this.ops.push('pop');
+    for (let i = 0; i < fined; i++) this.ops.push('fine');
+    for (let i = 0; i < takes; i++) this.ops.push('take');
     this.flash();
   }
 
@@ -358,33 +339,31 @@ export class ShellJar {
 
   /** The queue run out at once and the shells settled, unseen. */
   private settle(): void {
-    if (this.moving() && this.purse !== null) this.layIn();
+    if (this.moving() && this.count !== null) this.layIn();
   }
 
-  /** The jar filled at once with the purse as it stands, settled: dropped in rows and the simulation run till they lie still. */
+  /** The jar filled at once with the count as it stands, settled: dropped in rows and the simulation run till they lie still. */
   private layIn(): void {
-    const purse = this.purse!;
+    const count = Math.min(JAR_CAPACITY, this.count!);
     this.shells.length = 0;
     this.ops.length = 0;
-    for (const kind of SHELL_KINDS) this.fined[kind] = 0;
-    // Mixed, as they came; in rows from the foot up, each as wide as the belly is at its height.
-    const kinds: ShellKind[] = [];
-    for (const kind of SHELL_KINDS) for (let i = 0; i < purse[kind]; i++) kinds.push(kind);
-    for (let i = kinds.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [kinds[i], kinds[j]] = [kinds[j]!, kinds[i]!];
-    }
-    let y = FLOOR_Y - WALL / 2 - DIAMETER / 2;
-    let half = bellyHalfAt(y, DIAMETER / 2);
+    this.fined = 0;
+    // In rows from the foot up, each as wide as the belly is at its height, a row as high as the biggest shell.
+    const rowH = DIAMETER * SIZE_MAX;
+    let y = FLOOR_Y - WALL / 2 - rowH / 2;
+    let half = bellyHalfAt(y, rowH / 2);
     let x = CX - half;
-    for (const kind of kinds.slice(0, JAR_CAPACITY)) {
-      if (x + DIAMETER > CX + half) {
-        y -= DIAMETER;
-        half = Math.max(0, bellyHalfAt(y, DIAMETER / 2));
+    for (let i = 0; i < count; i++) {
+      const shell = this.newShell(0, y);
+      if (x + 2 * shell.r > CX + half) {
+        y -= rowH;
+        half = Math.max(0, bellyHalfAt(y, rowH / 2));
         x = CX - half;
       }
-      this.shells.push(this.newShell(kind, x + DIAMETER / 2, y));
-      x += DIAMETER * 1.02;
+      shell.x = x + shell.r;
+      shell.y = y;
+      this.shells.push(shell);
+      x += 2 * shell.r * 1.02;
     }
     for (let i = 0; i < 700; i++) this.step();
     for (const s of this.shells) s.vx = s.vy = 0;
@@ -392,18 +371,20 @@ export class ShellJar {
     this.draw();
   }
 
-  /** The topmost shell of `kind` lying in the jar, or null. */
-  private topmost(kind: ShellKind): Shell | null {
+  /** The topmost shell lying in the jar, or null. */
+  private topmost(): Shell | null {
     let top: Shell | null = null;
     for (const s of this.shells) {
-      if (s.kind === kind && s.popS < 0 && s.liftS < 0 && (top === null || s.y < top.y)) top = s;
+      if (s.popS < 0 && s.liftS < 0 && (top === null || s.y < top.y)) top = s;
     }
     return top;
   }
 
-  private newShell(kind: ShellKind, x: number, y: number): Shell {
+  /** A new shell at (`x`, `y`), of a size of its own. */
+  private newShell(x: number, y: number): Shell {
+    const r = (DIAMETER / 2) * (SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN));
     return {
-      kind, r: DIAMETER / 2, x, y, vx: 0, vy: 0, angle: Math.random() * Math.PI * 2, spin: 0,
+      r, x, y, vx: 0, vy: 0, angle: Math.random() * Math.PI * 2, spin: 0,
       popS: -1, fallS: -1, fined: false, liftS: -1, fromX: 0, fromY: 0,
     };
   }
@@ -451,22 +432,22 @@ export class ShellJar {
     this.restS = 0;
     this.flashUntilMs = now + FLASH_HOLD_MS;
     const next = this.ops[0];
-    this.nextActionMs = now + (next === undefined || next.t === op.t ? OP_MS[op.t] : SWAP_MS);
-    if (op.t === 'pour') {
-      const shell = this.newShell(op.kind, CX + (Math.random() - 0.5) * (MOUTH_HALF - DIAMETER / 2), LIP_Y - DIAMETER);
+    this.nextActionMs = now + (next === undefined || next === op ? OP_MS[op] : SWAP_MS);
+    if (op === 'pour') {
+      const shell = this.newShell(CX + (Math.random() - 0.5) * (MOUTH_HALF - DIAMETER / 2), LIP_Y - DIAMETER);
       shell.vy = 4;
       shell.vx = (Math.random() - 0.5) * 1.5;
       this.shells.push(shell);
       return;
     }
-    const top = this.topmost(op.kind);
+    const top = this.topmost();
     if (top === null) return;
-    if (op.t === 'take') {
+    if (op === 'take') {
       top.liftS = 0;
       top.fromX = top.x;
       top.fromY = top.y;
       top.vx = top.vy = 0;
-    } else if (op.t === 'pop') {
+    } else if (op === 'pop') {
       // Up through the mouth: the leap tops out over its middle, then the shell is thrown
       // aside, spinning, and falls past the jar and off it.
       this.leap(top, POP_OVER * (0.8 + Math.random() * 0.4), 6 + Math.random() * 4);
@@ -644,7 +625,7 @@ export class ShellJar {
     if (s.fined) g.filter = FINE_FILTER;
     g.translate(s.x, s.y);
     g.rotate(s.angle);
-    g.drawImage(shellSprite(s.kind), -half, -half, 2 * half, 2 * half);
+    g.drawImage(shellSprite(), -half, -half, 2 * half, 2 * half);
     g.restore();
   }
 

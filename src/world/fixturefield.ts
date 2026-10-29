@@ -1,6 +1,5 @@
 import type { FoleyContinuous, FoleyEvent } from '../audio/foley';
 import type { DeliveryProbe } from '../contracts/types';
-import type { ShellPrice } from '../economy/shells';
 import type { GameWorld } from '../game/state';
 import type { Inventory, Item } from '../items/items';
 import type { FixedGridView } from '../vehicle/trunk';
@@ -28,11 +27,11 @@ export interface FixtureContext {
   /** The item in the hands, or null. */
   readonly held: Item | null;
   /**
-   * Takes `price` out of the player's jar while a machine is being worked (framed or
-   * engaged); false, and nothing taken, when none is or he is short of its kind.
+   * Takes `count` shells out of the player's jar while a machine is being worked (framed
+   * or engaged); false, and nothing taken, when none is or he is short of them.
    */
-  debit(price: ShellPrice): boolean;
-  /** Pays `count` shells of random kinds into the player's jar (economy/economy.ts `credit`). */
+  debit(count: number): boolean;
+  /** Pays `count` shells into the player's jar (economy/economy.ts `credit`). */
   credit(count: number): void;
   /** Takes an item out of the hands (or the pack) by id. */
   give(itemId: string): Item | null;

@@ -48,6 +48,9 @@ const FOOTBALL_START_SPEED = 0.18;
 const FOOTBALL_SETTLED_SPEED = 0.14;
 const FOOTBALL_SETTLED_SECONDS = 0.45;
 const FOOTBALL_STRONG_KICK_SPEED = 5;
+/** An awake item slower than this, m/s, and turning slower than this, rad/s, is at rest (`forEachRestingItem`). */
+const REST_SPEED_SQ = 0.08 * 0.08;
+const REST_SPIN_SQ = 0.4 * 0.4;
 
 /**
  * Runtime-only rewind tape for one football. Authority still lives in the ordinary
@@ -375,6 +378,25 @@ export class LoosePartField {
   }
 
   /**
+   * Every live loose item at rest — its body asleep, or all but still — with its body's
+   * ABSOLUTE position. `visit` may `remove` the item it is handed.
+   */
+  forEachRestingItem(visit: (item: Item, x: number, y: number, z: number) => void): void {
+    for (const [id, entry] of this.items) {
+      const body = entry.body;
+      if (!body.isSleeping()) {
+        const v = body.linvel(this.vScratch);
+        const w = body.angvel(this.wScratch);
+        if (v.x * v.x + v.y * v.y + v.z * v.z > REST_SPEED_SQ || w.x * w.x + w.y * w.y + w.z * w.z > REST_SPIN_SQ) continue;
+      }
+      const loose = this.world.state.looseItems[id];
+      if (!loose) continue;
+      const t = body.translation(this.tScratch);
+      visit(loose.item, t.x + this.origin.x, t.y, t.z + this.origin.z);
+    }
+  }
+
+  /**
    * Rebuilds the derived view from authoritative state. Before an active center is
    * supplied, state remains intentionally dormant rather than materialising a save.
    */
@@ -431,6 +453,8 @@ export class LoosePartField {
   }
   private readonly tScratch = { x: 0, y: 0, z: 0 };
   private readonly rScratch = { x: 0, y: 0, z: 0, w: 1 };
+  private readonly vScratch = { x: 0, y: 0, z: 0 };
+  private readonly wScratch = { x: 0, y: 0, z: 0 };
 
   private isInsideLoadRadius(x: number, y: number, z: number): boolean {
     if (!this.hasActiveCenter) return false;

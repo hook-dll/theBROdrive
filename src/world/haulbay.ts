@@ -15,14 +15,15 @@ import {
  * THE PARKING ROW (game-design2.md §6.3, §7.8): three slots side by side on the post's
  * lay-by, painted on its asphalt in white, each at 45° to the road and leaning with the
  * lay-by's traffic, a herringbone `/ / /` seen from the road. A car arriving turns into
- * a slot nose first; a load is reversed in against the traffic and leaves forward. Each
- * slot is 3.5 m wide, room to walk between two cars parked side by side.
+ * a slot nose first; a load stands in it either way. Each slot is 3.5 m wide, room to
+ * walk between two cars parked side by side.
  *
  *  1. PICK-UP, the first a driver reaches: the post's haul load waits in it until it is
  *     taken, nose out, as if reversed in (contracts/world.ts `spawnHaulLoad`); a sign
  *     beside it says where it goes (world/haulsign.ts).
- *  2. HAND-IN: a haul's load is handed in by reversing it into the destination post's
- *     second slot (contracts/haulbays.ts).
+ *  2. HAND-IN: a haul's load is handed in by parking all of it inside the destination
+ *     post's second slot, which way round it stands is not judged (contracts/haulbays.ts);
+ *     while a haul is out that slot is marked with a pink grid (render/baymark.ts).
  *  3. SALE: the settlement's car for sale, when it has one (world/poi.ts `buildLot`);
  *     marked and empty otherwise.
  *
@@ -88,7 +89,7 @@ export function postParkingSlot(seed: number, road: Road, index: number, role: P
 
 /** The paint, metres: a line's width, and its top over the fitted ground. */
 const PAINT_W = 0.12;
-const PAINT_PROUD = 0.02;
+export const PAINT_PROUD = 0.02;
 
 /**
  * Paints `slots` (`postParkingSlots`) on the lay-by: each slot's sides and its back

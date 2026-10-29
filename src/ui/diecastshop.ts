@@ -66,6 +66,14 @@ export class DieCastShop {
     if (i > 0) this.queue.unshift(...this.queue.splice(i, 1));
   }
 
+  /** Drops `order` if it is still waiting: it will not be built, nor `done` called. False when it is not waiting. */
+  cancel(order: DieCastOrder): boolean {
+    const i = this.queue.indexOf(order);
+    if (i < 0) return false;
+    this.queue.splice(i, 1);
+    return true;
+  }
+
   close(): void {
     this.closed = true;
     this.queue.length = 0;

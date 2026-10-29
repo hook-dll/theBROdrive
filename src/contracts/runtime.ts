@@ -19,7 +19,7 @@
 
 import { fine, FINE_SHELLS, formatFine } from '../economy/economy';
 import type { CarState, GameWorld } from '../game/state';
-import { contractIdOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
+import { contractThing, type ContractCargoItem, type Item } from '../items/items';
 import { hasTag, thingWears, thingWearShare } from '../items/things';
 import type { RideMeter } from '../trip/ride';
 import { carModel, comfortFactor, type CarComfort } from '../vehicle/carmodels';
@@ -195,7 +195,7 @@ export class ContractRuntime {
     if (!wearThing(item, (carWear + (dropped ? DROP_WEAR : 0)) * thingWearShare(thing))) return;
     // Broken: its job closed undelivered there and then, a fragile thing's fined with the
     // break — unless the job was closed already and this is only its souvenir.
-    if (this.world.state.completedContractIds.includes(contractIdOf(item))) return;
+    if (this.world.state.completedContractIds.includes(item.id)) return;
     this.notify(hasTag(thing, 'fragile')
       ? `the ${thing.name} broke — the job is off, ${formatFine(fine(this.world, FINE_SHELLS))}`
       : `the ${thing.name} broke — the job is off, no pay`);

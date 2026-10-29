@@ -12,7 +12,11 @@
  *     trailer reaching in refuses it; `boxRefusal` still holds for the car that goes in;
  *  3. the stands: every variant builds headless, keeps its solids and controls inside the
  *     footprint `SERVICE_HALF.toybox` keeps clear, and has its moving parts apart from
- *     the merged ones; the whole toy box (stand, bay, fixture) builds at a real post.
+ *     the merged ones; the whole toy box (stand, bay, fixture) builds at a real post;
+ *  4. the catalogue: every car of the game once, cheapest first; BUY takes the price out
+ *     of the jar and puts a new car of his, in the paint its model showed, into the box,
+ *     takes nothing when the jar is short, never reuses an id, and the bought car survives
+ *     a save code; seeds are random uint32s, printed.
  *
  * What still needs the browser: the look, the wheel following the cursor, the model's
  * die-cast arriving from the worker, and no shader program linked mid-drive.
@@ -21,6 +25,10 @@
 import * as THREE from 'three';
 import type { CarState, TrailerState, WorldState } from '../src/game/state';
 import { GameWorld, newWorldState } from '../src/game/state';
+import { debit, carShells } from '../src/economy/economy';
+import { decodeSaveCode, encodeSaveCode } from '../src/save/save';
+import { CAR_MODELS } from '../src/vehicle/carmodels';
+import { factoryPaintHex, visiblePaintHex } from '../src/vehicle/carpaint';
 import type { ChunkContext } from '../src/world/chunks';
 import { TOY_STANDS } from '../src/world/devlook';
 import type { ParkingSlot } from '../src/world/haulbay';
@@ -31,9 +39,12 @@ import {
   BAY_HALF_WIDTH_M,
   BAY_PLAYER_MARGIN_M,
   buildToyBox,
+  catalogueCarId,
   inToyBay,
+  orderCatalogueCar,
   overlapsToyBay,
   readBaySwap,
+  TOY_CATALOGUE,
   type BayFootprint,
   type BayWorld,
 } from '../src/world/toybox';
@@ -206,6 +217,35 @@ for (const stand of TOY_STANDS) {
     buildToyBox(ctx, { index: 3, s: stop.roll.s }, stop.layout.toybox, group, [], [], { register: () => '' } as never, [], disposers);
     check(group.getObjectByName('toy-bay') !== undefined, 'the toy box paints its bay');
     for (const dispose of disposers) dispose();
+  }
+}
+
+// 4. THE CATALOGUE.
+{
+  const ids = CAR_MODELS.map((def) => def.id);
+  check(TOY_CATALOGUE.length === ids.length && ids.every((id) => TOY_CATALOGUE.includes(id)), `the catalogue holds every car of the game once (${TOY_CATALOGUE.length}/${ids.length})`);
+  check(TOY_CATALOGUE.every((id, i) => i === 0 || carShells(TOY_CATALOGUE[i - 1]!) <= carShells(id)), 'the catalogue runs cheapest first');
+  const seeds = Array.from({ length: 3 }, () => Math.floor(Math.random() * 0x100000000) >>> 0);
+  console.log(`  catalogue seeds ${seeds.join(', ')}`);
+  for (const seed of seeds) {
+    const world = new GameWorld(newWorldState(seed));
+    const modelId = TOY_CATALOGUE[Math.floor(Math.random() * TOY_CATALOGUE.length)]!;
+    const price = carShells(modelId);
+    world.apply({ t: 'shells', shells: price - 1 });
+    check(orderCatalogueCar(world, modelId, (count) => debit(world, count)) === null, `${seed}: one shell short, BUY refuses`);
+    check(world.state.player.shells === price - 1 && Object.keys(world.state.toyBox).length === 0, `${seed}: a refused BUY takes nothing and boxes nothing`);
+    world.apply({ t: 'shells', shells: price * 2 + 3 });
+    const shown = factoryPaintHex(modelId, catalogueCarId(seed, world.state, modelId));
+    const first = orderCatalogueCar(world, modelId, (count) => debit(world, count));
+    const bought = first ? world.state.toyBox[first] : undefined;
+    check(bought?.papers === true && bought.modelId === modelId && !world.state.cars[first!], `${seed}: the bought ${modelId} is his, in the box`);
+    check(world.state.player.shells === price + 3, `${seed}: BUY took ${price} shells (${world.state.player.shells} left of ${price * 2 + 3})`);
+    check(bought !== undefined && visiblePaintHex(bought.paint, modelId, bought.id) === shown, `${seed}: the bought car wears the paint its model showed`);
+    const second = orderCatalogueCar(world, modelId, (count) => debit(world, count));
+    check(second !== null && second !== first && Object.keys(world.state.toyBox).length === 2, `${seed}: a second one is a second car (${first}, ${second})`);
+    check(world.state.player.shells === 3, `${seed}: the second took its price too (${world.state.player.shells} left)`);
+    const loaded = decodeSaveCode(encodeSaveCode(world.state));
+    check(loaded.toyBox[first!]?.papers === true && loaded.toyBox[second!]?.papers === true, `${seed}: the bought cars load boxed and his`);
   }
 }
 

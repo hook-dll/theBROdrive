@@ -875,7 +875,7 @@ export interface PauseHooks {
    * 200-300 km, so driving to one is hours; dev only, absent in a production build.
    */
   jumpToLake?: (index: number) => void;
-  /** Pays ten shells of random kinds into the player's jar. Dev only, absent in a production build. */
+  /** Pays ten shells into the player's jar. Dev only, absent in a production build. */
   giveShells?: () => void;
   /** Puts the player and the driven car on the road at a kilometre. Dev only. */
   jumpToKm?: (km: number) => void;

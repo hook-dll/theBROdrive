@@ -20,6 +20,13 @@ import type { CarState } from '../game/state';
 import type { ContractCargoItem } from '../items/items';
 
 /**
+ * A taken contract left this far from the player, straight line, is ABANDONED, m: a
+ * haul's load (contracts/haulbays.ts) or a teddy lying anywhere (world/shelter.ts
+ * `settleBenchTeddies`). The contract closes undelivered and is fined.
+ */
+export const ABANDON_M = 300;
+
+/**
  * The machinery a thing rides on: a thing carried by hand (boot, seat, bench), a
  * trailer load, a towed car, a car driven over, teddy passengers. Counted by id in the
  * saved delivery ledger: never rename one.
@@ -145,9 +152,4 @@ export interface ContractKindDef {
    * (contracts/haulbays.ts), before the bay decides delivery or return.
    */
   readonly acceptRefusal?: (item: ContractCargoItem, probe: DeliveryProbe) => string | null;
-  /**
-   * Finishes a freshly generated offer of this kind: a passenger party's `party`.
-   * Called last by `makeContract`.
-   */
-  readonly dressOffer?: (offer: ContractCargoItem) => void;
 }

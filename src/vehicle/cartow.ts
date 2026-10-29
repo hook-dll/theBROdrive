@@ -1,7 +1,10 @@
 /**
  * The car-to-car tow bar: an immobilised car dragged behind a working one on an
- * A-FRAME. Contract kind `towing` is its user, but nothing here knows about contracts
- * — it is an ordinary world coupling between two `Vehicle`s.
+ * A-FRAME. A haul's car (contract kinds `towing` and `car_transfer`) is its user: it is
+ * moved on the bar only, and stands with its A-frame already bolted to its front bumper,
+ * the coupler resting on the ground (`carriesFrame`, `syncVisuals`), until the bar is put
+ * on a tower's ball. Nothing else here knows about contracts — it is an ordinary world
+ * coupling between two `Vehicle`s.
  *
  * WHAT A REAL TOW WITH NOBODY IN THE TOWED CAR IS.
  *
@@ -79,7 +82,6 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { emptyInput, type InputFrame } from '../core/input';
 import type { PhysicsWorld } from '../core/physics';
 import type { GameWorld } from '../game/state';
-import type { WorldOrigin } from '../world/origin';
 import type { Vehicle } from './vehicle';
 
 /**
@@ -343,6 +345,11 @@ export class CarTowField {
     string,
     { input: InputFrame; remaining: number; frontAxleZ: number; castor: CastorState }
   >();
+  /**
+   * The A-frames standing bolted to an uncoupled car's front (`carriesFrame`), by car id:
+   * a group under that car's own root, so it rides with the body for free.
+   */
+  private readonly frames = new Map<string, { vehicle: Vehicle; group: THREE.Group }>();
   /** Invisible holder that compiles the bar's program from boot; see the rule. */
   private readonly warmup = new THREE.Group();
   private readonly barGeometry: THREE.CylinderGeometry;
@@ -358,10 +365,11 @@ export class CarTowField {
     private readonly physics: PhysicsWorld,
     private readonly world: GameWorld,
     private readonly scene: THREE.Scene,
-    private readonly origin: WorldOrigin,
     private readonly vehicleFor: (carId: string) => Vehicle | null,
     /** Called once when a live bar snaps under overstretch, for the toast. */
     private readonly onBreak: (towedCarId: string, towerCarId: string) => void,
+    /** Cars that carry their own A-frame on their front bumper while no bar couples them. */
+    private readonly carriesFrame: (carId: string) => boolean = () => false,
   ) {
     // Cylinder axis along local +Z, so scaling z lengths the arm.
     this.barGeometry = new THREE.CylinderGeometry(BAR_RADIUS, BAR_RADIUS, 1, 8);
@@ -764,9 +772,9 @@ export class CarTowField {
 
   /**
    * Draws the A-frame on the live bodies: the coupler on the tower's ball and an arm
-   * from it to each foot on the towed car's front face. The scene is in absolute
-   * coordinates and the bodies are not, so the origin is added; the group itself
-   * stays at the scene origin and only its children move.
+   * from it to each foot on the towed car's front face. The bodies and the scene share
+   * the origin-relative frame, so the bodies' translations place the arms directly; the
+   * group itself stays at the scene origin and only its children move.
    */
   private placeBar(link: TowLink): void {
     const ct = link.towerBody.translation();
@@ -774,27 +782,84 @@ export class CarTowField {
     const tt = link.towedBody.translation();
     const tr = link.towedBody.rotation();
     const ball = rotateLocal(link.towerAnchor, cr);
-    const ballX = ct.x + ball.x + this.origin.x;
+    const ballX = ct.x + ball.x;
     const ballY = ct.y + ball.y;
-    const ballZ = ct.z + ball.z + this.origin.z;
+    const ballZ = ct.z + ball.z;
     link.coupler.position.set(ballX, ballY, ballZ);
     const footZ = link.towedAnchor.z - A_FRAME_REACH;
     for (let i = 0; i < 2; i++) {
       const foot = rotateLocal({ x: i === 0 ? -A_FRAME_HALF_SPAN : A_FRAME_HALF_SPAN, y: link.towedAnchor.y, z: footZ }, tr);
-      this.aScratch.set(tt.x + foot.x + this.origin.x, tt.y + foot.y, tt.z + foot.z + this.origin.z);
+      this.aScratch.set(tt.x + foot.x, tt.y + foot.y, tt.z + foot.z);
       this.bScratch.set(ballX, ballY, ballZ).sub(this.aScratch);
-      const length = Math.max(0.05, this.bScratch.length());
-      this.bScratch.multiplyScalar(1 / length);
-      const arm = link.arms[i]!;
-      arm.position.copy(this.aScratch).addScaledVector(this.bScratch, length / 2);
-      arm.quaternion.setFromUnitVectors(BAR_AXIS, this.bScratch);
-      arm.scale.set(1, 1, length);
+      this.placeArm(link.arms[i]!, this.aScratch, this.bScratch);
     }
   }
 
-  /** Draws every bar on this frame's corrected pose. */
+  /** Lays `arm` from `from` along `span` (both in its parent's frame); `span` is consumed. */
+  private placeArm(arm: THREE.Mesh, from: THREE.Vector3, span: THREE.Vector3): void {
+    const length = Math.max(0.05, span.length());
+    span.multiplyScalar(1 / length);
+    arm.position.copy(from).addScaledVector(span, length / 2);
+    arm.quaternion.setFromUnitVectors(BAR_AXIS, span);
+    arm.scale.set(1, 1, length);
+  }
+
+  /**
+   * A resting A-frame in `vehicle`'s own frame: the feet on its front face at the hitch
+   * height, the frame swung down on its cross pin until the coupler rests on the ground
+   * ahead, `A_FRAME_REACH` from the pin as it is level.
+   */
+  private buildFrame(vehicle: Vehicle): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'tow-frame';
+    const groundY = vehicle.contactPlaneLocalY;
+    const pinY = groundY + HITCH_HEIGHT;
+    const frontZ = vehicle.modelMeasure.halfExtents[2];
+    const drop = HITCH_HEIGHT - EYE_RADIUS;
+    const reach = Math.sqrt(Math.max(0, A_FRAME_REACH * A_FRAME_REACH - drop * drop));
+    const coupler = new THREE.Mesh(this.eyeGeometry, matBar);
+    coupler.position.set(0, groundY + EYE_RADIUS, frontZ + reach);
+    group.add(coupler);
+    for (const side of [-1, 1]) {
+      const arm = new THREE.Mesh(this.barGeometry, matBar);
+      arm.castShadow = true;
+      this.aScratch.set(side * A_FRAME_HALF_SPAN, pinY, frontZ);
+      this.bScratch.copy(coupler.position).sub(this.aScratch);
+      this.placeArm(arm, this.aScratch, this.bScratch);
+      group.add(arm);
+    }
+    return group;
+  }
+
+  /**
+   * Draws every bar on this frame's corrected pose, and keeps a resting A-frame on each
+   * uncoupled car that carries one: under its own root while it is live and off the bar.
+   */
   syncVisuals(): void {
     for (const link of this.links.values()) this.placeBar(link);
+    for (const carId in this.world.state.cars) {
+      if (!this.carriesFrame(carId)) continue;
+      const vehicle = this.vehicleFor(carId);
+      let frame = this.frames.get(carId);
+      if (frame && frame.vehicle !== vehicle) {
+        frame.group.removeFromParent();
+        this.frames.delete(carId);
+        frame = undefined;
+      }
+      if (!vehicle) continue;
+      if (!frame) {
+        frame = { vehicle, group: this.buildFrame(vehicle) };
+        this.frames.set(carId, frame);
+      }
+      // A car's visuals rebuilt drop every child of its root; put the frame back.
+      if (frame.group.parent !== vehicle.root) vehicle.root.add(frame.group);
+      frame.group.visible = !this.links.has(carId);
+    }
+    for (const [carId, frame] of this.frames) {
+      if (this.world.state.cars[carId] && this.vehicleFor(carId) === frame.vehicle) continue;
+      frame.group.removeFromParent();
+      this.frames.delete(carId);
+    }
   }
 
   /** Drops every bar on this car, as either end. */
@@ -806,6 +871,8 @@ export class CarTowField {
     for (const towedId of asTower) this.drop(towedId, false);
     this.drop(carId, false);
     this.coasting.delete(carId);
+    this.frames.get(carId)?.group.removeFromParent();
+    this.frames.delete(carId);
   }
 
   /** Releases every bar and the warm-up node while retaining authoritative state. */
@@ -816,6 +883,8 @@ export class CarTowField {
     }
     this.links.clear();
     this.coasting.clear();
+    for (const frame of this.frames.values()) frame.group.removeFromParent();
+    this.frames.clear();
     this.scene.remove(this.warmup);
     this.warmup.clear();
     this.barGeometry.dispose();

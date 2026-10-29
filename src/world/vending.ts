@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { FoleyEvent } from '../audio/foley';
 import { hash01, pick } from '../core/rng';
-import { formatPrice, itemPrice } from '../economy/economy';
+import { formatPay, itemShells } from '../economy/economy';
 import type { GameWorld } from '../game/state';
 import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { IMPORT_ENGINE_IDS, variantsOfKind, type PartInstance } from '../parts/registry';
@@ -40,9 +40,8 @@ import { box } from './poi/kit';
  * is filled at a settlement's pumps (world/pumps.ts) or from another can. Stickers are
  * not sold here: the claw machine gives them (world/claw.ts).
  *
- * Prices are not set here: the economy prices each item (`itemPrice`,
- * economy/economy.ts), the same count of shells down the whole road, and every price a
- * machine asks is in the one kind of shell it takes (`machineShellKind` of its id).
+ * Prices are not set here: the economy prices each item (`itemShells`,
+ * economy/economy.ts), the same count of shells down the whole road.
  */
 
 /** Most things one machine is stocked with. */
@@ -295,15 +294,15 @@ class GarageMachine extends CardMachine {
       return;
     }
     const card = WARE_CARD[ware];
-    const price = itemPrice(this.world.seed, this.id, item);
+    const price = itemShells(item);
     paintCardFace(g, w, h, {
       band: card.band,
       bandText: card.kind,
       corner: `${index + 1}/${this.available.length}`,
       headline: itemLabel(item),
       lines: [
-        formatPrice(price),
-        slot === this.short ? `NOT ENOUGH ${price.kind.toUpperCase()} SHELLS` : card.line,
+        formatPay(price),
+        slot === this.short ? 'NOT ENOUGH SHELLS' : card.line,
       ],
       footer: '',
     });
@@ -331,7 +330,7 @@ class GarageMachine extends CardMachine {
       ctx.toast('take out what lies in the grid first');
       return this.refuse();
     }
-    const price = itemPrice(this.world.seed, this.id, at.item);
+    const price = itemShells(at.item);
     if (!ctx.debit(price)) {
       // The card says why, painted afresh in place.
       this.short = at.slot;
