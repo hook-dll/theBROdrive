@@ -1528,6 +1528,41 @@
 
 ### Fixed
 
+- THE SMALL JERKS AT SPEED: THE MESA REBUILD NO LONGER LANDS IN ONE FRAME
+  (`render/vista.ts` `MesaBuild`, `planMesas`; `ui/perfoverlay.ts`). Reported from play
+  (owner, 2026-10-29): with the performance graph on, single short spikes, some under the
+  16.7 ms line, felt as jerks when driving fast. Traced on autopilot drives at
+  100-110 km/h (seeds 3597466627, 3226876384, 3981248153, per-frame CPU of the frame
+  callback with coarse section timers): every 250 m vista cell crossing rebuilt all ~113
+  resident mesas (56k vertices) in the crossing frame, 5-9 ms in `buildMesas` (over half
+  of it `BufferGeometry.toNonIndexed`) plus 1-6 ms of normals and a fresh 2 MB upload,
+  so 12-22 ms frames 6-10 times a minute. Now the next cell's mesas are written straight
+  into their flat-shaded arrays (no index, no copy), a millisecond a frame, then the
+  heights and normals in a frame of their own and the swap in the next. They build while
+  the disc's lattice point stands on the edge between the two cells, where both cells'
+  interpolations give the same ground, so the set on screen and its successor stand every
+  mesa in the same place to the bit (tools/vista-check.ts checks both directions; a
+  frame-by-frame comparison against the old one-frame build over 7 km each way on the
+  three seeds: positions identical every frame). Crossing in -x the build starts a step
+  before the disc leaves its cell. A road weaving back over the edge just crossed gets the
+  previous set back without a rebuild; an origin move (1 km) no longer rebuilds at all.
+  Only a teleport or a view-distance change still builds in one frame. Normals are taken
+  at the edge's lattice point rather than the next one, so they differ slightly from
+  before (the old ones were as stale across a cell). After, same drives and seeds:
+  frames with 3 ms or more of vista work 6-10 → 0-1 a minute, worst 12.7-16.8 → 1.4-3.1 ms;
+  frames over 12 ms 6-13 → 1-2 a minute, the rest being streaming jobs (below).
+  The overlay's budget line now sits at the scheduled presentation interval (the cap, else
+  the display's own rate) instead of a fixed 16.7 ms: on a 120 Hz panel the budget is
+  8.3 ms, and a 12 ms frame there is a dropped frame however far under 16.7 it stays.
+  Not changed, found on the same drives: an atomic POI chunk build of 23-30 ms when the
+  first POI streams in (`world/poi.ts` `PoiProvider.build`), single road-build steps of
+  65 and 85 ms on particular chunks (`road:build:24:road` on seed 3226876384,
+  `road:build:22:road` on 3981248153, every run), road collider slabs over their 1 ms
+  slice by 0.6-0.9 ms, a traffic car's spawn at 2-7 ms (`Traffic.placeCar`), and minor GC
+  about three times a second (0.6 ms typical, 1.5 ms worst; 55-75 MB/s allocated). The
+  loop itself was checked: fixed 60 Hz steps on the animation-frame timestamp with render
+  interpolation, frame-rate-independent camera smoothing, no raw-dt motion.
+
 - A DEATH ALWAYS ENDS ON THE TITLE SCREEN, AND IN SILENCE (`main.ts` `finishDeath`,
   `armDeathWatchdog`; `audio/mixer.ts` `fadeOut`). Reported from play (owner, 2026-10-28):
   killed head-on by an oncoming car, the camera rose and the screen went black, but the
