@@ -1908,6 +1908,8 @@ async function boot(): Promise<void> {
       playerDriven !== null ? -playerDriven.steeringFraction : 0,
     );
     input.setBrakeKnee(playerDriven?.thresholdBrakePedal ?? null);
+    // In a race the keys are plain pedals: a tap's cruise notch only got in the way.
+    input.setPlainPedals(race.active);
 
     // The races (race/director.ts): the offer and its F, before anything else reads the
     // key, and the racing rival's own controls, before the step.

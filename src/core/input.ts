@@ -405,6 +405,8 @@ export class InputReader {
   private brakeKnee: number = KEY_PEDAL_RAMPS.brake.knee;
   /** Keyboard and mouse throttle and brake (core/pedallever.ts). */
   private readonly lever = new PedalLever();
+  /** No cruise notches on the lever (`setPlainPedals`). */
+  private plainPedals = false;
   /**
    * MOUSE DRIVING's steering wheel: the rim angle in radians, positive RIGHT like
    * `steer`, within ±`STEERING_WHEEL_HALF_LOCK_RAD`. Only the mouse and the steering
@@ -544,6 +546,11 @@ export class InputReader {
     // A new seat starts in neutral: a lever left on a throttle notch must not drive off.
     if (driving !== this.driving) this.lever.reset();
     this.driving = driving;
+  }
+
+  /** The keys are plain pedals, no cruise notches (core/pedallever.ts `step`): during a race. */
+  setPlainPedals(plain: boolean): void {
+    this.plainPedals = plain;
   }
 
   /**
@@ -736,7 +743,7 @@ export class InputReader {
     // it a notch, holds floor the throttle or drop to full brake. Another device taking
     // a pedal puts it back in neutral, so no notch is waiting when the keys come back.
     if (this.throttleDevice !== 'keyboard' && this.brakeDevice !== 'keyboard') this.lever.reset();
-    else this.lever.step(keyThrottle, keyBrake, dt, this.brakeKnee);
+    else this.lever.step(keyThrottle, keyBrake, dt, this.brakeKnee, this.plainPedals);
     // A trigger is a position, so it lands as one: no rise, no fall. A touch pedal is a
     // switch-like thumb, so it moves the pedal like a quick foot (`KEY_PEDAL_RAMPS`).
     f.throttle =

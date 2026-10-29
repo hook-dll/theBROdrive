@@ -75,14 +75,18 @@ export class PedalLever {
     this.pedalling = false;
   }
 
-  /** `knee` is the brake pedal's ceiling, the driven car's threshold pedal. */
-  step(throttleKey: boolean, brakeKey: boolean, dt: number, knee: number): void {
+  /**
+   * `knee` is the brake pedal's ceiling, the driven car's threshold pedal. `plain` drops
+   * the cruise (a race, race/director.ts): every press is a hold from its first frame, so
+   * the throttle key heads for the floor and the brake key brakes, and no notch is set.
+   */
+  step(throttleKey: boolean, brakeKey: boolean, dt: number, knee: number, plain = false): void {
     this.knee = knee;
     if (brakeKey) {
       if (this.brakeHeldS < 0) {
         // The press: a lift on a throttle notch, the brake in neutral.
-        this.brakeHeldS = 0;
-        if (this.notch > 0) this.notch -= 1;
+        this.brakeHeldS = plain ? BRAKE_HOLD_S : 0;
+        if (this.notch > 0 && !plain) this.notch -= 1;
         else this.braking = true;
       } else {
         this.brakeHeldS += dt;
@@ -93,12 +97,12 @@ export class PedalLever {
       this.braking = false;
     }
     if (this.braking) this.notch = LEVER_MIN;
-    else if (this.notch === LEVER_MIN) this.notch = 0;
+    else if (this.notch === LEVER_MIN || plain) this.notch = 0;
 
     if (throttleKey && !brakeKey) {
       if (this.throttleHeldS < 0) {
-        this.throttleHeldS = 0;
-        this.notch = this.notch < 1 ? 1 : Math.min(LEVER_MAX, this.notch + 1);
+        this.throttleHeldS = plain ? LONG_PRESS_S : 0;
+        if (!plain) this.notch = this.notch < 1 ? 1 : Math.min(LEVER_MAX, this.notch + 1);
       } else {
         this.throttleHeldS += dt;
       }
