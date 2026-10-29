@@ -1879,6 +1879,16 @@ async function boot(): Promise<void> {
     for (const vehicle of vehicles.values()) {
       vehicle.setPlayerDriven(vehicle === playerDriven);
       vehicle.refreshLoad();
+      // Stop-start (`Vehicle.stepAutoStop`): an idling car that stands 20 s stops its
+      // engine, and the driver's throttle starts it again. Off while the autopilot drives
+      // it (the autopilot starts a stopped engine itself) and during a race (a car held
+      // on the grid must leave on the green, not crank first).
+      const step = vehicle.stepAutoStop(
+        dt,
+        vehicle === controlled ? f.throttle : 0,
+        !(autopilot.engaged && vehicle === driving) && !race.active,
+      );
+      if (step === 'stopped' && vehicle === controlled) hud.setToast('engine off: standing 20 s — throttle starts it');
     }
     syncPackMass(driving);
 

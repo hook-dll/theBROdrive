@@ -320,6 +320,11 @@ export class RaceDirector {
     return this.promptValue;
   }
 
+  /** A race is on (grid, running or results): the player's car keeps its engine (stop-start off). */
+  get active(): boolean {
+    return this.race !== null;
+  }
+
   /** The field car `id` is, or null. */
   private fieldCar(id: string): FieldCar | null {
     const field = this.field;

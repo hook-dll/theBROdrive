@@ -157,7 +157,13 @@ can do that". There is no key item and no ignition to find: every car starts on 
   the autopilot off, as `P` does ("autopilot off"); starting the engine engages nothing.
   An engaged autopilot that finds the engine stopped (a stall) starts it itself, once it
   can run.
-- Getting out leaves the engine as it is: a running car idles on. The switch is saved
+- **Stop-start.** An idling engine on one of the player's cars that stands still (under
+  0.3 m/s) with no throttle for 20 s stops itself, the key left in ("engine off: standing
+  20 s — throttle starts it"); the next throttle turns the starter. A car left idling at
+  a lay-by stops the same way. Only an engine stopped like this starts on the pedal: one
+  switched off with `I`, or stalled, waits for `I`. Off while the autopilot drives and
+  during a race (`Vehicle.stepAutoStop`). Not saved: a car reloaded auto-stopped waits for `I`.
+- Getting out leaves the engine as it is: a running car idles on, until stop-start stops it. The switch is saved
   with the car (`CarState.engineStopped`). Traffic and every car nobody has switched off
   run as before.
 

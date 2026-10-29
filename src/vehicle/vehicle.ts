@@ -1118,6 +1118,12 @@ const SPOT_REACH_MARGIN_M = 0.5;
  */
 const CRANK_MIN_S = 0.55;
 const CRANK_SPREAD_S = 0.35;
+/** Stop-start (`stepAutoStop`): seconds standing idle before the engine stops. */
+const AUTO_STOP_AFTER_S = 20;
+/** Under this road speed the car counts as standing, m/s. */
+const AUTO_STOP_STILL_MPS = 0.3;
+/** Throttle over this is the driver asking to go: it starts an auto-stopped engine. */
+const AUTO_START_THROTTLE = 0.05;
 
 export class Vehicle implements Rebasable {
   private readonly physics: PhysicsWorld;
@@ -1439,6 +1445,10 @@ export class Vehicle implements Rebasable {
   private stopped: boolean;
   /** The driver switched the engine off himself: the key is out and the dash goes dark. */
   private keyOff: boolean;
+  /** Seconds this car has stood idling with no throttle (`stepAutoStop`). */
+  private idleStill = 0;
+  /** The engine was stopped by `stepAutoStop`, not the key: the throttle starts it again. */
+  private autoStopped = false;
   /** Seconds left of the starter turning (`startEngine`); 0 when not cranking. */
   private crankLeft = 0;
   /** Starts made in this car's life, each drawing its own crank length (`hash01`). */
@@ -2118,6 +2128,7 @@ export class Vehicle implements Rebasable {
   startEngine(): void {
     if (!this.stopped || this.crankLeft > 0) return;
     this.keyOff = false;
+    this.autoStopped = false;
     this.crankCount++;
     const seconds = CRANK_MIN_S + CRANK_SPREAD_S * hash01(Math.floor(this.bouncePhase * 0x7fffffff), this.crankCount);
     this.crankLeft = seconds;
@@ -2137,6 +2148,7 @@ export class Vehicle implements Rebasable {
       audio.crankCatches = false;
     }
     this.keyOff = true;
+    this.autoStopped = false;
     this.setStopped(true);
     this.audioState.engineRunning = false;
   }
@@ -2145,6 +2157,46 @@ export class Vehicle implements Rebasable {
   toggleEngine(): void {
     if (this.stopped && this.crankLeft <= 0) this.startEngine();
     else this.stopEngine();
+  }
+
+  /**
+   * STOP-START, for the player's own cars (main.ts calls it each fixed step for every
+   * one of them; traffic never does). An engine idling on a car that has stood still
+   * with no throttle for `AUTO_STOP_AFTER_S` stops, the key left in: the dash stays lit
+   * as with any stopped engine on the key. The next throttle on it (`throttle`, the
+   * driver's pedal; 0 for a car nobody drives) turns the starter. A car left idling at a
+   * lay-by no longer burns its oil and boils its water while the player is away.
+   *
+   * Only an engine this stopped is started by the pedal: one switched off on the key, or
+   * stalled (dry tank, a part out, boiled), waits for the key as before. `enabled` false
+   * (an engaged autopilot drives the car, and starts a stopped engine itself) holds the
+   * count at zero. Returns what it did this step, for the driver's toast.
+   */
+  stepAutoStop(dt: number, throttle: number, enabled: boolean): 'stopped' | 'started' | null {
+    if (!enabled) {
+      this.idleStill = 0;
+      return null;
+    }
+    if (this.autoStopped) {
+      if (!this.stopped) {
+        this.autoStopped = false;
+        return null;
+      }
+      if (throttle > AUTO_START_THROTTLE && this.crankLeft <= 0) {
+        this.startEngine();
+        return 'started';
+      }
+      return null;
+    }
+    const idling = !this.stopped && this.crankLeft <= 0 && throttle <= AUTO_START_THROTTLE
+      && Math.abs(this.forwardSpeedMps()) < AUTO_STOP_STILL_MPS;
+    this.idleStill = idling ? this.idleStill + dt : 0;
+    if (this.idleStill < AUTO_STOP_AFTER_S) return null;
+    this.idleStill = 0;
+    this.setStopped(true);
+    this.audioState.engineRunning = false;
+    this.autoStopped = true;
+    return 'stopped';
   }
 
   private setStopped(stopped: boolean): void {

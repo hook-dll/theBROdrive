@@ -4,6 +4,12 @@
 
 ### Added
 
+- STOP-START on the player's cars (`Vehicle.stepAutoStop`, main.ts): an idling engine
+  that stands still with no throttle for 20 s stops itself, key left in, and the next
+  throttle cranks it. A car left running at a lay-by no longer idles on, losing oil and
+  water (and, with a low radiator, cooking) while the player is away. A key stop or a
+  stall still waits for `I`; off under the autopilot and during races.
+
 - THE ENGINE IS ON `I` (was `E`), and OIL GOES WITH THE WORK (`parts/registry.ts`
   `oilLossLph`, `vehicle/vehicle.ts`). Oil seeped at a flat 2.1 L/h whenever the engine
   ran, so ten minutes parked with it idling cost a tenth of a 4 L sump, and a car started
