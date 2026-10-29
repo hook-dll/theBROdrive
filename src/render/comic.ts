@@ -120,19 +120,25 @@ const LIGHTS_FRAGMENT_BEGIN = '#include <lights_fragment_begin>';
 const DIRECT_CALL =
   'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
 const SLOPE_SPOT_HELPER = /* glsl */ `
-vec3 groundSlopeNormal( vec3 position, vec3 flatNormal ) {
-	vec3 slope = normalize( cross( dFdx( position ), dFdy( position ) ) );
+vec3 groundSlopeNormal( vec3 dx, vec3 dy, vec3 flatNormal ) {
+	vec3 slope = normalize( cross( dx, dy ) );
 	return dot( slope, flatNormal ) < 0.0 ? -slope : slope;
 }
 `;
+/**
+ * The screen derivatives, taken once before the spot loop where every fragment runs
+ * them: inside it a slot's branch may differ between neighbouring fragments.
+ */
+const SLOPE_SPOT_DERIVATIVES =
+  'vec3 groundSpotDx = dFdx( geometryPosition );\nvec3 groundSpotDy = dFdy( geometryPosition );\n';
 const SLOPE_SPOT_CALL =
-  'RE_Direct( directLight, geometryPosition, groundSlopeNormal( geometryPosition, geometryNormal ), geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+  'RE_Direct( directLight, geometryPosition, groundSlopeNormal( groundSpotDx, groundSpotDy, geometryNormal ), geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
 
 /**
  * Ground uses authored upward normals for uniform sun colour. Spotlights need the
  * real geometric slope, however: on an uphill face the car is below a world-up
- * normal's horizon and Lambert rejects the beam completely. Replace only the spot
- * loop's direct-light call with a derivative normal; sun and hemisphere stay flat.
+ * normal's horizon and Lambert rejects the beam completely. Replace the spot loop's
+ * direct-light calls with a derivative normal; sun and hemisphere stay flat.
  *
  * `onBeforeCompile` receives the shader before Three expands ShaderChunk includes,
  * so patch the stock lighting chunk and splice it in at its include site.
@@ -141,14 +147,13 @@ function patchGroundSpotNormal(fragmentShader: string): string {
   const lightsChunk = THREE.ShaderChunk.lights_fragment_begin;
   const spotLoop = lightsChunk.indexOf('#if ( NUM_SPOT_LIGHTS > 0 )');
   const spotLoopEnd = lightsChunk.indexOf('#if ( NUM_DIR_LIGHTS > 0 )', spotLoop);
-  const directCall = spotLoop >= 0 ? lightsChunk.indexOf(DIRECT_CALL, spotLoop) : -1;
-  if (directCall < 0 || spotLoopEnd < 0 || directCall >= spotLoopEnd) {
-    throw new Error('Three spotlight shader layout changed');
-  }
+  const spotSection = spotLoop >= 0 && spotLoopEnd > spotLoop ? lightsChunk.slice(spotLoop, spotLoopEnd) : '';
+  if (!spotSection.includes(DIRECT_CALL)) throw new Error('Three spotlight shader layout changed');
   const patchedLightsChunk =
-    lightsChunk.slice(0, directCall) +
-    SLOPE_SPOT_CALL +
-    lightsChunk.slice(directCall + DIRECT_CALL.length);
+    lightsChunk.slice(0, spotLoop) +
+    SLOPE_SPOT_DERIVATIVES +
+    spotSection.replaceAll(DIRECT_CALL, SLOPE_SPOT_CALL) +
+    lightsChunk.slice(spotLoopEnd);
   const include = fragmentShader.indexOf(LIGHTS_FRAGMENT_BEGIN);
   if (include < 0) throw new Error('Three lighting include layout changed');
   let patched =

@@ -97,6 +97,8 @@ import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import { POOL_LIGHT_FLOATS, type LampPoolField, type LampView } from '../render/lamppools';
+import type { LampOccluders } from '../render/lampoccluders';
 import { SPOT_REACH_ALL } from '../render/lightshader';
 import { SWING_REACH_M } from '../render/kitdraw';
 import { KitRig } from '../carkit/rig';
@@ -1112,6 +1114,8 @@ const DOME_ANGLE = 1.25;
  * measured box's centre to the millimetre.
  */
 const SPOT_REACH_MARGIN_M = 0.5;
+/** `syncPoolLight`'s scratch: the pooled lamp pair on one car. */
+const _poolLight = new Float32Array(POOL_LIGHT_FLOATS);
 /**
  * How long the starter turns before the engine catches, seconds: a warm carburettor four
  * fires within a second [E: the engine voice's own crank, audio/engine-worklet.ts, which
@@ -4617,6 +4621,24 @@ export class Vehicle implements Rebasable {
     surface.setSpotReach(rig.spotReachMask(this.rootGroup.position, radius));
   }
 
+  /** Offers this car's chassis box to the lamps' occluders (render/lampoccluders.ts), if drawn. */
+  offerLampOccluder(occluders: LampOccluders): void {
+    if (!this.rootGroup.visible) return;
+    occluders.offer(this.rootGroup, this.rootGroup.position, this.rootGroup.quaternion, this.measure.halfExtents);
+  }
+
+  /**
+   * Lights this car's body and glass with the pooled lamps that reach it
+   * (render/lamppools.ts `lightOn`; call after the field's last `add`), or with none.
+   * A kit car's alone, as `syncSpotReach`.
+   */
+  syncPoolLight(field: LampPoolField | null): void {
+    const surface = this.surface;
+    if (!surface) return;
+    const lit = field?.lightOn(this.rootGroup, this.rootGroup.position, Math.hypot(...this.measure.halfExtents), _poolLight);
+    surface.setPoolLight(lit ? _poolLight : null);
+  }
+
   /**
    * True while any lamp on this vehicle is emitting. Lets the caller skip dark
    * vehicles entirely and order the lit ones before they claim rig slots.
@@ -4657,6 +4679,21 @@ export class Vehicle implements Rebasable {
     shadowed: boolean,
   ): void {
     this.lamps.syncProjectedLights(rig, group, gain, shadowed);
+  }
+
+  /** How much of this car's headlamp light the player sees (vehiclelamps.ts). */
+  headlampViewScore(view: LampView, distanceScale: number): number {
+    return this.lamps.headlampViewScore(view, distanceScale);
+  }
+
+  /** Lays one lit lamp group's light on the ground as a pool (vehiclelamps.ts). */
+  syncLampPool(field: LampPoolField, group: BeamGroup, gain: number): void {
+    this.lamps.syncLampPool(field, group, gain);
+  }
+
+  /** Lays the shadows of the cars in its slot-held headlamps' light (vehiclelamps.ts). */
+  syncLampShade(field: LampPoolField, gain: number, besideShadowed: boolean): void {
+    this.lamps.syncLampShade(field, gain, besideShadowed);
   }
 
   /**

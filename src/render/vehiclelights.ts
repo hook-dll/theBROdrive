@@ -40,9 +40,10 @@ import { SPOT_LIGHT_LIVE_MIN, SPOT_REACH_ALL } from './lightshader';
  *
  * Demand beyond the pool is therefore refused, and WHO is refused is decided before
  * any beam is offered: `main.ts` hands the slots out through a `FadingSlotPool`
- * (render/slotpool.ts) — the driven car's lamps pinned, then everyone else's nearest
- * to the camera first — so the farthest lamps lose their pool of light on the ground
- * while their lenses still glow, and a slot changes hands by fading out and in.
+ * (render/slotpool.ts) — the driven car's lamps pinned, then everyone else's headlamps
+ * by how much of their light the player sees (render/lamppools.ts `LampView`) — and a
+ * slot changes hands by fading out and in. A lamp without a slot lays its light on the
+ * ground as a pool instead (render/lamppools.ts), as do every other car's rear lamps.
  *
  * WHOSE LIGHT MATTERS. The driven car's beams are the only way to read the road at
  * night, so they are projected exactly as authored. Every other car's are projected
@@ -78,7 +79,7 @@ const DORMANT_INTENSITY = 1e-8;
  * across the dunes at three times the screen value. Matched by screenshot at midnight:
  * the pool on the road reads as before, the sand beyond it stays night.
  */
-const LAMP_EXPOSURE = 0.35;
+export const LAMP_EXPOSURE = 0.35;
 /**
  * Beam scale for a car the player is NOT driving, by distance from the camera.
  *

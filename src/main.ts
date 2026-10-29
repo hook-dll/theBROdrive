@@ -89,6 +89,28 @@ const LAMP_HANDOVER_S = 0.75;
 const DOME_BEAM_GROUP = BEAM_GROUPS.length;
 /** The beam pool's owner for the hand torch (render/vehiclelights.ts `addTorchBeam`). */
 const TORCH_BEAM_OWNER = {};
+/**
+ * Headlamp slot ranking (render/lamppools.ts `LampView`). A beam holding a slot is
+ * ranked this much above its score, so two beams of nearly equal worth do not trade the
+ * slot back and forth; and a beam scoring under the floor asks for no slot at all, since
+ * its pool shows everything of it the player could see.
+ */
+const HELD_SLOT_SCORE_BONUS = 1.5;
+const MIN_SLOT_VIEW_SCORE = 0.02;
+/**
+ * Traffic headlamps within 80 m of the eye (squared here, m2) whose light reaches any ground in
+ * view or the player's own car (a view score above zero, however small), ask for a slot
+ * before every farther beam. A pool lights the ground only, so a near car's beam on a
+ * post, a wall or a parked car is there only with a slot; past this the ranking by score
+ * alone decides.
+ */
+const NEAR_SLOT_RANGE_SQ = 80 * 80;
+/** The player's car as a lit target for that ranking: a sphere round the cabin, metres. */
+const PLAYER_CAR_LIT_RADIUS_M = 2.4;
+/** Cars past this from the eye (squared, m2) take no pooled lamp light on their bodies. */
+const POOL_LIT_CAR_RANGE_SQ = 200 * 200;
+import { LampPoolField, LampView } from './render/lamppools';
+import { LampOccluders } from './render/lampoccluders';
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -408,9 +430,31 @@ async function boot(): Promise<void> {
     world.state.settings.graphicsQuality,
     mobilePresentation,
   );
-  // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
-  // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
+  // Who holds the rig's spotlights frame to frame: a slot is handed over by fading,
+  // never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
+  // Every lit lamp without a slot lays its light on the ground as a pool instead, in one
+  // draw (render/lamppools.ts); `lampView` ranks the headlamps for the slots. The cars
+  // nearest the eye stand in the light of both tiers as boxes (render/lampoccluders.ts).
+  const lampOccluders = new LampOccluders();
+  const lampPools = new LampPoolField(
+    renderer.scene,
+    origin,
+    {
+      frame: (x, z, hintS, out) => {
+        const at = road.project(x, z, Number.isFinite(hintS) ? hintS : undefined);
+        out.s = at.s;
+        out.lateral = at.lateral;
+        out.heading = road.headingAt(at.s);
+        out.halfWidth = road.halfWidthAt(at.s);
+        return out;
+      },
+      heightAt: (x, z, s) => terrain.heightAt(x, z, s),
+    },
+    vehicleLights.headlightDistanceScale,
+    lampOccluders,
+  );
+  const lampView = new LampView();
   // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
   let spotReachCar: Vehicle | null = null;
   // Contact shadows are not a night effect and are not gated on the light rig: they are
@@ -1680,6 +1724,9 @@ async function boot(): Promise<void> {
         audio,
         origin,
         vehicleLights,
+        beamPool,
+        lampPools,
+        lampView,
         worldWork,
         streamer,
         desert,
@@ -1714,6 +1761,12 @@ async function boot(): Promise<void> {
   const litVehicles: Vehicle[] = [];
   /** `ambientBeamGain` of each of `litVehicles`, 1 for the driven car. */
   const litGains: number[] = [];
+  /** `headlampViewScore` of each of `litVehicles` with its range fade, 0 for no slot. */
+  const litScores: number[] = [];
+  /** Indices into `litVehicles` whose headlamps ask for a slot, best score first: the
+   *  near beams (`NEAR_SLOT_RANGE_SQ`) in `nearSlotCandidates`, the rest here. */
+  const slotCandidates: number[] = [];
+  const nearSlotCandidates: number[] = [];
 
   // Reused radio pose. The radio keeps the last non-null source coordinates after
   // exit, while the listener follows the camera every rendered frame.
@@ -2826,24 +2879,31 @@ async function boot(): Promise<void> {
       vehicle.setHeadlightEnvironmentFactor(headlightVisibility);
     }
 
-    // Every lit lamp in the active world casts its beam, not just the driven car's.
+    // Every lit lamp in the active world casts its light, not just the driven car's.
     //
     // This runs AFTER the environment factor above, because that factor is a
     // multiplier on the beam intensities the rig is about to read; projecting first
     // spent a frame on yesterday's twilight.
     //
-    // The rig's spotlights are few, so they go through `beamPool`, which hands a slot
-    // from one car to another by fading rather than in one frame. The driven car's
-    // lamps are pinned at full strength, the tail glow included, since the chase
-    // camera looks straight at it. Everyone else's are faded by range
-    // (`ambientBeamGain`) and ask in order of range, all headlamps before any tail or
-    // reversing glow: a tail lamp's six-metre pool is never worth an oncoming car's
-    // light on the road.
-    //
-    // This order used to fill the rig directly, nearest first, headlamps before ANY
-    // rear lamp. With two other cars lit within 170 m the driven car's own tail glow
-    // never got a slot, and every change of order between two cars switched one pool
-    // off and another on at full strength, at 20-120 m.
+    // Two tiers. The rig's spotlights are few, so they go through `beamPool`, which
+    // hands a slot from one beam to another by fading rather than in one frame; every
+    // lit lamp without one (or fading out of one) lays its light on the ground as a
+    // pool instead (render/lamppools.ts), in one draw.
+    //  - The driven car's lamps and courtesy lamp are pinned at full strength, the tail
+    //    glow included, since the chase camera looks straight at it.
+    //  - Everyone else's headlamps within 80 m of the eye whose light reaches anything
+    //    in view (`NEAR_SLOT_RANGE_SQ`) ask first: a pool lights the ground only, so a
+    //    near car's beam on a post, a wall or another car shows only with a slot. Then
+    //    the rest, in order of how much of their light the player sees
+    //    (`headlampViewScore`): on the road in view, and on his own car and inside its
+    //    cabin, which a car close behind lights more than anyone. They used to ask
+    //    nearest first, which spent the slots on cars driving away and left the car
+    //    behind dark. Each group asks best score first. A far beam the player cannot
+    //    see asks for nothing; its pool is all of it there is to see.
+    //  - Tail, stop and reversing lamps of every other car are pools only: their light
+    //    is a few metres of ground, and a slot each was a slot an oncoming car's beam
+    //    did not get.
+    // Everyone but the driven car is faded by range (`ambientBeamGain`).
     litVehicles.length = 0;
     for (const vehicle of vehicles.values()) {
       if (vehicle.hasLitLamps) litVehicles.push(vehicle);
@@ -2861,23 +2921,43 @@ async function boot(): Promise<void> {
       const vehicle = litVehicles[i];
       litGains[i] = vehicle === driving ? 1 : ambientBeamGain(vehicle.root.position.distanceTo(cam));
     }
+    // Ranked before the pool's frame begins, while `share` still reads last frame's
+    // holders for the held bonus.
+    lampView.update(renderer.camera, driving?.root ?? null, PLAYER_CAR_LIT_RADIUS_M);
+    litScores.length = litVehicles.length;
+    slotCandidates.length = 0;
+    nearSlotCandidates.length = 0;
+    for (let i = 0; i < litVehicles.length; i++) {
+      const vehicle = litVehicles[i];
+      litScores[i] = 0;
+      if (vehicle === driving || !(litGains[i] > 0)) continue;
+      let score = litGains[i] * vehicle.headlampViewScore(lampView, vehicleLights.headlightDistanceScale);
+      if (!(score > 0)) continue;
+      if (beamPool.share(vehicle, 0) > 0) score *= HELD_SLOT_SCORE_BONUS;
+      litScores[i] = score;
+      if (vehicle.root.position.distanceToSquared(cam) < NEAR_SLOT_RANGE_SQ) nearSlotCandidates.push(i);
+      else if (score > MIN_SLOT_VIEW_SCORE) slotCandidates.push(i);
+      else litScores[i] = 0;
+    }
+    nearSlotCandidates.sort((a, b) => litScores[b] - litScores[a]);
+    slotCandidates.sort((a, b) => litScores[b] - litScores[a]);
     // No lamp pair is merged into one beam any more, traffic included: a car with two
     // lit headlamps laying ONE pool of light on the road read wrongly up close, and the
     // ground light (render/groundlight.ts) made each slot cheap enough to spend two per
     // car. The pool's handover fade still decides who gets light when slots run out.
     // Where the tier draws shadows, the driven car's driver's side lamp takes the rig's
     // one shadow-casting beam (render/vehiclelights.ts; a second shadowed spot measured
-    // ten times dearer) and the other lamp a pinned pool slot.
+    // ten times dearer) and the other lamp a pinned slot.
     const shadowedHeadlamps = vehicleLights.hasShadowBeam;
     beamPool.begin();
     // The hand torch takes a pool slot of its own while lit, pinned ahead of everything:
     // the player is on foot and it is the light he walks by. A slot rather than a light
     // of its own, so lighting it never changes the program.
     if (usingTorchlight) beamPool.request(TORCH_BEAM_OWNER, 0, 1, true);
-    // The courtesy lamp of the car the player sits in lights its cabin with one pool
-    // beam, pinned after the headlamps and before the tail and reversing lamps: from the
-    // seat it is the light that is seen. On a four-slot tier at night the tail lamps'
-    // pair is what gives way to it.
+    // The courtesy lamp of the car the player sits in lights its cabin with one slot,
+    // pinned after the headlamps and before the tail and reversing lamps: from the seat
+    // it is the light that is seen. On a four-slot tier at night the tail lamps' pair is
+    // what gives way to it, and lays a pool instead.
     if (driving) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
         if (driving.hasLitLamps) {
@@ -2887,14 +2967,11 @@ async function boot(): Promise<void> {
         if (g === 0) beamPool.request(driving, DOME_BEAM_GROUP, driving.domeBeamCount, true);
       }
     }
-    for (let g = 0; g < BEAM_GROUPS.length; g++) {
-      for (let i = 0; i < litVehicles.length; i++) {
-        const vehicle = litVehicles[i];
-        // A gain of zero asks for nothing: past the range fade the pool belongs to
-        // the beams near enough to be seen.
-        if (vehicle === driving || !(litGains[i] > 0)) continue;
-        beamPool.request(vehicle, g, vehicle.beamCount(BEAM_GROUPS[g]), false);
-      }
+    for (const i of nearSlotCandidates) {
+      beamPool.request(litVehicles[i], 0, litVehicles[i].beamCount('front'), false);
+    }
+    for (const i of slotCandidates) {
+      beamPool.request(litVehicles[i], 0, litVehicles[i].beamCount('front'), false);
     }
     beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
@@ -2906,18 +2983,50 @@ async function boot(): Promise<void> {
       const share = beamPool.share(driving, DOME_BEAM_GROUP);
       if (share > 0) driving.syncDomeLight(vehicleLights, share);
     }
-    for (let i = 0; i < litVehicles.length; i++) {
+    // The cars nearest the eye, as the boxes both tiers' light is cut by.
+    lampOccluders.begin(cam);
+    for (const vehicle of vehicles.values()) vehicle.offerLampOccluder(lampOccluders);
+    traffic.forEachVehicle((_, vehicle) => vehicle.offerLampOccluder(lampOccluders));
+    lampOccluders.end();
+    lampPools.beginFrame(activeS);
+    // The walk starts at a different car each frame, so the pools' terrain samples
+    // (render/lamppools.ts `takeSamples`) go round every car instead of the first few.
+    const lit = litVehicles.length;
+    const litStart = lit > 0 ? lampPools.frameId % lit : 0;
+    for (let k = 0; k < lit; k++) {
+      const i = (litStart + k) % lit;
       const vehicle = litVehicles[i];
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
-        // The driven car's shadowed headlamps were all projected above.
-        if (g === 0 && vehicle === driving && shadowedHeadlamps) continue;
         const share = beamPool.share(vehicle, g);
+        if (g === 0 && vehicle === driving) {
+          // The driven car's headlamps are slots only; shadowed, they were projected above.
+          if (!shadowedHeadlamps && share > 0) {
+            vehicle.syncProjectedLights(vehicleLights, 'front', share, false);
+          }
+          // The cars in their light cast its shadows (render/lamppools.ts, shade pools);
+          // the shadowed beam's own map casts its lamp's.
+          if (share > 0) vehicle.syncLampShade(lampPools, share, shadowedHeadlamps);
+          continue;
+        }
         if (share > 0) {
           vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, false);
+          // A slot casts no shadow of its own: its headlamps' shade pool cuts the cars in
+          // its beam out of the ground it lights.
+          if (g === 0) vehicle.syncLampShade(lampPools, litGains[i] * share, false);
         }
+        if (share < 1) vehicle.syncLampPool(lampPools, BEAM_GROUPS[g], litGains[i] * (1 - share));
       }
     }
+    lampPools.endFrame();
     vehicleLights.endFrame();
+    // Every car near enough to see takes the pooled light that reaches it on its body
+    // and glass (render/lamppools.ts `lightOn`): a slot lights a car, so must a pool.
+    for (const vehicle of vehicles.values()) {
+      vehicle.syncPoolLight(vehicle.root.position.distanceToSquared(cam) < POOL_LIT_CAR_RANGE_SQ ? lampPools : null);
+    }
+    traffic.forEachVehicle((_, vehicle) => {
+      vehicle.syncPoolLight(vehicle.root.position.distanceToSquared(cam) < POOL_LIT_CAR_RANGE_SQ ? lampPools : null);
+    });
     // The car the player sits in fills the screen from the cabin, and every spot slot
     // that lights nothing of it is a whole light per pixel of it (render/lightshader.ts
     // `SPOT_REACH`): its body and glass skip the beams that cannot reach it. A car left
