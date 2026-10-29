@@ -35,6 +35,12 @@ const LOOP_RATE = 16000;
 const AUDIBLE_FROM_HZ = 150;
 const LOOP_AUDIBLE_RMS = 0.09;
 const LOOP_PEAK = 0.95;
+/**
+ * Ceiling on the WHOLE band's RMS (-11 dBFS): a loop whose sub carries far more than
+ * its audible part is pulled down by it, so a bass car close by drones in the chest
+ * instead of pressing on the ears.
+ */
+const LOOP_MAX_RMS = 0.28;
 /** Share of cars with music playing. */
 const MUSIC_SHARE = 0.45;
 
@@ -278,21 +284,26 @@ export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
     },
   },
   {
-    // Drum and bass: a two-step break at 174 over a growling reese.
+    // Drum and bass: a busy broken break at 174, ghost snares and fast hats on top, the
+    // reese kept low under a pad. The shell opens wider than the others so the hats get out.
     name: 'dnb',
     bpm: 174,
     beats: 8,
-    cutoffHz: 560,
-    drive: 1.1,
-    boomHz: 55,
-    boomDb: 10,
+    cutoffHz: 1400,
+    drive: 1,
+    boomHz: 70,
+    boomDb: 4,
     build(n) {
-      for (const b of [0, 2.5, 4, 6.25, 6.5]) n.kick(b, 1, 120, 45, 0.25);
-      for (const b of [1, 3, 5, 7]) n.snare(b, 0.55, 0.14, 1700);
-      for (let e = 0; e < 16; e++) n.snare(e / 2 + 0.25, 0.08, 0.04, 4200);
-      n.bass(0, 3.9, 26, 0.6, 'sawtooth', 240, 22);
-      n.bass(4, 1.9, 29, 0.6, 'sawtooth', 240, 22);
-      n.bass(6, 1.9, 24, 0.6, 'sawtooth', 240, 22);
+      for (const b of [0, 1.75, 2.5, 4, 5.75, 6.5]) n.kick(b, 0.9, 140, 55, 0.18);
+      for (const b of [1, 3, 5, 7]) n.snare(b, 0.6, 0.14, 1900);
+      for (const b of [1.75, 3.25, 3.75, 5.5, 7.25, 7.75]) n.snare(b, 0.18, 0.06, 2100);
+      for (let s = 0; s < 32; s++) n.snare(s / 4, s % 2 === 0 ? 0.22 : 0.13, 0.035, 3000);
+      n.bass(0, 3.9, 38, 0.3, 'sawtooth', 320, 18);
+      n.bass(4, 1.9, 41, 0.3, 'sawtooth', 320, 18);
+      n.bass(6, 1.9, 36, 0.3, 'sawtooth', 320, 18);
+      n.chord(0, 4, [62, 65, 69], { gain: 0.04, type: 'triangle', attack: 0.2, release: 0.3 });
+      n.chord(4, 4, [60, 64, 67], { gain: 0.04, type: 'triangle', attack: 0.2, release: 0.3 });
+      n.tune([[0, 1, 74], [1.5, 0.5, 72], [2, 1.5, 69], [4, 1, 72], [5.5, 0.5, 71], [6, 1.5, 67]], { gain: 0.06, type: 'square', detune: 8, attack: 0.01, release: 0.1 });
     },
   },
   {
@@ -312,38 +323,42 @@ export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
     },
   },
   {
-    // The boom car: long 808s, a slow snare, nothing else gets out of the shell.
+    // The boom car, trap: a slow 808, a clap, hat rolls in triplets and a bell tune.
     name: 'boom',
     bpm: 75,
     beats: 8,
-    cutoffHz: 420,
-    drive: 1.6,
-    boomHz: 50,
-    boomDb: 12,
+    cutoffHz: 1300,
+    drive: 1.1,
+    boomHz: 60,
+    boomDb: 5,
     build(n) {
-      for (const b of [0, 1.75, 4, 5.25, 5.75]) n.kick(b, 1, 90, 40, 0.9);
-      n.snare(2, 0.4, 0.2, 1100);
-      n.snare(6, 0.4, 0.2, 1100);
-      for (let e = 0; e < 16; e++) n.snare(e / 2, 0.06, 0.03, 5000);
-      n.chord(0, 7.8, [45, 52, 57], { gain: 0.03, type: 'triangle', attack: 0.5, release: 0.15 });
+      for (const b of [0, 1.75, 4, 5.25]) n.kick(b, 0.8, 100, 45, 0.5);
+      n.snare(2, 0.55, 0.18, 1500);
+      n.snare(6, 0.55, 0.18, 1500);
+      for (let e = 0; e < 16; e++) n.snare(e / 2, 0.2, 0.04, 3000);
+      for (const start of [3, 7]) for (let k = 0; k < 6; k++) n.snare(start + k / 6, 0.14, 0.025, 3200);
+      n.tune([[0, 0.5, 72], [0.5, 0.5, 75], [1, 0.5, 79], [1.5, 0.5, 75], [2, 0.5, 72], [2.5, 0.5, 70], [3, 1, 67],
+        [4, 0.5, 72], [4.5, 0.5, 75], [5, 0.5, 79], [5.5, 0.5, 82], [6, 1, 79], [7, 1, 75]], { gain: 0.06, type: 'triangle', detune: 4, attack: 0.003, release: 0.15 });
     },
   },
   {
-    // A wobble: half-time drums, the bass swept twice and four times a beat.
+    // Dubstep: half-time drums with hats in sixteenths, a wobble in the mids, a lead on top.
     name: 'wobble',
     bpm: 140,
     beats: 16,
-    cutoffHz: 540,
+    cutoffHz: 1200,
     drive: 0.9,
-    boomHz: 55,
-    boomDb: 10,
+    boomHz: 70,
+    boomDb: 4,
     build(n) {
-      for (const b of [0, 8, 10.5]) n.kick(b, 1.1, 110, 42, 0.4);
-      for (const b of [4, 12]) n.snare(b, 0.6, 0.2, 1300);
-      n.wobble(0, 4, 26, 2, 0.4);
-      n.wobble(4, 4, 26, 4, 0.4);
-      n.wobble(8, 4, 29, 2, 0.4);
-      n.wobble(12, 4, 24, 1, 0.4);
+      for (const b of [0, 8, 10.5]) n.kick(b, 1, 120, 50, 0.3);
+      for (const b of [4, 12]) n.snare(b, 0.7, 0.2, 1700);
+      for (let s = 0; s < 64; s++) if (s % 4 !== 0) n.snare(s / 4, s % 2 === 0 ? 0.18 : 0.1, 0.03, 3000);
+      n.wobble(0, 4, 38, 2, 0.3);
+      n.wobble(4, 4, 38, 4, 0.3);
+      n.wobble(8, 4, 41, 2, 0.3);
+      n.wobble(12, 4, 36, 3, 0.3);
+      n.tune([[0, 1, 74], [2, 1, 77], [3, 1, 76], [4, 2, 74], [8, 1, 72], [10, 1, 74], [11, 1, 76], [12, 3, 69]], { gain: 0.05, type: 'square', detune: 10, attack: 0.01, release: 0.12 });
     },
   },
   {
@@ -555,8 +570,17 @@ async function renderCabinLoop(spec: CabinLoopSpec): Promise<AudioBuffer> {
   const length = loopSamples(spec);
   const loop = (await renderCabinPasses(spec, 2)).subarray(length);
   let peak = 0;
-  for (let i = 0; i < length; i++) peak = Math.max(peak, Math.abs(loop[i]!));
-  const scale = Math.min(LOOP_AUDIBLE_RMS / Math.max(audibleRms(loop), 1e-9), LOOP_PEAK / Math.max(peak, 1e-9));
+  let energy = 0;
+  for (let i = 0; i < length; i++) {
+    peak = Math.max(peak, Math.abs(loop[i]!));
+    energy += loop[i]! * loop[i]!;
+  }
+  const full = Math.sqrt(energy / length);
+  const scale = Math.min(
+    LOOP_AUDIBLE_RMS / Math.max(audibleRms(loop), 1e-9),
+    LOOP_MAX_RMS / Math.max(full, 1e-9),
+    LOOP_PEAK / Math.max(peak, 1e-9),
+  );
   const buffer = new AudioBuffer({ numberOfChannels: 1, length, sampleRate: LOOP_RATE });
   const out = buffer.getChannelData(0);
   for (let i = 0; i < length; i++) out[i] = loop[i]! * scale;
