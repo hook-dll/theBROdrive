@@ -188,6 +188,22 @@
 
 ### Changed
 
+- A LAY-BY ON WIDENED ROAD JOINS THE ASPHALT AGAIN (`world/roadsurface.ts`
+  `WIDE_SECTION_LATERALS`). The ribbon's open-road cross-section still ended in 5.8 m
+  literals after lanes went to 3.2 m, so wherever the road was wider than two lanes (a
+  passing window: 6.4 m each side, its tapers, and every corner's widening) the drawn
+  and collided asphalt stopped up to 0.6 m short of `Road.halfWidthAt`, where the lay-by
+  pad, the terrain's edge height and the shoulder start. On a lay-by that left a strip
+  of sand and the road bed's black skirt between road and pad, the full length of the
+  pad, on any surface (it looked like a surface thing because only some stops sit on
+  widened road). The edge columns are now `±2 x LANE_WIDTH`, so the ribbon's edge is the
+  half-width at every width and the pad, its collider and the ribbon's share it.
+  Check: `bun tools/road-lanes.ts [seed ...]` now also crosses the joint of lay-bys of
+  every district surface, narrow and widened, on three fresh random seeds (or the ones
+  given): drawn top must be asphalt with no sand at or over it, no step over 1 cm per
+  5 cm, collider on the drawn top (before: 21 of 43 lay-bys failed, all on widened
+  road; after: 0).
+
 - EACH TEDDY IS ITS OWN CONTRACT, AND WAVES GOODBYE (`contracts/offers.ts`
   `shelterTeddies`, `contracts/shelters.ts` `teddyGetOff`, `world/shelter.ts`
   `settleBenchTeddies`, `render/thingmesh.ts` `createWavingTeddy`). The teddies on a

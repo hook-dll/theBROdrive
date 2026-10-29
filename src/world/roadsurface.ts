@@ -71,6 +71,13 @@ const HW = NARROW_HALF_WIDTH;
  * collider slabs cannot tear in a taper. The narrow literals preserve the old ribbon
  * bit-for-bit; the wide literals retain dense wheel/edge samples and hit the outer
  * pothole catalogue's fixed laterals.
+ *
+ * THE EDGE COLUMNS ARE THE HALF-WIDTH, never a literal: `sectionLateral` then puts
+ * the outermost column exactly on `Road.halfWidthAt(s)` at every width, through a
+ * taper and a corner's widening. Everything else hangs off that number — the lay-by's
+ * pad (world/laybymesh.ts), the terrain's edge height, the shoulder's reach — so an
+ * edge column short of it leaves a strip of sand and the bed's black skirt between
+ * the ribbon and a lay-by (it did: 5.8 m literals once lanes went to 3.2 m).
  */
 const SECTION_LATERALS: readonly number[] = [
   -HW, -2.45, -2, -1.65, -1.2, -0.85, -0.4,
@@ -78,9 +85,9 @@ const SECTION_LATERALS: readonly number[] = [
   0.4, 0.85, 1.2, 1.65, 2, 2.45, HW,
 ];
 const WIDE_SECTION_LATERALS: readonly number[] = [
-  -5.8, -5.25, -4.85, -4.05, -3.25, -2.45, -0.85,
+  -HW * 2, -5.25, -4.85, -4.05, -3.25, -2.45, -0.85,
   0,
-  0.85, 2.45, 3.25, 4.05, 4.85, 5.25, 5.8,
+  0.85, 2.45, 3.25, 4.05, 4.85, 5.25, HW * 2,
 ];
 /** Columns in a road row. */
 export const SECTION_COLUMNS = SECTION_LATERALS.length;

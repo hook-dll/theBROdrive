@@ -8,26 +8,53 @@
  * a lane divider each side and a narrow row carries none, and that a narrow chunk is
  * unchanged by any of this.
  *
- *   bun tools/road-lanes.ts [seed]
+ * LAY-BYS. A lay-by's pad (world/laybymesh.ts) hangs off the ribbon's edge at
+ * `halfWidthAt(s)`. On every seed, lay-bys of every district surface, on narrow and
+ * widened road, are built with the ribbon, its shoulder strip and both colliders, and
+ * the joint is crossed with rays: what is drawn there must be asphalt (ribbon or pad,
+ * no shoulder strip, no sand showing), with no step, and the collider must be the
+ * drawn surface.
+ *
+ *   bun tools/road-lanes.ts [seed ...]
+ *
+ * Seeds as the game draws them: the ones given, or three fresh full-range uint32s,
+ * printed so a run can be repeated. The ribbon checks use the first.
  *
  * Nothing here is part of the game bundle.
  */
 
 import * as THREE from 'three';
 
-import { type ChunkContext } from '../src/world/chunks';
+import { PhysicsWorld } from '../src/core/physics';
+import { SurfaceType } from '../src/core/surfaces';
+import { type ChunkContent, type ChunkContext } from '../src/world/chunks';
+import { tileGroundSampler, type DrawnGroundSample } from '../src/world/deserttiledata';
+import { laybyOuterAt, laybysBetween, type Layby } from '../src/world/layby';
+import { LaybyMeshProvider } from '../src/world/laybymesh';
 import { CHUNK_LENGTH } from '../src/world/ranges';
 import { Road } from '../src/world/road';
-import { RoadMeshProvider } from '../src/world/roadmesh';
+import { RoadDistance } from '../src/world/roaddistance';
+import { RoadMeshProvider, roadAsphaltMaterial, roadMarkingMaterial } from '../src/world/roadmesh';
+import { Terrain } from '../src/world/terrain';
 import { installDocumentShim } from './domshim';
-import { LANE_WIDTH, halfWidthAt, lanesPerSideAt } from '../src/world/roadprofile';
+import { LANE_WIDTH, NARROW_HALF_WIDTH, halfWidthAt, lanesPerSideAt } from '../src/world/roadprofile';
 import { roadConditionAt } from '../src/world/gradient';
 
 // The provider paints its asphalt maps on a 2D canvas; the shim lets the REAL
 // provider run headless rather than verifying a stand-in.
 installDocumentShim();
 
-const SEED = Number(process.argv[2] ?? 1337) >>> 0;
+const argSeeds = process.argv
+  .slice(2)
+  .map(Number)
+  .filter(Number.isFinite)
+  .map((n) => n >>> 0);
+const SEEDS =
+  argSeeds.length > 0
+    ? argSeeds
+    : Array.from({ length: 3 }, () => Math.floor(Math.random() * 0x100000000) >>> 0);
+const SEED = SEEDS[0]!;
+console.log(`seeds ${SEEDS.join(' ')}`);
 /** Half-width of a painted line: a quad's corners sit this far either side of it. */
 const MARKING_HALF_WIDTH_M = 0.12;
 
@@ -156,12 +183,12 @@ check(
   `${narrow.nonFinite} narrow, ${wide.nonFinite} wide`,
 );
 check(
-  'a narrow chunk is still 5.8 m of asphalt',
+  `a narrow chunk is still ${(LANE_WIDTH * 2).toFixed(1)} m of asphalt`,
   Math.abs(narrow.maxLateral - LANE_WIDTH) < 0.02 && Math.abs(narrow.minLateral + LANE_WIDTH) < 0.02,
   `${narrow.minLateral.toFixed(2)}..${narrow.maxLateral.toFixed(2)} m`,
 );
 check(
-  'a wide chunk is 11.6 m of asphalt',
+  `a wide chunk is ${(LANE_WIDTH * 4).toFixed(1)} m of asphalt`,
   Math.abs(wide.maxLateral - LANE_WIDTH * 2) < 0.02 && Math.abs(wide.minLateral + LANE_WIDTH * 2) < 0.02,
   `${wide.minLateral.toFixed(2)}..${wide.maxLateral.toFixed(2)} m`,
 );
@@ -227,6 +254,227 @@ check(
     taper.surfaceVerts % 15 === 0,
   `chunk ${taperChunk}: reaches ${taper.maxLateral.toFixed(2)} m against a claimed ${taperSpan.toFixed(2)} m`,
 );
+
+// --- lay-bys -------------------------------------------------------------------
+// Across the joint between the ribbon's edge and a lay-by's pad, every 5 cm from
+// 0.4 m inside the edge to 0.6 m out onto the pad, on rows where the pad is at least
+// a metre wide (the shoulder strip rightly hangs off its outer edge on the slips'
+// thin ends). Lay-bys are picked per district surface and per width class, on every
+// seed, until each bucket holds `LAYBYS_PER_BUCKET` or the search runs out of road.
+const DISTRICT_SURFACES: readonly SurfaceType[] = [
+  SurfaceType.Asphalt,
+  SurfaceType.CrackedAsphalt,
+  SurfaceType.Gravel,
+  SurfaceType.Concrete,
+];
+const SURFACE_NAMES: Partial<Record<SurfaceType, string>> = {
+  [SurfaceType.Asphalt]: 'asphalt',
+  [SurfaceType.CrackedAsphalt]: 'cracked',
+  [SurfaceType.Gravel]: 'gravel',
+  [SurfaceType.Concrete]: 'concrete',
+};
+const LAYBYS_PER_BUCKET = 2;
+const LAYBY_SEARCH_M = 1_500_000;
+const LAYBY_SEARCH_WINDOW_M = 50_000;
+/**
+ * Offsets from the ribbon's edge sampled across the joint, metres: 5 cm apart from 0.4 m
+ * inside to 0.6 m out, plus a pair 2 mm either side of the edge, never ON it. A ray down
+ * the exact line two separate trimeshes share can slip between them in float, which is
+ * the ray's problem, not a gap a tyre meets; 2 mm off finds any real one.
+ */
+const SEAM_OFFSETS_M: readonly number[] = [
+  ...Array.from({ length: 8 }, (_, i) => -0.4 + i * 0.05),
+  -0.002,
+  0.002,
+  ...Array.from({ length: 12 }, (_, i) => 0.05 + i * 0.05),
+];
+const SEAM_MIN_PAD_M = 1;
+/** Height change allowed between neighbouring samples: a 20% grade over 5 cm, never a kerb. */
+const SEAM_STEP_TOLERANCE_M = 0.01;
+/** Collider against the drawn top at the same point. */
+const SEAM_COLLIDER_TOLERANCE_M = 0.005;
+
+const physics = await PhysicsWorld.create();
+const DOWN = { x: 0, y: -1, z: 0 };
+const rayOrigin = { x: 0, y: 0, z: 0 };
+const raycaster = new THREE.Raycaster();
+const rayFrom = new THREE.Vector3();
+const rayDown = new THREE.Vector3(0, -1, 0);
+const groundSample: DrawnGroundSample = { height: 0, detail: 0, nx: 0, ny: 1, nz: 0 };
+
+interface SeamResult {
+  rows: number;
+  /** Samples whose drawn top is not asphalt (shoulder strip, bed, nothing: sand showing). */
+  notAsphalt: number;
+  /** Samples where the drawn desert ground stands at or over the drawn top. */
+  groundShowing: number;
+  /** Samples with no road-surface collider, or one off the drawn top. */
+  colliderOff: number;
+  worstDrawnStep: number;
+  worstColliderStep: number;
+  first: string;
+}
+
+function measureLayby(
+  seed: number,
+  seamRoad: Road,
+  terrain: Terrain,
+  ribbon: RoadMeshProvider,
+  pads: LaybyMeshProvider,
+  ground: (x: number, z: number, out: DrawnGroundSample) => void,
+  layby: Layby,
+): SeamResult {
+  const result: SeamResult = {
+    rows: 0,
+    notAsphalt: 0,
+    groundShowing: 0,
+    colliderOff: 0,
+    worstDrawnStep: 0,
+    worstColliderStep: 0,
+    first: '',
+  };
+  const note = (text: string): void => {
+    if (!result.first) result.first = text;
+  };
+  for (let chunk = Math.floor(layby.sEntry / CHUNK_LENGTH); chunk <= Math.floor(layby.sExit / CHUNK_LENGTH); chunk++) {
+    const sStart = chunk * CHUNK_LENGTH;
+    const start = seamRoad.sampleAt(sStart);
+    const ox = Math.round(start.x);
+    const oz = Math.round(start.z);
+    const ctx = {
+      chunkIndex: chunk,
+      sStart,
+      sEnd: sStart + CHUNK_LENGTH,
+      road: seamRoad,
+      terrain,
+      physics,
+      world: { seed },
+      hasPhysics: true,
+      originX: ox,
+      originZ: oz,
+    } as unknown as ChunkContext;
+    const contents = [ribbon.build(ctx), pads.build(ctx)].filter((c): c is ChunkContent => c !== null);
+    const drawn: THREE.Mesh[] = [];
+    for (const content of contents) {
+      for (const collider of content.colliders) collider.setEnabled(true);
+      content.group.updateMatrixWorld(true);
+      content.group.traverse((object) => {
+        if (object instanceof THREE.Mesh && object.material !== roadMarkingMaterial()) drawn.push(object);
+      });
+    }
+    physics.step();
+
+    const tops: number[] = [];
+    const hits: number[] = [];
+    for (let s = sStart + 0.5; s < sStart + CHUNK_LENGTH; s += 1) {
+      const halfWidth = seamRoad.halfWidthAt(s);
+      if (laybyOuterAt(layby, s, halfWidth) - halfWidth < SEAM_MIN_PAD_M) continue;
+      result.rows++;
+      tops.length = 0;
+      hits.length = 0;
+      for (const d of SEAM_OFFSETS_M) {
+        const where = `s ${s.toFixed(1)} ${d >= 0 ? '+' : ''}${d.toFixed(3)} m from the edge`;
+        const p = seamRoad.offsetPoint(s, layby.side * (halfWidth + d));
+        ground(p.x, p.z, groundSample);
+        rayFrom.set(p.x - ox, groundSample.height + 50, p.z - oz);
+        raycaster.set(rayFrom, rayDown);
+        const top = raycaster.intersectObjects(drawn, false)[0];
+        const topY = top ? top.point.y : Number.NEGATIVE_INFINITY;
+        if (!top || top.object instanceof THREE.Mesh === false || top.object.material !== roadAsphaltMaterial()) {
+          result.notAsphalt++;
+          note(`${where}: drawn top is ${top ? 'not asphalt' : 'nothing'}`);
+        }
+        if (groundSample.height >= topY) {
+          result.groundShowing++;
+          note(`${where}: sand ${(groundSample.height - topY).toFixed(3)} m over the drawn top`);
+        }
+        rayOrigin.x = p.x - ox;
+        rayOrigin.y = groundSample.height + 50;
+        rayOrigin.z = p.z - oz;
+        const hit = physics.raycast(rayOrigin, DOWN, 100);
+        const hitY = hit ? hit.point.y : Number.NEGATIVE_INFINITY;
+        if (
+          !hit ||
+          !DISTRICT_SURFACES.includes(physics.surfaces.lookupType(hit.colliderHandle)) ||
+          Math.abs(hitY - topY) > SEAM_COLLIDER_TOLERANCE_M
+        ) {
+          result.colliderOff++;
+          note(`${where}: collider ${hit ? `${(hitY - topY).toFixed(3)} m off the drawn top` : 'missing'}`);
+        }
+        tops.push(topY);
+        hits.push(hitY);
+      }
+      for (let i = 1; i < tops.length; i++) {
+        const drawnStep = Math.abs(tops[i]! - tops[i - 1]!);
+        const colliderStep = Math.abs(hits[i]! - hits[i - 1]!);
+        if (drawnStep > SEAM_STEP_TOLERANCE_M) note(`s ${s.toFixed(1)}: drawn step ${drawnStep.toFixed(3)} m`);
+        if (colliderStep > SEAM_STEP_TOLERANCE_M) note(`s ${s.toFixed(1)}: collider step ${colliderStep.toFixed(3)} m`);
+        result.worstDrawnStep = Math.max(result.worstDrawnStep, drawnStep);
+        result.worstColliderStep = Math.max(result.worstColliderStep, colliderStep);
+      }
+    }
+    for (const content of contents) {
+      for (const body of content.bodies) physics.removeBody(body);
+      content.dispose?.();
+    }
+  }
+  return result;
+}
+
+console.log(`\nlay-bys: the pad meets the ribbon's edge, -0.4 to +0.6 m across it`);
+let seamFailures = 0;
+let widenedMeasured = 0;
+const surfacesMeasured = new Set<SurfaceType>();
+for (const seed of SEEDS) {
+  const seamRoad = new Road(seed);
+  const terrain = new Terrain(seed, seamRoad);
+  const roadDistance = new RoadDistance(seamRoad);
+  const ribbon = new RoadMeshProvider(seed, roadDistance);
+  const pads = new LaybyMeshProvider();
+  const ground = tileGroundSampler({ seed, road: seamRoad, terrain, roadDistance });
+  const picked = new Map<string, number>();
+  const buckets = DISTRICT_SURFACES.length * 2;
+  const searchTo = Math.min(seamRoad.length - 2 * CHUNK_LENGTH, LAYBY_SEARCH_M);
+  for (let from = 5 * CHUNK_LENGTH; from < searchTo && picked.size < buckets; from += LAYBY_SEARCH_WINDOW_M) {
+    for (const layby of laybysBetween(seed, from, Math.min(searchTo, from + LAYBY_SEARCH_WINDOW_M))) {
+      if (layby.sEntry < from) continue;
+      // Widened: a passing window or a corner's widening reaches the pad's road edge.
+      let widest = 0;
+      for (let s = layby.sPadStart; s <= layby.sPadEnd; s += 5) widest = Math.max(widest, seamRoad.halfWidthAt(s));
+      const widened = widest > NARROW_HALF_WIDTH + 0.05;
+      const key = `${layby.surface}:${widened}`;
+      const count = picked.get(key) ?? 0;
+      if (count >= LAYBYS_PER_BUCKET) continue;
+      picked.set(key, count + 1);
+      const r = measureLayby(seed, seamRoad, terrain, ribbon, pads, ground, layby);
+      const ok =
+        r.rows > 0 &&
+        r.notAsphalt === 0 &&
+        r.groundShowing === 0 &&
+        r.colliderOff === 0 &&
+        r.worstDrawnStep <= SEAM_STEP_TOLERANCE_M &&
+        r.worstColliderStep <= SEAM_STEP_TOLERANCE_M;
+      if (!ok) seamFailures++;
+      surfacesMeasured.add(layby.surface);
+      if (widened) widenedMeasured++;
+      console.log(
+        `  ${ok ? 'ok  ' : 'FAIL'}  seed ${seed} s ${layby.s.toFixed(0).padStart(7)} ` +
+          `${(SURFACE_NAMES[layby.surface] ?? String(layby.surface)).padEnd(8)} ` +
+          `${widened ? `widened to ${widest.toFixed(2)}` : 'narrow'.padEnd(16)} m | ${r.rows} rows, ` +
+          `not asphalt ${r.notAsphalt}, sand showing ${r.groundShowing}, collider off ${r.colliderOff}, ` +
+          `worst step ${(r.worstDrawnStep * 100).toFixed(1)} cm drawn / ${(r.worstColliderStep * 100).toFixed(1)} cm collided` +
+          (r.first ? ` | first: ${r.first}` : ''),
+      );
+    }
+  }
+}
+check('every lay-by joins the ribbon flush, drawn and collided', seamFailures === 0, `${seamFailures} lay-bys with a seam`);
+check(
+  'lay-bys of every district surface were measured',
+  DISTRICT_SURFACES.every((surface) => surfacesMeasured.has(surface)),
+  [...surfacesMeasured].map((surface) => SURFACE_NAMES[surface]).join(', '),
+);
+check('lay-bys on widened road were measured', widenedMeasured > 0, `${widenedMeasured}`);
 
 console.log(failures === 0 ? '\nthe ribbon is the road the profile describes' : `\n${failures} checks failed`);
 process.exit(failures === 0 ? 0 : 1);
