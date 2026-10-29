@@ -25,6 +25,7 @@
  * interior trim id, carkit/trims.ts) puts every kit car in that trim, as the «Салон»
  * selector does; the «Экземпляр» slider shows each car's own draw of trim and paint.
  */
+import { CABIN_LOOPS, CabinMusic } from './audio/cabinmusic';
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -152,6 +153,49 @@ function queryNumber(query: URLSearchParams, key: string, fallback: number): num
   return query.has(key) && Number.isFinite(value) ? value : fallback;
 }
 
+/**
+ * The traffic's cabin loops (audio/cabinmusic.ts), played as they leave a shut car, to
+ * judge them one by one. Its own AudioContext, made on the first pick (a user gesture);
+ * the loops render once, then a pick swaps the playing source.
+ */
+function wireCabinMusicPlayer(root: HTMLElement): void {
+  const select = root.querySelector<HTMLSelectElement>('[data-music="loop"]');
+  const output = select?.parentElement?.querySelector('output');
+  if (!select || !output) return;
+  let ctx: AudioContext | null = null;
+  let music: CabinMusic | null = null;
+  let source: AudioBufferSourceNode | null = null;
+  const stop = (): void => {
+    source?.stop();
+    source?.disconnect();
+    source = null;
+  };
+  select.addEventListener('change', () => {
+    stop();
+    const index = select.value === '' ? -1 : Number(select.value);
+    output.textContent = '';
+    if (index < 0) return;
+    ctx ??= new AudioContext();
+    void ctx.resume();
+    music ??= new CabinMusic();
+    const play = (): void => {
+      if (Number(select.value) !== index || select.value === '') return;
+      const buffer = music!.loops[index];
+      if (!buffer) {
+        output.textContent = '…';
+        window.setTimeout(play, 100);
+        return;
+      }
+      output.textContent = `${CABIN_LOOPS[index]!.bpm}`;
+      stop();
+      source = new AudioBufferSourceNode(ctx!, { buffer, loop: true });
+      source.connect(ctx!.destination);
+      source.start();
+    };
+    play();
+  });
+}
+
 function createInterface(
   state: LabState,
   cars: readonly LabCar[],
@@ -189,8 +233,10 @@ function createInterface(
     ${unifiedRow}
     ${styleRow}
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.def.label}</option>`).join('')}</select>
+    <label><span>Музыка салона</span><select data-music="loop"><option value="">выкл</option>${CABIN_LOOPS.map((loop, i) => `<option value="${i}">${i + 1}. ${loop.name}</option>`).join('')}</select><output></output></label>
     <div class="buttons"><button data-action="game">Вернуться в игру</button></div>`;
   document.body.appendChild(root);
+  wireCabinMusicPlayer(root);
 
   const sync = (): void => {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-control]').forEach((input) => {
