@@ -14,7 +14,7 @@
  */
 
 import type { KitRig } from '../carkit/rig';
-import type { PlayerSeat } from '../game/state';
+import { seatRow, type PlayerSeat } from '../game/state';
 
 /** [channel, car side (+1 left, -1 right, 0 both), row (0 front, 1 rear), share at full open]. */
 const OPENINGS: readonly (readonly [string, -1 | 0 | 1, 0 | 1, number])[] = [
@@ -57,7 +57,7 @@ export interface CabinOpenness {
  * turned round to look back, 0 looking out of a side window.
  */
 export function cabinOpenness(rig: KitRig, seat: PlayerSeat, earAlong: number, out: CabinOpenness): void {
-  const row = seat === 'rear-left' || seat === 'rear-right' ? 1 : 0;
+  const row = seatRow(seat);
   // Shut shares per car side, multiplied: what is left of the cabin's seal.
   let shutLeft = 1;
   let shutRight = 1;

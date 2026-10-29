@@ -37,7 +37,7 @@ import { WeaponController } from './items/weapons';
 import { LoosePartField } from './parts/loose';
 import { oilCapacity } from './parts/registry';
 import { TouchControls } from './core/touch';
-import { loadCarModel } from './render/carmodel';
+import { carModelMeasure, loadCarModel } from './render/carmodel';
 import { CAR_LAMP_KNEE } from './render/materials';
 import { preloadTrailerModel } from './render/trailermodel';
 import { itemProgramAnchor } from './render/partmesh';
@@ -60,7 +60,7 @@ import { PlayerVitals } from './player/vitals';
 import { BirdFlock } from './agents/birds';
 import { TumbleweedField } from './agents/tumbleweed';
 import { CameraRig, DEATH_RISE_SECONDS, DEATH_TOTAL_SECONDS, type CameraTarget } from './render/cameras';
-import { CabinCamera } from './vehicle/cabincamera';
+import { seatEye, seatYaw } from './vehicle/cabincamera';
 import { HeldItemView } from './render/held';
 import { TrunkView } from './render/trunkview';
 import { Sky } from './render/sky';
@@ -1437,8 +1437,6 @@ async function boot(): Promise<void> {
   camera.setShake(world.state.settings.cameraShake);
   camera.setStyle(world.state.settings.cameraStyle);
   camera.setYaw(initialYaw);
-  /** The cabin view's eye per car model and seat; see vehicle/cabincamera.ts. */
-  const cabinCamera = new CabinCamera();
 
   // Synthesises ordinary InputFrame commands, so every fuel, gearbox, tyre and
   // steering rule the human drives under applies to it unchanged.
@@ -1492,6 +1490,7 @@ async function boot(): Promise<void> {
     surfaceRoughness: 0,
     wheelContact: 0,
     cabinOffset: [0, 0, 0],
+    cabinYaw: 0,
     eyeDrop: 0,
     velocityX: 0,
     velocityZ: 0,
@@ -2674,7 +2673,11 @@ async function boot(): Promise<void> {
       target.surfaceRoughness = driving.audio.surfaceRoughness;
       target.wheelContact = driving.audio.wheelContactFraction;
       const drivenModel = s.cars[drivingId!]?.modelId;
-      if (drivenModel) target.cabinOffset = cabinCamera.eyeFor(drivenModel, s.player.seat);
+      if (drivenModel) {
+        const measure = carModelMeasure(drivenModel);
+        target.cabinOffset = seatEye(measure, s.player.seat);
+        target.cabinYaw = seatYaw(measure, s.player.seat);
+      }
       target.eyeDrop = 0;
       // The dynamic camera's raw material: where the car is really going, not where it
       // points. Body-frame speed and slip come from the same solver step.

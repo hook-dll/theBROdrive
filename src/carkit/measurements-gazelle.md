@@ -111,10 +111,10 @@ The instrument combination [DASH]: tachometer (left) and speedometer (right) sid
 side, a column of warning lamps between them, oil pressure over coolant temperature at
 the left end, fuel over the voltmeter at the right → six gauges in rows [2, 2, 2], in the
 hood before the driver. Everything else [E]: a deep black dash, a two-spoke 0.42 wheel,
-two front seats ±0.52 (the real passenger seat is a double: see Gaps) either side of the
-engine cover (ds 0.05-0.60, ±0.22, 0.42 high) with the four service cells under it and
-under the bonnet; floor 0.65. GAZ-3221: five single seats and a rear bench for three
-(eight [F]).
+the driver's seat and a double passenger seat (both cars since §10; the 3302 had a single
+one either side of an engine cover in the cab, ds 0.05-0.60, ±0.22, 0.42 high, with the
+engine's cell under it) on a flat floor 0.65; the four service cells under the bonnet.
+GAZ-3221: five single seats and a rear bench for three (eight [F]).
 
 ## 6. Checks (2026-10-29)
 
@@ -127,8 +127,6 @@ Lab captures: build/kitcheck/gaz3302/lab-*.png, build/kitcheck/gaz3221/lab-*.png
 - The drawings carry the 2003 face: the early face comes from D96 (23 mm/px) and photos.
 - No rear view of the 3302's cab: its back window and the 3302's lamps' cells are
   estimates (the minibus's rear is sourced since §9).
-- The 3302's front passenger seat is single (the real one a double; the minibus has it,
-  `passengerDouble`, §8).
 - No step under the doors (the drawn step's plate stood 4 mm under the cab's bottom, a
   far-band z-fight in the generic step; left out rather than moving the ZIL's step code).
 - Dash: only the combination is sourced; the dash's shape, wheel and seats are estimates.
@@ -152,7 +150,7 @@ Built from them (`BODY_GAZ3221`, `LOOK_GAZELLE_BASE`, `CABIN_GAZ3221`):
 - Engine access only under the bonnet: no `engine_cover` in the 3221's cab
   (`engineCover: undefined`); its four cells under the bonnet (radiator s 0.10-0.18,
   engine 0.24-0.54 ±0.24, air filter and turbine either side) [E their sizes]. The 3302
-  keeps its cover (unchanged).
+  kept its cover (until §10: now both cars' bay, `CHASSIS.bay`).
 - Front row: the driver's seat and a double passenger seat (`passengerDouble`: one
   cushion and back 1.6 times as wide, two inlays, its middle at x −0.47). No partition.
 - Saloon (`saloon.seats`, ds behind the cowl 0.86): a rearward row of three at s 2.15
@@ -162,9 +160,9 @@ Built from them (`BODY_GAZ3221`, `LOOK_GAZELLE_BASE`, `CABIN_GAZ3221`):
   order and facing]. High backs (0.66 tall) in the upholstery with black plastic rears,
   on black pedestals. Grab pole at s 2.70, x 0.27; grab rail under the roof over the
   sliding door, s 2.36-3.16 [O].
-- Sitting: every saloon seat is a `KIT_BENCH_NODE`, so getting in by any seat on the left
-  seats the player as rear-left, on the right as rear-right; the rear passengers' eye
-  stands over the second row's left seat (x 0.6, facing forward), its mirror for the right.
+- Sitting: every saloon seat was a `KIT_BENCH_NODE`, so getting in by any seat on the left
+  seated the player as rear-left, on the right as rear-right, with one eye over the second
+  row's left seat and its mirror (until §10: now every seat its own, with its own eye).
 - Shape: the A pillar strip black (the screen's black frame) [O]; the high roof's sides
   rising 0.24 over the drip rail and rounding over (railInset 0.12, railBend) into a
   near-flat top (crown 0.05, power 4) [O, F 2200].
@@ -276,3 +274,61 @@ wide black rubber, the low cab partition of the brochure's other 13-seat variant
 blue vinyl and floor tread are not drawn; the first saloon window's front edge stands 6 cm
 behind the drawings' mean.
 
+## 10. Engine under the bonnet, the driver's eye, every seat sat in (2026-10-29)
+
+The owner: the flatbed shows no engine in its open bonnet (the minibus does); the
+driver's eye sits too high in both; of the many seats only a few can be sat in.
+
+### 10.1 The flatbed's engine
+
+Cause: the 3302 kept the first draft's bay, its engine cell at s 0.98-1.40 behind the
+cowl (0.86), 0.62-0.98 high, inside the cab's engine cover. The open bonnet showed the
+radiator, the filter and the turbine's cells; the engine was drawn inside the shut cover
+in the cab, seen only with the cover lifted from an open door. Fix: the minibus's
+under-bonnet cells are the chassis' (`CHASSIS.bay`: radiator s 0.10-0.18, engine
+0.24-0.54 ±0.24 0.50-0.98, filter and turbine either side 0.26-0.50, all under the shut
+bonnet's skin), and the cover left the cab (`CABIN_GAZELLE`: the owner's photo of the
+same cab, owner-6647b199, shows a flat floor between the seats). The 3302 takes the
+minibus's double passenger seat with it (`passengerDouble`), the real cab's [§7 had it as
+a gap]. The gearbox and exhaust follow the engine's rear (truck.ts), as on the minibus.
+
+### 10.2 The driver's eye
+
+| | Reading | Source |
+|---|---|---|
+| Belt (side glass's foot) | 1.27 | [D side 1.272] |
+| Cab floor | 0.65 | [E, unchanged; DM: the saloon's sill at the sliding door 0.55] |
+| Driver's cushion pad | 0.18 thick (0.56 × 0.52) | [F parts: gazelist52.ru, progress-nn.ru «подушка сиденья водителя 3302»] |
+| Cushion top | 0.27-0.30 under the belt, 0.97-1.05 over the ground | [P dromad-267151758-06, the cab from the sliding door: the driver's door 1.27 → its floor over ~270 px; the nearer cushion projected low, corrected up] |
+| Seated eye over the cushion | 0.74 (`SEATED_EYE`, every kit car; built 0.62-0.755) | [E anthropometry, unchanged] |
+
+Built before: cushion 0.36 over the floor (the truck layout's, the ZIL's bench), top 1.01;
+eye 1.75 over the ground at the hip (s 1.66), 0.48 over the belt. Against every other kit
+car the GAZelle's eye stood highest over its belt (cars 0.25-0.35, ZIL 0.345, UAZ-2206
+0.40) and highest over its wheel: 0.40 over the hub and only 0.30 behind it, the hub 53°
+under the eye and the speedometer 48° (the cars' 27-44° and 18-34°): both under the
+straight-ahead 85° view's lower edge (42.5°). The rim stood 0.15 m before the hip; the
+eye looked over the wheel at the dash's top.
+
+Now (`CABIN_GAZELLE`): the cushion 0.30 over the floor (the 0.18 pad on a 0.12 frame
+[E]), its top 0.95, 0.32 under the belt (the photo's 0.27-0.30 within its error); the eye
+0.74 over it and over the backrest's lean (`eyeForward: 0`, the eye 0.10 behind the hip:
+not 10 cm forward as on the cars, `DRIVER_EYE_FORWARD`, whose wheels stand 0.35-0.49
+before the hip): 1.69 over the ground at s 1.76, 0.42 over the belt, 0.40 behind and 0.34
+over the hub (40° down; the ZIL 0.41 / 0.28, the classics 0.40 / 0.32), the speedometer
+39° under the eye, through the wheel. The headliner 0.30 over it (the minibus's raised
+roof 0.44), the header and visors as before (kit-mirrors from the eye: L100 % R85 %, was
+R80 %). The passenger's and the middle's eyes at the same height and distance over their
+places (x −0.66, −0.28).
+
+### 10.3 Every seat sat in
+
+The seats are the cabin's own (interior.ts `seatPlan`, specs.ts `kitSeats`): the driver,
+the double seat's two places (passenger x −0.66, middle −0.28), and on the minibus all
+eleven saloon seats, each with its own eye at the saloon's cushion (0.45 over the floor)
+plus `SEATED_EYE`, 0.10 back from the hip with its backrest (towards the wall on the wall
+seats) and facing the seat's way: the rearward row looks back (π), the wall seats across
+the aisle (±π/2). Ids: seat 4 (forward left) is the car's `rear-left`, seat 6 (forward
+right by the wall, nearest its mirror) `rear-right`, the rest `rear-left:<i>` /
+`rear-right:<i>` by side. Through the sliding door the player sits in the seat looked at,
+or the saloon seat nearest the door; the saloon is left by the sliding door.

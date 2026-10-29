@@ -57,7 +57,8 @@ import { MATERIALS_CONFIG } from '../config';
 import { bakeCarPaintGeometry, bakeFarCarGeometry, type FarCarSurface, type MidCarWheel } from './farcars';
 import { bakeCarShadowHull, carShadowHullMesh } from './carshadowhull';
 import { attachKitDraw, attachKitWheels, bakeKitWheels, prepareKitDraw, type KitDrawModel, type KitSkeleton, type KitWheelModel } from './kitdraw';
-import { KIT_DRIVER_EYE_NODE, KIT_MIDDLE_EYE_NODE, KIT_REAR_EYE_NODE } from '../carkit/interior';
+import { KIT_DRIVER_EYE_NODE, KIT_SEAT_EYE_NODE } from '../carkit/interior';
+import type { PlayerSeat } from '../game/state';
 import { KIT_BONNET_CELL_NODE } from '../carkit/bay';
 import { KIT_FILLER_NODE } from '../carkit/exterior';
 import { BONNET_SLOT_KINDS } from '../vehicle/bonnet';
@@ -189,10 +190,12 @@ export interface CarModelMeasure {
    * the fit manifest; the cabin camera then falls back to `hoodPoint`.
    */
   readonly cabinEye?: readonly [number, number, number];
-  /** The rear left passenger's, the same way (`KIT_REAR_EYE_NODE`); absent with `cabinEye`. */
-  readonly rearEye?: readonly [number, number, number];
-  /** A front bench's middle place's (`KIT_MIDDLE_EYE_NODE`); absent without a front bench. */
-  readonly middleEye?: readonly [number, number, number];
+  /**
+   * Every other seat's eye and the way it faces (`yaw` about the up axis from the nose, +X
+   * the car's left: π rearward), the same way (`KIT_SEAT_EYE_NODE`), in the kit cabin's
+   * seat order; absent with `cabinEye`.
+   */
+  readonly seats?: readonly SeatMeasure[];
   /**
    * The bonnet's service cells in chassis-local metres, in `BONNET_SLOT_KINDS` order:
    * the kit bay's cell markers (`KIT_BONNET_CELL_NODE`) after the body fit, each at its
@@ -205,6 +208,13 @@ export interface CarModelMeasure {
    * absent on non-kit bodies and in the fit manifest.
    */
   readonly filler?: { readonly centre: readonly [number, number, number]; readonly size: readonly [number, number, number] };
+}
+
+/** One seat's eye in chassis-local metres and its facing (`CarModelMeasure.seats`). */
+export interface SeatMeasure {
+  readonly seat: PlayerSeat;
+  readonly eye: readonly [number, number, number];
+  readonly yaw: number;
 }
 
 interface Template {
@@ -1595,8 +1605,13 @@ async function buildTemplate(def: CarModelDef, scene: THREE.Group): Promise<Temp
     return { centre: at, size: [Math.abs(_sample.x), Math.abs(_sample.y), Math.abs(_sample.z)] };
   };
   const cabinEye = anchorAt(KIT_DRIVER_EYE_NODE)?.centre;
-  const rearEye = anchorAt(KIT_REAR_EYE_NODE)?.centre;
-  const middleEye = anchorAt(KIT_MIDDLE_EYE_NODE)?.centre;
+  const seatNodes: { seat: PlayerSeat; name: string; yaw: number }[] = [];
+  scene.traverse((node) => {
+    if (node.name.startsWith(`${KIT_SEAT_EYE_NODE}:`)) {
+      seatNodes.push({ seat: node.name.slice(KIT_SEAT_EYE_NODE.length + 1) as PlayerSeat, name: node.name, yaw: node.userData.kitSeatYaw as number });
+    }
+  });
+  const seats = seatNodes.length > 0 ? seatNodes.map(({ seat, name, yaw }): SeatMeasure => ({ seat, eye: anchorAt(name)!.centre, yaw })) : undefined;
   const filler = anchorAt(KIT_FILLER_NODE);
   // All four cells or none: the bonnet's grid is indexed by kind.
   const cellBoxes = BONNET_SLOT_KINDS.map((kind) => anchorAt(`${KIT_BONNET_CELL_NODE}:${kind}`));
@@ -1624,8 +1639,7 @@ async function buildTemplate(def: CarModelDef, scene: THREE.Group): Promise<Temp
     hoodPoint,
     visualOffset: [-centre.x, -centre.y, -centre.z],
     cabinEye,
-    rearEye,
-    middleEye,
+    seats,
     bonnetCells,
     filler,
   };

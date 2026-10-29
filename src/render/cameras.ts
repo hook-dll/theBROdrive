@@ -32,6 +32,11 @@ export interface CameraTarget {
   wheelContact: number;
   /** The seated player's eye in chassis-local metres, the cabin view's mount; see vehicle/cabincamera.ts. */
   cabinOffset: readonly [number, number, number];
+  /**
+   * The way his seat faces, the cabin view's straight ahead: radians about the car's up
+   * axis from its nose (π a rearward seat); see vehicle/cabincamera.ts.
+   */
+  cabinYaw: number;
   /** On foot, how far a crouch has lowered the eye below `EYE_HEIGHT`, metres (`Player.interpolatedEyeDrop`); 0 in a car. */
   eyeDrop: number;
   /**
@@ -514,6 +519,8 @@ export class CameraRig {
   private snapChaseEye = false;
   /** Cabin view heading relative to the car: where the driver has turned his head. */
   private cabinYawOffset = 0;
+  /** The seat's own heading relative to the car (`CameraTarget.cabinYaw`): where the head turns back to. */
+  private seatYaw = 0;
   /** Seconds since the player last turned the head in the cabin view. */
   private cabinLookIdle = 0;
   /** The hand is on a fitting the mouse works (the inside mirror): the head stays where it looks. */
@@ -851,9 +858,9 @@ export class CameraRig {
       this.chaseLookIdleKept = this.chaseLookIdle;
     }
     this._mode = 'cabin';
-    this.cabinYawOffset = 0;
+    this.cabinYawOffset = this.seatYaw;
     this.pitch = 0;
-    this.yawValue = this.vehicleYaw;
+    this.yawValue = wrapAngle(this.vehicleYaw + this.seatYaw);
   }
 
   /**
@@ -873,6 +880,16 @@ export class CameraRig {
 
   update(dt: number, input: InputFrame, target: CameraTarget, onFoot: boolean): void {
     const d = dt > 0 ? dt : 1 / 60;
+
+    // A seat facing another way (a minibus's saloon): the head turns with the seat as he
+    // moves to it, looking where it faces.
+    if (target.cabinYaw !== this.seatYaw) {
+      if (!onFoot && this._mode === 'cabin') {
+        this.cabinYawOffset = target.cabinYaw;
+        this.pitch = 0;
+      }
+      this.seatYaw = target.cabinYaw;
+    }
 
     // Entering/exiting a vehicle is the one legitimate snap point: teleporting
     // between a vehicle and a standing pose must not spring-in (a fly-through).
@@ -953,7 +970,7 @@ export class CameraRig {
       this.eagle = false;
       this.recentering = true;
       // Capture once: even a re-centre in progress must not inherit a wreck's spin.
-      this.recenterYaw = onFoot ? 0 : followYaw;
+      this.recenterYaw = onFoot ? 0 : inputMode === 'cabin' ? wrapAngle(followYaw + this.seatYaw) : followYaw;
     }
     if (this.recentering) {
       const k = 1 - Math.exp(-RECENTER_OMEGA * d);
@@ -992,8 +1009,8 @@ export class CameraRig {
       && this.cabinLookIdle >= CABIN_RECENTER_IDLE_SECONDS
     ) {
       const k = 1 - Math.exp(-CHASE_RECENTER_OMEGA * d);
-      const yawError = wrapAngle(this.vehicleYaw - this.yawValue);
-      this.yawValue = Math.abs(yawError) < RECENTER_EPSILON ? this.vehicleYaw : wrapAngle(this.yawValue + yawError * k);
+      const yawError = wrapAngle(this.vehicleYaw + this.seatYaw - this.yawValue);
+      this.yawValue = Math.abs(yawError) < RECENTER_EPSILON ? wrapAngle(this.vehicleYaw + this.seatYaw) : wrapAngle(this.yawValue + yawError * k);
       this.pitch = Math.abs(this.pitch) < RECENTER_EPSILON ? 0 : this.pitch * (1 - k);
     }
 
@@ -1567,10 +1584,10 @@ export class CameraRig {
     this.surgeSpeedMps = target.speedKmh / 3.6;
     this.resetDynamics();
     if (this._mode === 'cabin') {
-      // Sitting down faces the windscreen, whatever the walk-up looked at.
-      this.cabinYawOffset = 0;
+      // Sitting down faces where the seat does, whatever the walk-up looked at.
+      this.cabinYawOffset = this.seatYaw;
       this.pitch = 0;
-      this.yawValue = this.vehicleYaw;
+      this.yawValue = wrapAngle(this.vehicleYaw + this.seatYaw);
       this.desiredCabin(target);
     } else {
       this.desiredArm(target);

@@ -4,6 +4,20 @@
 
 ### Added
 
+- Every seat a kit car has is sat in: the GAZelles' double passenger seat's middle and all
+  eleven saloon seats of the GAZ-32213 (the ZIL's bench and the sedans' rear bench as
+  before). The seat list is the kit cabin's own (carkit/specs.ts `kitSeats`); each seat
+  has its own eye and faces its way in the cabin view (the minibus's rearward row looks
+  back, its wall seats across); getting in through a door with no seat in the aim takes
+  the seat of that row nearest the door (the saloon's by the sliding door), and getting
+  out uses the nearest door of the seat's row. Saves keep their seat; one the car no
+  longer has loads as its kind's, the passenger's or the driver's.
+- GAZ-3302: its engine stands under the bonnet like the minibus's (it was drawn inside a
+  cover in the cab, so the open bonnet showed none); the cover is gone from the cab and
+  the passenger seat is the real cab's double. Both GAZelles: the driver's seat 6 cm lower
+  and the eye over the hip, 1.69 m (was 1.75), the wheel and the gauges in the cabin view
+  (carkit/measurements-gazelle.md §10).
+
 - The segment display: a red P in its last digit while the handbrake is on, the message
   (station, fault) running in the fifteen before it; no ENGINE OFF for an engine
   stop-start stopped, since the throttle starts it. The race results (and the rematch

@@ -102,29 +102,36 @@ cannot take with his load says why.
   and water still pour into the engine and radiator cells in the open bonnet. The tank is
   the car's own; it is not a part.
 - **F gets in through an open side door** (front or rear, on the player's side; the rear
-  bench through a front door on a two-door car), the ray crossing the open door's outline
-  within reach. Looking at a seat (the first opaque thing met, not seen through glass)
-  sits in that seat; looking through the doorway at anything else in the cabin sits in
-  the seat that door serves (front left the driver's, front right the passenger's, rear
-  the bench's side). To shut an open door from outside, aim at it from where the ray
-  does not pass through its opening. The cabin carry limits still apply. The seats
-  themselves are not worked: no sliding, reclining or headrests.
+  bench through a front door on a two-door car; a minibus's saloon through its sliding
+  door), the ray crossing the open door's outline within reach. Every seat the car has is
+  sat in: the front row (a bench's or a double passenger seat's middle too), the rear
+  bench's two places, every saloon seat (the list is the kit body's own,
+  `src/carkit/specs.ts` `kitSeats`). Looking at a seat (the first opaque thing met, not
+  seen through glass) sits in that seat, a bench or a double seat at the place nearest
+  the aim; looking through the doorway at anything else in the cabin sits in the seat
+  that door serves (of its row, the seat nearest the door: front left the driver's,
+  front right the passenger's, rear the bench's side, a sliding door the saloon seat by
+  it). To shut an open door from outside, aim at it from where the ray does not pass
+  through its opening. The cabin carry limits still apply. The seats themselves are not
+  worked: no sliding, reclining or headrests.
 - **Only the driver's seat drives.** From any other seat the car holds where it stands:
   pedals, steering, gears, lights, indicators and the autopilot do nothing ("only the
-  driver can do that"). The cabin view is from that seat (the passenger's is the
-  driver's eye mirrored; the rear seats' sit over the bench).
+  driver can do that"). The cabin view is from that seat's own eye, facing the way the
+  seat faces (a minibus's rearward row looks back, its wall seats across the aisle).
 - **Seated, the ray runs from the camera that is drawing.** In the cabin view everything
   within reach works (doors, lids, windows, switches, stalks, visors, the courtesy lamp,
   the horn pad, which only moves: the game has no horn sound); in the chase view only the
   side doors do. Doors, lids and the flap are offered only below the exit speed
   (5 km/h). The light switch, hazards and stalk work the car's own lamps; the wiper stalk
   runs the wipers slow, fast and off.
-- **F gets out through the open door on the seat's side** (a rear seat's rear door, or
-  the front door on a car without rear doors) below 5 km/h, beside that door,
+- **F gets out through the door nearest the seat, of its row** (a rear seat's rear door,
+  or the front door on a car without rear doors; a saloon seat's sliding door; the front
+  row's middle by the door on the side he looks to) below 5 km/h, beside that door,
   ground-checked, when the aim is on no part and no other seat. A door opened from the
   seat is still in the aim: look off it (at the road) before F again, or F shuts it.
-- **Getting in from foot switches to the cabin view**, facing down the car; `C` goes
-  back to the chase. Moving between seats keeps the view as it was.
+- **Getting in from foot switches to the cabin view**, facing the way the seat faces; `C`
+  goes back to the chase. Moving between seats keeps the view as it was, or turns it with
+  a seat that faces another way.
 - **The cabin view hides the on-screen cluster**: the car's own instruments read speed,
   revs, fuel, temperature, oil pressure, charge and vacuum, and its warning lamps light.
   The interior and both door mirrors show what is behind, from the seat's eye.
@@ -294,18 +301,20 @@ Levels come from `RUMBLE_*` in `src/main.ts`.
 ## Driving views and the cabin camera
 
 `C` switches the driving view: **chase** (the follow arm) ↔ **cabin** (the seat).
-Entering the cabin faces down the car. The cabin eye is rigid with the chassis and so
-is its horizon; the mouse turns the head against the car (to look at a door, say), and
-3 s after the mouse stops the head turns back to the road by itself. There is no zoom,
+Entering the cabin faces the way the seat does (down the car from a front seat). The
+cabin eye is rigid with the chassis and so is its horizon; the mouse turns the head
+against the car (to look at a door, say), and 3 s after the mouse stops the head turns
+back to where the seat faces by itself. There is no zoom,
 no occlusion pull-in, and the speed sway does not reach it.
 
 The eye is per car model and seat, chassis-local metres (+X the car's left, +Y up, +Z
 forward; `src/vehicle/cabincamera.ts`). The driver's is the kit seat:
 `CarModelMeasure.cabinEye`, an anchor at the driver's cushion plus a seated eye height
-(`KIT_DRIVER_EYE_NODE`, `src/carkit/interior.ts`) carried through the body fit; a body
-without a kit cabin uses its bonnet mount. The front passenger's is the driver's mirrored
-across the car; the rear seats' come from the bench (`CarModelMeasure.rearEye`, the
-right one mirrored).
+(`KIT_DRIVER_EYE_NODE`, `src/carkit/interior.ts`) carried through the body fit; every
+other seat has its own (`CarModelMeasure.seats`, `KIT_SEAT_EYE_NODE`) with the way it
+faces, which is the view's straight ahead there (`CameraTarget.cabinYaw`): the head
+turns back to it, and `V` re-centres to it. A body without a kit cabin uses its bonnet
+mount for every seat.
 
 ## Camera style
 

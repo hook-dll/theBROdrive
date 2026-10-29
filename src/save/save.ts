@@ -1,6 +1,6 @@
 import { hash } from '../core/rng';
 import { parseCalendarEpoch } from '../game/calendar';
-import { DAY_LENGTH, MIRROR_FIELD, newWorldState, PLAYER_SEATS, SAVE_VERSION, type PlayerSeat } from '../game/state';
+import { DAY_LENGTH, MIRROR_FIELD, newWorldState, SAVE_VERSION, SEAT_KINDS, type PlayerSeat } from '../game/state';
 import type {
   CarState,
   ClawMachineState,
@@ -45,7 +45,7 @@ import { bootFreeAnchor, normalizeBoot, trunkCellCount } from '../vehicle/trunk'
 import { carPaintSwatch, visiblePaintHex, type CarPaint } from '../vehicle/carpaint';
 import { CABIN_PLACE_COUNT } from '../vehicle/cabin';
 import { weatherBeginS } from '../world/weather';
-import { kitFrontBench } from '../carkit/specs';
+import { kitSeats } from '../carkit/specs';
 
 /**
  * A post's saved stock (contracts/offers.ts `postStock`): its slots' offers — three, and
@@ -538,8 +538,8 @@ export function migrateState(raw: unknown): WorldState {
     health: Math.min(1, Math.max(0, numOr(playerRaw.health, dp.health))),
     s: numOr(playerRaw.s, dp.s),
     drivingCarId: typeof playerRaw.drivingCarId === 'string' ? playerRaw.drivingCarId : null,
-    // Saves from before seats were always in the driver's; the middle is only on a car
-    // with a front bench (`frontBenchCar`), else the passenger's.
+    // A seat the car no longer has loads as its kind's own, the passenger's or the
+    // driver's (`seatOf`).
     seat: seatOf(playerRaw.seat, playerRaw.drivingCarId, carsRaw),
     lastDrivenCarId: typeof playerRaw.lastDrivenCarId === 'string' ? playerRaw.lastDrivenCarId : null,
     carried,
@@ -940,19 +940,25 @@ function worldModelId(saved: unknown): string {
   return CAR_MODELS.some((model) => model.id === twin) ? twin : DEFAULT_CAR_MODEL_ID;
 }
 
-/** The saved seat; 'middle' only in a car whose front seat is a bench (`frontBenchCar`), else the passenger's. */
+/** A non-kit body's seats: a sedan's four. */
+const BODY_SEATS: readonly PlayerSeat[] = ['driver', 'passenger', 'rear-left', 'rear-right'];
+
+/**
+ * The saved seat, if the car it was saved in has it as that car loads (`worldModelId`,
+ * carkit/specs.ts `kitSeats`); else its kind's own seat there (`rear-left:3` loads as the
+ * rear-left), else the passenger's (a middle place on a car without one), else the
+ * driver's. Saves from before seats load in the driver's.
+ */
 function seatOf(saved: unknown, carId: unknown, carsRaw: Record<string, unknown>): PlayerSeat {
-  if (!PLAYER_SEATS.includes(saved as PlayerSeat)) return 'driver';
-  if (saved !== 'middle') return saved as PlayerSeat;
+  if (typeof saved !== 'string') return 'driver';
   const car = typeof carId === 'string' ? carsRaw[carId] : undefined;
   const modelId = typeof car === 'object' && car !== null ? (car as Record<string, unknown>).modelId : undefined;
-  return frontBenchCar(worldModelId(modelId)) ? 'middle' : 'passenger';
-}
-
-/** The world model's front seat is a bench with a middle place (carkit/specs.ts `kitFrontBench`). */
-function frontBenchCar(modelId: string): boolean {
-  const kit = carModel(modelId).kit;
-  return kit !== undefined && kitFrontBench(kit);
+  const kit = carModel(worldModelId(modelId)).kit;
+  const seats = kit !== undefined ? kitSeats(kit) : BODY_SEATS;
+  const kind = saved.split(':')[0];
+  const known = seats.find((seat) => seat === saved) ?? seats.find((seat) => seat === kind);
+  if (known) return known;
+  return (SEAT_KINDS as readonly string[]).includes(kind!) && seats.includes('passenger') ? 'passenger' : 'driver';
 }
 
 function migrateCar(raw: Record<string, unknown>, version: number): CarState {

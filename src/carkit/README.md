@@ -642,6 +642,17 @@ as is, the 2121 the `niva` platform's.
   `car-glass-clear`; every car draws its own copy, drop panes clipped at the door's top.
 - Steering wheel: node `steering_wheel`, its origin on the column axis, local +Y along the
   column towards the driver. The game turns it by `rotation.y`.
+- Seats: every seat the cabin builds is a seat the player sits in (interior.ts `seatPlan`,
+  `cabinSeats`; specs.ts `kitSeats` for the game and saves): the driver's, the
+  passenger's, a front bench's or a double passenger seat's middle, the rear bench's two,
+  a saloon's every seat (`Layout.saloon`: seat `rearLeft` is the rear-left, the right one
+  nearest its mirror the rear-right, the rest `rear-left:<i>` / `rear-right:<i>`). Each
+  piece of seating names its seats in `userData.kitSeats` (`KitSeatPlace`, each at its
+  place along the piece's x: getting in and moving seats take the nearest); each seat but
+  the driver's has an empty `kit_seat_eye:<seat>` node at its eye with the way it faces
+  (`userData.kitSeatYaw`), read as `CarModelMeasure.seats`. The driver's eye stays
+  `kit_driver_eye` (`driverEyeAt`): `SEATED_EYE` over the cushion, `EYE_BEHIND_HIP` less
+  `DRIVER_EYE_FORWARD` (`Layout.eyeForward`) along the car, under the headliner.
 - Dash fittings with no node of their own: `root.userData.kitDash` (`KitDashItem[]`,
   interior.ts): each vent, eyeball vent, the heater panel, clock, centre stack and console
   where it was built. Gauges are the `panel_dim_<channel>` groups, the glovebox the

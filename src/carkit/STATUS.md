@@ -73,7 +73,8 @@ on any car are still fixed.
    GAZ-3221 minibus on one cab-over cab, drafted 2026-10-29 (`kit_gaz3302`, `kit_gaz3221`;
    gazelle.ts, measurements-gazelle.md), on the generic truck generator (truck.ts; the
    ZIL's bonneted front moved to zilfront.ts, the ZIL identical): **draft, awaiting the
-   owner's first look**.
+   owner's first look**. 2026-10-29: both engines under the bonnet, the driver's eye
+   lowered to 1.69, every seat sat in (measurements-gazelle.md §10).
 5. **Foreign cars of the 1990s** (owner's list, 2026-10-18; order within it not set yet):
    see "Foreign cars: the owner's list" below. First batch, the GM cars on Opel running
    gear: the **Daewoo Nexia** drafted 2026-10-18, and with it the foreign running-gear
@@ -437,8 +438,8 @@ listed, not judged). Dash: the built cabin against the refs' interior photos.
 | AZLK-2141 | pass | pass | pass | L100 R100 | 0 | 12 133 | 14/16: front glass edge, mirror s | 3/5: Samara dash (3 spokes vs 2) |
 | UAZ-469 | pass | pass | no target | L100 R100 | 0 | 11 152 | 9/9 | 7/7 |
 | UAZ-2206 | pass | pass | no target | L100 R94 | 0 | 10 979 | 6/11 | 1/3 |
-| GAZ-3302 (draft) | pass | pass | pass | L100 R80 | 0 | 10 527 (front lamps only changed: flush `cornerLamps`, owner 2026-10-29) | 7/7 | 3/3 (the combination's photo) |
-| GAZ-32213 (id gaz3221; owner's review 3, 2026-10-29: 13 seats, rounded saloon windows, the roof's rise over the cab, rear doors up into the roof) | pass | pass | pass | L100 R80 | 0 | 13 111 | 8/8 | 3/3 (the combination's photo) |
+| GAZ-3302 (draft; §10: engine under the bonnet, no cover, double seat, eye 1.69) | pass | pass | pass | L100 R85 | 0 | 10 496 | 7/7 | 3/3 (the combination's photo) |
+| GAZ-32213 (id gaz3221; §10: eye 1.69, every saloon seat sat in) | pass | pass | pass | L100 R85 | 0 | 13 111 | 8/8 | 3/3 (the combination's photo) |
 | Nexia | pass | pass | pass | L100 R96 | 0 | 13 475 | 9/10: belt half width | 6/6 |
 | Espero | pass | pass | pass | L100 R100 | 0 | 14 486 | 9/9 (B-pillar shut line at the drawn 2.50) | 8/8 |
 | Astra F | pass | pass | pass | L100 R100 | 0 | 13 971 | 13/13 | 6/6 |

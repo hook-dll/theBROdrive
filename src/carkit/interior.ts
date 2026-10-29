@@ -36,6 +36,7 @@ import { addBuilt, addMirrorFace, attach, fineDetail, mirrorFrame, pivotGroup, t
 import type { KitControl, KitMotion } from './rig';
 import type { KitCarSpec } from './spec';
 import type { CabinPlace, PlaceRoom } from '../vehicle/cabin';
+import type { PlayerSeat } from '../game/state';
 
 type P2 = readonly [number, number];
 
@@ -231,7 +232,8 @@ interface Layout {
   /**
    * How far the driver's eye sits ahead of the backrest's lean, where it differs from
    * `DRIVER_EYE_FORWARD` (the Nivas': their chrome head on a rod stands far forward and the
-   * vent wing's frame hides it from an eye 10 cm forward).
+   * vent wing's frame hides it from an eye 10 cm forward; the GAZelles', whose wheel stands
+   * close before the hip).
    */
   readonly eyeForward?: number;
   /**
@@ -402,28 +404,31 @@ interface Layout {
   /** A padded engine cover on the centre line between the front seats (the van's): ds range, half width, height over the floor; in the dash's colour. */
   readonly engineCover?: { readonly ds0: number; readonly ds1: number; readonly half: number; readonly height: number };
   /**
-   * A truck's front seats: the driver's and the passenger's seat either side of the engine
-   * cover (`engineCover`) instead of the bench across the cab (the GAZelle's). Absent:
-   * the bench (the ZIL-130's).
+   * A truck's front seats: the driver's and the passenger's seat instead of the bench
+   * across the cab (the GAZelles'). Absent: the bench (the ZIL-130's).
    */
   readonly frontSeats?: true;
   /**
    * A van body behind a truck's cab (the GAZelle minibus): its saloon's fixed high-back
    * seats on black pedestals, each at [ds behind the cowl, x, facing: 1 forward, -1
-   * rearward, 0 sideways, its back to the wall and facing the aisle], every one a
-   * `KIT_BENCH_NODE` group (sat in as the rear left or right seat by its side); the rear
-   * passengers' eye over seat `eye`; a grab pole from floor to roof at `pole` [ds, x]; a
-   * grab rail under the roof over the side door from ds `rail[0]` to `rail[1]`. The floor
+   * rearward, 0 sideways, its back to the wall and facing the aisle], every one a seat of
+   * its own (`kitSeats`): seat `rearLeft` (on the left) the car's own rear-left, the right
+   * one nearest its mirror the rear-right, the others numbered by their side
+   * (`rear-left:<i>`, `rear-right:<i>`); a grab pole from floor to roof at `pole` [ds, x];
+   * a grab rail under the roof over the side door from ds `rail[0]` to `rail[1]`. The floor
    * and the lining run on to the rear doors and the rear wheel houses are covered. Absent:
    * the cab alone.
    */
   readonly saloon?: {
     readonly seats: readonly (readonly [ds: number, x: number, facing: 1 | -1 | 0])[];
-    readonly eye: number;
+    readonly rearLeft: number;
     readonly pole: readonly [ds: number, x: number];
     readonly rail: readonly [ds0: number, ds1: number];
   };
-  /** The front passenger's seat a double (two places, one cushion: the GAZelle minibus's), its middle further in. Absent: a single seat. */
+  /**
+   * The front passenger's seat a double (one cushion, two places: the GAZelles'), its
+   * middle further in; its inner place is the car's middle seat. Absent: a single seat.
+   */
   readonly passengerDouble?: true;
 }
 
@@ -1927,7 +1932,7 @@ export const CABIN_ZIL130: CabinLayoutOverride = {
   visor: { half: 0.2, depth: 0.18, x: 0.385 },
 };
 
-// The GAZelles on the truck's furniture, with the cab-over's front seats and engine cover.
+// The GAZelles on the truck's furniture, with the cab-over's front seats and a flat floor.
 // The cluster from the photo of the first cars' combination 384.3801 (drive2.ru, refs
 // DASH: the tachometer and the speedometer side by side, a column of warning lamps between
 // them, oil pressure over temperature at the left end, fuel over the voltmeter at the
@@ -1935,21 +1940,30 @@ export const CABIN_ZIL130: CabinLayoutOverride = {
 
 /**
  * GAZelle (1994-2003): a deep black plastic dash under the steep screen, a hooded cluster
- * before the driver; the engine's cover between the two front seats, from the dash back
- * to the seats' fronts; the gear lever out of the floor behind it; a large two-spoke
- * wheel on a steep column.
+ * before the driver; the engine under the bonnet and a flat floor between the front seats
+ * (owner's review, 2026-10-29: P owner-6647b199), the driver's seat and a double passenger
+ * seat; the gear lever out of the floor; a large two-spoke wheel on a steep column.
  */
 export const CABIN_GAZELLE: CabinLayoutOverride = {
   frontSeats: true,
+  passengerDouble: true,
   // The driver's hip 0.80 behind the A pillar's foot, behind the front wheel [E]; the
-  // seats ±0.52, either side of the cover [E].
+  // seats ±0.52 [E].
   hip: 0.8,
   seatX: 0.52,
+  // The cushion 0.30 over the floor (the ZIL's bench stood 0.36): the 0.18 pad [F: the
+  // 3302 driver's cushion, gazelist52.ru, progress-nn.ru] on a 0.12 frame [E]; its top 0.95,
+  // 0.32 under the belt [P dromad-267151758-06: 0.27-0.30 by the door glass's foot]. The eye
+  // 0.74 over it (`SEATED_EYE`, every kit car's) and over the hip, not 10 cm ahead of the
+  // lean (`DRIVER_EYE_FORWARD`): the wheel stands 0.30 ahead of the hip, and an eye there
+  // looked down past the rim from 0.48 over the belt (owner, 2026-10-29: «слишком высоко»);
+  // now 1.69 over the ground, 0.42 over the belt and 0.40 behind the hub (the ZIL's 0.41,
+  // the classics' 0.40), the cluster seen through the wheel (measurements-gazelle.md §10).
+  cushion: 0.3,
+  eyeForward: 0,
   // The cab's floor 0.65 over the ground, 0.22 over its bottom, clear over the frame [E: the door's step].
   floorRise: 0.22,
   tunnel: { heights: [0, 0, 0], base: [0.2, 0.2], top: [0.17, 0.17] },
-  // From the dash's foot back to 0.15 short of the seats' fronts, ±0.22, 0.42 high [E].
-  engineCover: { ds0: 0.05, ds1: 0.6, half: 0.22, height: 0.42 },
   gear: { ds: 0.7, height: 0.42, lean: 0.06 },
   handbrake: { rear: -0.5, length: 0.12 },
   // A deep shelf under the screen to an upright face over the knees [E].
@@ -1995,20 +2009,17 @@ export const CABIN_GAZELLE: CabinLayoutOverride = {
 /**
  * GAZ-32213, the 13-seat route minibus (owner's reviews, 2026-10-29: his photos
  * owner-6647b199, -6730fa4d, -6abb1fad and the factory seat plan owner-seat-plan-322132,
- * scaled 6.0 mm/px between the rearward row's backs and the rear doors): the engine under
- * the bonnet only, no cover in the cab; the driver's seat and a double passenger seat;
- * eleven high-back seats on black pedestals in the saloon: a row of three facing rearward
- * behind the cab, left of the sliding door's entry; one on the left wall facing the aisle
- * opposite the door; one forward on the left and a forward pair on the right over the
- * rear axle; two on each wall at the back facing the aisle; a grab pole at the aisle by
- * the forward left seat, a grab rail over the sliding door (measurements-gazelle.md §9).
- * The rear passengers' eye over the forward left seat; every seat on a side maps to that
- * side's rear place.
+ * scaled 6.0 mm/px between the rearward row's backs and the rear doors): the GAZelle's cab
+ * (the driver's seat and a double passenger seat); eleven high-back seats on black
+ * pedestals in the saloon: a row of three facing rearward behind the cab, left of the
+ * sliding door's entry; one on the left wall facing the aisle opposite the door; one
+ * forward on the left and a forward pair on the right over the rear axle; two on each wall
+ * at the back facing the aisle; a grab pole at the aisle by the forward left seat, a grab
+ * rail over the sliding door (measurements-gazelle.md §9). Every seat is sat in, each with
+ * its own eye (`kitSeats`); the forward left seat is the car's own rear-left.
  */
 export const CABIN_GAZ3221: CabinLayoutOverride = {
   ...CABIN_GAZELLE,
-  engineCover: undefined,
-  passengerDouble: true,
   saloon: {
     seats: [
       [1.29, 0.62, -1], [1.29, 0.15, -1], [1.29, -0.32, -1],
@@ -2016,7 +2027,7 @@ export const CABIN_GAZ3221: CabinLayoutOverride = {
       [3.19, 0.63, 1], [3.19, -0.21, 1], [3.19, -0.66, 1],
       [3.71, 0.56, 0], [4.18, 0.56, 0], [3.71, -0.56, 0], [4.18, -0.56, 0],
     ],
-    eye: 4,
+    rearLeft: 4,
     pole: [2.76, 0.3],
     rail: [1.5, 2.3],
   },
@@ -2030,21 +2041,25 @@ export const CABIN_GAZ3221: CabinLayoutOverride = {
  * takes it out of the template.
  */
 export const KIT_DRIVER_EYE_NODE = 'kit_driver_eye';
-/** The same over the rear bench's left seat; the right one is its mirror. */
-export const KIT_REAR_EYE_NODE = 'kit_rear_eye';
 /**
- * The same over a front bench's middle place (`kitFrontBench`): on the bench's centre line at
- * the driver's eye height and distance from the screen. Absent on cars without one.
+ * Prefix of the empty nodes at every other seat's eye (`${KIT_SEAT_EYE_NODE}:${seat}`, one
+ * per `cabinSeats` but the driver's), in the kit frame, the way the seat faces in
+ * `userData.kitSeatYaw`: radians about the up axis from the car's nose, +X the car's left
+ * (π a rearward seat, -π/2 one on the left wall facing the aisle). render/carmodel.ts
+ * reads them after the body fit (`CarModelMeasure.seats`) and takes them out of the
+ * template.
  */
-export const KIT_MIDDLE_EYE_NODE = 'kit_middle_eye';
+export const KIT_SEAT_EYE_NODE = 'kit_seat_eye';
 /**
- * Name of the group holding the rear bench's meshes, inside `kit_cabin`: the bench is
- * one piece with no channel, and getting in (player/interaction.ts) has to know it. A
- * truck's bench is its only seat, the front one: its group carries
- * `userData.kitFrontBench = true` and `userData.kitBenchHalf` (its half width), its thirds
- * the driver's, the middle place's and the passenger's.
+ * One place sat on in a piece of seating: `userData.kitSeats` of the node that holds it
+ * (a front seat's runners, a bench, a saloon seat) lists each seat in it with its centre
+ * along that node's own x. Getting in and moving seats (player/interaction.ts) take the
+ * place nearest where the eye ray meets the piece.
  */
-export const KIT_BENCH_NODE = 'kit_bench';
+export interface KitSeatPlace {
+  readonly seat: PlayerSeat;
+  readonly x: number;
+}
 /**
  * The fixed dash fittings that have no node of their own, as built, for the checks that
  * hold a cabin to its car's photos (tools/kit-drawing.ts): `root.userData.kitDash`. Each
@@ -2107,8 +2122,69 @@ export function buildInterior(ctx: KitContext): void {
 }
 
 /** A car's cabin layout: its platform's, with its own `cabinLayout` over it. */
-function layoutOf(frame: BodyFrame): Layout {
-  return { ...LAYOUTS[frame.spec.platform], ...frame.spec.cabinLayout };
+function layoutOf(spec: KitCarSpec): Layout {
+  return { ...LAYOUTS[spec.platform], ...spec.cabinLayout };
+}
+
+/** A double passenger seat (`Layout.passengerDouble`): its middle this much further in than a single seat's, its two places this far either side of its middle. */
+const DOUBLE_IN = 0.05;
+const DOUBLE_PLACE = 0.19;
+
+/**
+ * One seat of a cabin as `seatPlan` lays it out: its id, its place's centre across the car
+ * (+x the car's left), and what it is in: the front row (seats or a bench), the rear
+ * bench, or a saloon's seat (its index in `Layout.saloon.seats`).
+ */
+interface SeatPlan {
+  readonly seat: PlayerSeat;
+  readonly x: number;
+  readonly on: 'front' | 'bench' | number;
+}
+
+/**
+ * Every seat the cabin builds, in its order: the driver's; the passenger's and a middle
+ * place on a front bench (the ZIL-130's, thirds of it) or a double passenger seat (the
+ * GAZelles': its outer place the passenger's); the rear bench's two (not on a truck); and
+ * a saloon's every seat (`Layout.saloon`): seat `rearLeft` is the car's rear-left, the
+ * right seat nearest its mirror the rear-right, every other one numbered by its side.
+ */
+function seatPlan(spec: KitCarSpec): SeatPlan[] {
+  const lay = layoutOf(spec);
+  const truck = spec.platform === 'truck';
+  const plan: SeatPlan[] = [{ seat: 'driver', x: lay.seatX, on: 'front' }];
+  if (truck && !lay.frontSeats) {
+    plan.push({ seat: 'middle', x: 0, on: 'front' }, { seat: 'passenger', x: -lay.seatX, on: 'front' });
+  } else if (lay.passengerDouble) {
+    const x = -(lay.seatX - DOUBLE_IN);
+    plan.push({ seat: 'passenger', x: x - DOUBLE_PLACE, on: 'front' }, { seat: 'middle', x: x + DOUBLE_PLACE, on: 'front' });
+  } else {
+    plan.push({ seat: 'passenger', x: -lay.seatX, on: 'front' });
+  }
+  if (!truck) plan.push({ seat: 'rear-left', x: BENCH_SEAT_X, on: 'bench' }, { seat: 'rear-right', x: -BENCH_SEAT_X, on: 'bench' });
+  const sal = truck ? lay.saloon : undefined;
+  if (sal) {
+    const own = sal.seats[sal.rearLeft];
+    if (!own || own[1] <= 0) throw new Error(`Kit car "${spec.id}": saloon seat ${sal.rearLeft} (rearLeft) is not on the left`);
+    let right = -1;
+    let nearest = Infinity;
+    sal.seats.forEach(([ds, x], i) => {
+      const d = Math.hypot(ds - own[0], x + own[1]);
+      if (x < 0 && d < nearest) {
+        nearest = d;
+        right = i;
+      }
+    });
+    sal.seats.forEach(([, x], i) => {
+      const side = x > 0 ? 'rear-left' : 'rear-right';
+      plan.push({ seat: i === sal.rearLeft || i === right ? side : `${side}:${i}`, x, on: i });
+    });
+  }
+  return plan;
+}
+
+/** The seats of a kit car's cabin (`seatPlan`), every one sat in: carkit/specs.ts `kitSeats`. */
+export function cabinSeats(spec: KitCarSpec): PlayerSeat[] {
+  return seatPlan(spec).map((p) => p.seat);
 }
 
 /** The rear bench's hip along the car, for a frame and its layout. */
@@ -2121,7 +2197,7 @@ function benchHip(frame: BodyFrame, lay: Layout): number {
  * bay.ts lays the load floor from here, so the two never overlap or leave a gap.
  */
 export function loadSpaceStart(frame: BodyFrame): number {
-  return benchHip(frame, layoutOf(frame)) + BENCH_BACK;
+  return benchHip(frame, layoutOf(frame.spec)) + BENCH_BACK;
 }
 
 /**
@@ -2129,7 +2205,7 @@ export function loadSpaceStart(frame: BodyFrame): number {
  * the gearbox there, under the floor behind the engine. The cowl without a cover.
  */
 export function engineCoverEnd(frame: BodyFrame): number {
-  return frame.cowl + (layoutOf(frame).engineCover?.ds1 ?? 0);
+  return frame.cowl + (layoutOf(frame.spec).engineCover?.ds1 ?? 0);
 }
 
 /**
@@ -2139,7 +2215,7 @@ export function engineCoverEnd(frame: BodyFrame): number {
  * end walls' bottom chamfers, and `COVER_ROOM_TOP` under its top. Null without a cover.
  */
 export function engineCoverRoom(frame: BodyFrame): { readonly s0: number; readonly s1: number; readonly half: number; readonly floor: number; readonly top: number } | null {
-  const c = layoutOf(frame).engineCover;
+  const c = layoutOf(frame.spec).engineCover;
   if (!c) return null;
   const floor = cabinFloor(frame);
   const end = COVER_CHAMFER + COVER_ROOM_GAP;
@@ -2154,7 +2230,7 @@ export function engineCoverRoom(frame: BodyFrame): { readonly s0: number; readon
 
 /** The cabin's floor pan: the shell's flat underbody plus `floorRise` (`FLOOR_RISE`). */
 function cabinFloor(frame: BodyFrame): number {
-  return frame.station(frame.cowl + 0.5).sill + (layoutOf(frame).floorRise ?? FLOOR_RISE);
+  return frame.station(frame.cowl + 0.5).sill + (layoutOf(frame.spec).floorRise ?? FLOOR_RISE);
 }
 
 /** Underside of the headliner (the shell's roof lining) at half width x and position s. */
@@ -2173,7 +2249,7 @@ function headlinerUnder(frame: BodyFrame, x: number, s: number): number {
  * `KIT_DRIVER_EYE_NODE`, and what the mirrors are turned to (exterior.ts as well).
  */
 export function driverEyeAt(frame: BodyFrame): Vec3 {
-  const lay = layoutOf(frame);
+  const lay = layoutOf(frame.spec);
   const s = frame.cowl + lay.hip + EYE_BEHIND_HIP - (lay.eyeForward ?? DRIVER_EYE_FORWARD);
   const seated = Math.min(cabinFloor(frame) + lay.cushion + SEATED_EYE, headlinerUnder(frame, lay.seatX, s) - EYE_HEADROOM);
   const [hs, hy] = screenHeaderEdge(frame, lay.seatX);
@@ -2449,6 +2525,8 @@ class Cabin {
   private readonly x0: number;
   /** `root.userData.kitDash`: the fittings below, where they were built. */
   private readonly dashItems: KitDashItem[] = [];
+  /** Every seat built, where it is (`seatPlan`). */
+  private readonly plan: readonly SeatPlan[];
   /** The windscreen's panes as built (`paneGap`), read once. */
   private panes?: [Vec3, Vec3, Vec3][];
 
@@ -2456,7 +2534,8 @@ class Cabin {
     this.ctx = ctx;
     this.frame = ctx.frame;
     this.spec = ctx.frame.spec;
-    this.lay = layoutOf(ctx.frame);
+    this.lay = layoutOf(this.spec);
+    this.plan = seatPlan(this.spec);
     this.hatch = this.spec.bootEnd === undefined;
     this.van = this.spec.platform === 'van';
     this.truck = this.spec.platform === 'truck';
@@ -2506,39 +2585,48 @@ class Cabin {
     if (!this.truck || this.truckBench) this.bench();
     if (this.saloon) this.saloonSeats();
     if (!this.van && !this.truck) this.floorPlaces();
-    this.driverEye();
-    this.rearEye();
+    this.eyes();
     addBuilt(this.group, this.fixed, ORIGIN, 'cabin', true);
     this.ctx.root.add(this.group);
     this.ctx.root.userData.kitDash = this.dashItems;
     this.doors();
   }
 
-  /** The empty `KIT_DRIVER_EYE_NODE`. */
-  private driverEye(): void {
-    const eye = new THREE.Object3D();
-    eye.name = KIT_DRIVER_EYE_NODE;
-    eye.position.set(...driverEyeAt(this.frame));
-    this.ctx.root.add(eye);
-    if (!this.truckBench) return;
-    const middle = new THREE.Object3D();
-    middle.name = KIT_MIDDLE_EYE_NODE;
-    middle.position.set(0, eye.position.y, eye.position.z);
-    this.ctx.root.add(middle);
-  }
-
-  /** The empty `KIT_REAR_EYE_NODE`, seated on the bench as the driver's is on his cushion. */
-  private rearEye(): void {
-    const eye = new THREE.Object3D();
-    eye.name = KIT_REAR_EYE_NODE;
-    // A saloon's eye over its chosen seat (`Layout.saloon.eye`); the bench's otherwise.
+  /**
+   * The empty `KIT_DRIVER_EYE_NODE`, and a `KIT_SEAT_EYE_NODE` over every other seat
+   * (`seatPlan`): the front row's at the driver's eye height and distance from the screen
+   * over its own place; the rear bench's and a saloon's seated on their cushions as the
+   * driver is on his, `EYE_BEHIND_HIP` back from the hip with the backrest's lean (a
+   * sideways seat's towards its wall) and under the headliner.
+   */
+  private eyes(): void {
+    const driver = driverEyeAt(this.frame);
+    const node = (name: string, at: Vec3, yaw: number): void => {
+      const eye = new THREE.Object3D();
+      eye.name = name;
+      eye.position.set(...at);
+      if (name !== KIT_DRIVER_EYE_NODE) eye.userData.kitSeatYaw = yaw;
+      this.ctx.root.add(eye);
+    };
+    node(KIT_DRIVER_EYE_NODE, driver, 0);
+    const seated = this.floorY + this.lay.benchCushion + SEATED_EYE;
     const sal = this.lay.saloon;
-    const seat = sal?.seats[sal.eye];
-    const ex = seat ? seat[1] : BENCH_SEAT_X;
-    const es = seat ? this.frame.cowl + seat[0] + seat[2] * EYE_BEHIND_HIP : this.benchS + EYE_BEHIND_HIP;
-    const y = Math.min(this.floorY + this.lay.benchCushion + SEATED_EYE, this.dome(ex, es) - EYE_HEADROOM);
-    eye.position.set(...this.P(ex, y, es));
-    this.ctx.root.add(eye);
+    for (const { seat, x, on } of this.plan) {
+      if (seat === 'driver') continue;
+      const name = `${KIT_SEAT_EYE_NODE}:${seat}`;
+      if (on === 'front') {
+        node(name, [x, driver[1], driver[2]], 0);
+      } else if (on === 'bench') {
+        const s = this.benchS + EYE_BEHIND_HIP;
+        node(name, this.P(x, Math.min(seated, this.dome(x, s) - EYE_HEADROOM), s), 0);
+      } else {
+        const [ds, , facing] = sal!.seats[on]!;
+        const s = this.frame.cowl + ds + facing * EYE_BEHIND_HIP;
+        const ex = facing === 0 ? x + Math.sign(x) * EYE_BEHIND_HIP : x;
+        const yaw = facing > 0 ? 0 : facing < 0 ? Math.PI : -Math.sign(x) * (Math.PI / 2);
+        node(name, this.P(ex, Math.min(seated, this.dome(ex, s) - EYE_HEADROOM), s), yaw);
+      }
+    }
   }
 
   // ---- lookups ----
@@ -3728,8 +3816,8 @@ class Cabin {
     // The minibus's double passenger seat: wider, its middle further in (`passengerDouble`).
     const dbl = side < 0 && L.passengerDouble === true;
     const w = dbl ? 1.6 : 1;
-    const cells = dbl ? [-0.19, 0.19] : [0];
-    const x = side * (dbl ? this.x0 - 0.05 : this.x0);
+    const cells = dbl ? [-DOUBLE_PLACE, DOUBLE_PLACE] : [0];
+    const x = side * (dbl ? this.x0 - DOUBLE_IN : this.x0);
     const hip = this.hipS;
     const top = this.floorY + L.cushion;
     const uph = this.spec.look.upholstery;
@@ -3748,6 +3836,7 @@ class Cabin {
       for (const c of cells) inlay(b.color(insert, 'upholstery'), 'trim', [[c - 0.11, 0.065, -0.19], [c + 0.11, 0.065, -0.19], [c + 0.11, 0.065, 0.19], [c - 0.11, 0.065, 0.19]]);
       b.pop();
     });
+    this.seatsIn(seat, x, 'front', 0.25 * w);
     // The front passenger's cushion holds things (vehicle/cabin.ts): the room over its
     // flat top, from just behind the rounded front edge back to the seat back's foot.
     if (side < 0) {
@@ -3820,9 +3909,10 @@ class Cabin {
     for (const sx of seats) inlay(b, 'trim', [[sx - 0.11, 0.06, 0.015], [sx + 0.11, 0.06, 0.015], [sx + 0.11, 0.42, 0.015], [sx - 0.11, 0.42, 0.015]]);
     b.pop();
     const group = new THREE.Group();
-    group.name = KIT_BENCH_NODE;
+    group.name = 'kit_bench';
     addBuilt(group, b, ORIGIN, 'bench', true);
     this.group.add(group);
+    this.seatsIn(group, 0, this.truckBench ? 'front' : 'bench', wall);
     // The bench holds things on either half or across the whole of it: the room over
     // its flat top from behind the front edge to the back's foot, clear of the doors.
     const cushion = this.P(0, top - 0.07, H - 0.13);
@@ -3834,8 +3924,6 @@ class Cabin {
     const room = (halfX: number): PlaceRoom => ({ halfX, halfZ: (back - front) / 2, height: SEAT_ROOM_HEIGHT, overhang: SEAT_OVERHANG });
     // A truck's bench is the passenger's seat: the place on his third of it.
     if (this.truckBench) {
-      group.userData.kitFrontBench = true;
-      group.userData.kitBenchHalf = half;
       this.place(group, ORIGIN, 'seat', add(at, [-L.seatX, 0, 0]), -0.06, room(Math.min(0.21, edge - L.seatX)));
       return;
     }
@@ -3847,10 +3935,10 @@ class Cabin {
   }
 
   /**
-   * The saloon (`Layout.saloon`): high-back single seats on black pedestals, facing forward
-   * or rearward, each its own `KIT_BENCH_NODE` group so getting in seats the player on its
-   * side's rear place; the grab pole from the floor to the roof and the grab rail under the
-   * roof over the side door, in black.
+   * The saloon (`Layout.saloon`): high-back single seats on black pedestals, facing forward,
+   * rearward or across, each a group of its own holding its seat (`seatsIn`); the grab pole
+   * from the floor to the roof and the grab rail under the roof over the side door, in
+   * black.
    */
   private saloonSeats(): void {
     const L = this.lay;
@@ -3859,7 +3947,7 @@ class Cabin {
     const uph = this.spec.look.upholstery;
     const insert = shade(uph, 1.35);
     const top = this.floorY + L.benchCushion;
-    for (const [ds, x, facing] of sal.seats) {
+    sal.seats.forEach(([ds, x, facing], i) => {
       const b = new PartBuilder();
       // Built about the hip facing +z (forward), then turned round for a rearward seat, or
       // a quarter turn to face the aisle from its wall.
@@ -3880,10 +3968,11 @@ class Cabin {
       b.pop();
       b.pop();
       const group = new THREE.Group();
-      group.name = KIT_BENCH_NODE;
+      group.name = 'kit_bench';
       addBuilt(group, b, ORIGIN, 'bench', true);
       this.group.add(group);
-    }
+      this.seatsIn(group, 0, i, Infinity);
+    });
     const f = this.fixed.color(COLOURS.black);
     const [pds, px] = sal.pole;
     const ps = this.frame.cowl + pds;
@@ -3949,6 +4038,17 @@ class Cabin {
       for (let j = 0; j <= 4; j++) least = Math.min(least, this.inner(s, lerp(y0, y1, j / 4)));
     }
     return least - PLACE_CLEAR;
+  }
+
+  /**
+   * Tells `node`, a piece of seating standing at `nodeX` across the car, which seats it
+   * holds (`KitSeatPlace`): the plan's seats `on` it within `half` of its centre, each at
+   * its place along the node's x.
+   */
+  private seatsIn(node: THREE.Object3D, nodeX: number, on: SeatPlan['on'], half: number): void {
+    const places: KitSeatPlace[] = [];
+    for (const p of this.plan) if (p.on === on && Math.abs(p.x - nodeX) <= half) places.push({ seat: p.seat, x: p.x - nodeX });
+    node.userData.kitSeats = places;
   }
 
   /** One `KIT_PLACE_NODE` under `parent` (standing at `parentAt`), at `at`, turned `tilt` about x. */

@@ -5,7 +5,7 @@
  *
  * One cab for both, written once (`cab`): a short sloping bonnet ahead of a steep wide
  * screen, the front wheel under the door's front (its arch cut into the cab's side), the
- * engine under the bonnet and a cover between the front seats (no tilting cab). Measured
+ * engine under the bonnet, a flat floor between the front seats (no tilting cab). Measured
  * on getoutlines.com's GAZ-3302 (2006) side and front views, 10.915 mm/px from the drawn
  * 2900 wheelbase (hubs x 106 / 371.7), ground y 240.5, front view 10.69 mm/px from the 1700
  * front track; the 2006 drawings carry the 2003 face, so the face, bumper and bonnet nose
@@ -100,14 +100,16 @@ const CHASSIS: Pick<TruckSpec, 'frame' | 'springs' | 'step' | 'exhaust' | 'drive
   // Inside the right rail under the floor [E].
   exhaust: { x: -0.25, y: 0.3, top: 0.58, silencer: [2.4, 3.1], tail: 3.45 },
   driveline: { y: 0.47 },
-  // The engine under the cover between the seats, its front under the bonnet [F:
-  // ZMZ-4026, longitudinal]; the radiator behind the grille, the air filter and the
-  // turbine's cell under the bonnet either side of the engine's front [E].
+  // The engine under the bonnet only, no cover in the cab (owner's review, 2026-10-29;
+  // P owner-6647b199: a flat floor between the seats; F: ZMZ-4026, longitudinal): all four
+  // cells under the bonnet [E], their tops under its closed skin (the deck 0.99 at s 0.14
+  // to 1.28 at 0.56). Both cars: the flatbed's engine stood under a cover in the cab
+  // behind the cowl, where opening the bonnet showed none (owner, 2026-10-29).
   bay: {
-    engine: { x: [-0.15, 0.15], s: [0.98, 1.4], floor: 0.62, top: 0.98 },
-    radiator: { x: [-0.36, 0.36], s: [0.14, 0.22], floor: 0.46, top: 0.86 },
-    air_filter: { x: [0.12, 0.4], s: [0.3, 0.52], floor: 0.74, top: 1.06 },
-    turbine: { x: [-0.4, -0.12], s: [0.3, 0.52], floor: 0.74, top: 1.06 },
+    radiator: { x: [-0.36, 0.36], s: [0.1, 0.18], floor: 0.46, top: 0.86 },
+    engine: { x: [-0.24, 0.24], s: [0.24, 0.54], floor: 0.5, top: 0.98 },
+    air_filter: { x: [0.3, 0.6], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
+    turbine: { x: [-0.6, -0.3], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
   },
 };
 
@@ -270,15 +272,6 @@ export const BODY_GAZ3221: KitBody = {
     // The rails level under the saloon's floor (0.65), their bottom 1.5 cm under the
     // body's at the nose, clear of it [E].
     frame: { ...CHASSIS.frame, top: [0.535, 0.535] },
-    // The engine under the bonnet only, no cover in the cab (owner's review, 2026-10-29;
-    // P owner-6647b199: a flat floor between the seats): all four cells under the bonnet
-    // [E], their tops under its closed skin (the deck 0.99 at s 0.14 to 1.28 at 0.56).
-    bay: {
-      radiator: { x: [-0.36, 0.36], s: [0.1, 0.18], floor: 0.46, top: 0.86 },
-      engine: { x: [-0.24, 0.24], s: [0.24, 0.54], floor: 0.5, top: 0.98 },
-      air_filter: { x: [0.3, 0.6], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
-      turbine: { x: [-0.6, -0.3], s: [0.26, 0.5], floor: 0.74, top: 0.98 },
-    },
   },
 };
 

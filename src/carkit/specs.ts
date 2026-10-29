@@ -21,7 +21,7 @@
 import { BODY_2141, LOOK_2141 } from './azlk';
 import { BODY_ESPERO, BODY_NEXIA, LOOK_ESPERO, LOOK_NEXIA } from './daewoo';
 import { BODY_2102, BODY_2104, REAR_2102, REAR_2104 } from './estates';
-import { CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_E34, CABIN_GAZ24, CABIN_GAZ31029, CABIN_GAZ3221, CABIN_GAZELLE, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124, CABIN_ZIL130 } from './interior';
+import { cabinSeats, CABIN_1111, CABIN_2101, CABIN_2103, CABIN_2105, CABIN_2106, CABIN_2107, CABIN_2110, CABIN_2131, CABIN_2141, CABIN_ASTRA_F, CABIN_E34, CABIN_GAZ24, CABIN_GAZ31029, CABIN_GAZ3221, CABIN_GAZELLE, CABIN_ESPERO, CABIN_NEXIA, CABIN_UAZ2206, CABIN_UAZ469, CABIN_VECTRA_A, CABIN_W124, CABIN_ZIL130 } from './interior';
 import { BODY_GAZ3221, BODY_GAZ3302, LOOK_GAZ3221, LOOK_GAZ3302 } from './gazelle';
 import { BODY_W124, LOOK_W124 } from './mercedes';
 import { BODY_E34, LOOK_E34 } from './bmw';
@@ -31,6 +31,7 @@ import { BODY_2108, BODY_2109, BODY_21099, BODY_2115, LOOK_2108, LOOK_2109, LOOK
 import type { EndLean, KitCarSpec, KitLook } from './spec';
 import { BODY_2110, BODY_2111, BODY_2112, LOOK_2110, LOOK_2111, LOOK_2112 } from './tens';
 import { BODY_2121, BODY_2131, LOOK_2121, LOOK_2131 } from './nivas';
+import type { PlayerSeat } from '../game/state';
 import { BODY_GAZ24, BODY_GAZ31029, LOOK_GAZ24, LOOK_GAZ31029 } from './volgas';
 import { BODY_UAZ2206, BODY_UAZ469, LOOK_UAZ2206, LOOK_UAZ469 } from './uaz';
 import { BODY_ZIL130, LOOK_ZIL130 } from './zil';
@@ -608,11 +609,19 @@ export const KIT_SPECS: Readonly<Record<string, KitCarSpec>> = {
   gaz3221: { id: 'gaz3221', ...BODY_GAZ3221, look: LOOK_GAZ3221, cabinLayout: CABIN_GAZ3221 },
 };
 
+const SEATS = new Map<string, readonly PlayerSeat[]>();
+
 /**
- * The kit car's front seat is one bench across the cab (a truck without
- * `Layout.frontSeats`, the ZIL-130; carkit/interior.ts `truckBench`): its middle is a seat.
+ * The seats of a kit car, every one sat in (carkit/interior.ts `cabinSeats`: the front
+ * row with a bench's or a double seat's middle, the rear bench, a saloon's every seat);
+ * empty for an unknown id. Built once per car.
  */
-export function kitFrontBench(kitId: string): boolean {
-  const spec = KIT_SPECS[kitId];
-  return spec !== undefined && spec.platform === 'truck' && !spec.cabinLayout?.frontSeats;
+export function kitSeats(kitId: string): readonly PlayerSeat[] {
+  let seats = SEATS.get(kitId);
+  if (!seats) {
+    const spec = KIT_SPECS[kitId];
+    seats = spec ? cabinSeats(spec) : [];
+    SEATS.set(kitId, seats);
+  }
+  return seats;
 }

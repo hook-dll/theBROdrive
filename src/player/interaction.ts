@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { PhysicsWorld } from '../core/physics';
 
-import type { CarState, GameWorld, PlayerSeat, StickerState } from '../game/state';
+import { seatKind, seatRow, type CarState, type GameWorld, type PlayerSeat, type StickerState } from '../game/state';
 import type { DeliveryProbe } from '../contracts/types';
 import { takeHaulLoads, waitingHaulOfLoad } from '../contracts/hauls';
 import { haulLoadLock } from '../contracts/world';
@@ -22,6 +22,7 @@ import { thingDef } from '../items/things';
 import { isPassenger } from '../contracts/kinds/teddyPassengers';
 import { CABIN_PLACES, cabinIndex, cabinRule, layPlace, placeSeats, seatTaken, takePlace } from '../vehicle/cabin';
 import { cabinItemBounds } from '../vehicle/cabincargo';
+import { seatEye } from '../vehicle/cabincamera';
 import type { CarStats, PartInstance } from '../parts/registry';
 import {
   applySponge,
@@ -66,7 +67,7 @@ import type { BoardableField } from '../story/sitebuild';
 import { STICKER_SCALE_MAX, STICKER_SCALE_MIN } from '../items/stickercatalog';
 import { uprightStickerRoll } from '../render/stickers';
 import { KitRig, type KitControl, type KitPicked } from '../carkit/rig';
-import { KIT_BENCH_NODE } from '../carkit/interior';
+import type { KitSeatPlace } from '../carkit/interior';
 import { carShellKind, credit, debit, formatPrice } from '../economy/economy';
 import type { ShellPrice } from '../economy/shells';
 import type { FixtureContext, FixtureField, WorldFixture } from '../world/fixturefield';
@@ -517,8 +518,6 @@ const CRANK_AIM_RADIUS = 0.11;
 /** The door mirrors' heads (carkit/exterior.ts `sideMirrorControl`): a front seat's, through any glass. */
 const KIT_SIDE_MIRROR = /^mirror_[lr]$/;
 
-/** A front seat's parts, by the channel's position; the rear bench is `KIT_BENCH_NODE`. */
-const KIT_FRONT_SEAT = /^(?:seat|seatback|headrest)_(f[lr])$/;
 /**
  * A seat's own controls (its runners, back and headrest): sat in, never worked. They
  * stay controls in the car lab; in the game the seat is only where F puts the player.
@@ -1761,7 +1760,7 @@ export class Interaction {
         // across the cabin).
         && (part === null || this.kitAimed.distance > this.kitOpeningDistance)
       ) {
-        kitSeat = door.front ? (door.left ? 'driver' : 'passenger') : door.left ? 'rear-left' : 'rear-right';
+        kitSeat = this.kitDoorSeat(vehicle, door);
       }
     }
 
@@ -1893,7 +1892,7 @@ export class Interaction {
     this.raycaster.far = far;
     this.hits.length = 0;
     this.raycaster.intersectObject(root, true, this.hits);
-    const frontSeat = seated && (this.world.state.player.seat === 'driver' || this.world.state.player.seat === 'passenger');
+    const frontSeat = seated && seatRow(this.world.state.player.seat) === 0;
     // A door mirror is reached from a front seat through whatever glass is in the way,
     // shut or not: the door's drop pane, a vent window, the screen. The first surface
     // that is not glass decides whether it is the mirror.
@@ -2003,26 +2002,28 @@ export class Interaction {
   }
 
   /**
-   * The seat a kit car's surface belongs to, or null: a front seat by its parts' channel
-   * (`seat_fl` and the back and headrest riding on it are the driver's, on the left),
-   * the bench by its group, halved down the car's centre line: the rear seats'; a
-   * truck's front bench (`kitFrontBench`, carkit/interior.ts `KIT_BENCH_NODE`) in thirds
-   * of its width (`kitBenchHalf`): the driver's, the middle place's, the passenger's.
+   * The seat a kit car's surface belongs to, or null: the piece of seating it is part of
+   * (carkit/interior.ts `KitSeatPlace`: a front seat's runners with its back and headrest,
+   * a bench, a saloon seat) names the seats in it, and the place nearest the hit along the
+   * piece is the one: a bench's thirds or halves, a double seat's halves.
    */
   private kitSeatOf(hit: THREE.Intersection): PlayerSeat | null {
     for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
-      if (node.name === KIT_BENCH_NODE) {
+      const places = node.userData.kitSeats as readonly KitSeatPlace[] | undefined;
+      if (places) {
         const x = node.worldToLocal(this.kitEye.copy(hit.point)).x;
-        if (node.userData.kitFrontBench === true) {
-          const third = (node.userData.kitBenchHalf as number) / 3;
-          return x > third ? 'driver' : x < -third ? 'passenger' : 'middle';
+        let seat: PlayerSeat | null = null;
+        let gap = Infinity;
+        for (const place of places) {
+          if (Math.abs(place.x - x) < gap) {
+            gap = Math.abs(place.x - x);
+            seat = place.seat;
+          }
         }
-        return x > 0 ? 'rear-left' : 'rear-right';
+        return seat;
       }
       const id = (node.userData.kitControl as KitControl | undefined)?.id;
-      if (id === undefined) continue;
-      const front = KIT_FRONT_SEAT.exec(id);
-      return front ? (front[1] === 'fl' ? 'driver' : 'passenger') : null;
+      if (id !== undefined && !KIT_SEAT_PART.test(id)) return null;
     }
     return null;
   }
@@ -3205,15 +3206,15 @@ export class Interaction {
     if (!active || active.vehicle.speedKmh >= EXIT_SPEED_LIMIT_KMH) return;
     const rig = active.vehicle.kit;
     const seat = this.world.state.player.seat;
-    // The middle of a front bench is left by the door on the side he looks to, the
+    // The middle of the front row is left by the door on the side he looks to, the
     // passenger's when he looks ahead or back (+X is the car's left).
-    let left = seat === 'driver' || seat === 'rear-left';
-    if (seat === 'middle') {
+    let side: boolean | null = null;
+    if (seatKind(seat) === 'middle') {
       active.vehicle.chassis.rotation(this.qScratch);
-      const side = this.vScratch.set(1, 0, 0).applyQuaternion(this.qScratch);
-      left = side.x * dirX + side.y * dirY + side.z * dirZ > MIDDLE_EXIT_LOOK;
+      const left = this.vScratch.set(1, 0, 0).applyQuaternion(this.qScratch);
+      side = left.x * dirX + left.y * dirY + left.z * dirZ > MIDDLE_EXIT_LOOK;
     }
-    const door = rig ? this.kitExitDoor(rig, active.vehicle, seat, left) : null;
+    const door = rig ? this.kitExitDoor(rig, active.vehicle, seat, side) : null;
     if (rig && door && rig.get(door.id) <= 0.5) {
       this.sound = 'refused';
       return;
@@ -3233,19 +3234,66 @@ export class Interaction {
   }
 
   /**
-   * The door `seat` is left by, open or shut, on the `left` or right side: the front door
-   * for a front seat; for a rear seat the rear door, or the front one on a car without
-   * rear doors. Null for a kit car without doors found, which is left by its flank.
+   * The door `seat` is left by, open or shut: of the side doors of its row (the rear doors
+   * for a seat behind the front row, the front ones on a car without rear doors) the one
+   * nearest its eye, along and across the car; on the `side` he looks to from the middle
+   * of the front row (true the car's left). A minibus's saloon is left by its sliding
+   * door. Null for a kit car without doors found, which is left by its flank.
    */
-  private kitExitDoor(rig: KitRig, vehicle: Vehicle, seat: PlayerSeat, left: boolean): KitDoor | null {
-    const rear = seat === 'rear-left' || seat === 'rear-right';
-    let front: KitDoor | null = null;
-    for (const door of this.kitDoors(rig, vehicle)) {
-      if (door.left !== left) continue;
-      if (!door.front && rear) return door;
-      if (door.front) front = door;
+  private kitExitDoor(rig: KitRig, vehicle: Vehicle, seat: PlayerSeat, side: boolean | null): KitDoor | null {
+    const doors = this.kitDoors(rig, vehicle);
+    const rear = seatRow(seat) === 1 && doors.some((door) => !door.front);
+    const eye = seatEye(vehicle.modelMeasure, seat);
+    let nearest: KitDoor | null = null;
+    let gap = Infinity;
+    for (const door of doors) {
+      if (door.front === rear || (side !== null && door.left !== side)) continue;
+      const centre = this.kitDoorCentre(vehicle, door, this.kitCentre);
+      const d = Math.hypot(centre.x - eye[0], centre.z - eye[2]);
+      if (d < gap) {
+        gap = d;
+        nearest = door;
+      }
     }
-    return front;
+    return nearest;
+  }
+
+  /** The centre of `door`'s shut outline in chassis-local metres (+X the car's left), into `out`. */
+  private kitDoorCentre(vehicle: Vehicle, door: KitDoor, out: THREE.Vector3): THREE.Vector3 {
+    door.frame.localToWorld(door.box.getCenter(out));
+    const t = vehicle.chassis.translation(this.tScratch);
+    vehicle.chassis.rotation(this.qScratch);
+    return out.set(out.x - t.x, out.y - t.y, out.z - t.z).applyQuaternion(this.qBody.copy(this.qScratch).invert());
+  }
+
+  /**
+   * The seat an open side door serves when the player gets in through its doorway without
+   * looking at a seat: of the seats of its row (the front row through a front door, the
+   * rows behind through a rear one) the one whose eye is nearest the door, along and
+   * across the car; a sliding door's the saloon seat nearest its opening.
+   */
+  private kitDoorSeat(vehicle: Vehicle, door: KitDoor): PlayerSeat {
+    const measure = vehicle.modelMeasure;
+    const centre = this.kitDoorCentre(vehicle, door, this.kitCentre);
+    const row = door.front ? 0 : 1;
+    let seat: PlayerSeat = door.front ? (door.left ? 'driver' : 'passenger') : door.left ? 'rear-left' : 'rear-right';
+    let gap = Infinity;
+    const driver = measure.cabinEye;
+    if (driver && row === 0) {
+      seat = 'driver';
+      gap = Math.hypot(centre.x - driver[0], centre.z - driver[2]);
+    }
+    if (measure.seats) {
+      for (const measured of measure.seats) {
+        if (seatRow(measured.seat) !== row) continue;
+        const d = Math.hypot(centre.x - measured.eye[0], centre.z - measured.eye[2]);
+        if (d < gap) {
+          gap = d;
+          seat = measured.seat;
+        }
+      }
+    }
+    return seat;
   }
 
   private computeExitPosition(

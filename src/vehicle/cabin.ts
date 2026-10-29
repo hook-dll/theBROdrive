@@ -1,5 +1,5 @@
 import { contractThing, type Item } from '../items/items';
-import type { PlayerSeat } from '../game/state';
+import { seatKind, type PlayerSeat, type SeatKind } from '../game/state';
 
 /**
  * CARGO IN THE CABIN: things laid on the front passenger seat, on the rear bench or on
@@ -58,10 +58,11 @@ const SPANS: Partial<Record<CabinPlace, readonly CabinPlace[]>> = {
 const SEAT_PLACES: readonly CabinPlace[] = ['seat', 'bench_l', 'bench_r', 'bench'];
 
 /**
- * The places reached through a seat's door, in the order something is laid on them:
- * a half of the bench before the whole of it. The driver's seat holds nobody's luggage.
+ * The places reached through a seat's door, by its kind, in the order something is laid
+ * on them: a half of the bench before the whole of it. The driver's seat holds nobody's
+ * luggage.
  */
-const LAY_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+const LAY_ON: Readonly<Record<SeatKind, readonly CabinPlace[]>> = {
   driver: [],
   passenger: ['seat'],
   'rear-left': ['bench_l', 'bench'],
@@ -70,7 +71,7 @@ const LAY_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   middle: ['seat'],
 };
 /** And the places a thing is taken from through that door: seats first, then the floor. */
-const TAKE_FROM: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+const TAKE_FROM: Readonly<Record<SeatKind, readonly CabinPlace[]>> = {
   driver: [],
   passenger: ['seat', 'floor_front'],
   'rear-left': ['bench_l', 'bench', 'floor_rear_l', 'floor_rear'],
@@ -78,8 +79,8 @@ const TAKE_FROM: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
   middle: ['seat'],
 };
 
-/** The seat a place is reached from and sat on; the whole bench and rear floor answer to both. */
-export function placeSeats(place: CabinPlace): readonly PlayerSeat[] {
+/** The seats a place is reached from and sat on; the whole bench and rear floor answer to both. */
+export function placeSeats(place: CabinPlace): readonly SeatKind[] {
   switch (place) {
     case 'seat':
     case 'floor_front':
@@ -109,7 +110,7 @@ export function placeFree(cabin: readonly (Item | null)[], place: CabinPlace): b
 
 /** Something lies on the seat itself (not the floor in front of it), so nobody can sit there. */
 export function seatTaken(cabin: readonly (Item | null)[], seat: PlayerSeat): boolean {
-  return SEAT_PLACES.some((place) => cabin[cabinIndex(place)] !== null && placeSeats(place).includes(seat));
+  return SEAT_PLACES.some((place) => cabin[cabinIndex(place)] !== null && placeSeats(place).some((on) => on === seat));
 }
 
 /**
@@ -182,7 +183,7 @@ export function cabinRule(item: Item): CabinRule | null {
  * each door: a seat of its own, never the whole bench, the floor, the boot or the
  * driver's seat.
  */
-const SIT_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+const SIT_ON: Readonly<Record<SeatKind, readonly CabinPlace[]>> = {
   driver: [],
   passenger: ['seat'],
   'rear-left': ['bench_l'],
@@ -191,7 +192,7 @@ const SIT_ON: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
 };
 
 /** The one place a bench-only thing (the carpet) lies, through either rear door. */
-const BENCH_ONLY: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
+const BENCH_ONLY: Readonly<Record<SeatKind, readonly CabinPlace[]>> = {
   driver: [],
   passenger: [],
   'rear-left': ['bench'],
@@ -201,8 +202,9 @@ const BENCH_ONLY: Readonly<Record<PlayerSeat, readonly CabinPlace[]>> = {
 
 /**
  * Where a thing in hand goes through `seat`'s door under its `rule`: the first place
- * reached from it that is free and fits, or why not. A `passenger` goes only on a seat
- * of its own (`SIT_ON`), sitting up and facing forward: unturned, or not at all.
+ * reached from a seat of its kind that is free and fits, or why not. A `passenger` goes
+ * only on a seat of its own (`SIT_ON`), sitting up and facing forward: unturned, or not at
+ * all.
  */
 export function layPlace(
   cabin: readonly (Item | null)[],
@@ -212,7 +214,8 @@ export function layPlace(
   rule: CabinRule,
 ): { place: CabinPlace } | { refusal: string } {
   const passenger = rule === 'passenger';
-  const places = passenger ? SIT_ON[seat] : rule === 'bench' ? BENCH_ONLY[seat] : LAY_ON[seat];
+  const kind = seatKind(seat);
+  const places = passenger ? SIT_ON[kind] : rule === 'bench' ? BENCH_ONLY[kind] : LAY_ON[kind];
   if (places.length === 0) {
     if (passenger) return { refusal: 'passengers ride on a passenger seat' };
     return { refusal: rule === 'bench' ? 'it goes across the whole rear bench — through a rear door' : 'keep the driver\'s seat clear' };
@@ -235,5 +238,5 @@ export function layPlace(
 
 /** The place something is taken from through `seat`'s door, or null. */
 export function takePlace(cabin: readonly (Item | null)[], seat: PlayerSeat): CabinPlace | null {
-  return TAKE_FROM[seat].find((place) => cabin[cabinIndex(place)] !== null) ?? null;
+  return TAKE_FROM[seatKind(seat)].find((place) => cabin[cabinIndex(place)] !== null) ?? null;
 }

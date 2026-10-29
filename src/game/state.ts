@@ -193,12 +193,32 @@ export interface CarState {
 }
 
 /**
- * A kit car's seats; the driver sits on the car's left (+X in the kit frame). 'middle' is a
- * front bench's middle place (carkit/interior.ts `kitFrontBench`, the ZIL-130's), offered
- * only on such a car.
+ * The kinds of seat in a car; the driver sits on the car's left (+X in the kit frame).
+ * 'middle' is the front row's middle place: a front bench's (the ZIL-130's) or the inner
+ * half of a double passenger seat (the GAZelles'). A kind says which side and row the
+ * seat is on, what is reached through its door (vehicle/cabin.ts) and how the cabin
+ * sounds there (audio/cabinopenness.ts).
  */
-export const PLAYER_SEATS = ['driver', 'passenger', 'rear-left', 'rear-right', 'middle'] as const;
-export type PlayerSeat = (typeof PLAYER_SEATS)[number];
+export const SEAT_KINDS = ['driver', 'passenger', 'rear-left', 'rear-right', 'middle'] as const;
+export type SeatKind = (typeof SEAT_KINDS)[number];
+/**
+ * A seat of a car: a kind's own seat, or a further seat of that kind numbered by its car
+ * (`rear-left:3`, a minibus saloon's). Which seats a car has is its kit body's
+ * (carkit/specs.ts `kitSeats`): a sedan's four, a truck bench's three, a minibus's
+ * fourteen.
+ */
+export type PlayerSeat = SeatKind | `${SeatKind}:${number}`;
+
+/** The kind of `seat`: itself, or what comes before its number. */
+export function seatKind(seat: PlayerSeat): SeatKind {
+  const colon = seat.indexOf(':');
+  return (colon < 0 ? seat : seat.slice(0, colon)) as SeatKind;
+}
+
+/** The row `seat` is in: 0 the front row (the driver's, the passenger's, the middle), 1 behind it. */
+export function seatRow(seat: PlayerSeat): 0 | 1 {
+  return seat.startsWith('rear-') ? 1 : 0;
+}
 
 export interface PlayerState {
   x: number;

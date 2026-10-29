@@ -1641,6 +1641,34 @@ before (31 cars); kit-fingerprint: the 28 accepted cars moved in cabin only, re-
 check passes on all 31 but the ZIL's DASH UNVERIFIED, as before. Sheets before and after:
 `build/kitcheck/visors/{before,after}-{1..4}.png`, per car `<id>-{before,after}.png`.
 
+## GAZelles: the flatbed's engine, the driver's eye, every seat (2026-10-29)
+
+- **The GAZ-3302's open bonnet shows no engine; the minibus's does (owner).** → The
+  flatbed kept the first draft's engine cell at s 0.98–1.40, behind the cowl inside the
+  cab's engine cover: the bonnet showed only the radiator, filter and turbine. → Both
+  cars share the minibus's under-bonnet cells (`CHASSIS.bay`), the cover is gone from the
+  cab (the owner's photo of the same cab: a flat floor) and the 3302 takes the double
+  passenger seat. *gazelle.ts `CHASSIS.bay`; interior.ts `CABIN_GAZELLE`*.
+- **The driver's eye sits too high in both GAZelles (owner).** → The truck layout's 0.36
+  cushion (the ZIL's bench) and the eye 10 cm forward of the lean: 1.75 m, 0.48 over the
+  belt (other kit cars 0.25–0.40), 0.40 over the wheel's hub and 0.30 behind it, hub and
+  gauges under the cabin view's lower edge. → Cushion 0.30 (0.18 pad [F parts] on a 0.12
+  frame [E]; P dromad-267151758-06), `eyeForward: 0`: 1.69 m, 0.42 over the belt, 0.40
+  behind / 0.34 over the hub (the ZIL's 0.41 / 0.28), the cluster seen through the wheel.
+  *interior.ts `CABIN_GAZELLE`; measurements-gazelle.md §10*.
+- **Many seats, few sittable (owner).** → Seats were five fixed names; the saloon's eleven
+  mapped to rear-left/right with one mirrored eye. → The seat list is the cabin's own
+  (`seatPlan`, `cabinSeats`, specs.ts `kitSeats`): each piece of seating names its seats
+  (`userData.kitSeats`), each seat has its eye and facing (`kit_seat_eye:<seat>`,
+  `CarModelMeasure.seats`); the camera looks the seat's way; exit by the nearest door of
+  its row; saves keep loading (unknown ids fall back to their kind). *interior.ts,
+  specs.ts, game/state.ts `PlayerSeat`, player/interaction.ts, vehicle/cabincamera.ts,
+  render/cameras.ts, save/save.ts*.
+
+Checks: tsc clean; kit-check gaz3302 gaz3221 zil130 all pass but the ZIL's DASH
+UNVERIFIED (as before); mirrors R80 → R85 %; fingerprints: the 28 recorded cars
+identical. Traces before/after: `build/kitcheck/gazelle-fixes/`.
+
 ## Failed approaches (do not retry)
 
 - **A sun visor's hinge as far forward as it fits** (on the header band, nearest the
