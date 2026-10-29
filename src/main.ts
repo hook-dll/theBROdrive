@@ -1885,12 +1885,13 @@ async function boot(): Promise<void> {
       // engine, and the driver's throttle starts it again. Off while the autopilot drives
       // it (the autopilot starts a stopped engine itself) and during a race (a car held
       // on the grid must leave on the green, not crank first).
+      // Forward or back starts it: the backward key held at rest is reverse.
       const step = vehicle.stepAutoStop(
         dt,
-        vehicle === controlled ? f.throttle : 0,
+        vehicle === controlled ? Math.max(f.throttle, f.reverse ? 1 : 0) : 0,
         !(autopilot.engaged && vehicle === driving) && !race.active,
       );
-      if (step === 'stopped' && vehicle === controlled) hud.setToast('engine off: standing 20 s — throttle starts it');
+      if (step === 'stopped' && vehicle === controlled) hud.setToast('engine off: standing 20 s — drive to start');
     }
     syncPackMass(driving);
 
@@ -3026,6 +3027,8 @@ async function boot(): Promise<void> {
           knee: driving.thresholdBrakePedal,
           notch: autopilot.engaged ? null : input.pedalLever?.notch ?? null,
         },
+        autoStopped: driving.engineAutoStopped,
+        parked: driving.handbrakeOn,
       });
     } else {
       hud.setDriving(null);

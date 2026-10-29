@@ -81,7 +81,8 @@ import { RaceVisuals } from './visuals';
  * times and the prize: a rival still running is placed where it is (laps, then distance)
  * and its time is its projection (`RaceSession.projectedTime`), shown "~1:52.3". While
  * the panel is up, Backspace or F races the SAME field again for a new stake (a rematch:
- * everybody back on the grid); driving `RESULTS_AWAY_M` from the grid closes it. Every
+ * everybody back on the grid); the panel closes after `RESULTS_SHOWN_S`, or sooner once
+ * the player drives `RESULTS_AWAY_M` from the grid. Every
  * rival, finished or not, drives a slow cool-down lap to its box and stops; one out of
  * the player's view is simply stood back in its box.
  *
@@ -145,8 +146,10 @@ const COOLDOWN_MAX_S = 240;
 const COOLDOWN_PARKED_M = 6;
 /** Seconds the "GO!" stays up after the green. */
 const GO_S = 1.2;
-/** The results close with the player this far from the grid, metres. */
+/** The results close with the player this far from the grid, metres... */
 const RESULTS_AWAY_M = 300;
+/** ...or this long after they come up, seconds: the rematch offer goes with them. */
+const RESULTS_SHOWN_S = 10;
 /** A trailer race's load on each trailer: from this to this, kg, drawn per round. */
 const TRAILER_LOAD_MIN_KG = 150;
 const TRAILER_LOAD_MAX_KG = 350;
@@ -297,6 +300,8 @@ export class RaceDirector {
     results: null,
   };
   private readonly position = { x: 0, y: 0, z: 0 };
+  /** Seconds the results panel has been up (`stepResults`). */
+  private resultsAge = 0;
   private readonly other = { x: 0, y: 0, z: 0 };
   private readonly point = { x: 0, y: 0, z: 0 };
   private readonly at: TrackProjection = { s: 0, lateral: 0, height: 0 };
@@ -431,7 +436,7 @@ export class RaceDirector {
     const race = this.race;
     if (race) this.stepRace(dt, race);
     this.stepCooldowns(dt);
-    this.stepResults();
+    this.stepResults(dt);
     this.updateReadout();
   }
 
@@ -1070,6 +1075,7 @@ export class RaceDirector {
       flipped: 'OUT — on the roof',
       wrecked: 'OUT — the car is done',
     };
+    this.resultsAge = 0;
     this.readout.results = {
       headline: why[session.end ?? 'laps'],
       won: place === 1,
@@ -1123,10 +1129,15 @@ export class RaceDirector {
     }
   }
 
-  /** The results close once the player has driven away from the grid. */
-  private stepResults(): void {
+  /** The results close `RESULTS_SHOWN_S` after they come up, or once the player has driven away from the grid. */
+  private stepResults(dt: number): void {
     const field = this.field;
     if (this.readout.results === null || !field || this.race) return;
+    this.resultsAge += dt;
+    if (this.resultsAge >= RESULTS_SHOWN_S) {
+      this.readout.results = null;
+      return;
+    }
     const carId = this.world.state.player.drivingCarId;
     const vehicle = carId !== null ? this.host.vehicle(carId) : null;
     if (!vehicle) return;

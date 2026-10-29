@@ -159,10 +159,13 @@ can do that". There is no key item and no ignition to find: every car starts on 
   can run.
 - **Stop-start.** An idling engine on one of the player's cars that stands still (under
   0.3 m/s) with no throttle for 20 s stops itself, the key left in ("engine off: standing
-  20 s — throttle starts it"); the next throttle turns the starter. A car left idling at
-  a lay-by stops the same way. Only an engine stopped like this starts on the pedal: one
-  switched off with `I`, or stalled, waits for `I`. Off while the autopilot drives and
-  during a race (`Vehicle.stepAutoStop`). Not saved: a car reloaded auto-stopped waits for `I`.
+  20 s — drive to start"); the next throttle, or the backward key, turns the starter. The display shows no
+  ENGINE OFF for it. A car left idling at a lay-by stops the same way. Only an engine
+  stopped like this starts on the pedal: one switched off with `I`, or stalled, waits for
+  `I`. Off while the autopilot drives and during a race (`Vehicle.stepAutoStop`). Not
+  saved: a car reloaded auto-stopped waits for `I`.
+- **Handbrake on: a red P** in the display's last digit (ui/hud.ts); whatever the display
+  reads (the radio's station, a fault) runs in the fifteen digits before it.
 - Getting out leaves the engine as it is: a running car idles on, until stop-start stops it. The switch is saved
   with the car (`CarState.engineStopped`). Traffic and every car nobody has switched off
   run as before.

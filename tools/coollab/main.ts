@@ -85,6 +85,8 @@ function paint(): void {
     engineDestroyed: false,
     autopilotMode: null,
     pedalLever: null,
+    autoStopped: false,
+    parked: false,
   });
   document.title = `coollab ${sample.zone}`;
 }

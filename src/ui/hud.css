@@ -571,6 +571,11 @@ body.is-machine-focus .hud-crosshair {
   --hud-lcd-on: var(--lcd-alarm);
 }
 
+/* The handbrake's P in the last digit: red whatever the rest of the display shows. */
+.hud-lcd .hud-lcd-digit.is-park {
+  --hud-lcd-on: var(--lcd-alarm);
+}
+
 .hud-lcd-segment {
   /* Unlit: as faint as the rest of the glass (--hud-faint of --lcd-dim). */
   stroke: color-mix(in srgb, var(--lcd-dim) 62%, transparent);

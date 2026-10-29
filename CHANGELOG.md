@@ -4,6 +4,11 @@
 
 ### Added
 
+- The segment display: a red P in its last digit while the handbrake is on, the message
+  (station, fault) running in the fifteen before it; no ENGINE OFF for an engine
+  stop-start stopped, since the throttle starts it. The race results (and the rematch
+  offer) close after 10 s, or sooner once the player drives 300 m from the grid.
+
 - STOP-START on the player's cars (`Vehicle.stepAutoStop`, main.ts): an idling engine
   that stands still with no throttle for 20 s stops itself, key left in, and the next
   throttle cranks it. A car left running at a lay-by no longer idles on, losing oil and

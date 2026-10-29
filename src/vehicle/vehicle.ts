@@ -2129,6 +2129,16 @@ export class Vehicle implements Rebasable {
     return this.crankLeft > 0;
   }
 
+  /** Stopped by stop-start (`stepAutoStop`): the throttle starts it, no key needed. */
+  get engineAutoStopped(): boolean {
+    return this.autoStopped && this.stopped;
+  }
+
+  /** The handbrake is on, as the driver's last step set it. */
+  get handbrakeOn(): boolean {
+    return this.kitHandbrake > 0;
+  }
+
   /**
    * Turns the starter. For a crank of its own length the engine gives no torque; at its
    * end it runs if it can (`engineCanRun`), else it stays stopped: the starter turned and

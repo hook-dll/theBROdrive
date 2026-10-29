@@ -56,6 +56,10 @@ export interface DrivingReadout {
    * drives them: the lever scale beside the gyro orb (ui/hudgyro.ts).
    */
   pedals: PedalReadout;
+  /** Stopped by stop-start (`Vehicle.stepAutoStop`), not by the key or a stall: no ENGINE OFF. */
+  autoStopped: boolean;
+  /** The handbrake is on: the display's last digit is a red P. */
+  parked: boolean;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -194,6 +198,10 @@ export class Hud {
   private autopilotFaces: AutopilotMode | null = null;
   private engineOff = false;
   private engineStartKey: string | null = null;
+  /** The handbrake is on: a red P in the display's last digit (`refreshSegmentDisplay`). */
+  private parked = false;
+  /** Digits the message ran in at the last refresh: one fewer while `parked`. */
+  private displayWidth = LCD_DIGITS;
   private radioText: string | null = null;
   private radioOffUntil = 0;
   private displayMessage = '';
@@ -333,6 +341,7 @@ export class Hud {
         this.warningsSignature = '';
         this.engineOff = false;
         this.engineStartKey = null;
+        this.parked = false;
         this.refreshSegmentDisplay();
         this.gyro.setPedals(null);
       }
@@ -365,8 +374,11 @@ export class Hud {
     }
     const signature = warnings.join('   ');
     if (signature !== this.warningsSignature) this.warningsSignature = signature;
-    this.engineOff = !readout.engineRunning;
+    // An engine stop-start stopped (`Vehicle.stepAutoStop`) is not a fault: the pedal
+    // starts it, so the display says nothing about it.
+    this.engineOff = !readout.engineRunning && !readout.autoStopped;
     this.engineStartKey = readout.engineStartKey;
+    this.parked = readout.parked;
     this.refreshSegmentDisplay();
     this.gyro.setPedals(readout.pedals);
   }
@@ -464,22 +476,28 @@ export class Hud {
       this.lcdEl.classList.toggle('is-alarm', hasProblems);
     }
 
+    // The handbrake's P holds the last digit; the message runs in the digits before it.
+    const width = this.parked ? LCD_DIGITS - 1 : LCD_DIGITS;
     let offset = 0;
-    if (message.length > LCD_DIGITS) {
+    if (message.length > width) {
       const elapsedSteps = Math.floor((now - this.displayEpoch) / LCD_STEP_MS);
       offset = Math.max(0, elapsedSteps - LCD_INITIAL_PAUSE_STEPS) % (message.length + 3);
     }
-    if (offset === this.displayOffset) return;
+    if (offset === this.displayOffset && width === this.displayWidth) return;
     this.displayOffset = offset;
+    this.displayWidth = width;
 
     let frame: string;
-    if (message.length <= LCD_DIGITS) {
-      const leftPadding = Math.floor((LCD_DIGITS - message.length) / 2);
-      frame = `${' '.repeat(leftPadding)}${message}`.padEnd(LCD_DIGITS);
+    if (message.length <= width) {
+      const leftPadding = Math.floor((width - message.length) / 2);
+      frame = `${' '.repeat(leftPadding)}${message}`.padEnd(width);
     } else {
       const scroll = `${message}   `;
-      frame = `${scroll}${scroll}`.slice(offset, offset + LCD_DIGITS);
+      frame = `${scroll}${scroll}`.slice(offset, offset + width);
     }
+    if (this.parked) frame += 'P';
+    const last = this.lcdDigits[LCD_DIGITS - 1]!;
+    if (last.classList.contains('is-park') !== this.parked) last.classList.toggle('is-park', this.parked);
     // One attribute write per digit, and CSS decides which of its sixteen segments
     // are lit (see installSegmentGlyphRules). The display used to write 256 class
     // names per scroll step and every lit segment carried its own drop-shadow
