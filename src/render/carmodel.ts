@@ -620,6 +620,22 @@ function boundsOf(object: THREE.Object3D): THREE.Box3 {
 }
 
 /**
+ * `object.clone(true)`, less three's throwaway defaults. `Mesh.clone` constructs a mesh
+ * with a fresh BufferGeometry and MeshBasicMaterial (two UUIDs and a material's worth of
+ * properties) only for `copy` to swap in the source's own; a kit body is some 280 nodes,
+ * 150 of them meshes, cloned for every car that spawns. Every other node type is
+ * three's own clone, one level at a time.
+ */
+function cloneTree<T extends THREE.Object3D>(source: T): T {
+  const node: THREE.Object3D = source;
+  const copy = node instanceof THREE.Mesh && node.constructor === THREE.Mesh
+    ? new THREE.Mesh(node.geometry, node.material).copy(node, false)
+    : node.clone(false);
+  for (const child of node.children) copy.add(cloneTree(child));
+  return copy as T;
+}
+
+/**
  * THE CAR SHADOW CONTRACT: bodywork casts and never receives; wheels do both.
  *
  * Both packs author bodywork as ZERO-THICKNESS panels, and a driven instance draws
@@ -1793,6 +1809,17 @@ export function loadCarModel(id: string): Promise<void> {
       // A frame of its own like every other step; its program is the boot anchor's
       // (render/farcars.ts), so it needs no compiling.
       farGeometries.set(id, await onOwnFrame(() => buildFarGeometry(template(id))));
+      // Every wheel set a kit body can draw, merged for it (`kitWheelModel`). The anchor
+      // bakes the pack sets; a generated set draws in the body's own program and was left
+      // to the first car that wore it: 4-8 ms in that car's spawn, a hundred times a
+      // session (31 bodies, three or four generated sets each).
+      await onOwnFrame(() => {
+        const t = template(id);
+        if (!t.kit) return;
+        const pool = t.def.wheelSetPool ?? [];
+        if (pool.length === 0) kitWheelModel(t, t.wheels);
+        for (const sourceId of pool) kitWheelModel(t, poolWheelSet(sourceId) ?? t.wheels);
+      });
       readyModels.add(id);
     })().catch((error: unknown) => {
       modelReadiness.delete(id);
@@ -1891,6 +1918,12 @@ export function setWheelSetOverride(id: string | null): void {
 }
 
 /**
+ * Each set wheel's drawn width and rolling radius, as `cloneWheels` measures a fresh clone
+ * of it: the same for every clone, and a precise bounds walks every vertex of the wheel.
+ */
+const wheelVisuals = new WeakMap<THREE.Object3D, { readonly width: number; readonly radius: number }>();
+
+/**
  * Clones a wheel style from `source` (a set: `selectedWheels`) while keeping this body's
  * measured factory rolling radius. The source set contributes mesh, rim and tyre
  * appearance; chassis geometry remains the target model's responsibility.
@@ -1898,11 +1931,20 @@ export function setWheelSetOverride(id: string | null): void {
 function cloneWheels(t: Template, source: ReadonlyMap<string, THREE.Object3D>): Map<string, THREE.Object3D> {
   const wheels = new Map<string, THREE.Object3D>();
   for (const targetWheel of t.measure.wheels) {
-    const mesh = source.get(targetWheel.id)!.clone(true);
+    const wheel = source.get(targetWheel.id)!;
+    const mesh = cloneTree(wheel);
     mesh.updateMatrixWorld(true);
-    const box = boundsOf(mesh);
-    const visualWidth = box.max.x - box.min.x;
-    const visualRadius = Math.max(box.max.y - box.min.y, box.max.z - box.min.z) * 0.5;
+    let visual = wheelVisuals.get(wheel);
+    if (!visual) {
+      const box = boundsOf(mesh);
+      visual = {
+        width: box.max.x - box.min.x,
+        radius: Math.max(box.max.y - box.min.y, box.max.z - box.min.z) * 0.5,
+      };
+      wheelVisuals.set(wheel, visual);
+    }
+    const visualWidth = visual.width;
+    const visualRadius = visual.radius;
     if (!(visualRadius > 0) || !(visualWidth > 0)) {
       throw new Error(`Car model "${t.def.id}" has a wheel with invalid dimensions`);
     }
@@ -2012,7 +2054,7 @@ function kitWheelModel(t: Template, set: ReadonlyMap<string, THREE.Object3D>): K
 function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInstance {
   const set = selectedWheels(t, appearanceKey);
   const wheels = cloneWheels(t, set);
-  const body = t.body.clone(true);
+  const body = cloneTree(t.body);
   const clones = cloneCarBodyPaintMaterials(body, t, appearanceKey);
   const paint = [...clones.values()];
   const glass = cloneCarGlass(body, paint, t.kit !== null);
@@ -2123,7 +2165,7 @@ const _bodyInverse = new THREE.Matrix4();
  */
 function addSpareWheel(body: THREE.Object3D, t: Template, wheels: ReadonlyMap<string, THREE.Object3D>): void {
   if (!t.spare) return;
-  const wheel = wheels.get('wheel_rl')!.clone(true);
+  const wheel = cloneTree(wheels.get('wheel_rl')!);
   wheel.position.set(0, 0, 0);
   const mount = new THREE.Group();
   mount.name = 'spare';
@@ -2270,7 +2312,7 @@ function cloneStaticModel(t: Template, appearanceKey: string): StaticCarInstance
     group.add(wheels);
     return { model: group, paint, glass };
   }
-  const body = t.body.clone(true);
+  const body = cloneTree(t.body);
   const paint = [...cloneCarBodyPaintMaterials(body, t, appearanceKey).values()];
   const glass = cloneCarGlass(body, paint, false);
   applyRandomPaint(body, t.def, appearanceKey);

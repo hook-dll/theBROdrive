@@ -407,6 +407,8 @@ async function boot(): Promise<void> {
   // Who holds the rig's spotlights, and the road's headlamp streaks, frame to frame:
   // a slot is handed over by fading, never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
+  // Each frame's spot cluster grid is built for the scene pass's camera (render/spotclusters.ts).
+  renderer.setSpotClusterPass(vehicleLights.clusterPass);
   // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
   let spotReachCar: Vehicle | null = null;
   // Contact shadows are not a night effect and are not gated on the light rig: they are
@@ -3216,9 +3218,10 @@ async function boot(): Promise<void> {
     renderer.setItemViewEffects(
       s.player.wornSunShades?.tint ?? null,
       usingBinoculars,
-      usingTorchlight,
       usingCamera,
     );
+    // The torch is a slot of the light rig, aimed from the eye about to be drawn.
+    vehicleLights.setTorch(usingTorchlight, renderer.camera);
     if (pendingPhotoCamera !== null) {
       const cameraItem = pendingPhotoCamera;
       pendingPhotoCamera = null;

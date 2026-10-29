@@ -410,8 +410,6 @@ export class Renderer {
   private observedDeviceWidth = 0;
   private observedDeviceHeight = 0;
   private readonly canvasObserver: ResizeObserver | null;
-  /** Reused scratch for the camera's forward vector (torch aim). */
-  private readonly _forward = new THREE.Vector3();
   /** Whether the cinema lens is on: cinema mode, set through `setCinema`. */
   private cinemaLens = false;
   /** The cinema lens's Panini strength; see `panini`. */
@@ -420,9 +418,6 @@ export class Renderer {
   private fxaa: boolean;
   /** `Settings.shadows`, kept so a rung change can apply it (phones may still force off). */
   private shadowMode: ShadowMode;
-  /** Hand torch projected from the rendered eye; disabled rather than recreated. */
-  private readonly torchLight: THREE.SpotLight;
-  private readonly torchTarget = new THREE.Object3D();
   /** Reused 2D target for compact photographs; created only when the shutter fires. */
   private photoCanvas: HTMLCanvasElement | null = null;
   private photoContext: CanvasRenderingContext2D | null = null;
@@ -437,6 +432,16 @@ export class Renderer {
    * `waitForFrameShaders`, being in no scene the boot compile walks.
    */
   private cloudShadowPass: { draw(): void; compile(): Promise<unknown> } | null = null;
+  /**
+   * The spot cluster grid (render/spotclusters.ts): built for the game's camera right
+   * before the scene pass and switched off after it. A mirror (`renderMirror`) shades
+   * every lit slot, the ending every slot.
+   */
+  private spotClusterPass: {
+    begin(camera: THREE.PerspectiveCamera, width: number, height: number): void;
+    beginOther(): void;
+    end(): void;
+  } | null = null;
 
   private quality: GraphicsQuality;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
@@ -654,15 +659,6 @@ export class Renderer {
     presentMesh.frustumCulled = false;
     this.presentScene.add(presentMesh);
 
-    // Retuned with the vehicle lamps (render/vehiclelights.ts `LAMP_EXPOSURE`): 150 was
-    // authored against the old linear-encoded frame.
-    this.torchLight = new THREE.SpotLight(0xffedbd, 52, 65, 0.32, 0.58, 1.7);
-    this.torchLight.visible = false;
-    this.torchLight.castShadow = false;
-    this.torchLight.target = this.torchTarget;
-    this.scene.add(this.torchLight, this.torchTarget);
-
-
     // The window's resize event still drives it (a DPR change on a move between screens
     // arrives there everywhere); the observer adds the exact device-pixel size and the
     // layout changes no window event reports.
@@ -685,8 +681,6 @@ export class Renderer {
     this.hazeMaterial.dispose();
     this.presentMaterial.dispose();
     this.hazeGeometry.dispose();
-    this.scene.remove(this.torchLight, this.torchTarget);
-    this.torchLight.dispose();
     this.renderer.dispose();
   }
 
@@ -957,7 +951,6 @@ export class Renderer {
   setItemViewEffects(
     shades: ShadeTint | null,
     binoculars: boolean,
-    torchlight: boolean,
     cameraViewfinder: boolean,
   ): void {
     const tint = this.hazeMaterial.uniforms.uViewTint.value as THREE.Color;
@@ -968,14 +961,6 @@ export class Renderer {
     this.hazeMaterial.uniforms.uViewTintStrength.value = shades === null ? 0 : 0.72;
     this.hazeMaterial.uniforms.uBinoculars.value = binoculars ? 1 : 0;
     this.hazeMaterial.uniforms.uCameraViewfinder.value = cameraViewfinder ? 1 : 0;
-
-    this.torchLight.visible = torchlight;
-    if (torchlight) {
-      this.torchLight.position.copy(this.camera.position);
-      this.camera.getWorldDirection(this._forward);
-      this.torchTarget.position.copy(this.camera.position).addScaledVector(this._forward, 25);
-      this.torchTarget.updateMatrixWorld();
-    }
   }
 
   /**
@@ -1071,6 +1056,12 @@ export class Renderer {
     this.cloudShadowPass = pass;
   }
 
+  /** Installs the spot cluster grid's pass; see `spotClusterPass`. */
+  setSpotClusterPass(pass: Renderer['spotClusterPass']): void {
+    this.spotClusterPass?.end();
+    this.spotClusterPass = pass;
+  }
+
   /**
    * Draws the game's scene once more, from `camera` into `target`: a live mirror, right
    * after the frame. Every material keeps its program: any render target gives the same
@@ -1086,10 +1077,13 @@ export class Renderer {
     shadows.autoUpdate = false;
     shadows.needsUpdate = false;
     this.scene.matrixWorldAutoUpdate = false;
+    const clusters = this.spotClusterPass;
+    clusters?.beginOther();
     try {
       this.renderer.setRenderTarget(target);
       this.renderer.render(this.scene, camera);
     } finally {
+      clusters?.end();
       this.renderer.setRenderTarget(null);
       this.scene.matrixWorldAutoUpdate = matrices;
       shadows.autoUpdate = autoUpdate;
@@ -1170,10 +1164,17 @@ export class Renderer {
     // present pass shrinks it onto the canvas (see `resize`).
     //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
-    // cutscene's ground does not read it.
+    // cutscene's ground does not read it. The spot cluster grid likewise, for this
+    // camera's scene pass alone (render/spotclusters.ts).
+    const clusters = scene === this.scene ? this.spotClusterPass : null;
     if (scene === this.scene) this.cloudShadowPass?.draw();
     this.renderer.setRenderTarget(this.hazeTarget);
-    this.renderer.render(scene, camera);
+    clusters?.begin(camera, this.hazeTarget.width, this.hazeTarget.height);
+    try {
+      this.renderer.render(scene, camera);
+    } finally {
+      clusters?.end();
+    }
     if (this.shrinking) {
       this.renderer.setRenderTarget(this.frameTarget);
       this.renderer.render(this.hazeScene, this.hazeCamera);

@@ -632,7 +632,9 @@ export class CarStickerDecals {
         && (this.build === null || this.build.stickers === stickers);
       this.placedStickers = stickers;
       this.placedLength = stickers.length;
-      this.source ??= this.makeSource();
+      // Only a list with a sticker on it needs the triangles: a fresh car's first, empty
+      // call (every traffic car's) built the whole source, about a quarter of its spawn.
+      if (stickers.length > 0) this.source ??= this.makeSource();
       if (!appended) {
         for (const layer of this.layers) layer?.placed.reset();
         this.build = { stickers, next: 0 };

@@ -81,6 +81,7 @@ import {
   carModelMeasure,
   createCarModel,
   type CarMidInstance,
+  type CarModelInstance,
   type CarModelMeasure,
 } from '../render/carmodel';
 import type { CarBodySurface } from '../render/carsurface';
@@ -1184,6 +1185,12 @@ export class Vehicle implements Rebasable {
   /** This car's paint, created with its visuals; see render/carsurface.ts. */
   private surface: CarBodySurface | null = null;
   /**
+   * The instance the first `buildVisuals` takes instead of cloning one: built a frame
+   * ahead by a caller that spreads a spawn over frames (world/traffic.ts). Same model,
+   * same appearance key (the car's id) as `createCarModel` would have been given.
+   */
+  private prebuiltVisuals: CarModelInstance | null;
+  /**
    * The body's shadow hull (render/carshadowhull.ts) under the root, casting while the
    * car casts as itself; a car the far, mid or stand-in meshes draw casts it from the
    * shadow-only field instead (`castHull`).
@@ -1661,7 +1668,9 @@ export class Vehicle implements Rebasable {
     carState: CarState,
     scene: THREE.Scene,
     origin: WorldOrigin,
+    visuals: CarModelInstance | null = null,
   ) {
+    this.prebuiltVisuals = visuals;
     this.physics = physics;
     this.world = world;
     this.car = carState;
@@ -7062,7 +7071,8 @@ export class Vehicle implements Rebasable {
    * `previousKit`'s channels, so a rebuild leaves an open door open.
    */
   private buildVisuals(previousKit: KitRig | null): void {
-    const instance = createCarModel(this.model.id, this.car.id);
+    const instance = this.prebuiltVisuals ?? createCarModel(this.model.id, this.car.id);
+    this.prebuiltVisuals = null;
     this.rootGroup.add(instance.body);
     this.bodyGroup = instance.body;
     this.bodyRestScale.copy(instance.body.scale);

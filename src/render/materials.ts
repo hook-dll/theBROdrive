@@ -841,9 +841,10 @@ function kitLightsBegin(): string {
   if (gated === chunk) throw new Error('Three lights_fragment_begin layout changed: no receiveShadow test');
   const spotLoop = gated.indexOf('i < NUM_SPOT_LIGHTS;');
   const dirLoop = gated.indexOf('i < NUM_DIR_LIGHTS;');
-  const spotCall = spotLoop >= 0 ? gated.indexOf(KIT_DIRECT_CALL, spotLoop) : -1;
-  if (spotCall < 0 || dirLoop < 0 || spotCall > dirLoop) throw new Error('Three lights_fragment_begin layout changed: no spot light call');
-  const lit = gated.slice(0, spotCall) + KIT_SPOT_CALL + gated.slice(spotCall + KIT_DIRECT_CALL.length);
+  const spotSection = spotLoop >= 0 && dirLoop > spotLoop ? gated.slice(spotLoop, dirLoop) : '';
+  if (!spotSection.includes(KIT_DIRECT_CALL)) throw new Error('Three lights_fragment_begin layout changed: no spot light call');
+  // Both spot loops, the fixed slots' and the clustered one (render/lightshader.ts).
+  const lit = gated.slice(0, spotLoop) + spotSection.replaceAll(KIT_DIRECT_CALL, KIT_SPOT_CALL) + gated.slice(dirLoop);
   return `bool kitReceiveShadow = receiveShadow && vKitSurface.w > 0.5;
 bool kitMatt = vKitSurface.w > 0.5 && vKitSurface.x < 0.01 && vKitSurface.z < 0.01 && vKitSurface.y > ${KIT_MATT_ROUGHNESS.toFixed(2)} && vKitRole.x < 0.5;
 ${lit}`;
