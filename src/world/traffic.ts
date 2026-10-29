@@ -415,6 +415,9 @@ const RAILS_PROBE_BELOW_M = 0.5;
  */
 const NEIGHBOUR_HALF_WIDTH_M = 1.0;
 const NEIGHBOUR_HALF_LENGTH_M = 2.3;
+/** Models a new car may not repeat: the last this many drawn (`drawModel`). */
+const RECENT_MODELS = 4;
+
 /**
  * A STOP AT THE ROADSIDE. A roadside stop has a lay-by (`world/layby.ts`), and now and
  * then a car passing one on its own side pulls in, parks on the pad for a while and
@@ -849,6 +852,8 @@ export class RoadTraffic {
   /** The line round the bulb at the road's start; a turning car sees other cars by proximity. */
   private readonly turnaround: TurnaroundRoad;
   private readonly random: () => number;
+  /** The last models drawn, oldest first; see `drawModel`. */
+  private readonly recentModels: string[] = [];
   private readonly carList: TrafficCar[] = [];
   /** Reused coordinator scratch; allocating and sorting two fresh arrays at 60 Hz caused GC churn. */
   private readonly forwardQueue: TrafficCar[] = [];
@@ -2713,6 +2718,23 @@ export class RoadTraffic {
     });
   }
 
+  /**
+   * A model for the next car: uniform over `CAR_MODELS`, but none of the last
+   * `RECENT_MODELS` drawn, so a run of spawns (a platoon above all) is never three ZILs
+   * or four Mercedes in a row.
+   */
+  private drawModel(): (typeof CAR_MODELS)[number] {
+    const recent = this.recentModels;
+    const memory = Math.min(RECENT_MODELS, CAR_MODELS.length - 1);
+    let model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    for (let tries = 0; tries < 8 && recent.includes(model.id); tries++) {
+      model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    }
+    recent.push(model.id);
+    while (recent.length > memory) recent.shift();
+    return model;
+  }
+
   private queueSpawn(): void {
     const direction = this.nextDirection();
     if (direction === null) return;
@@ -2721,7 +2743,7 @@ export class RoadTraffic {
     // behind him is a car he will never see: it only falls further back until the
     // rear despawn collects it. Oncoming traffic behind him is worse still — it
     // drives away from the moment it exists.
-    const model = CAR_MODELS[Math.floor(this.random() * CAR_MODELS.length)]!;
+    const model = this.drawModel();
     const driver = this.drawDriver(direction);
     const fromBehind =
       direction === 1 && driver.speedCap > this.playerSpeed + REAR_SPAWN_CLOSING_MPS;
@@ -3007,18 +3029,14 @@ export class RoadTraffic {
       if (stale >= 0) this.removeAt(stale);
     }
     if (this.carList.length >= this.trafficCap) return;
-    // Reuses the leader's own model rather than drawing a fresh random one: the
-    // leader's model just finished loading (it is instantiated and on screen), so
-    // this spawn is guaranteed warm. A platoon mate fires the moment its leader
-    // does, bypassing the ordinary `spawnCooldown` that spaces solo spawns out — a
-    // fresh random pick here could land on a model nothing has used yet and start a
-    // second GLTF fetch/parse/upload back-to-back with the first, which is a stutter,
-    // not a frame-time average, so it would not show up in the aggregate report.
+    // A fresh model, not the leader's: a convoy of one model in four paints read as a
+    // glitch. Every model is loaded behind the boot cover (app/bootwarmup.ts), so this
+    // fetches nothing.
     const request: PendingSpawn = {
       generation: this.generation,
       direction: leader.direction,
       forwardS: s,
-      modelId: leader.modelId,
+      modelId: this.drawModel().id,
       id: `${TRAFFIC_ID_PREFIX}${(this.serial++).toString(36)}`,
       // Rides in convoy: the same character as the car it is tucked behind, so the
       // pair does not immediately pull apart onto a different target speed.

@@ -1,19 +1,24 @@
 /**
  * Music from other cars' cabins, heard through their shut windows.
  *
- * Nearly half the traffic has something playing: the thump of a dance track, an
- * accordion waltz, somebody's tape of estrada, a talk station. From outside a closed
- * car none of it is music any more, only its bottom octaves and its beat, so the loops
- * are made that way: short (4-8 s), mono, at 16 kHz, each a few bars of a style built
- * from oscillators and noise, and the car's shell baked in (two low-passes at 420-700
- * Hz, a cabin boom at 110 Hz and a soft saturation of the little speakers). Nothing is
- * loaded: `CabinMusic` renders the eight with OfflineAudioContext at startup, one after
- * another, off the main thread (about 3 MB of samples).
+ * Nearly half the traffic has something playing, and what a driver plays LOUD on a
+ * highway is a beat: house, techno, trance, drum and bass, hardcore, an 808 boom car,
+ * a wobble, eurodance, reggaeton, now and then rock, synth-pop, swing or an accordion
+ * tune. Nobody plays a talk station at that level, and a voice through a shut car is
+ * only a mumble, so there is no speech and no singing; a loop with a tune carries it on
+ * an instrument. From outside a closed car none of it is music any more, only its
+ * bottom octaves and its beat, so the loops are made that way: short (3-8 s), mono, at
+ * 16 kHz, each a few bars of a style built from oscillators and noise, and the car's
+ * shell baked in (two low-passes at 420-700 Hz, a cabin boom, and the soft clipping of
+ * speakers driven past what they can take). The bass-heavy ones push a deep boom
+ * (`boomHz`, `boomDb`) hard into that clipping: the farting, rattling low end of a car
+ * with too much sub in it. Nothing is loaded: `CabinMusic` renders them with
+ * OfflineAudioContext at startup, one after another, off the main thread (about 4.5 MB
+ * of samples).
  *
- * SEAMLESS. Every sound is a note started and ended inside the pattern, so the pattern
- * is time-invariant. Each loop is rendered twice over and the SECOND pass kept: it
- * already carries the first pass's tails, exactly what its own end hands to its start
- * when it loops, and every filter has settled. No crossfade.
+ * SEAMLESS. The pattern is time-invariant: each loop is rendered twice over and the
+ * SECOND pass kept: it already carries the first pass's tails, exactly what its own end
+ * hands to its start when it loops, and every filter has settled. No crossfade.
  *
  * Which car plays what is fixed by its id (`cabinMusicFor`); trafficaudio.ts plays it
  * through the car's own voice, before its panner.
@@ -26,17 +31,6 @@ const LOOP_RMS = 0.125;
 const LOOP_PEAK = 0.95;
 /** Share of cars with music playing. */
 const MUSIC_SHARE = 0.45;
-
-type Vowel = 'a' | 'o' | 'u' | 'e' | 'm';
-/** First three formants, Hz, of a male voice; `m` is a hum through the nose. */
-const FORMANTS: Record<Vowel, readonly [number, number, number]> = {
-  a: [750, 1150, 2600],
-  o: [500, 850, 2500],
-  u: [350, 650, 2400],
-  e: [520, 1750, 2500],
-  m: [260, 1100, 2300],
-};
-const VOWELS: readonly Vowel[] = ['a', 'o', 'u', 'e'];
 
 function hz(midi: number): number {
   return 440 * 2 ** ((midi - 69) / 12);
@@ -93,7 +87,7 @@ class Notes {
     osc.stop(t + decay * 2.5);
   }
 
-  /** A snare or clap: a noise burst round `tone` Hz over a short body. */
+  /** A snare, clap or (high `tone`, short `decay`) a hat: a noise burst over a short body. */
   snare(beat: number, gain = 0.4, decay = 0.13, tone = 1500): void {
     const t = this.at(beat);
     const src = new AudioBufferSourceNode(this.ctx, { buffer: this.noise, loop: true });
@@ -105,6 +99,7 @@ class Notes {
     src.connect(band).connect(g).connect(this.out);
     src.start(t, 0.37);
     src.stop(t + decay * 2.5);
+    if (tone > 2500) return;
     const body = new OscillatorNode(this.ctx, { frequency: 185 });
     const bg = new GainNode(this.ctx, { gain: 0 });
     bg.gain.setValueAtTime(0, t);
@@ -115,20 +110,46 @@ class Notes {
     body.stop(t + 0.2);
   }
 
-  /** One bass note, `len` beats long, through its own low-pass. */
-  bass(beat: number, len: number, midi: number, gain = 0.5, type: OscillatorType = 'sawtooth', cutoff = 380): void {
+  /**
+   * One bass note, `len` beats long, through its own low-pass. `detune` cents splits it
+   * into two oscillators that beat against each other: the drum and bass reese.
+   */
+  bass(beat: number, len: number, midi: number, gain = 0.5, type: OscillatorType = 'sawtooth', cutoff = 380, detune = 0): void {
     const t = this.at(beat);
     const d = len * this.beat;
-    const osc = new OscillatorNode(this.ctx, { type, frequency: hz(midi) });
     const lp = new BiquadFilterNode(this.ctx, { type: 'lowpass', frequency: cutoff, Q: 1.2 });
-    osc.connect(lp).connect(this.envelope(t, 0.006, d - 0.04, 0.04, gain));
-    osc.start(t);
-    osc.stop(t + d + 0.05);
+    lp.connect(this.envelope(t, 0.006, d - 0.04, 0.04, gain));
+    for (const cents of detune > 0 ? [-detune, detune] : [0]) {
+      const osc = new OscillatorNode(this.ctx, { type, frequency: hz(midi), detune: cents });
+      osc.connect(lp);
+      osc.start(t);
+      osc.stop(t + d + 0.05);
+    }
+  }
+
+  /** A wobble bass: a saw through a resonant low-pass swept by an LFO of `rate` per beat. */
+  wobble(beat: number, len: number, midi: number, rate: number, gain = 0.5): void {
+    const t = this.at(beat);
+    const d = len * this.beat;
+    const stop = t + d + 0.05;
+    const lp = new BiquadFilterNode(this.ctx, { type: 'lowpass', frequency: 260, Q: 7 });
+    const lfo = new OscillatorNode(this.ctx, { frequency: rate / this.beat });
+    const depth = new GainNode(this.ctx, { gain: 220 });
+    lfo.connect(depth).connect(lp.frequency);
+    lp.connect(this.envelope(t, 0.01, d - 0.04, 0.04, gain));
+    for (const [type, cents] of [['sawtooth', -8], ['square', 8]] as const) {
+      const osc = new OscillatorNode(this.ctx, { type, frequency: hz(midi), detune: cents });
+      osc.connect(lp);
+      osc.start(t);
+      osc.stop(stop);
+    }
+    lfo.start(t);
+    lfo.stop(stop);
   }
 
   /**
    * A chord, each note two oscillators `detune` cents apart (an accordion's wet
-   * tuning, a brass section's spread); `tremolo` Hz shakes it like bellows.
+   * tuning, a brass section's spread, a trance supersaw); `tremolo` Hz shakes it.
    */
   chord(
     beat: number,
@@ -162,45 +183,9 @@ class Notes {
     }
   }
 
-  /** A sung note: a buzz with vibrato through the vowel's three formants. */
-  sing(beat: number, len: number, midi: number, vowel: Vowel, gain = 0.45): void {
-    this.voice(this.at(beat), len * this.beat, hz(midi), hz(midi), vowel, gain, 5.3, 0.06, 0.12);
-  }
-
-  /** A spoken syllable: no vibrato, the pitch sliding from `f0` to `f1`, a short burst before it. */
-  syllable(t: number, len: number, f0: number, f1: number, vowel: Vowel, gain: number, consonant: boolean): void {
-    const at = this.t0 + t;
-    if (consonant) {
-      const src = new AudioBufferSourceNode(this.ctx, { buffer: this.noise, loop: true });
-      const band = new BiquadFilterNode(this.ctx, { type: 'bandpass', frequency: 2400, Q: 1 });
-      src.connect(band).connect(this.envelope(at - 0.03, 0.004, 0.02, 0.01, gain * 0.5));
-      src.start(at - 0.03, 1.1 + (t % 1));
-      src.stop(at + 0.01);
-    }
-    this.voice(at, len, f0, f1, vowel, gain, 0, 0.02, 0.04);
-  }
-
-  private voice(t: number, d: number, f0: number, f1: number, vowel: Vowel, gain: number, vibratoHz: number, attack: number, release: number): void {
-    const osc = new OscillatorNode(this.ctx, { type: 'sawtooth', frequency: f0 });
-    osc.frequency.setValueAtTime(f0, t);
-    osc.frequency.linearRampToValueAtTime(f1, t + d);
-    const stop = t + d + release + 0.02;
-    if (vibratoHz > 0) {
-      const lfo = new OscillatorNode(this.ctx, { frequency: vibratoHz });
-      const depth = new GainNode(this.ctx, { gain: f0 * 0.007 });
-      lfo.connect(depth).connect(osc.frequency);
-      lfo.start(t);
-      lfo.stop(stop);
-    }
-    const env = this.envelope(t, attack, d - release, release, gain);
-    const [f1Hz, f2Hz, f3Hz] = FORMANTS[vowel];
-    for (const [f, level, bw] of [[f1Hz, 1, 90], [f2Hz, 0.5, 110], [f3Hz, 0.25, 150]] as const) {
-      const band = new BiquadFilterNode(this.ctx, { type: 'bandpass', frequency: f, Q: f / bw });
-      const g = new GainNode(this.ctx, { gain: level * 4 });
-      osc.connect(band).connect(g).connect(env);
-    }
-    osc.start(t);
-    osc.stop(stop);
+  /** A melody, `[beat, beats, midi]` per note, on one detuned instrument. */
+  tune(notes: readonly (readonly [number, number, number])[], options: Parameters<Notes['chord']>[3] = {}): void {
+    for (const [b, len, midi] of notes) this.chord(b, len, [midi], options);
   }
 }
 
@@ -210,71 +195,191 @@ export interface CabinLoopSpec {
   readonly beats: number;
   /** The shell's low-pass corner, Hz. */
   readonly cutoffHz: number;
-  /** A small radio's band: nothing under 250 Hz. */
-  readonly radio?: boolean;
-  /** Level into the speakers' saturation. */
+  /** Level into the speakers' saturation: past ~1.5 the low end farts and rattles. */
   readonly drive: number;
+  /** The cabin boom's centre, Hz, and its lift, dB: deep and big for a bass car. */
+  readonly boomHz?: number;
+  readonly boomDb?: number;
   readonly build: (n: Notes) => void;
+}
+
+/** Four on the floor across `beats`, a kick per beat. */
+function fourOnTheFloor(n: Notes, beats: number, gain = 1, from = 110, to = 45, decay = 0.3): void {
+  for (let b = 0; b < beats; b++) n.kick(b, gain, from, to, decay);
 }
 
 /** The loops, in the order `cabinMusicFor` indexes them. */
 export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
   {
-    // Four on the floor: the «тумц-тумц» from a passing car at night.
-    name: 'tumts',
-    bpm: 128,
+    // House: the «тумц-тумц» from a passing car at night.
+    name: 'house',
+    bpm: 126,
     beats: 16,
     cutoffHz: 520,
-    drive: 0.9,
+    drive: 1.5,
+    boomHz: 65,
+    boomDb: 9,
     build(n) {
       const roots = [33, 33, 29, 31];
+      fourOnTheFloor(n, 16);
       for (let b = 0; b < 16; b++) {
-        n.kick(b, 1);
         if (b % 2 === 1) n.snare(b, 0.3, 0.1, 1300);
-        n.bass(b + 0.5, 0.42, roots[b >> 2]!, 0.55, 'sawtooth', 300);
+        n.snare(b + 0.5, 0.12, 0.05, 4000);
+        n.bass(b + 0.5, 0.42, roots[b >> 2]!, 0.6, 'sawtooth', 300);
       }
       for (let bar = 0; bar < 4; bar++) n.chord(bar * 4 + 1.5, 0.35, [roots[bar]! + 24, roots[bar]! + 27, roots[bar]! + 31], { gain: 0.05, type: 'square' });
     },
   },
   {
-    // A slow chanson waltz: oom-pah-pah under an accordion with the bellows shaking.
-    name: 'chanson',
-    bpm: 100,
-    beats: 12,
-    cutoffHz: 650,
-    drive: 0.8,
+    // Techno: a hard kick every beat and the rumble rolling off it in sixteenths.
+    name: 'techno',
+    bpm: 134,
+    beats: 8,
+    cutoffHz: 480,
+    drive: 1.2,
+    boomHz: 58,
+    boomDb: 10,
     build(n) {
-      const bass = [45, 38, 40, 45];
-      const chords = [[57, 60, 64], [57, 62, 65], [56, 59, 62, 64], [57, 60, 64]];
-      for (let bar = 0; bar < 4; bar++) {
-        n.bass(bar * 3, 0.9, bass[bar]!, 0.5, 'triangle', 500);
-        for (const pah of [1, 2]) n.chord(bar * 3 + pah, 0.5, chords[bar]!, { gain: 0.05, detune: 12 });
+      fourOnTheFloor(n, 8, 1.1, 130, 42, 0.35);
+      for (let b = 0; b < 8; b++) {
+        for (const q of [0.25, 0.5, 0.75]) n.bass(b + q, 0.22, b < 6 ? 31 : 34, 0.35 * (1 - q * 0.5), 'sine', 200);
+        n.snare(b + 0.5, 0.14, 0.06, 4500);
+        if (b % 2 === 1) n.snare(b, 0.25, 0.09, 1500);
       }
-      const tune: readonly (readonly [number, number, number])[] = [
-        [0, 1.5, 64], [1.5, 0.5, 65], [2, 1, 64],
-        [3, 1.5, 62], [4.5, 0.5, 64], [5, 1, 65],
-        [6, 1, 68], [7, 1, 71], [8, 1, 68],
-        [9, 2, 69], [11, 1, 64],
-      ];
-      for (const [b, len, midi] of tune) n.chord(b, len, [midi], { gain: 0.09, type: 'square', detune: 12, tremolo: 5.5, attack: 0.03 });
     },
   },
   {
-    // Somebody singing along: a hummed, sung line over a soft pad.
-    name: 'hum',
-    bpm: 80,
-    beats: 8,
-    cutoffHz: 600,
-    drive: 0.8,
+    // Trance: the rolling offbeat bass under supersaw stabs carrying the riff.
+    name: 'trance',
+    bpm: 138,
+    beats: 16,
+    cutoffHz: 620,
+    drive: 1.4,
+    boomHz: 70,
+    boomDb: 7,
     build(n) {
-      n.chord(0, 4, [48, 55, 64], { gain: 0.05, type: 'triangle', attack: 0.3, release: 0.4 });
-      n.chord(4, 4, [45, 52, 60], { gain: 0.05, type: 'triangle', attack: 0.3, release: 0.4 });
-      n.bass(0, 3.9, 36, 0.3, 'sine', 300);
-      n.bass(4, 3.9, 33, 0.3, 'sine', 300);
-      const line: readonly (readonly [number, number, number, Vowel])[] = [
-        [0, 1.5, 64, 'm'], [1.5, 0.5, 67, 'o'], [2, 2, 69, 'a'], [4, 1, 67, 'o'], [5, 1, 64, 'u'], [6, 1.8, 62, 'm'],
-      ];
-      for (const [b, len, midi, vowel] of line) n.sing(b, len, midi, vowel, 0.5);
+      const roots = [33, 29, 36, 31];
+      fourOnTheFloor(n, 16, 1, 120, 45, 0.28);
+      for (let b = 0; b < 16; b++) {
+        const root = roots[b >> 2]!;
+        for (const q of [0.25, 0.5, 0.75]) n.bass(b + q, 0.2, root, 0.45, 'sawtooth', 340);
+      }
+      const riff = [0, 0.75, 1.5, 2, 2.75, 3.5];
+      const steps = [12, 19, 15, 12, 19, 24];
+      for (let bar = 0; bar < 4; bar++) {
+        riff.forEach((q, i) => n.chord(bar * 4 + q, 0.4, [roots[bar]! + 24 + steps[i]!], { gain: 0.045, detune: 18, attack: 0.005, release: 0.06 }));
+      }
+    },
+  },
+  {
+    // Drum and bass: a two-step break at 174 over a growling reese.
+    name: 'dnb',
+    bpm: 174,
+    beats: 8,
+    cutoffHz: 560,
+    drive: 1.1,
+    boomHz: 55,
+    boomDb: 10,
+    build(n) {
+      for (const b of [0, 2.5, 4, 6.25, 6.5]) n.kick(b, 1, 120, 45, 0.25);
+      for (const b of [1, 3, 5, 7]) n.snare(b, 0.55, 0.14, 1700);
+      for (let e = 0; e < 16; e++) n.snare(e / 2 + 0.25, 0.08, 0.04, 4200);
+      n.bass(0, 3.9, 26, 0.6, 'sawtooth', 240, 22);
+      n.bass(4, 1.9, 29, 0.6, 'sawtooth', 240, 22);
+      n.bass(6, 1.9, 24, 0.6, 'sawtooth', 240, 22);
+    },
+  },
+  {
+    // Hardcore: a distorted kick on every beat at 180, the kick IS the tune.
+    name: 'hardcore',
+    bpm: 180,
+    beats: 8,
+    cutoffHz: 520,
+    drive: 1.5,
+    boomHz: 62,
+    boomDb: 9,
+    build(n) {
+      fourOnTheFloor(n, 8, 1.3, 220, 48, 0.3);
+      for (let b = 0; b < 8; b++) n.bass(b + 0.5, 0.35, b < 4 ? 33 : 31, 0.4, 'square', 420);
+      n.chord(0, 3.8, [69, 72, 76], { gain: 0.03, type: 'square', detune: 15 });
+      n.chord(4, 3.8, [67, 71, 74], { gain: 0.03, type: 'square', detune: 15 });
+    },
+  },
+  {
+    // The boom car: long 808s, a slow snare, nothing else gets out of the shell.
+    name: 'boom',
+    bpm: 75,
+    beats: 8,
+    cutoffHz: 420,
+    drive: 1.6,
+    boomHz: 50,
+    boomDb: 12,
+    build(n) {
+      for (const b of [0, 1.75, 4, 5.25, 5.75]) n.kick(b, 1, 90, 40, 0.9);
+      n.snare(2, 0.4, 0.2, 1100);
+      n.snare(6, 0.4, 0.2, 1100);
+      for (let e = 0; e < 16; e++) n.snare(e / 2, 0.06, 0.03, 5000);
+      n.chord(0, 7.8, [45, 52, 57], { gain: 0.03, type: 'triangle', attack: 0.5, release: 0.15 });
+    },
+  },
+  {
+    // A wobble: half-time drums, the bass swept twice and four times a beat.
+    name: 'wobble',
+    bpm: 140,
+    beats: 16,
+    cutoffHz: 540,
+    drive: 0.9,
+    boomHz: 55,
+    boomDb: 10,
+    build(n) {
+      for (const b of [0, 8, 10.5]) n.kick(b, 1.1, 110, 42, 0.4);
+      for (const b of [4, 12]) n.snare(b, 0.6, 0.2, 1300);
+      n.wobble(0, 4, 26, 2, 0.4);
+      n.wobble(4, 4, 26, 4, 0.4);
+      n.wobble(8, 4, 29, 2, 0.4);
+      n.wobble(12, 4, 24, 1, 0.4);
+    },
+  },
+  {
+    // Eurodance: an octave bass on the offbeat and a square-wave hook.
+    name: 'eurodance',
+    bpm: 140,
+    beats: 8,
+    cutoffHz: 640,
+    drive: 1.4,
+    boomHz: 75,
+    boomDb: 6,
+    build(n) {
+      fourOnTheFloor(n, 8, 1, 120, 46, 0.25);
+      for (let b = 0; b < 8; b++) {
+        if (b % 2 === 1) n.snare(b, 0.35, 0.1, 1500);
+        const root = b < 4 ? 33 : 31;
+        n.bass(b + 0.5, 0.4, root + 12, 0.45, 'sawtooth', 450);
+      }
+      n.tune([
+        [0, 0.5, 69], [0.5, 0.5, 72], [1, 0.5, 76], [1.5, 1, 74], [3, 0.5, 72],
+        [4, 0.5, 67], [4.5, 0.5, 71], [5, 0.5, 74], [5.5, 1, 72], [7, 0.5, 71],
+      ], { gain: 0.06, type: 'square', detune: 10, attack: 0.005, release: 0.05 });
+    },
+  },
+  {
+    // Reggaeton: the dembow, a boom-ch-boom-chick over a sub held long.
+    name: 'dembow',
+    bpm: 96,
+    beats: 8,
+    cutoffHz: 500,
+    drive: 0.9,
+    boomHz: 55,
+    boomDb: 10,
+    build(n) {
+      fourOnTheFloor(n, 8, 0.8, 100, 42, 0.45);
+      for (let b = 0; b < 8; b++) {
+        n.snare(b + 0.75, 0.35, 0.09, 1600);
+        if (b % 2 === 1) n.snare(b + 0.5, 0.3, 0.09, 1600);
+      }
+      n.bass(0, 3.9, 28, 0.55, 'sine', 200);
+      n.bass(4, 3.9, 31, 0.55, 'sine', 200);
+      n.tune([[0.5, 0.5, 64], [1.5, 0.5, 67], [2.5, 1, 66], [4.5, 0.5, 64], [5.5, 0.5, 62], [6.5, 1, 64]], { gain: 0.05, type: 'triangle', detune: 6 });
     },
   },
   {
@@ -283,7 +388,7 @@ export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
     bpm: 116,
     beats: 8,
     cutoffHz: 560,
-    drive: 0.9,
+    drive: 1.1,
     build(n) {
       for (let b = 0; b < 8; b++) {
         if (b % 2 === 0) n.kick(b, 0.9);
@@ -299,71 +404,12 @@ export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
     },
   },
   {
-    // A talk station: a man's voice, phrases and pauses, through a small speaker.
-    name: 'talk',
-    bpm: 60,
-    beats: 6,
-    cutoffHz: 700,
-    radio: true,
-    drive: 0.8,
-    build(n) {
-      const rand = mulberry(0x7a1c3e55);
-      for (const [start, end] of [[0.15, 2.6], [3.15, 5.55]] as const) {
-        let t = start;
-        while (t < end - 0.15) {
-          const along = (t - start) / (end - start);
-          const f0 = 138 - 34 * along + (rand() - 0.5) * 16;
-          const len = 0.1 + rand() * 0.13;
-          const vowel = VOWELS[Math.floor(rand() * VOWELS.length)]!;
-          n.syllable(t, len, f0, f0 * (0.93 + rand() * 0.05), vowel, 0.5 + rand() * 0.3, rand() < 0.6);
-          // Words of two or three syllables, then a short gap.
-          t += len + (rand() < 0.35 ? 0.09 + rand() * 0.08 : 0.025);
-        }
-      }
-    },
-  },
-  {
-    // Soviet estrada: a walking bass, brass stabs on the off-beats and a singer.
-    name: 'estrada',
-    bpm: 104,
-    beats: 8,
-    cutoffHz: 620,
-    drive: 0.85,
-    build(n) {
-      const walk = [45, 49, 52, 49, 50, 54, 57, 52];
-      for (let b = 0; b < 8; b++) {
-        if (b % 2 === 0) n.kick(b, 0.8);
-        else n.snare(b, 0.35, 0.12, 1600);
-        n.bass(b, 0.9, walk[b]!, 0.45, 'triangle', 600);
-        n.chord(b + 0.5, 0.25, b < 4 ? [57, 61, 64] : [57, 62, 66], { gain: 0.04, attack: 0.01, release: 0.05 });
-      }
-      const line: readonly (readonly [number, number, number, Vowel])[] = [
-        [0, 1, 64, 'a'], [1, 1, 66, 'e'], [2, 2, 69, 'a'], [4, 1.5, 69, 'o'], [5.5, 0.5, 71, 'e'], [6, 1.8, 69, 'a'],
-      ];
-      for (const [b, len, midi, vowel] of line) n.sing(b, len, midi, vowel, 0.4);
-    },
-  },
-  {
-    // The boom car: long 808 kicks, a slow snare, nothing else gets out.
-    name: 'boom',
-    bpm: 75,
-    beats: 8,
-    cutoffHz: 420,
-    drive: 1,
-    build(n) {
-      for (const b of [0, 1.75, 4, 5.25, 5.75]) n.kick(b, 1, 90, 42, 0.9);
-      n.snare(2, 0.4, 0.2, 1100);
-      n.snare(6, 0.4, 0.2, 1100);
-      n.chord(0, 7.8, [45, 52, 57], { gain: 0.03, type: 'triangle', attack: 0.5, release: 0.15 });
-    },
-  },
-  {
     // Rock: palm-muted power chords in eighths over a straight beat.
     name: 'rock',
     bpm: 120,
     beats: 8,
     cutoffHz: 600,
-    drive: 1.2,
+    drive: 1.3,
     build(n) {
       for (const b of [0, 2, 2.5, 4, 6, 6.5]) n.kick(b, 0.9, 100, 50, 0.22);
       for (const b of [1, 3, 5, 7]) n.snare(b, 0.5, 0.15, 1400);
@@ -371,6 +417,71 @@ export const CABIN_LOOPS: readonly CabinLoopSpec[] = [
         const root = e < 8 ? 40 : e < 12 ? 43 : 45;
         n.chord(e / 2, 0.4, [root, root + 7, root + 12], { gain: 0.06, attack: 0.004, release: 0.04, detune: 5 });
       }
+    },
+  },
+  {
+    // Swing: a walking bass, the ride's spang-a-lang, chords comped on the swung eighth.
+    name: 'swing',
+    bpm: 150,
+    beats: 8,
+    cutoffHz: 650,
+    drive: 1,
+    build(n) {
+      const walk = [38, 41, 43, 44, 45, 43, 41, 40];
+      for (let b = 0; b < 8; b++) {
+        n.bass(b, 0.9, walk[b]!, 0.55, 'triangle', 600);
+        n.snare(b, 0.12, 0.12, 3800);
+        if (b % 2 === 1) n.snare(b + 2 / 3, 0.09, 0.08, 3800);
+        if (b % 2 === 1) n.snare(b, 0.12, 0.06, 1800);
+      }
+      n.kick(0, 0.5, 90, 50, 0.2);
+      n.kick(4, 0.5, 90, 50, 0.2);
+      n.chord(1 + 2 / 3, 0.5, [53, 57, 60, 64], { gain: 0.03, type: 'triangle', detune: 4 });
+      n.chord(3 + 2 / 3, 0.9, [55, 59, 62, 65], { gain: 0.03, type: 'triangle', detune: 4 });
+      n.chord(5 + 2 / 3, 0.5, [52, 55, 59, 62], { gain: 0.03, type: 'triangle', detune: 4 });
+    },
+  },
+  {
+    // A slow chanson waltz: oom-pah-pah under an accordion with the bellows shaking.
+    name: 'chanson',
+    bpm: 100,
+    beats: 12,
+    cutoffHz: 650,
+    drive: 1,
+    build(n) {
+      const bass = [45, 38, 40, 45];
+      const chords = [[57, 60, 64], [57, 62, 65], [56, 59, 62, 64], [57, 60, 64]];
+      for (let bar = 0; bar < 4; bar++) {
+        n.bass(bar * 3, 0.9, bass[bar]!, 0.5, 'triangle', 500);
+        for (const pah of [1, 2]) n.chord(bar * 3 + pah, 0.5, chords[bar]!, { gain: 0.05, detune: 12 });
+      }
+      n.tune([
+        [0, 1.5, 64], [1.5, 0.5, 65], [2, 1, 64],
+        [3, 1.5, 62], [4.5, 0.5, 64], [5, 1, 65],
+        [6, 1, 68], [7, 1, 71], [8, 1, 68],
+        [9, 2, 69], [11, 1, 64],
+      ], { gain: 0.09, type: 'square', detune: 12, tremolo: 5.5, attack: 0.03 });
+    },
+  },
+  {
+    // A slow pop ballad: the tune on a soft lead over a pad, where a singer would be.
+    name: 'ballad',
+    bpm: 84,
+    beats: 8,
+    cutoffHz: 620,
+    drive: 1.1,
+    boomHz: 80,
+    boomDb: 5,
+    build(n) {
+      for (const b of [0, 2.5, 4, 6.5]) n.kick(b, 0.8, 100, 45, 0.35);
+      for (const b of [2, 6]) n.snare(b, 0.4, 0.2, 1300);
+      n.chord(0, 4, [48, 55, 64], { gain: 0.04, type: 'triangle', attack: 0.2, release: 0.3 });
+      n.chord(4, 4, [45, 52, 60], { gain: 0.04, type: 'triangle', attack: 0.2, release: 0.3 });
+      n.bass(0, 3.9, 36, 0.45, 'sine', 300);
+      n.bass(4, 3.9, 33, 0.45, 'sine', 300);
+      n.tune([
+        [0, 1.5, 64], [1.5, 0.5, 67], [2, 2, 69], [4, 1, 67], [5, 1, 64], [6, 1.8, 62],
+      ], { gain: 0.08, type: 'triangle', detune: 6, tremolo: 5, attack: 0.04, release: 0.15 });
     },
   },
 ];
@@ -387,10 +498,10 @@ function loopSamples(spec: CabinLoopSpec): number {
 export async function renderCabinPasses(spec: CabinLoopSpec, passes: number): Promise<Float32Array> {
   const length = loopSamples(spec);
   const ctx = new OfflineAudioContext(1, length * passes, LOOP_RATE);
-  // The shell: a cabin boom, two low-passes, the small speakers' soft clipping.
+  // The shell: a cabin boom, two low-passes, the speakers' soft clipping.
   const input = new GainNode(ctx, { gain: spec.drive });
-  const low = new BiquadFilterNode(ctx, { type: 'highpass', frequency: spec.radio ? 250 : 35, Q: 0.6 });
-  const boom = new BiquadFilterNode(ctx, { type: 'peaking', frequency: 110, Q: 1, gain: 3 });
+  const low = new BiquadFilterNode(ctx, { type: 'highpass', frequency: 35, Q: 0.6 });
+  const boom = new BiquadFilterNode(ctx, { type: 'peaking', frequency: spec.boomHz ?? 110, Q: 1, gain: spec.boomDb ?? 3 });
   const lp1 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: spec.cutoffHz, Q: 0.7 });
   const lp2 = new BiquadFilterNode(ctx, { type: 'lowpass', frequency: spec.cutoffHz * 1.25, Q: 0.6 });
   const curve = new Float32Array(1025);
