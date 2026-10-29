@@ -203,7 +203,7 @@ export const BINDABLE_ACTIONS: readonly {
   // while driving impossible.
   { id: 'shiftUp', label: 'Shift up', defaultKeys: ['KeyX'] },
   { id: 'shiftDown', label: 'Shift down', defaultKeys: ['KeyZ'] },
-  { id: 'engine', label: 'Start / stop engine', defaultKeys: ['KeyE'] },
+  { id: 'engine', label: 'Start / stop engine', defaultKeys: ['KeyI'] },
   { id: 'lights', label: 'Cycle headlights', defaultKeys: ['KeyL'] },
   { id: 'indicatorLeft', label: 'Left blinker', defaultKeys: ['Comma'] },
   { id: 'indicatorRight', label: 'Right blinker', defaultKeys: ['Period'] },

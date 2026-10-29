@@ -35,7 +35,7 @@ import { DAY_LENGTH, MIRROR_FIELD, type CarState, type GameWorld } from '../game
 import type { KitMirror } from '../carkit/names';
 import {
   FUEL_RESERVE_FRACTION,
-  OIL_LOSS_LPH,
+  oilLossLph,
   oilCapacity,
   variant,
   type CarStats,
@@ -3268,16 +3268,18 @@ export class Vehicle implements Rebasable {
     if (cooling.critical) this.overheatStalled = true;
     else if (this.overheatStalled && !cooling.overheating) this.overheatStalled = false;
 
-    // Oil seeps while the engine turns. It is not consumed by work like fuel is —
-    // the rate is flat per running second, which is why this only asks whether the
-    // engine is alive. Water is not here: the cooling system above owns its loss,
-    // because how fast water leaves depends on how hot the engine is being run.
+    // Oil goes while the engine turns, with the work it does (`oilLossLph`): the
+    // revolutions and the throttle, as fuel does, so a car left idling loses a few
+    // centilitres where a flat-out climb loses litres. Water is not here: the cooling
+    // system above owns its loss, because how fast water leaves depends on how hot the
+    // engine is being run.
     //
     // Mirrored locally and emitted on the same throttled cadence as fuel, for the
     // same reason: a delta per tick for a number that moves by 0.0004 L would be
     // three hundred pointless state writes a second.
     if (this.engineRunning) {
-      this.localOil = Math.max(0, this.localOil - (OIL_LOSS_LPH / 3600) * dt);
+      const revs = stats.engine.redlineRpm > 0 ? this.drivetrain.rpm / stats.engine.redlineRpm : 0;
+      this.localOil = Math.max(0, this.localOil - (oilLossLph(revs, throttle) / 3600) * dt);
     }
     this.fluidEmitTimer += dt;
     if (this.fluidEmitTimer >= FUEL_EMIT_INTERVAL) {

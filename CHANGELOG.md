@@ -4,6 +4,14 @@
 
 ### Added
 
+- THE ENGINE IS ON `I` (was `E`), and OIL GOES WITH THE WORK (`parts/registry.ts`
+  `oilLossLph`, `vehicle/vehicle.ts`). Oil seeped at a flat 2.1 L/h whenever the engine
+  ran, so ten minutes parked with it idling cost a tenth of a 4 L sump, and a car started
+  with its sump half full came back to OIL LOW. Now the loss is the revolutions times a
+  load term, still 2.1 L/h at a 90 km/h cruise (half the redline, a third throttle, the
+  ~170 km per sump it was tuned for): about 0.3 L/h idling, about 9 L/h flat out at the
+  redline. Fuel already burned by the work (bsfc), and water keeps its seep and its boiling.
+
 - CABIN MUSIC IS BAKED (`audio/cabinmusic.ts`, `audio/cabinsynth.ts`,
   `public/audio/cabin/*.wav`, 2.2 MB). The game no longer synthesises the traffic's 14
   cabin loops at startup; it fetches 16-bit mono WAVs at 16 kHz and copies their samples

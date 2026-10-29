@@ -1788,7 +1788,8 @@ export function engineHeat(engine: EngineSpec): EngineHeatSpec {
 }
 
 /**
- * Litres per hour of oil that a running engine seeps away.
+ * Litres per hour of oil a running engine seeps away AT A STEADY 90 KM/H CRUISE
+ * (`OIL_CRUISE_REVS`, `OIL_CRUISE_LOAD`); `oilLossLph` scales it with the work.
  *
  * NOT realistic — a sound engine loses none. It is tuned so a full sump lasts
  * roughly 170 km of cruising, which at 90 km/h is a couple of hours of driving.
@@ -1800,7 +1801,29 @@ export function engineHeat(engine: EngineSpec): EngineHeatSpec {
  * `WATER_BOIL_LPH_PER_K` in vehicle/cooling.ts), which is what makes a low radiator
  * cost water faster the lower it gets.
  */
-export const OIL_LOSS_LPH = 2.1;
+const OIL_LOSS_LPH = 2.1;
+/** Crank speed, as a fraction of the redline, and throttle of the cruise `OIL_LOSS_LPH` is set at. */
+const OIL_CRUISE_REVS = 0.5;
+const OIL_CRUISE_LOAD = 0.3;
+/** Share of the loss that goes with the revolutions alone, whatever the throttle. */
+const OIL_REVS_SHARE = 0.25;
+
+/**
+ * Oil a running engine loses, litres per hour, at crank speed `revs` (fraction of the
+ * redline) and throttle `load` (0..1). Oil goes past the rings and out of the seals
+ * with every revolution, and faster the harder each one is pushed, so the rate is the
+ * revolutions times a load term, normalised to `OIL_LOSS_LPH` at the cruise. An idling
+ * car (~0.14 of the redline, no throttle) loses about a seventh of that, 0.3 L/h: ten
+ * minutes parked with the engine on costs a few centilitres, not the sump. Flat out at
+ * the redline it is four times the cruise.
+ */
+export function oilLossLph(revs: number, load: number): number {
+  const r = Math.max(0, revs);
+  const l = Math.min(1, Math.max(0, load));
+  const work = OIL_REVS_SHARE + (1 - OIL_REVS_SHARE) * l;
+  const cruise = OIL_REVS_SHARE + (1 - OIL_REVS_SHARE) * OIL_CRUISE_LOAD;
+  return OIL_LOSS_LPH * (r / OIL_CRUISE_REVS) * (work / cruise);
+}
 
 /**
  * Fuel fraction below which the tank is on its reserve: the HUD's fuel gauge reads as an
