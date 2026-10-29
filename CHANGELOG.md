@@ -1528,6 +1528,35 @@
 
 ### Fixed
 
+- THE 65-90 MS ROAD CHUNK STALL AND THE 25-30 MS SETTLEMENT STALL ARE GONE
+  (`world/racetrack/site.ts` `RaceTrackField.prepareSteps`, `placeTrackSteps`;
+  `world/racetrack/mesh.ts` `RaceTrackSiteProvider`; `world/racetrack/layout.ts`
+  `generateLoopSteps`; `world/poi.ts` `PoiProvider.buildSteps`; `world/poi/kit.ts`
+  `mergeParts`; `render/figurine.ts`; `world/roaddistance.ts`). Profiled with CPU profiles
+  on autopilot drives at 100-110 km/h (seeds 3226876384, 3981248153, 3597466627):
+  - The road chunk step (`road:build:24:road` 70 ms, `road:build:22:road` 87 ms) was not
+    the road. Its shoulder's first terrain sample near a post with a race track placed
+    the whole track inside `RaceTrackField.lookup`: loop rolls and closure, the profile,
+    and the levelled ground's 3 m lattice (`buildRaster`, 40 of the 70 ms), plus a second
+    whole-road `RoadDistance` coarse index (5 ms). A new first provider,
+    `RaceTrackSiteProvider`, now places every track a chunk's ground can read a step at a
+    time (each 0.1-2 ms, ~500 steps a track) before anything samples it; a sample that
+    still finds its track unplaced finishes it synchronously, as before. The coarse index
+    is built once per spine and shared. Every placed track (raster, heights, lane, all
+    fields) hashes identical to the old one-shot placement on all three seeds.
+  - `PoiProvider.build` (24-31 ms) built a whole settlement in one job: card machines'
+    `mergeKitStatics` (clone, `toNonIndexed`, per-vertex `applyMatrix4`, `mergeGeometries`),
+    the claw's figurine heap (`FigurineBatch` per-vertex `Vector3` maths), house colliders.
+    It is now `buildSteps`, a piece per step (cabinet, merge, machine, heap); the merge
+    writes the merged arrays directly with three's own arithmetic (4x faster; the old path
+    stays for unusual attributes) and the heap writes its arrays directly. Registrations
+    (fixtures, lot signs, the lot car's `car_add`) wait for the new `ChunkContent.attach`,
+    so a promotion's disposal of the visual-only build cannot forget them. Every POI chunk
+    over 40 km of three seeds, visual and physical, hashes identical (meshes, attributes,
+    matrices, colliders, fixture ids, cars).
+  - Before → after, 45 s per seed: worst streaming job 70 / 87 / 31 ms → 2.4 / 2.9 / 4.1
+    ms; frames over 8.3 ms 7.0 / 9.8 / 5.6 → 2.8 / 2.8 / 2.8 a minute; over 12 ms
+    4.2 / 2.8 / 1.4 → 1.4 / 0 / 0 (the one left is a render frame, not streaming).
 - THE SMALL JERKS AT SPEED: THE MESA REBUILD NO LONGER LANDS IN ONE FRAME
   (`render/vista.ts` `MesaBuild`, `planMesas`; `ui/perfoverlay.ts`). Reported from play
   (owner, 2026-10-29): with the performance graph on, single short spikes, some under the

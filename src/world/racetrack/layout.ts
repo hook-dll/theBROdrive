@@ -511,8 +511,9 @@ function pieceHeading(pieces: readonly TrackPiece[], index: number): number {
 /**
  * Closes the filtered loop by adjusting the start straight and the straight most nearly
  * at right angles to it. Returns the walk, or null when a straight would go short.
+ * Yields after each Newton iteration (three walks of the table).
  */
-function close(pieces: TrackPiece[]): Walked | null {
+function* closeSteps(pieces: TrackPiece[]): Generator<void, Walked | null> {
   const p = 0;
   let q = -1;
   let best = 0.5;
@@ -528,6 +529,7 @@ function close(pieces: TrackPiece[]): Walked | null {
   if (q < 0) return null;
   let walked = walk(pieces);
   for (let iteration = 0; iteration < 10; iteration++) {
+    yield;
     if (Math.hypot(walked.residualX, walked.residualZ) < 1e-4) return walked;
     const delta = 0.5;
     pieces[p]!.length += delta;
@@ -631,18 +633,21 @@ function rollSectors(rand: Rand, pieces: readonly TrackPiece[], starts: Float64A
  * for a technical corner, arcs that do not fit, fewer than `MIN_FEATURES` corner
  * features, a closure that would shorten a straight past its floor, a lap outside the
  * length window, or a loop that crowds itself. The caller rolls again from the same
- * stream.
+ * stream. A generator whose steps are a Newton iteration of the closure or less, so the
+ * main thread can spread it over frames (racetrack/site.ts).
  */
-export function generateLoop(rand: Rand): TrackLoop | null {
+export function* generateLoopSteps(rand: Rand): Generator<void, TrackLoop | null> {
   const polygon = polygonPieces(rand);
   if (!polygon) return null;
   const { pieces, inserts } = insertDoubleS(rand, polygon.pieces);
   if (polygon.pieces.length / 2 + inserts < MIN_FEATURES) return null;
-  const walked = close(pieces);
+  const walked = yield* closeSteps(pieces);
   if (!walked) return null;
+  yield;
   const length = walked.count * walked.step;
   if (length < TRACK_MIN_LENGTH_M || length > TRACK_MAX_LENGTH_M) return null;
   if (loopSeparation(walked.xs, walked.zs, length, TRACK_CLEAR_M) < TRACK_CLEAR_M) return null;
+  yield;
 
   const pieceStarts = new Float64Array(pieces.length);
   for (let i = 1; i < pieces.length; i++) pieceStarts[i] = pieceStarts[i - 1]! + pieces[i - 1]!.length;

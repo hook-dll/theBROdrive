@@ -104,6 +104,14 @@ export interface ChunkContent {
    */
   dispose?: () => void;
   /**
+   * Registers what this contribution names BY ID in a shared registry (fixtures, lot
+   * signs, a car it adds to the world). Called by the streamer in `attachContent`, the
+   * call that puts the group in the scene and enables its colliders — after the
+   * contribution it replaces, if any, has been disposed, so that one's `dispose`
+   * forgetting the same ids cannot take this one's entries with it.
+   */
+  attach?: () => void;
+  /**
    * Night-time state for providers with emissive fixtures (the reflector posts).
    * Called from the render loop with the shared night factor (0..1, from the sky);
    * providers without any simply omit it.
@@ -130,9 +138,10 @@ export interface ChunkProvider {
    * visual-only contribution for the same chunk, and swaps the two only when the
    * physical one completes. Anything a `buildSteps` provider registers BY ID in a shared
    * registry must therefore be registered by its physical build only — as the scatter's
-   * breakables and ground cover are — or the visual-only contribution's disposal would
-   * forget its replacement's entry. Shared instance-batch slots may coexist: both
-   * contributions draw the same instances for the few frames the replacement builds.
+   * breakables and ground cover are — or in its content's `attach`, or the visual-only
+   * contribution's disposal would forget its replacement's entry. Shared instance-batch
+   * slots may coexist: both contributions draw the same instances for the few frames
+   * the replacement builds.
    */
   buildSteps?(ctx: ChunkContext): Iterator<void, ChunkContent | null>;
 }
@@ -613,6 +622,7 @@ export class ChunkStreamer {
     // yield mid-build, so a collider created early must not be solid until the mesh
     // and any breakable registration that names it exist.
     for (const collider of content.colliders) collider.setEnabled(true);
+    content.attach?.();
   }
 
   private teardownContent(content: ChunkContent): void {

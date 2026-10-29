@@ -303,7 +303,7 @@ function dressCabinet(root: THREE.Group, look: CardMachineLook): void {
   box(root, [INNER_W, H - HOOD_H, D], [0, (H - HOOD_H) / 2, 0], look.body);
   const trim = look.cabinet === 'garage' ? dressGarageShell(root) : dressArcadeShell(root);
 
-  // The window's black bezel; the window's frame stands out of it (`buildCardMachine`).
+  // The window's black bezel; the window's frame stands out of it (`buildCardMachineSteps`).
   box(root, [CARD_W + 0.14, CARD_H + 0.16, 0.012], [CARD_X, CARD_Y, FRONT - 0.006], CABINET_BLACK);
 
   // The showcase: a pale back, its frame standing out round it, a lamp under its top.
@@ -493,9 +493,9 @@ function dressDial(mount: THREE.Object3D, rotor: THREE.Object3D): void {
 /**
  * Builds the cabinet at ABSOLUTE (`x`, `z`) on the sand, its front turned by `yaw`, on the
  * lowest ground under it. In the physics band it is solid, its deck too. `disposers` gets
- * the two card materials.
+ * the two card materials. Yields once, between dressing the cabinet and merging it.
  */
-export function buildCardMachine(
+export function* buildCardMachineSteps(
   ctx: ChunkContext,
   s: number,
   x: number,
@@ -506,7 +506,7 @@ export function buildCardMachine(
   bodies: RAPIER.RigidBody[],
   colliders: RAPIER.Collider[],
   disposers: Array<() => void>,
-): CardMachineParts {
+): Generator<void, CardMachineParts> {
   const c = Math.cos(yaw);
   const sn = Math.sin(yaw);
   const local = (lx: number, lz: number): [number, number] => [x + c * lx + sn * lz, z - sn * lx + c * lz];
@@ -596,6 +596,7 @@ export function buildCardMachine(
   root.add(buttonPlate);
 
   // The cabinet's boxes in one draw per finish, each moving part's in one of its own.
+  yield;
   mergeKitStatics(root);
   group.add(root);
 

@@ -115,7 +115,7 @@ import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
 import { ScatterProvider } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
-import { RaceTrackProvider, raceTrackProgramAnchor } from './world/racetrack/mesh';
+import { RaceTrackProvider, RaceTrackSiteProvider, raceTrackProgramAnchor } from './world/racetrack/mesh';
 import { updateWeather, weather, weatherBeginS } from './world/weather';
 import { Road, ROAD_LENGTH } from './world/road';
 import { WorldOrigin } from './world/origin';
@@ -637,6 +637,9 @@ async function boot(): Promise<void> {
     origin,
     worldWork,
   );
+  // First: places the race tracks this chunk's ground reads, a step at a time, before
+  // any provider below samples it (world/racetrack/mesh.ts).
+  streamer.register(new RaceTrackSiteProvider());
   streamer.register(new RoadMeshProvider(world.seed, roadDistance));
   // The paved lay-bys in front of the roadside stops (world/layby.ts), hung off the
   // ribbon's edge rows, so they build right after it.

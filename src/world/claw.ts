@@ -367,8 +367,9 @@ export class ClawHeap {
  * Builds stop `poi`'s claw machine standing at absolute (`x`, `z`) on the sand, its front
  * turned by `yaw`. In the physics band it is solid, fills its heap and registers its
  * fixture (id pushed to `registered`, for the chunk to forget); `disposers` gets the heap.
+ * Yields between its stages: the cabinet, its merge, the machine and its heap.
  */
-export function buildClaw(
+export function* buildClawSteps(
   ctx: ChunkContext,
   poi: Poi,
   x: number,
@@ -380,7 +381,7 @@ export function buildClaw(
   fixtures: FixtureField,
   registered: string[],
   disposers: Array<() => void>,
-): void {
+): Generator<void, void> {
   const c = Math.cos(yaw);
   const sn = Math.sin(yaw);
   const local = (lx: number, lz: number): [number, number] => [x + c * lx + sn * lz, z - sn * lx + c * lz];
@@ -396,6 +397,7 @@ export function buildClaw(
   root.position.set(x - ctx.originX, y, z - ctx.originZ);
   root.rotation.y = yaw;
   const parts = dressCabinet(root);
+  yield;
   mergeKitStatics(root);
   group.add(root);
 
@@ -408,6 +410,7 @@ export function buildClaw(
     );
   }
 
+  yield;
   const machine = new ClawMachine(ctx.world, poi.index, parts, x, y, z, yaw, ctx.hasPhysics);
   if (!ctx.hasPhysics) return;
   disposers.push(() => machine.dispose());

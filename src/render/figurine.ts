@@ -121,7 +121,6 @@ export class FigurineBatch {
   private readonly position: THREE.BufferAttribute;
   private readonly normal: THREE.BufferAttribute;
   private readonly normalMatrix = new THREE.Matrix3();
-  private readonly v = new THREE.Vector3();
 
   constructor(kinds: readonly StickerKind[], matrices: readonly THREE.Matrix4[], bounds: THREE.Sphere) {
     this.kinds = kinds;
@@ -156,17 +155,38 @@ export class FigurineBatch {
     this.upload(i);
   }
 
+  /**
+   * Writes figurine `i` at `matrix` (the heap mesh's frame). Straight on the arrays, with
+   * three's own arithmetic (`Vector3.applyMatrix4`, `applyMatrix3`, `normalize`) written
+   * out: a heap is tens of thousands of vertices, built in the frame its machine streams in.
+   */
   private write(i: number, matrix: THREE.Matrix4): void {
     const source = figurineGeometry(this.kinds[i]!);
-    const from = source.getAttribute('position') as THREE.BufferAttribute;
-    const normals = source.getAttribute('normal') as THREE.BufferAttribute;
-    this.normalMatrix.getNormalMatrix(matrix);
-    const start = this.starts[i]!;
-    for (let k = 0; k < this.counts[i]!; k++) {
-      this.v.fromBufferAttribute(from, k).applyMatrix4(matrix);
-      this.position.setXYZ(start + k, this.v.x, this.v.y, this.v.z);
-      this.v.fromBufferAttribute(normals, k).applyMatrix3(this.normalMatrix).normalize();
-      this.normal.setXYZ(start + k, this.v.x, this.v.y, this.v.z);
+    const from = (source.getAttribute('position') as THREE.BufferAttribute).array;
+    const normals = (source.getAttribute('normal') as THREE.BufferAttribute).array;
+    const e = matrix.elements;
+    const n = this.normalMatrix.getNormalMatrix(matrix).elements;
+    const toPosition = this.position.array;
+    const toNormal = this.normal.array;
+    const count = this.counts[i]!;
+    for (let k = 0, at = this.starts[i]! * 3; k < count; k++, at += 3) {
+      const x = from[k * 3]!;
+      const y = from[k * 3 + 1]!;
+      const z = from[k * 3 + 2]!;
+      const w = 1 / (e[3]! * x + e[7]! * y + e[11]! * z + e[15]!);
+      toPosition[at] = (e[0]! * x + e[4]! * y + e[8]! * z + e[12]!) * w;
+      toPosition[at + 1] = (e[1]! * x + e[5]! * y + e[9]! * z + e[13]!) * w;
+      toPosition[at + 2] = (e[2]! * x + e[6]! * y + e[10]! * z + e[14]!) * w;
+      const a = normals[k * 3]!;
+      const b = normals[k * 3 + 1]!;
+      const c = normals[k * 3 + 2]!;
+      const nx = n[0]! * a + n[3]! * b + n[6]! * c;
+      const ny = n[1]! * a + n[4]! * b + n[7]! * c;
+      const nz = n[2]! * a + n[5]! * b + n[8]! * c;
+      const scale = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+      toNormal[at] = nx * scale;
+      toNormal[at + 1] = ny * scale;
+      toNormal[at + 2] = nz * scale;
     }
   }
 

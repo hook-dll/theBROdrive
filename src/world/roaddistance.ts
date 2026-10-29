@@ -220,65 +220,28 @@ export class RoadDistance {
    * one caller would fault the entire road in on the first query. The spine's coarse
    * table holds exactly these positions, computed once by a single walk and persisted,
    * so the index is now a copy of two flat arrays and forces no integration at all.
+   *
+   * Still about 5 ms at 40 000 km, so one index per spine is shared by every instance in
+   * the thread (`coarseIndexes`): a later one, such as the race tracks' own, costs nothing.
    */
   private ensureCoarse(): void {
     if (this.coarseS) return;
     const spine = this.road.spine;
-    const x = spine.coarseX;
-    const z = spine.coarseZ;
-    const count = x.length;
-    const s = new Float64Array(count);
-    for (let k = 0; k < count; k++) s[k] = k * COARSE_STEP;
-
-    // Grid bounds from the samples themselves. The road wanders wherever its curvature
-    // takes it, so nothing else knows how far out it reaches.
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (let k = 0; k < count; k++) {
-      const px = x[k]!;
-      const pz = z[k]!;
-      if (px < minX) minX = px;
-      if (px > maxX) maxX = px;
-      if (pz < minZ) minZ = pz;
-      if (pz > maxZ) maxZ = pz;
+    let index = coarseIndexes.get(spine);
+    if (!index) {
+      index = buildCoarseIndex(spine.coarseX, spine.coarseZ);
+      coarseIndexes.set(spine, index);
     }
-    const cellMinX = Math.floor(minX / CELL_SIZE);
-    const cellMinZ = Math.floor(minZ / CELL_SIZE);
-    const cellsX = Math.floor(maxX / CELL_SIZE) - cellMinX + 1;
-    const cellsZ = Math.floor(maxZ / CELL_SIZE) - cellMinZ + 1;
-
-    // Counting sort into CSR. Two passes over the samples and one over the cells, so
-    // building the index is linear and allocates exactly twice.
-    const cellCount = cellsX * cellsZ;
-    const start = new Int32Array(cellCount + 1);
-    for (let k = 0; k < count; k++) {
-      const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
-      const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
-      start[cz * cellsX + cx + 1]++;
-    }
-    for (let c = 0; c < cellCount; c++) start[c + 1] += start[c];
-    const items = new Int32Array(count);
-    const cursor = new Int32Array(cellCount);
-    for (let k = 0; k < count; k++) {
-      const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
-      const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
-      const c = cz * cellsX + cx;
-      items[start[c]! + cursor[c]!] = k;
-      cursor[c]!++;
-    }
-
-    this.coarseS = s;
-    this.coarseX = x;
-    this.coarseZ = z;
+    this.coarseS = index.s;
+    this.coarseX = spine.coarseX;
+    this.coarseZ = spine.coarseZ;
     this.cellSize = CELL_SIZE;
-    this.cellMinX = cellMinX;
-    this.cellMinZ = cellMinZ;
-    this.cellsX = cellsX;
-    this.cellsZ = cellsZ;
-    this.cellStart = start;
-    this.cellItems = items;
+    this.cellMinX = index.cellMinX;
+    this.cellMinZ = index.cellMinZ;
+    this.cellsX = index.cellsX;
+    this.cellsZ = index.cellsZ;
+    this.cellStart = index.start;
+    this.cellItems = index.items;
   }
 
   /** A fine centreline sample at `index * FINE_STEP`, cached across callers. */
@@ -389,4 +352,64 @@ export class RoadDistance {
 
 function key(ix: number, iz: number): number {
   return (ix + NODE_BIAS) * NODE_STRIDE + (iz + NODE_BIAS);
+}
+
+/** `RoadDistance`'s whole-road coarse index (see `ensureCoarse`), a pure function of the spine. */
+interface CoarseIndex {
+  readonly s: Float64Array<ArrayBuffer>;
+  readonly cellMinX: number;
+  readonly cellMinZ: number;
+  readonly cellsX: number;
+  readonly cellsZ: number;
+  readonly start: Int32Array<ArrayBuffer>;
+  readonly items: Int32Array<ArrayBuffer>;
+}
+
+/** One coarse index per spine object in this thread, read-only once built. */
+const coarseIndexes = new WeakMap<object, CoarseIndex>();
+
+function buildCoarseIndex(x: Float64Array<ArrayBufferLike>, z: Float64Array<ArrayBufferLike>): CoarseIndex {
+  const count = x.length;
+  const s = new Float64Array(count);
+  for (let k = 0; k < count; k++) s[k] = k * COARSE_STEP;
+
+  // Grid bounds from the samples themselves. The road wanders wherever its curvature
+  // takes it, so nothing else knows how far out it reaches.
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let k = 0; k < count; k++) {
+    const px = x[k]!;
+    const pz = z[k]!;
+    if (px < minX) minX = px;
+    if (px > maxX) maxX = px;
+    if (pz < minZ) minZ = pz;
+    if (pz > maxZ) maxZ = pz;
+  }
+  const cellMinX = Math.floor(minX / CELL_SIZE);
+  const cellMinZ = Math.floor(minZ / CELL_SIZE);
+  const cellsX = Math.floor(maxX / CELL_SIZE) - cellMinX + 1;
+  const cellsZ = Math.floor(maxZ / CELL_SIZE) - cellMinZ + 1;
+
+  // Counting sort into CSR. Two passes over the samples and one over the cells, so
+  // building the index is linear and allocates exactly twice.
+  const cellCount = cellsX * cellsZ;
+  const start = new Int32Array(cellCount + 1);
+  for (let k = 0; k < count; k++) {
+    const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
+    const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
+    start[cz * cellsX + cx + 1]++;
+  }
+  for (let c = 0; c < cellCount; c++) start[c + 1] += start[c];
+  const items = new Int32Array(count);
+  const cursor = new Int32Array(cellCount);
+  for (let k = 0; k < count; k++) {
+    const cx = Math.floor(x[k]! / CELL_SIZE) - cellMinX;
+    const cz = Math.floor(z[k]! / CELL_SIZE) - cellMinZ;
+    const c = cz * cellsX + cx;
+    items[start[c]! + cursor[c]!] = k;
+    cursor[c]!++;
+  }
+  return { s, cellMinX, cellMinZ, cellsX, cellsZ, start, items };
 }

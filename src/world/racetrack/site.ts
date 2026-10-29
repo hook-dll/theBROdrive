@@ -9,7 +9,7 @@ import { COARSE_SPACING } from '../roadcurve';
 import { RoadDistance } from '../roaddistance';
 import { roadHalf, roadsideStop, type RoadsideStop } from '../settlement';
 import type { Terrain } from '../terrain';
-import { generateLoop, NEIGHBOUR_S_M, TRACK_SURFACE, type TrackLoop, type TrackSector } from './layout';
+import { generateLoopSteps, NEIGHBOUR_S_M, TRACK_SURFACE, type TrackLoop, type TrackSector } from './layout';
 import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from './track';
 
 /**
@@ -178,6 +178,15 @@ const LOOP_ATTEMPTS = 10;
 const PLACEMENTS_PER_LOOP = 3;
 /** Sites one thread keeps; anything else is regenerated identically when asked again. */
 const SITE_CACHE = 4;
+/**
+ * One step of a placement (`placeTrackSteps`): raster nodes visited, centreline
+ * samples or lane points checked, and rows of the profile's passing-stretches rule,
+ * between two yields. Each is a few tenths of a millisecond, so a main-thread placement
+ * spread over frames fits beside the rest of one.
+ */
+const RASTER_STEP_NODES = 8_000;
+const PLACE_STEP_SAMPLES = 8;
+const PAIR_STEP_ROWS = 48;
 /** A track is looked up for terrain samples whose road arclength is this near its post. */
 const OWNER_WINDOW_M = 3000;
 /**
@@ -304,7 +313,12 @@ function smoothPeriodic(values: Float64Array, step: number, sigma: number): Floa
   const out = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     let sum = 0;
-    for (let k = -reach; k <= reach; k++) sum += values[(((i + k) % n) + n) % n]! * kernel[k + reach]!;
+    // values[(i + k) mod n], walked with one wrap rather than two modulos a term.
+    let j = (((i - reach) % n) + n) % n;
+    for (let k = 0; k <= 2 * reach; k++) {
+      sum += values[j]! * kernel[k]!;
+      if (++j === n) j = 0;
+    }
     out[i] = sum / total;
   }
   return out;
@@ -476,16 +490,16 @@ interface Mound {
  * mounds and hollows in PLAN, and crests and a dip on straights along the lap — scaled
  * down until the grade, the passing-stretches rule and the fit to the desert at the
  * run-off's edges (`edges`: the ground there, both sides, every `groundStep` rows) all
- * hold. Null when the ground alone breaks them.
+ * hold. Null when the ground alone breaks them. Yields once per relief scale tried.
  */
-function profile(
+function* profileSteps(
   placed: Placed,
   rand: Rand,
   ground: Float64Array,
   edges: Float64Array,
   groundStep: number,
   halfWidth: number,
-): Float64Array | null {
+): Generator<void, Float64Array | null> {
   const { count, step, length } = placed;
   // The ground under the centreline every `groundStep` rows, smoothed, back on the table.
   let smooth = smoothPeriodic(ground, groundStep * step, PROFILE_SIGMA_M);
@@ -579,7 +593,7 @@ function profile(
     if (!list) grid.set(k, (list = []));
     list.push(i);
   }
-  const holds = (): boolean => {
+  function* holdsSteps(): Generator<void, boolean> {
     for (let i = 0; i < count; i++) {
       if (Math.abs(ys[(i + 1) % count]! - ys[i]!) / step > MAX_GRADE) return false;
     }
@@ -593,6 +607,7 @@ function profile(
       }
     }
     for (let i = 0; i < count; i += stride) {
+      if ((i / stride) % PAIR_STEP_ROWS === PAIR_STEP_ROWS - 1) yield;
       const cx = Math.floor(placed.xs[i]! / reach);
       const cz = Math.floor(placed.zs[i]! / reach);
       for (let dx = -1; dx <= 1; dx++) {
@@ -615,9 +630,10 @@ function profile(
       }
     }
     return true;
-  };
+  }
 
   for (let pass = 0; pass < RELIEF_SCALES.length; pass++) {
+    yield;
     // The relief shrinks pass by pass; the last but one also smooths the ground harder,
     // the last drops the relief altogether.
     const scale = RELIEF_SCALES[pass]!;
@@ -632,7 +648,8 @@ function profile(
       ys[i] = y;
     }
     ys.set(limitGrade(ys, step, MAX_GRADE * GRADE_AIM));
-    if (holds()) return ys;
+    yield;
+    if (yield* holdsSteps()) return ys;
   }
   return null;
 }
@@ -651,9 +668,9 @@ interface Strip {
 /**
  * The levelled ground's lattice (see the header): two passes over every strip segment's
  * neighbourhood, the first for the least excess over a core, the second for the
- * soft-minimum's weighted heights.
+ * soft-minimum's weighted heights. Yields every `RASTER_STEP_NODES` nodes visited.
  */
-function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): TrackRaster {
+function* buildRasterSteps(strips: readonly Strip[], lane: readonly LanePoint[]): Generator<void, TrackRaster> {
   let minX = Infinity;
   let minZ = Infinity;
   let maxX = -Infinity;
@@ -683,7 +700,8 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
   const sumK = new Float64Array(nodes);
   const sumKH = new Float64Array(nodes);
 
-  const visit = (pass: 0 | 1): void => {
+  let visited = 0;
+  function* visit(pass: 0 | 1): Generator<void, void> {
     for (const strip of strips) {
       const n = strip.xs.length;
       const segments = strip.closed ? n : n - 1;
@@ -701,6 +719,7 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
         const i1 = Math.min(nx - 1, Math.ceil((Math.max(ax, ax + dx) + reach - minX) / RASTER_CELL_M));
         const j0 = Math.max(0, Math.floor((Math.min(az, az + dz) - reach - minZ) / RASTER_CELL_M));
         const j1 = Math.min(nz - 1, Math.ceil((Math.max(az, az + dz) + reach - minZ) / RASTER_CELL_M));
+        visited += (i1 - i0 + 1) * (j1 - j0 + 1);
         for (let i = i0; i <= i1; i++) {
           const px = minX + i * RASTER_CELL_M - ax;
           for (let j = j0; j <= j1; j++) {
@@ -740,16 +759,23 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
             sumKH[node] += k * (y - bank * lateral);
           }
         }
+        if (visited >= RASTER_STEP_NODES) {
+          visited = 0;
+          yield;
+        }
       }
     }
-  };
-  visit(0);
-  visit(1);
+  }
+  yield;
+  yield* visit(0);
+  yield* visit(1);
+  yield;
 
   const hw = new Float32Array(nodes);
   const w = new Float32Array(nodes);
   const mask = new Uint8Array(nodes);
   for (let node = 0; node < nodes; node++) {
+    if (node % (8 * RASTER_STEP_NODES) === 8 * RASTER_STEP_NODES - 1) yield;
     if (sumK[node]! <= 0) continue;
     const weight = 1 - smoothstep01(excess[node]! / SKIRT_M);
     if (weight <= 0) continue;
@@ -757,6 +783,7 @@ function buildRaster(strips: readonly Strip[], lane: readonly LanePoint[]): Trac
     hw[node] = (sumKH[node]! / sumK[node]!) * weight;
     mask[node] = 1;
   }
+  yield;
   // The lane's corridor is kept clear of props but not levelled: it is draped on the sand.
   const laneClear = LANE_HALF_WIDTH_M + LANE_CLEAR_M;
   for (let p = 0; p + 1 < lane.length; p++) {
@@ -830,9 +857,10 @@ function accessLane(road: Road, postArc: number, side: 1 | -1, padOuter: number,
 
 /**
  * Tries one rolled loop at a few placements beside the post; the first that passes
- * every rule (see the header) becomes the track.
+ * every rule (see the header) becomes the track. Yields between the rules' passes, and
+ * every `PLACE_STEP_SAMPLES` points inside the dearer ones.
  */
-function tryLoop(
+function* tryLoopSteps(
   world: TrackSiteWorld,
   distance: RoadDistance,
   postIndex: number,
@@ -840,7 +868,7 @@ function tryLoop(
   loop: TrackLoop,
   rand: Rand,
   near: RoadNear,
-): TrackSite | null {
+): Generator<void, TrackSite | null> {
   const road = world.road;
   const postArc = stop.roll.s;
   const side = stop.layout.side;
@@ -850,6 +878,7 @@ function tryLoop(
   const mesas = mesaFieldOf(road, world.terrain);
   const coarse: number[] = [];
   for (let placement = 0; placement < PLACEMENTS_PER_LOOP; placement++) {
+    yield;
     const placed = placeLoop(loop, rand, road, postArc, side);
     if (!placed) return null;
     const { count, xs, zs, step } = placed;
@@ -867,6 +896,7 @@ function tryLoop(
     const roadS = new Float64Array(samples);
     let clear = true;
     for (let k = 0; k < samples && clear; k++) {
+      if (k % (4 * PLACE_STEP_SAMPLES) === 4 * PLACE_STEP_SAMPLES - 1) yield;
       near.measure(xs[k * groundStep]!, zs[k * groundStep]!);
       roadDist[k] = near.dist;
       roadS[k] = near.s;
@@ -913,6 +943,7 @@ function tryLoop(
       if (s < near.s0 + 200 || s > near.s1 - 200) clear = false;
     }
     if (!clear) continue;
+    yield;
 
     // The gate, and the lane to it.
     const gateAt = sampleAt((paddock.s0 + paddock.s1) / 2);
@@ -923,6 +954,7 @@ function tryLoop(
     if (!lane) continue;
     const laneStraight = Math.ceil((LANE_OUT_M - pad.padOuter) / LANE_STEP_M);
     for (let p = laneStraight; p < lane.length && clear; p++) {
+      if ((p - laneStraight) % PLACE_STEP_SAMPLES === PLACE_STEP_SAMPLES - 1) yield;
       const point = lane[p]!;
       near.measure(point.x, point.z);
       if (near.dist < LANE_OUT_M - 6) clear = false;
@@ -950,6 +982,7 @@ function tryLoop(
     const lakeCentres = [...lakes].map((lake) => road.offsetPoint(lake.s, lake.lateral));
     const reachOut = core + SKIRT_M;
     for (let k = 0; k < samples && clear; k++) {
+      if (k % PLACE_STEP_SAMPLES === PLACE_STEP_SAMPLES - 1) yield;
       const x = xs[k * groundStep]!;
       const z = zs[k * groundStep]!;
       for (const centre of lakeCentres) {
@@ -972,6 +1005,7 @@ function tryLoop(
     const ground = new Float64Array(samples);
     const edges = new Float64Array(samples * 4);
     for (let k = 0; k < samples; k++) {
+      if (k % PLACE_STEP_SAMPLES === PLACE_STEP_SAMPLES - 1) yield;
       const i = k * groundStep;
       ground[k] = world.natural(xs[i]!, zs[i]!, roadDist[k]!, roadS[k]!);
       for (let side = 0; side < 4; side++) {
@@ -984,8 +1018,9 @@ function tryLoop(
       }
     }
     if (!clear) continue;
-    const ys = profile(placed, rand, ground, edges, groundStep, halfWidth);
+    const ys = yield* profileSteps(placed, rand, ground, edges, groundStep, halfWidth);
     if (!ys) continue;
+    yield;
 
     // Accepted. The surfaces by row, the paddock strip, the ground lattice.
     const surfaces = new Uint8Array(count);
@@ -1029,7 +1064,8 @@ function tryLoop(
       (paddockStrip.zs as Float64Array)[r] = zs[i]! - Math.sin(placed.headings[i]!) * paddockMid;
       (paddockStrip.ys as Float64Array)[r] = ys[i]!;
     }
-    const raster = buildRaster([trackStrip, paddockStrip], lane);
+    const raster = yield* buildRasterSteps([trackStrip, paddockStrip], lane);
+    yield;
     const track = new RaceTrack({
       postIndex,
       postS: postArc,
@@ -1056,18 +1092,26 @@ function tryLoop(
   return null;
 }
 
-/** The track at a post, placed, or null when it has none or no placement fits. */
-function placeTrack(world: TrackSiteWorld, distance: RoadDistance, postIndex: number): TrackSite | null {
+/**
+ * The track at a post, placed, or null when it has none or no placement fits: a
+ * generator whose steps are each a small part of the work (`RASTER_STEP_NODES`,
+ * `PLACE_STEP_SAMPLES`), so the main thread can spread one placement over frames.
+ */
+function* placeTrackSteps(world: TrackSiteWorld, distance: RoadDistance, postIndex: number): Generator<void, TrackSite | null> {
   if (!postHasTrack(world.seed, postIndex)) return null;
   const stop = roadsideStop(world.seed, postSlot(postIndex));
   if (!stop || !stop.pad || !stop.layout.settlement) return null;
   const rand = mulberry32(hash(world.seed, TRACK_DOMAIN, postIndex, 1));
   const near = new RoadNear(world.road, stop.roll.s);
   for (let attempt = 0; attempt < LOOP_ATTEMPTS; attempt++) {
+    yield;
     let loop: TrackLoop | null = null;
-    for (let roll = 0; roll < 12 && !loop; roll++) loop = generateLoop(rand);
+    for (let roll = 0; roll < 12 && !loop; roll++) {
+      yield;
+      loop = yield* generateLoopSteps(rand);
+    }
     if (!loop) continue;
-    const site = tryLoop(world, distance, postIndex, stop, loop, rand, near);
+    const site = yield* tryLoopSteps(world, distance, postIndex, stop, loop, rand, near);
     if (site) return site;
   }
   return null;
@@ -1082,6 +1126,10 @@ function placeTrack(world: TrackSiteWorld, distance: RoadDistance, postIndex: nu
  * it are looked at, and a placement makes sure every road arclength its ground can be
  * owned by lies within that window. The last answer is kept, because the terrain asks
  * for the blend and then for the detail's share at the same point.
+ *
+ * Placing one track is tens of milliseconds. A sample that finds its track unplaced
+ * places it there and then, whole; the main thread places them ahead of its samples
+ * instead, a step at a time (`prepareSteps`, driven per chunk by `RaceTrackSiteProvider`).
  */
 export class RaceTrackField {
   private readonly sites = new Map<number, TrackSite | null>();
@@ -1093,6 +1141,8 @@ export class RaceTrackField {
   private lastMask = false;
   /** Whole-road coarse index for the other-pass test; built on the first placement. */
   private distance: RoadDistance | null = null;
+  /** Placements `prepareSteps` started and has not finished, by post; resumed by either caller. */
+  private readonly placing = new Map<number, Generator<void, TrackSite | null>>();
 
   constructor(private readonly world: TrackSiteWorld) {}
 
@@ -1130,11 +1180,52 @@ export class RaceTrackField {
     return this.world.natural(x, z, dist, s);
   }
 
+  /**
+   * Places, a step per yield, every track a terrain sample at a road arclength between
+   * `fromS` and `toS` would look up (see `lookup`), so that sample finds it placed. A
+   * placement left part-way is resumed by the next caller, this or `site`.
+   */
+  *prepareSteps(fromS: number, toS: number): Generator<void, void> {
+    const seed = this.world.seed;
+    const first = Math.max(TRACK_FIRST_POST, postBracket(seed, Math.max(0, fromS)).before - 1);
+    const last = postBracket(seed, Math.max(0, toS)).after + 1;
+    for (let k = first; k <= last; k++) {
+      if (this.sites.has(k) || !postHasTrack(seed, k)) continue;
+      const at = postS(seed, k);
+      if (at < fromS - OWNER_WINDOW_M || at > toS + OWNER_WINDOW_M) continue;
+      // Re-checked every step: a sample may have needed it meanwhile and finished it.
+      while (!this.sites.has(k)) {
+        const step = this.placement(k).next();
+        if (step.done) this.store(k, step.value);
+        else yield;
+      }
+    }
+  }
+
   private site(postIndex: number): TrackSite | null {
     const hit = this.sites.get(postIndex);
     if (hit !== undefined) return hit;
-    this.distance ??= new RoadDistance(this.world.road);
-    const site = placeTrack(this.world, this.distance, postIndex);
+    const steps = this.placement(postIndex);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    this.store(postIndex, step.value);
+    return step.value;
+  }
+
+  /** The placement of a post in flight, started if there is none. */
+  private placement(postIndex: number): Generator<void, TrackSite | null> {
+    let steps = this.placing.get(postIndex);
+    if (!steps) {
+      this.distance ??= new RoadDistance(this.world.road);
+      steps = placeTrackSteps(this.world, this.distance, postIndex);
+      this.placing.set(postIndex, steps);
+    }
+    return steps;
+  }
+
+  /** Files a finished placement, dropping the oldest held track past `SITE_CACHE`. */
+  private store(postIndex: number, site: TrackSite | null): void {
+    this.placing.delete(postIndex);
     if (site) {
       let held = 0;
       for (const value of this.sites.values()) if (value) held++;
@@ -1147,7 +1238,6 @@ export class RaceTrackField {
       }
     }
     this.sites.set(postIndex, site);
-    return site;
   }
 
   private lookup(x: number, z: number, s: number): void {

@@ -27,6 +27,12 @@ export class MarketField {
     for (const id of ids) this.lotSigns.delete(id);
   }
 
+  /** Hands every sign registered here to `target`, which keeps them from then on (world/poi.ts `PoiRegistrations`). */
+  moveInto(target: MarketField): void {
+    for (const [carId, sign] of this.lotSigns) target.registerLotSign(carId, sign);
+    this.lotSigns.clear();
+  }
+
   /** A lot car was bought: its price sign comes down. */
   carSold(carId: string): void {
     const sign = this.lotSigns.get(carId);

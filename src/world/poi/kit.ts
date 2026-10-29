@@ -682,33 +682,9 @@ function mergeInto(root: THREE.Object3D, deep: boolean, owned: boolean): void {
   if (deep) walk(root);
   else for (const child of root.children) take(child);
 
-  const color = new THREE.Color();
   for (const { material, palette, cast, receive, meshes } of batches.values()) {
     if (meshes.length < 2) continue;
-    const indexed = meshes.every((mesh) => mesh.geometry.index !== null);
-    const parts: THREE.BufferGeometry[] = [];
-    for (const mesh of meshes) {
-      let geometry = mesh.geometry.clone();
-      for (const name of Object.keys(geometry.attributes)) {
-        // A palette mesh merged before (a machine dressed after its cabinet) keeps its colours.
-        if (name !== 'position' && name !== 'normal' && name !== 'uv' && !(palette && name === 'color')) geometry.deleteAttribute(name);
-      }
-      if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
-      const count = geometry.getAttribute('position').count;
-      if (!geometry.getAttribute('uv')) geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
-      if (palette && !geometry.getAttribute('color')) {
-        // Linear, as the material's own colour is: three reads vertex colours linear.
-        color.copy((mesh.material as THREE.MeshStandardMaterial).color);
-        const colors = new Float32Array(count * 3);
-        for (let i = 0; i < count; i++) color.toArray(colors, i * 3);
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      }
-      if (!indexed && geometry.index) geometry = geometry.toNonIndexed();
-      geometry.applyMatrix4(_toRoot.multiplyMatrices(_rootInverse, mesh.matrixWorld));
-      parts.push(geometry);
-    }
-    const merged = mergeGeometries(parts, false);
-    for (const part of parts) part.dispose();
+    const merged = meshes.every(isPlainPart) ? mergeParts(meshes, palette) : mergePartsByCopy(meshes, palette);
     if (!merged) continue;
     const mesh = new THREE.Mesh(merged, material);
     mesh.castShadow = cast;
@@ -721,4 +697,174 @@ function mergeInto(root: THREE.Object3D, deep: boolean, owned: boolean): void {
       if (original.userData.kitMerged === true) original.geometry.dispose();
     }
   }
+}
+
+/** Item size of every attribute a merged part keeps (see `mergePartsByCopy`). */
+const KEPT_ITEM_SIZE: Readonly<Record<string, number>> = { position: 3, normal: 3, uv: 2, color: 3 };
+
+/**
+ * Whether `mergeParts` reproduces `mergePartsByCopy` for this mesh exactly: plain float
+ * attributes of the usual sizes, no morphs. Every kit geometry is; anything else takes
+ * the general path.
+ */
+function isPlainPart(mesh: THREE.Mesh): boolean {
+  const geometry = mesh.geometry;
+  if (geometry.morphTargetsRelative || Object.keys(geometry.morphAttributes).length > 0) return false;
+  for (const name of Object.keys(KEPT_ITEM_SIZE)) {
+    const attribute = geometry.getAttribute(name) as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+    if (!attribute) {
+      if (name === 'position') return false;
+      continue;
+    }
+    if ((attribute as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute) return false;
+    const plain = attribute as THREE.BufferAttribute;
+    if (!(plain.array instanceof Float32Array) || plain.normalized || plain.gpuType !== THREE.FloatType) return false;
+    if (plain.itemSize !== KEPT_ITEM_SIZE[name]) return false;
+  }
+  return true;
+}
+
+const _normalMatrix = new THREE.Matrix3();
+
+/**
+ * One batch's meshes as one geometry in the root's frame: what `mergePartsByCopy` builds
+ * (a copy of each part trimmed, filled, de-indexed, transformed, then merged), written
+ * straight into the merged arrays with three's own arithmetic. Several times faster, and
+ * a settlement merges a few thousand parts in the frames it streams in.
+ */
+function mergeParts(meshes: readonly THREE.Mesh[], palette: boolean): THREE.BufferGeometry {
+  const indexed = meshes.every((mesh) => mesh.geometry.index !== null);
+  interface Part {
+    readonly geometry: THREE.BufferGeometry;
+    /** Its normals: its own, or computed as `computeVertexNormals` would on the copy. */
+    readonly normal: THREE.BufferAttribute;
+    /** A palette part without colours of its own takes its material's, linear. */
+    readonly fill: THREE.Color | null;
+    /** Vertices it adds: its own when the batch stays indexed, else one per index. */
+    readonly count: number;
+  }
+  const parts: Part[] = [];
+  // The first part's attribute order is the merged geometry's: kept ones in its own
+  // order, then whatever it had to be given, as the copy appends them.
+  let names: string[] | null = null;
+  let total = 0;
+  for (const mesh of meshes) {
+    const geometry = mesh.geometry;
+    const order = Object.keys(geometry.attributes).filter((name) => name === 'position' || name === 'normal' || name === 'uv' || (palette && name === 'color'));
+    let normal = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
+    if (!normal) {
+      const scratch = new THREE.BufferGeometry();
+      scratch.setAttribute('position', geometry.getAttribute('position'));
+      scratch.setIndex(geometry.index);
+      scratch.computeVertexNormals();
+      normal = scratch.getAttribute('normal') as THREE.BufferAttribute;
+      order.push('normal');
+    }
+    if (!geometry.getAttribute('uv')) order.push('uv');
+    let fill: THREE.Color | null = null;
+    if (palette && !geometry.getAttribute('color')) {
+      fill = new THREE.Color().copy((mesh.material as THREE.MeshStandardMaterial).color);
+      order.push('color');
+    }
+    names ??= order;
+    const vertices = geometry.getAttribute('position').count;
+    const count = !indexed && geometry.index ? geometry.index.count : vertices;
+    parts.push({ geometry, normal, fill, count });
+    total += count;
+  }
+
+  const merged = new THREE.BufferGeometry();
+  if (indexed) {
+    const mergedIndex: number[] = [];
+    let offset = 0;
+    for (const { geometry } of parts) {
+      const index = geometry.index!;
+      for (let j = 0; j < index.count; j++) mergedIndex.push(index.getX(j) + offset);
+      offset += geometry.getAttribute('position').count;
+    }
+    merged.setIndex(mergedIndex);
+  }
+  for (const name of names!) {
+    const itemSize = KEPT_ITEM_SIZE[name]!;
+    const array = new Float32Array(total * itemSize);
+    let at = 0;
+    for (let p = 0; p < parts.length; p++) {
+      const { geometry, normal, fill, count } = parts[p]!;
+      // De-indexed, vertex `v` of the part is its index's `v`th entry (`toNonIndexed`).
+      const gather = !indexed && geometry.index ? geometry.index.array : null;
+      const source = name === 'normal' ? normal : (geometry.getAttribute(name) as THREE.BufferAttribute | undefined);
+      if (name === 'position' || name === 'normal') {
+        const from = source!.array;
+        const e = _toRoot.multiplyMatrices(_rootInverse, meshes[p]!.matrixWorld).elements;
+        const n = _normalMatrix.getNormalMatrix(_toRoot).elements;
+        for (let v = 0; v < count; v++, at += 3) {
+          const i = (gather ? gather[v]! : v) * 3;
+          const x = from[i]!;
+          const y = from[i + 1]!;
+          const z = from[i + 2]!;
+          if (name === 'position') {
+            // `Vector3.applyMatrix4`.
+            const w = 1 / (e[3]! * x + e[7]! * y + e[11]! * z + e[15]!);
+            array[at] = (e[0]! * x + e[4]! * y + e[8]! * z + e[12]!) * w;
+            array[at + 1] = (e[1]! * x + e[5]! * y + e[9]! * z + e[13]!) * w;
+            array[at + 2] = (e[2]! * x + e[6]! * y + e[10]! * z + e[14]!) * w;
+          } else {
+            // `Vector3.applyNormalMatrix`: `applyMatrix3`, then `normalize`.
+            const nx = n[0]! * x + n[3]! * y + n[6]! * z;
+            const ny = n[1]! * x + n[4]! * y + n[7]! * z;
+            const nz = n[2]! * x + n[5]! * y + n[8]! * z;
+            const scale = 1 / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1);
+            array[at] = nx * scale;
+            array[at + 1] = ny * scale;
+            array[at + 2] = nz * scale;
+          }
+        }
+      } else if (source) {
+        const from = source.array;
+        for (let v = 0; v < count; v++) {
+          const i = (gather ? gather[v]! : v) * itemSize;
+          for (let k = 0; k < itemSize; k++) array[at++] = from[i + k]!;
+        }
+      } else if (fill) {
+        for (let v = 0; v < count; v++, at += 3) fill.toArray(array, at);
+      } else {
+        // A part without uvs: zeros, as the copy is given.
+        at += count * itemSize;
+      }
+    }
+    merged.setAttribute(name, new THREE.BufferAttribute(array, itemSize));
+  }
+  return merged;
+}
+
+/** The general merge: each part copied, trimmed to what it keeps, filled, de-indexed if any part is not indexed, and transformed. */
+function mergePartsByCopy(meshes: readonly THREE.Mesh[], palette: boolean): THREE.BufferGeometry | null {
+  const color = new THREE.Color();
+  const indexed = meshes.every((mesh) => mesh.geometry.index !== null);
+  const parts: THREE.BufferGeometry[] = [];
+  for (const mesh of meshes) {
+    // `clone()` would first build a default instance of the geometry's own class (a
+    // full cylinder, box or torus) only for `copy` to throw it away.
+    let geometry = new THREE.BufferGeometry().copy(mesh.geometry);
+    for (const name of Object.keys(geometry.attributes)) {
+      // A palette mesh merged before (a machine dressed after its cabinet) keeps its colours.
+      if (name !== 'position' && name !== 'normal' && name !== 'uv' && !(palette && name === 'color')) geometry.deleteAttribute(name);
+    }
+    if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+    const count = geometry.getAttribute('position').count;
+    if (!geometry.getAttribute('uv')) geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+    if (palette && !geometry.getAttribute('color')) {
+      // Linear, as the material's own colour is: three reads vertex colours linear.
+      color.copy((mesh.material as THREE.MeshStandardMaterial).color);
+      const colors = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) color.toArray(colors, i * 3);
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    }
+    if (!indexed && geometry.index) geometry = geometry.toNonIndexed();
+    geometry.applyMatrix4(_toRoot.multiplyMatrices(_rootInverse, mesh.matrixWorld));
+    parts.push(geometry);
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const part of parts) part.dispose();
+  return merged;
 }

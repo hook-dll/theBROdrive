@@ -1353,8 +1353,7 @@ export class RaceTrackProvider implements ChunkProvider {
     // Posts whose track's owner could be this chunk: its post lies within the spread.
     for (const post of postStopsBetween(seed, ctx.sStart - CHUNK_SPREAD_M, ctx.sEnd + CHUNK_SPREAD_M)) {
       if (!postHasTrack(seed, post.index)) continue;
-      // Placing a track the first time is the terrain's work too (it levels the ground);
-      // usually already done by the tiles that drew the ground here.
+      // Placed already, a step at a time, by this chunk's `RaceTrackSiteProvider`.
       const track = ctx.terrain.raceTracks.track(post.index);
       yield;
       if (!track || Math.floor(track.chunkS / CHUNK_LENGTH) !== ctx.chunkIndex) continue;
@@ -1433,5 +1432,28 @@ export class RaceTrackProvider implements ChunkProvider {
         for (const geometry of geometries) geometry.dispose();
       },
     };
+  }
+}
+
+/**
+ * Places the race tracks a chunk's ground will read before anything samples that ground
+ * (`RaceTrackField.prepareSteps`, a few tenths of a millisecond a step). Registered
+ * first, and builds nothing. Without it the chunk's first terrain sample near a track's
+ * post placed the whole track in that call: the loop, its profile and the levelled
+ * ground's lattice, 65-85 ms in one frame. The reach is a chunk either side, for the
+ * providers that sample a little past their own chunk.
+ */
+export class RaceTrackSiteProvider implements ChunkProvider {
+  readonly id = 'racetrack-site';
+
+  build(ctx: ChunkContext): null {
+    const iterator = this.buildSteps(ctx);
+    while (!iterator.next().done);
+    return null;
+  }
+
+  *buildSteps(ctx: ChunkContext): Generator<void, null> {
+    yield* ctx.terrain.raceTracks.prepareSteps(ctx.sStart - CHUNK_LENGTH, ctx.sEnd + CHUNK_LENGTH);
+    return null;
   }
 }

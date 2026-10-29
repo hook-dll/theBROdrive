@@ -9,7 +9,7 @@ import { contractPay, fine, FINE_SHELLS, formatFine, formatPay } from '../econom
 import type { GameWorld } from '../game/state';
 import { contractIdOf, contractKindOf, contractThing, type ContractCargoItem, type Item } from '../items/items';
 import { thingCard, type PostCard, type ThingDef } from '../items/things';
-import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, thingName, type CardMachineParts } from './cardmachine';
+import { buildCardMachineSteps, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, thingName, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import { placeNameAt } from './placenames';
@@ -120,9 +120,9 @@ interface HandInCard {
  * `yaw` (front local -Z: the settlement spot's convention), a tied parcel in its
  * showcase. In the physics band it is solid and registers its fixture (id pushed to
  * `registered`, for the chunk to forget); beyond it, it is only seen. `disposers` gets
- * the card materials.
+ * the card materials. Yields between its stages.
  */
-export function buildPost(
+export function* buildPostSteps(
   ctx: ChunkContext,
   stop: PostStop,
   x: number,
@@ -134,8 +134,9 @@ export function buildPost(
   fixtures: FixtureField,
   registered: string[],
   disposers: Array<() => void>,
-): void {
-  const parts = buildCardMachine(ctx, stop.s, x, z, yaw, POST_LOOK, group, bodies, colliders, disposers);
+): Generator<void, void> {
+  const parts = yield* buildCardMachineSteps(ctx, stop.s, x, z, yaw, POST_LOOK, group, bodies, colliders, disposers);
+  yield;
   // The parcel: brown paper, twine round it both ways and a pale label on its front,
   // each standing 5-6 mm proud of what it lies on.
   const at: [number, number, number] = [NICHE_X, NICHE_FLOOR_Y + 0.06, NICHE_Z];
@@ -144,6 +145,7 @@ export function buildPost(
   box(parts.root, [0.18, 0.13, 0.012], at, 0xd8c9a0);
   box(parts.root, [0.06, 0.04, 0.012], [NICHE_X + 0.045, at[1] - 0.01, NICHE_Z - 0.05], 0xece4cf);
   mergeKitStatics(parts.root);
+  yield;
   const slot = postParkingSlot(ctx.world.seed, ctx.road, stop.index, 'handIn');
   const machine = new PostMachine(ctx.world, stop, slot.x, slot.z, parts);
   if (ctx.hasPhysics) registered.push(fixtures.register(machine));

@@ -4,9 +4,9 @@ import { hash, hash01 } from '../core/rng';
 import { GAMEPLAY_CONFIG } from '../config';
 import { SurfaceType } from '../core/surfaces';
 import { ROAD_LENGTH, type Road } from './road';
-import type { MarketField } from './market';
-import { buildGarage } from './vending';
-import { buildClaw } from './claw';
+import { MarketField } from './market';
+import { buildGarageSteps } from './vending';
+import { buildClawSteps } from './claw';
 import { disposeKitMerged } from './poi/kit';
 import { buildLotSign, lotModel, makeLotCar } from './carlot';
 import {
@@ -32,8 +32,8 @@ import type { VariantInstance } from './poivariantbuild';
 import { createStructureInstance, structureDef } from './poistructures';
 import { roadsideSlot, roadsideSlotOfIndex, roadsideSlotsBetween, rollStructure, slotPost } from './poislots';
 import { settlementLayout, spotPose, type SettlementHouse, type SettlementLayout } from './settlement';
-import type { FixtureField } from './fixturefield';
-import { buildPost } from './post';
+import { FixtureField } from './fixturefield';
+import { buildPostSteps } from './post';
 import { buildToyBox } from './toybox';
 import { buildShelter } from './shelter';
 import { buildPumpStand } from './pumps';
@@ -453,6 +453,9 @@ function seatStructure(
   const trimesh = geometryToTrimesh(instance.solid, matrix);
   if (trimesh.indices.length === 0) return;
   const collider = ctx.physics.addStaticTrimesh(trimesh.vertices, trimesh.indices, SurfaceType.Concrete);
+  // Switched on when the contribution attaches (`ChunkContent.colliders`): the build is
+  // spread over frames.
+  collider.setEnabled(false);
   colliders.push(collider);
   const parent = collider.parent();
   if (parent) bodies.push(parent);
@@ -549,12 +552,29 @@ const LOT_BOARD_OUT_M = 0.6;
 const KEY_BOX_BESIDE_M = 0.65;
 
 /**
+ * What a POI build names in the shared registries, held back until its content attaches
+ * (`ChunkContent.attach`). The build is spread over frames, and when it is a promotion the
+ * visual-only contribution it replaces is disposed — forgetting these very ids — only just
+ * before it attaches, so registering as it went would have them forgotten.
+ */
+interface PoiRegistrations {
+  /** Stand-in fields the builders register into; moved into the live ones on attach. */
+  readonly fixtures: FixtureField;
+  readonly fixtureIds: string[];
+  readonly signs: MarketField;
+  readonly signIds: string[];
+  /** World changes the build makes (a lot's car), applied on attach. */
+  readonly commits: Array<() => void>;
+}
+
+/**
  * A settlement's car for sale, nose out in the third slot of its parking row
  * (world/haulbay.ts), with its price board just past the row's end, beside the car's
  * flank (world/carlot.ts). `next`: which way along the slot's local X the row runs. The
- * car is a real car in world state from the moment its chunk enters the physics band,
- * carrying its price until it is bought; out there, distant scenery shows it as an
- * upright static model.
+ * car is a real car in world state from the moment its chunk enters the physics band
+ * (added when the chunk's content attaches), carrying its price until it is bought;
+ * out there, distant scenery shows it as an upright static model. `market` is the live
+ * field, which the key box tells when the car is sold.
  */
 function buildLot(
   ctx: ChunkContext,
@@ -566,9 +586,7 @@ function buildLot(
   colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
   market: MarketField,
-  registeredMarket: string[],
-  fixtures: FixtureField,
-  registeredFixtures: string[],
+  staged: PoiRegistrations,
 ): void {
   const def = lotModel(ctx.world.seed, poi);
   if (!def) return;
@@ -587,12 +605,12 @@ function buildLot(
     const y = ctx.terrain.heightAt(at.x, at.z, slot.s);
     const road = ctx.road.offsetPoint(slot.s, 0);
     const face = Math.atan2(road.x - at.x, road.z - at.z);
-    buildLotSign(ctx, group, carId, def, price, at.x, y, at.z, face, market, registeredMarket);
+    buildLotSign(ctx, group, carId, def, price, at.x, y, at.z, face, staged.signs, staged.signIds);
     const boxX = at.x + Math.cos(face) * KEY_BOX_BESIDE_M;
     const boxZ = at.z - Math.sin(face) * KEY_BOX_BESIDE_M;
     buildKeyBox(
       ctx, carId, price, boxX, ctx.terrain.heightAt(boxX, boxZ, slot.s), boxZ, face,
-      group, bodies, colliders, fixtures, registeredFixtures, market,
+      group, bodies, colliders, staged.fixtures, staged.fixtureIds, market,
     );
   };
 
@@ -605,10 +623,8 @@ function buildLot(
   priceBoard(carShells(def.id));
   if (ctx.hasPhysics) {
     // Created in clear air, so gravity and suspension find its ride height.
-    ctx.world.apply({
-      t: 'car_add',
-      car: makeLotCar(poi, carId, def, pose.x, carSpawnYAboveGround(measure, groundY), pose.z, pose.yaw),
-    });
+    const car = makeLotCar(poi, carId, def, pose.x, carSpawnYAboveGround(measure, groundY), pose.z, pose.yaw);
+    staged.commits.push(() => ctx.world.apply({ t: 'car_add', car }));
     return;
   }
   const plane = fitGround(ctx.terrain, pose.x, pose.z, pose.yaw, half[0], half[2], slot.s);
@@ -653,9 +669,10 @@ function buildLot(
  * sides, its «ПОЧТА» machine (world/post.ts), toy box (world/toybox.ts), teddy shelter
  * (world/shelter.ts) and parking row (world/haulbay.ts) with the car for sale and its key
  * box in the third slot, the garage and claw machines where it has them, the pumps (world/pumps.ts).
- * True when it built reflectors (the pumps'), which follow the night.
+ * True when it built reflectors (the pumps'), which follow the night. Yields after every
+ * piece, so a settlement is built over several streaming jobs.
  */
-function buildPoi(
+function* buildPoiSteps(
   ctx: ChunkContext,
   poi: Poi,
   roadDistance: RoadDistance,
@@ -664,61 +681,73 @@ function buildPoi(
   colliders: RAPIER.Collider[],
   deferredVisuals: Array<() => void>,
   market: MarketField,
-  registeredMarket: string[],
-  fixtures: FixtureField,
-  registeredFixtures: string[],
+  staged: PoiRegistrations,
   disposers: Array<() => void>,
-): boolean {
+): Generator<void, boolean> {
   if (poi.desert) {
     const at = ctx.road.offsetPoint(poi.s, poi.lateral);
     const yaw = poiYaw(poi, ctx.road.headingAt(poi.s));
     seatStructure(ctx, poi.structure, at.x, at.z, yaw, poi.s, group, bodies, colliders);
+    yield;
     return false;
   }
 
+  const { fixtures, fixtureIds } = staged;
   const layout = settlementLayout(ctx.world.seed, poi);
   for (const house of standingHouses(layout, ctx.road, ctx.terrain, roadDistance)) {
+    yield;
     const pose = spotPose(ctx.road, house);
     seatStructure(ctx, house.structure, pose.x, pose.z, pose.yaw, house.s, group, bodies, colliders);
   }
   if (layout.post) {
     const stop = postStop(ctx.world.seed, slotPost(roadsideSlotOfIndex(poi.index)));
     const pose = spotPose(ctx.road, layout.post);
-    buildPost(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
-    if (layout.toybox) buildToyBox(ctx, stop, layout.toybox, group, bodies, colliders, fixtures, registeredFixtures, disposers);
-    if (layout.shelter) buildShelter(ctx, stop, layout.shelter, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    yield;
+    yield* buildPostSteps(ctx, stop, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, fixtureIds, disposers);
+    if (layout.toybox) {
+      yield;
+      buildToyBox(ctx, stop, layout.toybox, group, bodies, colliders, fixtures, fixtureIds, disposers);
+    }
+    if (layout.shelter) {
+      yield;
+      buildShelter(ctx, stop, layout.shelter, group, bodies, colliders, fixtures, fixtureIds, disposers);
+    }
     if (layout.parking) {
+      yield;
       const slots = postParkingSlots(ctx.world.seed, ctx.road, stop.index);
       buildParkingRow(ctx, slots, group);
       const pickup = slots[0]!;
       const second = slots[1]!;
       // The row's next slot along the pick-up slot's local X: the sign stands the other way.
       const toNext = Math.sign((second.x - pickup.x) * Math.cos(pickup.yaw) - (second.z - pickup.z) * Math.sin(pickup.yaw));
-      buildHaulSign(ctx, stop, pickup, toNext, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+      yield;
+      buildHaulSign(ctx, stop, pickup, toNext, group, bodies, colliders, fixtures, fixtureIds, disposers);
       if (layout.forSale) {
         const sale = slots[2]!;
         const middle = slots[1]!;
         // Past the row's end: away from the middle slot along the sale slot's local X.
         const next = Math.sign((sale.x - middle.x) * Math.cos(sale.yaw) - (sale.z - middle.z) * Math.sin(sale.yaw));
-        buildLot(
-          ctx, poi, sale, next, group, bodies, colliders, deferredVisuals,
-          market, registeredMarket, fixtures, registeredFixtures,
-        );
+        yield;
+        buildLot(ctx, poi, sale, next, group, bodies, colliders, deferredVisuals, market, staged);
       }
     }
   }
   if (layout.garage) {
     const pose = spotPose(ctx.road, layout.garage);
-    buildGarage(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    yield;
+    yield* buildGarageSteps(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, fixtureIds, disposers);
   }
   if (layout.claw) {
     const pose = spotPose(ctx.road, layout.claw);
-    buildClaw(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    yield;
+    yield* buildClawSteps(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, fixtureIds, disposers);
   }
   if (layout.pumps) {
     const pose = spotPose(ctx.road, layout.pumps);
-    buildPumpStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, registeredFixtures, disposers);
+    yield;
+    buildPumpStand(ctx, poi, pose.x, pose.z, pose.yaw, group, bodies, colliders, fixtures, fixtureIds, disposers);
   }
+  yield;
   return layout.pumps !== null;
 }
 
@@ -754,6 +783,10 @@ export function setPoiReceiveShadows(scene: THREE.Object3D, on: boolean): void {
  * Builds roadside and desert stops, the post network's machines among them. Fixture and
  * market registries exist only for the live physics band; what is edited at them remains
  * in WorldState.
+ *
+ * A settlement is 15-30 ms of kit, machines and colliders, so it is built a piece per
+ * step (`buildSteps`) and what it registers waits for its content's `attach`
+ * (`PoiRegistrations`).
  */
 export class PoiProvider implements ChunkProvider {
   readonly id = 'poi';
@@ -767,57 +800,88 @@ export class PoiProvider implements ChunkProvider {
   ) {}
 
   build(ctx: ChunkContext): ChunkContent | null {
+    const iterator = this.buildSteps(ctx);
+    let result = iterator.next();
+    while (!result.done) result = iterator.next();
+    return result.value;
+  }
+
+  *buildSteps(ctx: ChunkContext): Generator<void, ChunkContent | null> {
     const spacing = DESERT_SPACING_M;
     const pois = poisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd);
-    const desert = desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing).filter(
-      (poi) =>
+    const desert: Poi[] = [];
+    for (const poi of desertPoisBetween(ctx.world.seed, ctx.sStart, ctx.sEnd, spacing)) {
+      if (
         desertPoiClearOfRoad(poi, ctx.road, this.roadDistance) &&
         desertPoiClearOfLandforms(poi, ctx.road, ctx.terrain) &&
         desertPoiClearOfMesas(poi, ctx.road, ctx.terrain) &&
-        desertPoiClearOfNeighbours(poi, ctx.world.seed, spacing, ctx.road),
-    );
+        desertPoiClearOfNeighbours(poi, ctx.world.seed, spacing, ctx.road)
+      ) {
+        desert.push(poi);
+      }
+      yield;
+    }
 
     const group = new THREE.Group();
     group.name = 'poi';
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
+    /** Cancels a lot car's pending preview, and disposes what the machines own. */
     const deferredVisuals: Array<() => void> = [];
-    const registeredMarket: string[] = [];
-    /** Ids of the world fixtures this chunk registered; forgotten with it. */
-    const registeredFixtures: string[] = [];
-
-    let reflectors = false;
-    for (const poi of [...pois, ...desert]) {
-      const built = buildPoi(
-        ctx,
-        poi,
-        this.roadDistance,
+    const staged: PoiRegistrations = {
+      fixtures: new FixtureField(),
+      fixtureIds: [],
+      signs: new MarketField(),
+      signIds: [],
+      commits: [],
+    };
+    let completed = false;
+    try {
+      let reflectors = false;
+      for (const poi of [...pois, ...desert]) {
+        const built = yield* buildPoiSteps(
+          ctx,
+          poi,
+          this.roadDistance,
+          group,
+          bodies,
+          colliders,
+          deferredVisuals,
+          this.market,
+          staged,
+          deferredVisuals,
+        );
+        reflectors ||= built;
+      }
+      completed = true;
+      return {
         group,
         bodies,
         colliders,
-        deferredVisuals,
-        this.market,
-        registeredMarket,
-        this.fixtures,
-        registeredFixtures,
-        deferredVisuals,
-      );
-      reflectors ||= built;
-    }
-
-    return {
-      group,
-      bodies,
-      colliders,
-      dispose: () => {
-        // The fixtures' merged boxes (world/poi/kit.ts `mergeKitStatics`) are this chunk's own.
+        attach: () => {
+          for (const fixture of staged.fixtures.values()) this.fixtures.register(fixture);
+          staged.signs.moveInto(this.market);
+          for (const commit of staged.commits) commit();
+        },
+        dispose: () => {
+          // The fixtures' merged boxes (world/poi/kit.ts `mergeKitStatics`) are this chunk's own.
+          disposeKitMerged(group);
+          this.market.forget(staged.signIds);
+          this.fixtures.forget(staged.fixtureIds);
+          for (const cancel of deferredVisuals) cancel();
+        },
+        // The pumps' reflector chips share the delineators' material.
+        ...(reflectors ? { setLamps: setReflectorEmission } : {}),
+      };
+    } finally {
+      // Abandoned part-way (a rebase, the chunk leaving): nothing was registered or
+      // attached, so what was built is simply freed.
+      if (!completed) {
+        for (const body of bodies) ctx.physics.removeBody(body);
         disposeKitMerged(group);
-        this.market.forget(registeredMarket);
-        this.fixtures.forget(registeredFixtures);
         for (const cancel of deferredVisuals) cancel();
-      },
-      // The pumps' reflector chips share the delineators' material.
-      ...(reflectors ? { setLamps: setReflectorEmission } : {}),
-    };
+        group.clear();
+      }
+    }
   }
 }

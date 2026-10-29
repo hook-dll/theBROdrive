@@ -7,7 +7,7 @@ import type { GameWorld } from '../game/state';
 import { itemLabel, type Item, type ShadeTint } from '../items/items';
 import { IMPORT_ENGINE_IDS, variantsOfKind, type PartInstance } from '../parts/registry';
 import { CAR_PAINTS } from '../vehicle/carpaint';
-import { buildCardMachine, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
+import { buildCardMachineSteps, CardMachine, NICHE_FLOOR_Y, NICHE_X, NICHE_Z, paintCardFace, registerCardMachineSigns, type CardMachineParts } from './cardmachine';
 import type { ChunkContext } from './chunks';
 import type { FixtureContext, FixtureField } from './fixturefield';
 import type { Poi } from './poi';
@@ -199,9 +199,9 @@ const WARE_CARD: Readonly<Record<Ware, { readonly band: string; readonly kind: s
 /**
  * Builds a machine standing at absolute (`x`, `z`) on the sand, its front turned by `yaw`.
  * In the physics band it is solid and registers its fixture (id pushed to `registered`,
- * for the chunk to forget). `disposers` gets the card materials.
+ * for the chunk to forget). `disposers` gets the card materials. Yields between its stages.
  */
-export function buildGarage(
+export function* buildGarageSteps(
   ctx: ChunkContext,
   poi: Poi,
   x: number,
@@ -213,8 +213,9 @@ export function buildGarage(
   fixtures: FixtureField,
   registered: string[],
   disposers: Array<() => void>,
-): void {
-  const parts = buildCardMachine(ctx, poi.s, x, z, yaw, GARAGE_LOOK, group, bodies, colliders, disposers);
+): Generator<void, void> {
+  const parts = yield* buildCardMachineSteps(ctx, poi.s, x, z, yaw, GARAGE_LOOK, group, bodies, colliders, disposers);
+  yield;
   // The machine's key in `WorldState.vendingSold` and `machineGrids`, and its fixture id.
   // `vend:<poi>` was the mixed shop's before the garage machine replaced it: save/save.ts
   // drops that one's sold slots and moves what lay in its grid to this key.
