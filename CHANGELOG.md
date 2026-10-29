@@ -188,6 +188,18 @@
 
 ### Changed
 
+- NEAR TRAFFIC HEADLAMPS GET A REAL SLOT FIRST, AND THE TOP RUNG HAS 15 (`main.ts`
+  `NEAR_SLOT_RANGE_SQ`, `game/settings.ts` blessing `vehicleLightSlots`). A pool lights
+  the ground only, so a near car's beam on a post, a wall or a parked car showed only
+  when it happened to win a slot by view score. Every other car's headlamps within 80 m
+  of the eye whose light reaches any ground in view or the player's own car now ask for
+  a slot before any farther beam, best view score first; the farther beams follow in
+  the existing ranking, and whatever gets no slot stays a pool, handed over by the same
+  fade. Blessing goes from 11 to 15 spot slots (desktop; the phone keeps 8, other rungs
+  unchanged), still fixed for the session and compiled behind the loading cover. The
+  driven car's lamps (headlamps, tail and reversing lamps), courtesy lamp and the hand
+  torch stay pinned slots. Not measured at 15 slots.
+
 - LAMP POOLS LIGHT LIKE THE LAMP THEY STAND FOR, CARS IN ANY BEAM CAST SHADOWS, AND A
   POOLED BEAM LIGHTS THE CARS IT REACHES (`render/lamppools.ts`, new
   `render/lampoccluders.ts`, `vehicle/vehiclelamps.ts` `syncLampShade`,

@@ -97,6 +97,14 @@ const TORCH_BEAM_OWNER = {};
  */
 const HELD_SLOT_SCORE_BONUS = 1.5;
 const MIN_SLOT_VIEW_SCORE = 0.02;
+/**
+ * Traffic headlamps within 80 m of the eye (squared here, m2) whose light reaches any ground in
+ * view or the player's own car (a view score above zero, however small), ask for a slot
+ * before every farther beam. A pool lights the ground only, so a near car's beam on a
+ * post, a wall or a parked car is there only with a slot; past this the ranking by score
+ * alone decides.
+ */
+const NEAR_SLOT_RANGE_SQ = 80 * 80;
 /** The player's car as a lit target for that ranking: a sphere round the cabin, metres. */
 const PLAYER_CAR_LIT_RADIUS_M = 2.4;
 /** Cars past this from the eye (squared, m2) take no pooled lamp light on their bodies. */
@@ -1755,8 +1763,10 @@ async function boot(): Promise<void> {
   const litGains: number[] = [];
   /** `headlampViewScore` of each of `litVehicles` with its range fade, 0 for no slot. */
   const litScores: number[] = [];
-  /** Indices into `litVehicles` whose headlamps ask for a slot, best score first. */
+  /** Indices into `litVehicles` whose headlamps ask for a slot, best score first: the
+   *  near beams (`NEAR_SLOT_RANGE_SQ`) in `nearSlotCandidates`, the rest here. */
   const slotCandidates: number[] = [];
+  const nearSlotCandidates: number[] = [];
 
   // Reused radio pose. The radio keeps the last non-null source coordinates after
   // exit, while the listener follows the camera every rendered frame.
@@ -2881,12 +2891,15 @@ async function boot(): Promise<void> {
     // pool instead (render/lamppools.ts), in one draw.
     //  - The driven car's lamps and courtesy lamp are pinned at full strength, the tail
     //    glow included, since the chase camera looks straight at it.
-    //  - Everyone else's headlamps ask in order of how much of their light the player
-    //    sees (`headlampViewScore`): on the road in view, and on his own car and inside
-    //    its cabin, which a car close behind lights more than anyone. They used to ask
+    //  - Everyone else's headlamps within 80 m of the eye whose light reaches anything
+    //    in view (`NEAR_SLOT_RANGE_SQ`) ask first: a pool lights the ground only, so a
+    //    near car's beam on a post, a wall or another car shows only with a slot. Then
+    //    the rest, in order of how much of their light the player sees
+    //    (`headlampViewScore`): on the road in view, and on his own car and inside its
+    //    cabin, which a car close behind lights more than anyone. They used to ask
     //    nearest first, which spent the slots on cars driving away and left the car
-    //    behind dark. A beam the player cannot see asks for nothing; its pool is all
-    //    of it there is to see.
+    //    behind dark. Each group asks best score first. A far beam the player cannot
+    //    see asks for nothing; its pool is all of it there is to see.
     //  - Tail, stop and reversing lamps of every other car are pools only: their light
     //    is a few metres of ground, and a slot each was a slot an oncoming car's beam
     //    did not get.
@@ -2913,16 +2926,20 @@ async function boot(): Promise<void> {
     lampView.update(renderer.camera, driving?.root ?? null, PLAYER_CAR_LIT_RADIUS_M);
     litScores.length = litVehicles.length;
     slotCandidates.length = 0;
+    nearSlotCandidates.length = 0;
     for (let i = 0; i < litVehicles.length; i++) {
       const vehicle = litVehicles[i];
       litScores[i] = 0;
       if (vehicle === driving || !(litGains[i] > 0)) continue;
       let score = litGains[i] * vehicle.headlampViewScore(lampView, vehicleLights.headlightDistanceScale);
+      if (!(score > 0)) continue;
       if (beamPool.share(vehicle, 0) > 0) score *= HELD_SLOT_SCORE_BONUS;
-      if (!(score > MIN_SLOT_VIEW_SCORE)) continue;
       litScores[i] = score;
-      slotCandidates.push(i);
+      if (vehicle.root.position.distanceToSquared(cam) < NEAR_SLOT_RANGE_SQ) nearSlotCandidates.push(i);
+      else if (score > MIN_SLOT_VIEW_SCORE) slotCandidates.push(i);
+      else litScores[i] = 0;
     }
+    nearSlotCandidates.sort((a, b) => litScores[b] - litScores[a]);
     slotCandidates.sort((a, b) => litScores[b] - litScores[a]);
     // No lamp pair is merged into one beam any more, traffic included: a car with two
     // lit headlamps laying ONE pool of light on the road read wrongly up close, and the
@@ -2949,6 +2966,9 @@ async function boot(): Promise<void> {
         }
         if (g === 0) beamPool.request(driving, DOME_BEAM_GROUP, driving.domeBeamCount, true);
       }
+    }
+    for (const i of nearSlotCandidates) {
+      beamPool.request(litVehicles[i], 0, litVehicles[i].beamCount('front'), false);
     }
     for (const i of slotCandidates) {
       beamPool.request(litVehicles[i], 0, litVehicles[i].beamCount('front'), false);

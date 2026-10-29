@@ -246,10 +246,17 @@ export const GRAPHICS_TIERS: Record<GraphicsQuality, GraphicsTier> = {
     // the resolution, the sky.
     //
     // THE POINT SLOTS ARE GONE. Their only sources were the switchable room lights in
-    // the mast huts, and the whole point-light path went with them. What is left is 11
-    // spots — still on the cheap side of the cliff — so traffic beams and unmerged tail
-    // lamps both fit.
-    vehicleLightSlots: 11,
+    // the mast huts, and the whole point-light path went with them. 11 spots were left.
+    //
+    // FIFTEEN NOW. The figures above predate the shader that skips a dark slot by a
+    // uniform branch and the kit car's per-car reach mask (render/lightshader.ts), so a
+    // slot no beam holds, or one that cannot reach the pixel, no longer costs what it
+    // did at the cliff. Every other car's rear lamps and every beam without a slot are
+    // ground pools (render/lamppools.ts), and those pools light no post or wall: the
+    // four more slots go to traffic headlamps within 80 m whose light is in view
+    // (main.ts `NEAR_SLOT_RANGE_SQ`), which ask before any farther beam. Not re-measured
+    // at 15; if the rung is ever found slow at night, measure here first.
+    vehicleLightSlots: 15,
     // Two thirds of a desktop again; the phone's spots are cut the same way, 8 where the
     // desktop spends 11.
     mobileVehicleLightSlots: 8,
