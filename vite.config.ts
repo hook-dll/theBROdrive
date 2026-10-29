@@ -1,5 +1,37 @@
 import basicSsl from '@vitejs/plugin-basic-ssl';
-import { defineConfig } from 'vite';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { defineConfig, type Plugin } from 'vite';
+
+/**
+ * Dev only: `POST /__cabin-bake/<name>` writes the body to `public/audio/cabin/<name>.wav`.
+ * The car lab's «Записать лупы» renders the cabin loops (src/audio/cabinsynth.ts) in the
+ * browser, the only place OfflineAudioContext exists, and posts each one here.
+ */
+function cabinBake(): Plugin {
+  return {
+    name: 'cabin-bake',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__cabin-bake/', (req, res) => {
+        const name = (req.url ?? '').replace(/^\//, '');
+        if (req.method !== 'POST' || !/^[a-z0-9-]+$/.test(name)) {
+          res.statusCode = 400;
+          res.end();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', () => {
+          const dir = resolve(server.config.root, 'public/audio/cabin');
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(resolve(dir, `${name}.wav`), Buffer.concat(chunks));
+          res.end('ok');
+        });
+      });
+    },
+  };
+}
 
 /**
  * Development and preview servers use plain HTTP by default: the shipped local package
@@ -12,7 +44,7 @@ import { defineConfig } from 'vite';
  * the script runs the same in cmd, PowerShell and a POSIX shell.
  */
 export default defineConfig(({ mode }) => ({
-  plugins: mode === 'https' ? [basicSsl()] : [],
+  plugins: [cabinBake(), ...(mode === 'https' ? [basicSsl()] : [])],
   /**
    * `vite build` hardcodes `process.env.NODE_ENV` to `"production"` regardless of
    * `--mode`, so `import.meta.env.DEV` (the flag every dev-menu button and the

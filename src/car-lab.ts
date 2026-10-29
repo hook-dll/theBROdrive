@@ -25,7 +25,8 @@
  * interior trim id, carkit/trims.ts) puts every kit car in that trim, as the «Салон»
  * selector does; the «Экземпляр» slider shows each car's own draw of trim and paint.
  */
-import { CABIN_LOOPS, CabinMusic } from './audio/cabinmusic';
+import { CABIN_LOOP_NAMES, CabinMusic, encodeCabinWav } from './audio/cabinmusic';
+import { renderCabinLoops } from './audio/cabinsynth';
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -200,7 +201,7 @@ function cabinMusicPlayer(root: HTMLElement): CabinMusicPlayer {
         window.setTimeout(play, 100);
         return;
       }
-      if (output) output.textContent = `${CABIN_LOOPS[index]!.bpm}`;
+      if (output) output.textContent = `${(buffer.duration).toFixed(1)}s`;
       stop();
       source = new AudioBufferSourceNode(ctx!, { buffer, loop: true });
       source.connect(panner!);
@@ -272,10 +273,25 @@ function createInterface(
     ${unifiedRow}
     ${styleRow}
     <select data-control="focus"><option value="">Общий вид</option>${cars.map((car) => `<option value="${car.def.id}">${car.def.label}</option>`).join('')}</select>
-    <label><span>Музыка в 2101</span><select data-music="loop"><option value="">выкл</option>${CABIN_LOOPS.map((loop, i) => `<option value="${i}">${i + 1}. ${loop.name}</option>`).join('')}</select><output></output></label>
-    <div class="buttons"><button data-action="game">Вернуться в игру</button></div>`;
+    <label><span>Музыка в 2101</span><select data-music="loop"><option value="">выкл</option>${CABIN_LOOP_NAMES.map((name, i) => `<option value="${i}">${i + 1}. ${name}</option>`).join('')}</select><output></output></label>
+    <div class="buttons"><button data-action="game">Вернуться в игру</button><button data-action="cabin-bake" title="Синтезирует лупы (audio/cabinsynth.ts) и пишет public/audio/cabin/*.wav; после — перезагрузить">Записать лупы</button></div>`;
   document.body.appendChild(root);
   const music = cabinMusicPlayer(root);
+  root.querySelector<HTMLButtonElement>('[data-action="cabin-bake"]')?.addEventListener('click', (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = 'Пишу…';
+    void (async () => {
+      for (const { name, samples } of await renderCabinLoops()) {
+        const response = await fetch(`/__cabin-bake/${name}`, { method: 'POST', body: encodeCabinWav(samples) });
+        if (!response.ok) throw new Error(`${name}: ${response.status}`);
+      }
+      button.textContent = 'Записано, перезагрузи';
+    })().catch((error: unknown) => {
+      console.error('cabin bake failed', error);
+      button.textContent = 'Ошибка, см. консоль';
+    });
+  });
 
   const sync = (): void => {
     root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-control]').forEach((input) => {

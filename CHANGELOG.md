@@ -4,6 +4,14 @@
 
 ### Added
 
+- CABIN MUSIC IS BAKED (`audio/cabinmusic.ts`, `audio/cabinsynth.ts`,
+  `public/audio/cabin/*.wav`, 2.2 MB). The game no longer synthesises the traffic's 14
+  cabin loops at startup; it fetches 16-bit mono WAVs at 16 kHz and copies their samples
+  into AudioBuffers at their own rate (14 loops in ~14 ms, no task over 50 ms, no
+  resampling, so each loop stays exactly its pattern and seamless). The synthesis lives
+  on in `cabinsynth.ts` for authoring only: the car lab's «Записать лупы» renders them in
+  the browser and the dev-only `cabin-bake` middleware (vite.config.ts) writes the files.
+
 - The ZIL-130's bench seats three: its middle is a fifth seat, `'middle'` (game/state.ts
   `PLAYER_SEATS`), offered only on a car whose front seat is a bench (`kitFrontBench`,
   carkit/specs.ts). F on the bench's left, middle or right third (by its width,

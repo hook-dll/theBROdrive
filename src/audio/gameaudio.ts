@@ -79,7 +79,7 @@ export class GameAudio {
   private readonly vehicle = new VehicleAudio(this.mixer);
   private readonly foleyVoices = new Foley(this.mixer);
   private readonly ambience = new Ambience(this.mixer);
-  /** The loops other cars play in their cabins (cabinmusic.ts), rendered at startup. */
+  /** The loops other cars play in their cabins (cabinmusic.ts), fetched at startup. */
   private readonly cabinMusic = new CabinMusic();
   private readonly radios = new Map<string, Radio>();
   /** Voiced cars by id, and the same voices as a list (at most TRAFFIC_VOICES). */
