@@ -4,6 +4,25 @@
 
 ### Added
 
+- EVERY LIT LAMP LIGHTS THE GROUND, AND THE SPOT SLOTS GO TO THE LIGHT THE PLAYER SEES
+  (`render/lamppools.ts`, `vehicle/vehiclelamps.ts` `syncLampPool`/`headlampViewScore`,
+  `main.ts`). A lamp without a spotlight slot used to lay no light at all. Now it lays a
+  ground POOL instead: a soft additive patch under its beam, all of them in one draw. The
+  patch is shaded per pixel with three's spot cone, falloff and incidence, on asphalt or
+  on the desert's sand by the road's half-width, and fogged. Its near rows lie on the
+  car's tyre plane and its far rows on the terrain, sampled within a per-frame
+  allowance. Other cars' tail, stop and reversing lamps are always pools (red behind
+  the car, brighter braking, white reversing). Other cars' headlamps ask for a slot by
+  their light on the ground in view plus their light on the player's own car and cabin.
+  A car close behind keeps its slot, oncoming beams in view win over cars driving away,
+  and a beam below the floor stays a pool. Slots still hand over by fading; the lamp's
+  pool fades the other way. The driven car's lamps, courtesy lamp and torch are
+  unchanged. Light count and visibility are fixed, and one new boot-compiled program
+  (`lamp-pool`, in the scene from boot) is added. Measured, blessing 2560×1440, night,
+  normal traffic, 150-240 s per seed: slots asked p50 5/9 (was 23/31 beams wanted),
+  frames that ask beyond the 11 slots 33%/25% (was 83%/99%). Pools cost 0.04-0.08 ms
+  of GPU at a staged pose with 9 pools.
+
 - In a race the throttle and brake keys are plain pedals (`PedalLever.step` `plain`,
   `InputReader.setPlainPedals`): a tap no longer sets a cruise notch.
 

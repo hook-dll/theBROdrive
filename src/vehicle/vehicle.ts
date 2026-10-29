@@ -97,6 +97,7 @@ import { carPaintColor, type CarPaint } from './carpaint';
 import type { ContactPatchField } from '../render/contactpatches';
 import { patchOpacity } from '../render/contactpatches';
 import type { VehicleLightRig } from '../render/vehiclelights';
+import type { LampPoolField, LampView } from '../render/lamppools';
 import { SPOT_REACH_ALL } from '../render/lightshader';
 import { SWING_REACH_M } from '../render/kitdraw';
 import { KitRig } from '../carkit/rig';
@@ -4657,6 +4658,16 @@ export class Vehicle implements Rebasable {
     shadowed: boolean,
   ): void {
     this.lamps.syncProjectedLights(rig, group, gain, shadowed);
+  }
+
+  /** How much of this car's headlamp light the player sees (vehiclelamps.ts). */
+  headlampViewScore(view: LampView, distanceScale: number): number {
+    return this.lamps.headlampViewScore(view, distanceScale);
+  }
+
+  /** Lays one lit lamp group's light on the ground as a pool (vehiclelamps.ts). */
+  syncLampPool(field: LampPoolField, group: BeamGroup, gain: number): void {
+    this.lamps.syncLampPool(field, group, gain);
   }
 
   /**
