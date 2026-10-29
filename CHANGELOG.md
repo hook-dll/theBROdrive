@@ -4,6 +4,9 @@
 
 ### Added
 
+- In a race the throttle and brake keys are plain pedals (`PedalLever.step` `plain`,
+  `InputReader.setPlainPedals`): a tap no longer sets a cruise notch.
+
 - Every seat a kit car has is sat in: the GAZelles' double passenger seat's middle and all
   eleven saloon seats of the GAZ-32213 (the ZIL's bench and the sedans' rear bench as
   before). The seat list is the kit cabin's own (carkit/specs.ts `kitSeats`); each seat
