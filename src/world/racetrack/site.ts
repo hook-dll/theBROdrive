@@ -18,8 +18,9 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
  * WHICH POSTS. `postHasTrack` is a pure roll per post stop, as `poiHasMachine` is for
  * the machines: never at posts 0 and 1, where the road teaches everything else, and
  * past them at `TRACK_CHANCE`. A roll is only a wish: the track must also find room
- * (below), and about one roll in sixteen does not, so about one settlement in three
- * has one (tools/racetrack-gen.ts counts it: 60 of 180 posts over three seeds).
+ * (below), and about one roll in twelve does not, so nearly every second settlement
+ * has one (tools/racetrack-gen.ts counts it: 55 placed of 60 rolled over 120 posts of
+ * three seeds; it was a third of the posts until 2026-10-29).
  *
  * WHERE BESIDE THE POST. Always on the LAY-BY's side, so the access lane leaves the
  * pad without crossing the road: from the pad's outer edge `LANE_ALONG_M` before the
@@ -83,8 +84,8 @@ import { RaceTrack, type LanePoint, type TrackCorner, type TrackPaddock } from '
 
 /** No track at the first posts: the road's start teaches the rest of the game first. */
 const TRACK_FIRST_POST = 2;
-/** Share of posts past the first that roll a track (about one in sixteen fails to place). */
-const TRACK_CHANCE = 0.33;
+/** Share of posts past the first that roll a track: half (one roll in six to sixteen finds no room). */
+const TRACK_CHANCE = 0.5;
 const TRACK_DOMAIN = 0x52434531; // 'RCE1'
 
 /** Asphalt half width range: two cars side by side and room to pass. */
