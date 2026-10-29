@@ -361,3 +361,15 @@ Settings → Controller: vibration, stick dead-zone (default 8%), steering
 sensitivity (how much lock a given stick deflection asks for) and steering assist
 (see Steering). They live in `Settings` with the rest and persist through the same
 store; older saves load with the defaults.
+
+## Resolution and upscaling
+
+Settings → Quality: **Resolution** is the frame as a multiple of the screen (×0.5,
+×0.67, ×0.75, Screen, ×1.5, ×2). **Upscaling** decides how a frame below Screen reaches
+it: **Off** (default) is the browser's bilinear stretch; **FSR** is AMD FidelityFX Super
+Resolution 1 (`src/render/fsr.ts`): EASU rebuilds the screen's pixels from the frame,
+keeping edges and lettering as lines, then RCAS sharpens them by **Sharpness** (shown
+only under FSR; default 85%, 0% no sharpening). At Screen FSR only sharpens; at ×1.5 and
+×2 it does nothing; Very Low never uses it. For a 144 Hz frame that still looks close to
+Screen, try FSR at ×0.75, then ×0.67; for a crisper Screen, FSR at Screen. Everything
+applies at once, with no reload. `Settings.upscaling`, `Settings.sharpness`.

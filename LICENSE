@@ -20,6 +20,10 @@ authors; see the credits and notices that accompany them (for example,
 public/audio/CREDITS.md and the dependencies listed in package.json). Nothing in this
 notice restricts any right those licenses grant.
 
+- src/render/fsr.ts is a port of AMD FidelityFX Super Resolution 1 (EASU and RCAS,
+  https://github.com/GPUOpen-Effects/FidelityFX-FSR), Copyright (c) 2021 Advanced Micro
+  Devices, Inc., under the MIT license; its notice is kept in that file.
+
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO
 EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.

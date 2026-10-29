@@ -38,6 +38,7 @@ import {
   PHONE_FIRST_LAUNCH,
   QUALITY_PRESET_DETAIL,
   FRAME_SCALES,
+  SHARPNESS_STEP,
   screenLinesFor,
   TRAFFIC_CAPS,
   qualityPresetOf,
@@ -104,6 +105,7 @@ function el(tag: string, cls?: string): HTMLElement {
  */
 const FRAME_SCALE_NOTES: Record<FrameScale, string> = {
   0.5: 'A quarter of the pixels: the lightest on the graphics chip, and the softest.',
+  0.67: 'Under half the pixels: FSR\'s own "Quality" step, for Upscaling FSR.',
   0.75: 'About half the pixels: light on the chip, a little soft.',
   1: 'Exactly the screen\'s pixels.',
   1.5: 'Supersampled: smooth edges and steady thin detail, for about twice the chip\'s work.',
@@ -1478,20 +1480,66 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           const held = viewport.deviceHeight > ceiling
             ? ` This level takes the screen at ${ceiling} lines at most.`
             : '';
+          const upscaled = settings.upscaling === 'fsr';
           return `${pixelsOf(frame)}. ${FRAME_SCALE_NOTES[scale]}${held} `
             + (ratio < 0.99
-              ? `On this screen it is stretched ${(1 / ratio).toFixed(2)}x.`
+              ? upscaled
+                ? `On this screen FSR upscales it ${(1 / ratio).toFixed(2)}x.`
+                : `On this screen it is stretched ${(1 / ratio).toFixed(2)}x.`
               : ratio > 1.01
                 ? `Drawn ${ratio.toFixed(2)}x the screen and averaged down to it`
                   + (ratio >= 1.4 ? ', so FXAA is left off.' : '.')
-                : 'This screen\'s own pixels, one for one.');
+                : 'This screen\'s own pixels, one for one'
+                  + (upscaled && settings.sharpness > 0 ? ', sharpened by FSR.' : '.'));
         },
         active: () => settings.frameScale === scale,
         pick: () => {
           settings.frameScale = scale;
           changed();
         },
-      })))]),
+      }))),
+      // HOW A SMALLER FRAME REACHES THE SCREEN (render/fsr.ts). Off is the browser's
+      // bilinear stretch; FSR draws the screen's own pixels from the frame, edges kept
+      // as lines, then sharpens. Above the screen's size it does nothing.
+      segmented('Upscaling', [
+        {
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'Below Screen, the browser stretches the frame to the screen: smooth but soft. Nothing is sharpened.',
+          active: () => settings.upscaling === 'off',
+          pick: () => {
+            settings.upscaling = 'off';
+            changed();
+          },
+        },
+        {
+          label: 'FSR',
+          icon: 'pixels',
+          hint: 'AMD FidelityFX Super Resolution 1. Below Screen it rebuilds the screen\'s pixels from the '
+            + 'frame, keeping edges and lettering as lines instead of smearing them, then sharpens: '
+            + 'try ×0.67 or ×0.75, about half of Screen\'s pixels. At Screen it only sharpens. '
+            + 'Does nothing at ×1.5 and ×2.',
+          active: () => settings.upscaling === 'fsr',
+          pick: () => {
+            settings.upscaling = 'fsr';
+            changed();
+          },
+        },
+      ]),
+      ...(settings.upscaling === 'fsr' ? [sliderField(
+        'Sharpness',
+        'pixels',
+        'How hard FSR sharpens the finished picture (its RCAS pass), at every frame size up to Screen. '
+          + '0% leaves the upscale unsharpened; the default is 85%; near 100% thin lines can ring.',
+        0,
+        1,
+        SHARPNESS_STEP,
+        () => settings.sharpness,
+        (value) => `${Math.round(value * 100)}%`,
+        (value) => {
+          settings.sharpness = value;
+        },
+      )] : [])]),
       segmented('Traffic', COMPUTE_LEVELS.map(({ level, label }) => ({
         label,
         icon: TRAFFIC_ICONS[level],
@@ -2606,6 +2654,8 @@ export class MainMenu {
         frameScale: base.frameScale,
         retroLines: base.retroLines,
         fxaa: base.fxaa,
+        upscaling: base.upscaling,
+        sharpness: base.sharpness,
         shadows: base.shadows,
         groundCover: base.groundCover,
         frameRateLimit: base.frameRateLimit,
@@ -2641,6 +2691,8 @@ export class MainMenu {
           frameScale: settings.frameScale,
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
+          upscaling: settings.upscaling,
+          sharpness: settings.sharpness,
           shadows: settings.shadows,
           groundCover: settings.groundCover,
           frameRateLimit: settings.frameRateLimit,

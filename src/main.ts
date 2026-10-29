@@ -407,6 +407,7 @@ async function boot(): Promise<void> {
     world.state.settings.shadows,
   );
   renderer.setRetroLines(world.state.settings.retroLines);
+  renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
     const transition = document.fullscreenElement
@@ -833,7 +834,8 @@ async function boot(): Promise<void> {
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
-            + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}`,
+            + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}, upscaling ${s.upscaling}`
+            + (s.upscaling === 'fsr' ? ` (sharpness ${Math.round(s.sharpness * 100)}%)` : ''),
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -3658,6 +3660,7 @@ async function boot(): Promise<void> {
       sky.setShadowMode(world.state.settings.shadows);
       renderer.setFrameScale(world.state.settings.frameScale);
       renderer.setRetroLines(world.state.settings.retroLines);
+      renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
       camera.setShake(world.state.settings.cameraShake);
       camera.setStyle(world.state.settings.cameraStyle);
       hud.setDashboardScale(world.state.settings.dashboardSize);

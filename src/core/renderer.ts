@@ -9,8 +9,10 @@ import { retroActive, retroPixelRatio } from '../render/retro';
 import { setSceneFrameHeight } from '../render/sceneframe';
 import { DEFAULT_EYE_HEIGHT_M, HAZE_FRAGMENT, HAZE_VERTEX } from '../render/hazeshader';
 import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
+import { EASU_FRAGMENT, RCAS_FRAGMENT } from '../render/fsr';
 import {
   DEFAULT_INK_STRENGTH,
+  DEFAULT_SHARPNESS,
   screenLinesFor,
   shadowModeDefault,
   shadowModeFor,
@@ -18,6 +20,7 @@ import {
   type GraphicsQuality,
   type FrameScale,
   type RetroLines,
+  type Upscaling,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -384,21 +387,39 @@ export class Renderer {
   private readonly hazeMaterial: THREE.ShaderMaterial;
   private readonly hazeGeometry: THREE.BufferGeometry;
   /**
-   * The finished frame at the scene's size, drawn only while the frame has more lines
-   * than the screen (`shrinking`): the finishing pass writes here instead of the canvas,
-   * and the present pass shrinks it onto the canvas (render/presentshader.ts). Eight-bit,
-   * display-encoded, no depth: exactly what the canvas would have held. 1x1 otherwise,
-   * which Three never allocates while nothing draws into it.
+   * The finished frame at the scene's size, drawn while the frame is shrunk onto the
+   * canvas (`shrinking`) or goes through FSR (`easu`, `rcas`): the finishing pass writes
+   * here instead of the canvas, and the present pass shrinks it onto the canvas
+   * (render/presentshader.ts), or EASU and RCAS take it from here (render/fsr.ts).
+   * Eight-bit, display-encoded, no depth: exactly what the canvas would have held. 1x1
+   * otherwise, which Three never allocates while nothing draws into it.
    */
   private readonly frameTarget: THREE.WebGLRenderTarget;
   private readonly presentScene = new THREE.Scene();
   private readonly presentMaterial: THREE.ShaderMaterial;
+  /**
+   * EASU's output at the canvas's size, for RCAS to sharpen: drawn only while both run
+   * (EASU alone draws straight to the canvas). Eight-bit and display-encoded like
+   * `frameTarget`; 1x1 otherwise.
+   */
+  private readonly upscaleTarget: THREE.WebGLRenderTarget;
+  private readonly easuScene = new THREE.Scene();
+  private readonly easuMaterial: THREE.ShaderMaterial;
+  private readonly rcasScene = new THREE.Scene();
+  private readonly rcasMaterial: THREE.ShaderMaterial;
   /** The scene frame, texels: what the scene and the finishing pass are drawn at. */
   private readonly sceneSize = new THREE.Vector2(1, 1);
   /** The device pixels the canvas covers, as `resize` last resolved them (`presentedSize`). */
   private readonly displaySize = new THREE.Vector2(1, 1);
   /** Whether the frame is taller than the canvas's device pixels and is shrunk onto it. */
   private shrinking = false;
+  /** `Settings.upscaling` and `Settings.sharpness`, kept for `resize`. */
+  private upscaling: Upscaling = 'off';
+  private sharpness = DEFAULT_SHARPNESS;
+  /** Whether EASU brings a frame smaller than the canvas's device pixels up to them. */
+  private easu = false;
+  /** Whether RCAS sharpens the frame at the canvas's size, after EASU or alone at x1. */
+  private rcas = false;
   /** Frame lines per screen line; 0 on the retro rung. Decides FXAA (`applyFxaa`). */
   private supersample = 1;
   /**
@@ -649,6 +670,42 @@ export class Renderer {
     presentMesh.frustumCulled = false;
     this.presentScene.add(presentMesh);
 
+    // FSR's two passes (render/fsr.ts), on the same triangle. Both read their input
+    // texel by texel, so their target is nearest and unmipped like `frameTarget`.
+    this.upscaleTarget = new THREE.WebGLRenderTarget(1, 1, {
+      depthBuffer: false,
+      type: THREE.UnsignedByteType,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      generateMipmaps: false,
+    });
+    this.easuMaterial = new THREE.ShaderMaterial({
+      vertexShader: PRESENT_VERTEX,
+      fragmentShader: EASU_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tFrame: { value: this.frameTarget.texture },
+        uScale: { value: new THREE.Vector2(1, 1) },
+      },
+    });
+    const easuMesh = new THREE.Mesh(this.hazeGeometry, this.easuMaterial);
+    easuMesh.frustumCulled = false;
+    this.easuScene.add(easuMesh);
+    this.rcasMaterial = new THREE.ShaderMaterial({
+      vertexShader: PRESENT_VERTEX,
+      fragmentShader: RCAS_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tFrame: { value: this.frameTarget.texture },
+        uSharpness: { value: DEFAULT_SHARPNESS },
+      },
+    });
+    const rcasMesh = new THREE.Mesh(this.hazeGeometry, this.rcasMaterial);
+    rcasMesh.frustumCulled = false;
+    this.rcasScene.add(rcasMesh);
+
     // The window's resize event still drives it (a DPR change on a move between screens
     // arrives there everywhere); the observer adds the exact device-pixel size and the
     // layout changes no window event reports.
@@ -668,8 +725,11 @@ export class Renderer {
     this.disposeGpuQueries();
     this.hazeTarget.dispose();
     this.frameTarget.dispose();
+    this.upscaleTarget.dispose();
     this.hazeMaterial.dispose();
     this.presentMaterial.dispose();
+    this.easuMaterial.dispose();
+    this.rcasMaterial.dispose();
     this.hazeGeometry.dispose();
     this.renderer.dispose();
   }
@@ -703,10 +763,10 @@ export class Renderer {
   /**
    * Waits until every program variant the live frame draws is ready — the scene pass,
    * the finishing pass both to the canvas and into the frame target (a render target is
-   * a different program key: linear output), and the present pass — and the plain
-   * shadow depth variants (`depthVariantSamples`) with them. Both finishing variants
-   * always, because the player can move the frame past the screen's height from the
-   * pause menu at any time.
+   * a different program key: linear output), the present pass, EASU both to the canvas
+   * and into `upscaleTarget`, and RCAS — and the plain shadow depth variants
+   * (`depthVariantSamples`) with them. Every presentation variant always, because the
+   * player can change the frame's size and the upscaling from the pause menu at any time.
    */
   async waitForFrameShaders(): Promise<void> {
     const sceneReady = this.compileForScenePass(this.scene);
@@ -717,11 +777,17 @@ export class Renderer {
     try {
       this.renderer.setRenderTarget(this.frameTarget);
       const framedReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
+      this.renderer.setRenderTarget(this.upscaleTarget);
+      const easuFramedReady = compileAsyncSafe(this.renderer, this.easuScene, this.hazeCamera);
       this.renderer.setRenderTarget(null);
       const postReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
       const presentReady = compileAsyncSafe(this.renderer, this.presentScene, this.hazeCamera);
+      const easuReady = compileAsyncSafe(this.renderer, this.easuScene, this.hazeCamera);
+      const rcasReady = compileAsyncSafe(this.renderer, this.rcasScene, this.hazeCamera);
       const shadeReady = this.cloudShadowPass?.compile();
-      await Promise.all([sceneReady, depthReady, framedReady, postReady, presentReady, shadeReady]);
+      await Promise.all([
+        sceneReady, depthReady, framedReady, easuFramedReady, postReady, presentReady, easuReady, rcasReady, shadeReady,
+      ]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
     }
@@ -989,12 +1055,16 @@ export class Renderer {
    * Sizes the scene frame and the canvas.
    *
    * Up to the screen's own height the canvas IS the frame, as it always was: equal, or
-   * smaller and scaled up by the compositor, which is free and as good as any upscale
-   * this pass could afford at the screen's size. Past it, the canvas stays at the
-   * screen's device pixels and the frame is shrunk onto it by `presentMaterial`, an
-   * area average, instead of by the compositor's single bilinear tap (see
-   * render/presentshader.ts for why that tap wasted most of a supersample). The retro
-   * rung never shrinks: its frame is always coarser than the screen.
+   * smaller and scaled up by the compositor's bilinear tap, which is free. Past it, the
+   * canvas stays at the screen's device pixels and the frame is shrunk onto it by
+   * `presentMaterial`, an area average, instead of by the compositor's single bilinear
+   * tap (see render/presentshader.ts for why that tap wasted most of a supersample). The
+   * retro rung never shrinks: its frame is always coarser than the screen.
+   *
+   * Under FSR (`Settings.upscaling`) a frame smaller than the screen is brought up to
+   * the screen's device pixels by EASU instead of the compositor, so the canvas is the
+   * screen; at the screen's own size RCAS alone sharpens it. Never on the retro rung,
+   * whose squares are the look, nor on a frame that is shrunk.
    *
    * The canvas is only re-sized when its size changes: assigning a canvas's width
    * clears it even to the same value, and the observer reports after the frame is drawn.
@@ -1005,10 +1075,14 @@ export class Renderer {
     this.sceneSize.set(frame.width, frame.height);
     this.displaySize.set(canvas.deviceWidth, canvas.deviceHeight);
     this.shrinking = this.quality !== 'retro' && frame.height > canvas.deviceHeight;
+    const fsr = this.upscaling === 'fsr' && this.quality !== 'retro' && !this.shrinking;
+    this.easu = fsr && (frame.width !== canvas.deviceWidth || frame.height !== canvas.deviceHeight);
+    this.rcas = fsr && this.sharpness > 0;
     this.supersample = this.quality === 'retro' ? 0 : frame.height / canvas.deviceHeight;
     this.applyFxaa();
-    const width = this.shrinking ? canvas.deviceWidth : frame.width;
-    const height = this.shrinking ? canvas.deviceHeight : frame.height;
+    const toScreen = this.shrinking || this.easu;
+    const width = toScreen ? canvas.deviceWidth : frame.width;
+    const height = toScreen ? canvas.deviceHeight : frame.height;
     const element = this.renderer.domElement;
     if (element.width !== width || element.height !== height) {
       // Drawing-buffer pixels given directly at a ratio of 1: the frame and the screen are
@@ -1142,7 +1216,9 @@ export class Renderer {
     // the ink and the grain on the displayed picture.
     //
     // A frame taller than the screen takes a third: pass 2 into `frameTarget`, then the
-    // present pass shrinks it onto the canvas (see `resize`).
+    // present pass shrinks it onto the canvas (see `resize`). Under FSR pass 2 goes into
+    // `frameTarget` too, then EASU brings it up to the canvas (into `upscaleTarget`
+    // while RCAS follows) and RCAS sharpens it onto the canvas (render/fsr.ts).
     //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
     // cutscene's ground does not read it.
@@ -1154,6 +1230,17 @@ export class Renderer {
       this.renderer.render(this.hazeScene, this.hazeCamera);
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.presentScene, this.hazeCamera);
+    } else if (this.easu || this.rcas) {
+      this.renderer.setRenderTarget(this.frameTarget);
+      this.renderer.render(this.hazeScene, this.hazeCamera);
+      if (this.easu) {
+        this.renderer.setRenderTarget(this.rcas ? this.upscaleTarget : null);
+        this.renderer.render(this.easuScene, this.hazeCamera);
+      }
+      if (this.rcas) {
+        this.renderer.setRenderTarget(null);
+        this.renderer.render(this.rcasScene, this.hazeCamera);
+      }
     } else {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.hazeScene, this.hazeCamera);
@@ -1230,8 +1317,9 @@ export class Renderer {
 
   /**
    * Size the scene-pass target to the scene frame (`sceneSize`), the frame target with
-   * it while the frame is shrunk onto the screen, and hand the lens its uniforms. The
-   * cinema lens samples this same target: a 1.25x target under it was 1.56x the
+   * it while the frame is shrunk onto the screen or goes through FSR, EASU's target to
+   * the canvas while RCAS follows it, and hand the lens and the passes their uniforms.
+   * The cinema lens samples this same target: a 1.25x target under it was 1.56x the
    * scene's pixels, about 80% of the lens's cost (+1.35 ms in the cabin view on the M2
    * Pro), for a centre the lens magnifies past it; Catmull-Rom (render/hazeshader.ts
    * `sceneSample`) upscales that centre instead. Three's `setSize` is a no-op at an
@@ -1240,19 +1328,27 @@ export class Renderer {
   private resizeHazeTarget(): void {
     const { x: width, y: height } = this.sceneSize;
     const uniforms = this.hazeMaterial.uniforms;
+    const framed = this.shrinking || this.easu || this.rcas;
     this.hazeTarget.setSize(width, height);
     uniforms.uResolution.value.set(width, height);
     uniforms.uPanini.value = this.cinemaLens ? this.paniniStrength : 0;
-    uniforms.uEncodeOutput.value = this.shrinking ? 1 : 0;
-    // Back to 1x1 when not shrinking: `setSize` disposes the frame-sized texture, and
-    // Three allocates the small one only if something draws into it.
-    this.frameTarget.setSize(this.shrinking ? width : 1, this.shrinking ? height : 1);
+    uniforms.uEncodeOutput.value = framed ? 1 : 0;
+    // Back to 1x1 when unused: `setSize` disposes the full-sized texture, and Three
+    // allocates the small one only if something draws into it.
+    this.frameTarget.setSize(framed ? width : 1, framed ? height : 1);
     const canvas = this.renderer.domElement;
+    const upscaled = this.easu && this.rcas;
+    this.upscaleTarget.setSize(upscaled ? canvas.width : 1, upscaled ? canvas.height : 1);
     (this.presentMaterial.uniforms.uFrameSize.value as THREE.Vector2).set(width, height);
     (this.presentMaterial.uniforms.uScale.value as THREE.Vector2).set(
       width / Math.max(1, canvas.width),
       height / Math.max(1, canvas.height),
     );
+    (this.easuMaterial.uniforms.uScale.value as THREE.Vector2).set(
+      width / Math.max(1, canvas.width),
+      height / Math.max(1, canvas.height),
+    );
+    this.rcasMaterial.uniforms.tFrame.value = this.easu ? this.upscaleTarget.texture : this.frameTarget.texture;
     setSceneFrameHeight(height);
   }
 
@@ -1277,15 +1373,18 @@ export class Renderer {
    * How the frame reaches the display, all three sizes in device pixels:
    *
    *  - `width`/`height`: the canvas's drawing buffer — the frame itself, or the screen's
-   *    own device pixels while a taller frame is shrunk onto them (`shrunk`).
+   *    own device pixels while a taller frame is shrunk onto them (`shrunk`) or a
+   *    smaller one is upscaled to them by FSR (`upscaled`).
    *  - `displayWidth`/`displayHeight`: the device pixels the canvas covers on the panel,
    *    as `resize` last resolved them.
-   *  - `fit`: `native` when the frame is those pixels one for one; `stretched` when it is
-   *    deliberately smaller (the rung's `screenLines` ceiling, or a multiple below 1) and
-   *    the compositor scales it up, bilinear; `shrunk` when it is larger and the present
-   *    pass averages it down; `pixelated` on the retro rung, scaled up nearest-neighbour.
-   *    No other fit exists: a frame at the screen's lines is always its exact pixels
-   *    (`sceneFrameSize`), so `stretched` is never an accident of rounding.
+   *  - `fit`: `native` when the frame is those pixels one for one (`sharpened` when RCAS
+   *    runs on it); `stretched` when it is deliberately smaller (the rung's `screenLines`
+   *    ceiling, or a multiple below 1) and the compositor scales it up, bilinear;
+   *    `upscaled` when FSR brings it up instead; `shrunk` when it is larger and the
+   *    present pass averages it down; `pixelated` on the retro rung, scaled up
+   *    nearest-neighbour. No other fit exists: a frame at the screen's lines is always
+   *    its exact pixels (`sceneFrameSize`), so `stretched` is never an accident of
+   *    rounding.
    */
   get presentedSize(): {
     readonly width: number;
@@ -1293,7 +1392,7 @@ export class Renderer {
     readonly shrunk: boolean;
     readonly displayWidth: number;
     readonly displayHeight: number;
-    readonly fit: 'native' | 'stretched' | 'shrunk' | 'pixelated';
+    readonly fit: 'native' | 'sharpened' | 'stretched' | 'upscaled' | 'shrunk' | 'pixelated';
   } {
     const canvas = this.renderer.domElement;
     const displayWidth = this.displaySize.x;
@@ -1302,9 +1401,11 @@ export class Renderer {
       ? 'pixelated'
       : this.shrinking
         ? 'shrunk'
-        : this.sceneSize.x === displayWidth && this.sceneSize.y === displayHeight
-          ? 'native'
-          : 'stretched';
+        : this.easu
+          ? 'upscaled'
+          : this.sceneSize.x === displayWidth && this.sceneSize.y === displayHeight
+            ? this.rcas ? 'sharpened' : 'native'
+            : 'stretched';
     return { width: canvas.width, height: canvas.height, shrunk: this.shrinking, displayWidth, displayHeight, fit };
   }
 
@@ -1469,6 +1570,21 @@ export class Renderer {
     this.frameScale = scale;
     if (this.quality === 'retro') return;
     this.applyResolution();
+  }
+
+  /**
+   * Installs `Settings.upscaling` and `Settings.sharpness`. The strength is a uniform;
+   * only turning FSR on or off, or the sharpening between none and some, changes which
+   * passes draw and the canvas's size, and so the GPU average. Every pass's program is
+   * linked at boot (`waitForFrameShaders`), so neither links one.
+   */
+  setUpscaling(mode: Upscaling, sharpness: number): void {
+    const strength = Math.min(1, Math.max(0, sharpness));
+    this.rcasMaterial.uniforms.uSharpness.value = strength;
+    const passesChange = mode !== this.upscaling || (strength > 0) !== (this.sharpness > 0);
+    this.upscaling = mode;
+    this.sharpness = strength;
+    if (passesChange) this.applyResolution();
   }
 
   /** Very Low's frame height, lines (`Settings.retroLines`); no effect on other rungs. */

@@ -4,6 +4,25 @@
 
 ### Added
 
+- SMART UPSCALING: FSR 1 (`render/fsr.ts`; `core/renderer.ts` `setUpscaling`,
+  `drawFrame`; `Settings.upscaling`, `Settings.sharpness`, `UPSCALINGS`; menu
+  Settings → Quality → **Upscaling**, **Sharpness**). AMD FidelityFX Super Resolution 1 (MIT,
+  notice in the file and in LICENSE), its EASU and RCAS passes ported to GLSL ES 3.0.
+  - With Upscaling **FSR** and a Resolution below Screen, the canvas is the screen's own
+    device pixels: the finishing pass (tone map, grade, ink, FXAA, all at the frame's
+    size) draws into the eight-bit frame target, EASU upscales its display-encoded
+    picture to the screen, edge-adaptive instead of the compositor's bilinear stretch,
+    and RCAS sharpens it at the screen's size. At Screen it is RCAS alone; at ×1.5 and
+    ×2 nothing changes (the frame is averaged down as before); never on Very Low.
+  - **Sharpness** (0-100%, default 85%, about 0.2 stops; 0% skips RCAS) is RCAS's
+    linear strength, a uniform.
+  - Resolution gains **×0.67** (FSR's "Quality" ratio) beside ×0.75 (near its "Ultra
+    Quality").
+  - Off by default: every existing setting draws as it did. The three programs (EASU to
+    the canvas and into its target, RCAS) are linked at boot in `waitForFrameShaders`;
+    switching never links one. The frame report's resolution line says `upscaled` or
+    `sharpened`.
+
 - HAUL CARS ARE TOWED ONLY, THE HAND-IN SLOT IS MARKED, AND ANY WAY ROUND IS IN
   (game-design2.md §7.8; `contracts/haulbays.ts` `footprintInBay`, `markedSlots`;
   `render/baymark.ts` `BayMark`; `contracts/world.ts` `haulCarSeal`;

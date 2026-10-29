@@ -431,10 +431,14 @@ export type ScreenLines = 540 | 720 | 1080 | 1440;
 /**
  * The Resolution row: the frame as a multiple of its BASE, which is the canvas's own
  * device pixels held to the rung's `screenLines`. 1 is the screen one for one (where the
- * rung's ceiling does not bite), below it the frame is drawn smaller and stretched by
- * the compositor, above it the frame is drawn bigger and averaged down to the screen by
- * the game (render/presentshader.ts): supersampling, which is the only antialiasing
- * here that smooths what is thinner than a pixel. Bounded at 2x the canvas's CSS size.
+ * rung's ceiling does not bite), below it the frame is drawn smaller and stretched to
+ * the screen (by the compositor, or by FSR under `Settings.upscaling`), above it the
+ * frame is drawn bigger and averaged down to the screen by the game
+ * (render/presentshader.ts): supersampling, which is the only antialiasing here that
+ * smooths what is thinner than a pixel. Bounded at 2x the canvas's CSS size.
+ *
+ * 0.67 is FSR's own "Quality" ratio (1.5x per axis), there for the upscaler; 0.75 sits
+ * next to its "Ultra Quality" (1.3x).
  *
  * WHY A MULTIPLE AND NOT LINES ANY MORE. The row used to be 540/720/1080/1440 lines, and
  * a browser window is almost never one of those: a maximised window on a 1080-line
@@ -446,8 +450,26 @@ export type ScreenLines = 540 | 720 | 1080 | 1440;
  * Not `renderScale`: that key once held a DPR multiplier, and a save that still carries
  * it must not come back as a supersample.
  */
-export const FRAME_SCALES = [0.5, 0.75, 1, 1.5, 2] as const;
+export const FRAME_SCALES = [0.5, 0.67, 0.75, 1, 1.5, 2] as const;
 export type FrameScale = (typeof FRAME_SCALES)[number];
+
+/**
+ * How a frame drawn below the screen's size reaches it (`Settings.upscaling`): `off`
+ * is the compositor's bilinear stretch, `fsr` AMD FidelityFX Super Resolution 1
+ * (render/fsr.ts): EASU's edge-adaptive upscale to the screen, then RCAS sharpening at
+ * `Settings.sharpness`. At the screen's own size `fsr` is the sharpening alone; above
+ * it (x1.5, x2) neither applies, the frame is averaged down as always.
+ */
+export const UPSCALINGS = ['off', 'fsr'] as const;
+export type Upscaling = (typeof UPSCALINGS)[number];
+
+/**
+ * RCAS strength under FSR (`Settings.sharpness`), as RCAS's own linear amount
+ * exp2(-stops): 1 the most it allows, 0 none (the pass is skipped). 0.85 is about the
+ * 0.2 stops AMD's samples default to.
+ */
+export const DEFAULT_SHARPNESS = 0.85;
+export const SHARPNESS_STEP = 0.05;
 
 /** The ceiling on a rung's frame base, for this presentation. */
 export function screenLinesFor(quality: GraphicsQuality, mobilePresentation: boolean): ScreenLines {
@@ -564,6 +586,10 @@ export interface Settings {
   retroLines: RetroLines;
   /** FXAA: edge antialiasing in the post pass, on the shaded picture (render/hazeshader.ts). */
   fxaa: boolean;
+  /** How a frame below the screen's size is brought up to it; see `UPSCALINGS`. Off unless chosen. */
+  upscaling: Upscaling;
+  /** RCAS sharpening under FSR, 0..1; see `DEFAULT_SHARPNESS`. */
+  sharpness: number;
   /** Sun shadows (`ShadowMode`); the rung's default until the player chooses. */
   shadows: ShadowMode;
   /**
@@ -705,6 +731,8 @@ export const DEFAULT_SETTINGS: Settings = {
   frameScale: 1,
   retroLines: 360,
   fxaa: true,
+  upscaling: 'off',
+  sharpness: DEFAULT_SHARPNESS,
   shadows: 'full',
   groundCover: 'off',
   // Uncapped by default on every device, phones included: a cap is the player's choice
@@ -958,6 +986,14 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
       typeof obj.fxaa === 'boolean'
         ? obj.fxaa
         : obj.graphicsQuality !== 'acceptable' && obj.graphicsQuality !== 'retro',
+    // Missing means a save from before the upscaler: the compositor's stretch it drew.
+    upscaling: (UPSCALINGS as readonly unknown[]).includes(obj.upscaling) ? (obj.upscaling as Upscaling) : 'off',
+    // Snapped to the slider's step (divided back by the steps per unit, so 0.85 stays
+    // 0.85), clamped to its range; missing means the default.
+    sharpness:
+      typeof obj.sharpness === 'number' && Number.isFinite(obj.sharpness)
+        ? Math.round(Math.min(1, Math.max(0, obj.sharpness)) / SHARPNESS_STEP) / Math.round(1 / SHARPNESS_STEP)
+        : DEFAULT_SHARPNESS,
     // Missing or unrecognised means a save from before the option: the stored rung's
     // own default, which is what that save was drawing.
     shadows:
