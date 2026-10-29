@@ -14,6 +14,7 @@ import { applyComicShading } from './comic';
 import { SandColor } from './desertdust';
 import { stickerAtlas } from './stickerart';
 import { SPOT_REACH_ALL } from './lightshader';
+import { POOL_LIGHT_FLOATS } from './lamppools';
 import type { CarDustFlow } from '../vehicle/carmodels';
 
 /** Per-instance uniforms for condition-shaded materials. */
@@ -694,6 +695,42 @@ const carSpotReach = new WeakMap<THREE.Material, { value: number }>();
 const KIT_SPOT_REACH_PARS = `uniform int uKitSpotReach;
 #define SPOT_REACH( index ) ( ( uKitSpotReach & ( 1 << ( index ) ) ) != 0 )`;
 
+/**
+ * A kit car's body and glass: the pooled lamp light on the car (render/lamppools.ts
+ * `lightOn`, `setCarPoolLight`), as `vec4[ 5 ]` in scene coordinates: lamp A, lamp B,
+ * the beam's axis, its colour (zero: none), and its cone cosine, penumbra cosine, decay
+ * and cutoff.
+ */
+const carPoolLight = new WeakMap<THREE.Material, { value: Float32Array }>();
+
+/**
+ * The pooled lamp pair lighting a kit car (`carPoolLight`), after the light loops: two
+ * lamps through the material's own `RE_Direct` (`call`), with three's spot cone and
+ * range, as a slot would light the car. A branch on uniforms: a car no pool reaches
+ * pays one test.
+ */
+const KIT_POOL_LIGHT_PARS = 'uniform vec4 uKitPoolLight[ 5 ];';
+function kitPoolLight(call: string): string {
+  return `if ( uKitPoolLight[ 3 ].x + uKitPoolLight[ 3 ].y + uKitPoolLight[ 3 ].z > 0.0 ) {
+	vec3 kitPoolAxis = normalize( mat3( viewMatrix ) * uKitPoolLight[ 2 ].xyz );
+	vec4 kitPoolShape = uKitPoolLight[ 4 ];
+	for ( int k = 0; k < 2; k ++ ) {
+		vec3 toLamp = ( viewMatrix * vec4( uKitPoolLight[ k ].xyz, 1.0 ) ).xyz - geometryPosition;
+		float d = max( length( toLamp ), 1e-4 );
+		directLight.direction = toLamp / d;
+		float spot = smoothstep( kitPoolShape.x, kitPoolShape.y, dot( -directLight.direction, kitPoolAxis ) );
+		float r = d / kitPoolShape.w;
+		r *= r;
+		float window = saturate( 1.0 - r * r );
+		directLight.color = uKitPoolLight[ 3 ].xyz * ( spot * window * window / max( pow( d, kitPoolShape.z ), 0.01 ) );
+		directLight.visible = spot > 0.0;
+		if ( directLight.visible ) {
+		${call}
+		}
+	}
+}`;
+}
+
 /** One role of a kit car's lens uniforms, shaped as the lens material it stands in for. */
 class KitLensGlow implements LensGlow {
   constructor(
@@ -711,7 +748,7 @@ class KitLensGlow implements LensGlow {
   }
 }
 
-const KIT_BODY_PROGRAM_KEY = `${CAR_BODY_PROGRAM_KEY}-kit-v3`;
+const KIT_BODY_PROGRAM_KEY = `${CAR_BODY_PROGRAM_KEY}-kit-v4`;
 
 const KIT_BODY_VERTEX_PARS = `${CAR_BODY_VERTEX_PARS}
 attribute vec4 ${CAR_SURFACE_ATTRIBUTE};
@@ -751,7 +788,8 @@ uniform float uKitLensGrime;
 varying vec4 vKitSurface;
 varying vec2 vKitRole;
 varying vec3 vKitGlow;
-${KIT_SPOT_REACH_PARS}`;
+${KIT_SPOT_REACH_PARS}
+${KIT_POOL_LIGHT_PARS}`;
 
 /** The paint share replaces the palette test: a kit car has no map. */
 const KIT_BODY_MAP = `float carPaintPanel = 1.0;
@@ -832,7 +870,8 @@ const KIT_SPOT_CALL = `if ( kitMatt ) RE_Direct_KitMatt( directLight, geometryPo
  * Shadows only where the part receives them (carmodel.ts `prepareMaterials`: the kit's
  * detail parts and exhaust do, the bodywork and lenses do not). `receiveShadow` is a
  * uniform in three, not a program variant, so the mesh receives and this narrows it.
- * The spot loop's light call becomes `KIT_SPOT_CALL` (`KIT_MATT_LIGHT`).
+ * The spot loop's light call becomes `KIT_SPOT_CALL` (`KIT_MATT_LIGHT`), and so is the
+ * pooled lamp pair's after the loops (`kitPoolLight`).
  * Read at compile time: render/lightshader.ts patches the chunk once at start-up.
  */
 function kitLightsBegin(): string {
@@ -846,7 +885,8 @@ function kitLightsBegin(): string {
   const lit = gated.slice(0, spotCall) + KIT_SPOT_CALL + gated.slice(spotCall + KIT_DIRECT_CALL.length);
   return `bool kitReceiveShadow = receiveShadow && vKitSurface.w > 0.5;
 bool kitMatt = vKitSurface.w > 0.5 && vKitSurface.x < 0.01 && vKitSurface.z < 0.01 && vKitSurface.y > ${KIT_MATT_ROUGHNESS.toFixed(2)} && vKitRole.x < 0.5;
-${lit}`;
+${lit}
+${kitPoolLight(KIT_SPOT_CALL)}`;
 }
 
 function patchKitBodyShader(
@@ -854,6 +894,7 @@ function patchKitBodyShader(
   uniforms: CarBodyUniforms,
   kit: KitBodyUniforms,
   spotReach: { value: number },
+  poolLight: { value: Float32Array },
 ): void {
   shader.uniforms.uDirt = uniforms.dirt;
   shader.uniforms.uScratch = uniforms.scratches;
@@ -873,6 +914,7 @@ function patchKitBodyShader(
   shader.uniforms.uKitLensGrime = kit.lensGrime;
   shader.uniforms.uKitTrim = kit.trim;
   shader.uniforms.uKitSpotReach = spotReach;
+  shader.uniforms.uKitPoolLight = poolLight;
   if (!shader.fragmentShader.includes('#include <lights_physical_pars_fragment>')) {
     throw new Error('Three physical fragment layout changed');
   }
@@ -1396,7 +1438,9 @@ export function makeCarBodyConditionMaterial(
     kitBodyUniforms.set(material, lamps);
     const spotReach = { value: SPOT_REACH_ALL };
     carSpotReach.set(material, spotReach);
-    material.onBeforeCompile = (shader) => patchKitBodyShader(shader, uniforms, lamps, spotReach);
+    const poolLight = { value: new Float32Array(POOL_LIGHT_FLOATS) };
+    carPoolLight.set(material, poolLight);
+    material.onBeforeCompile = (shader) => patchKitBodyShader(shader, uniforms, lamps, spotReach, poolLight);
     material.customProgramCacheKey = () => KIT_BODY_PROGRAM_KEY;
     return material;
   }
@@ -1773,9 +1817,12 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
   const glass = standard && frame !== null;
   const drops = glass && panes ? ([new THREE.Vector4(), new THREE.Vector4()] as const) : null;
   if (drops) kitPaneDrops.set(material, drops);
-  // A kit car's glass is the car's too, so it takes the body's spot reach (`setCarSpotReach`).
+  // A kit car's glass is the car's too, so it takes the body's spot reach (`setCarSpotReach`)
+  // and pooled lamp light (`setCarPoolLight`).
   const spotReach = drops ? { value: SPOT_REACH_ALL } : null;
   if (spotReach) carSpotReach.set(material, spotReach);
+  const poolLight = drops ? { value: new Float32Array(POOL_LIGHT_FLOATS) } : null;
+  if (poolLight) carPoolLight.set(material, poolLight);
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGrime = grime;
     shader.uniforms.uGrimeSkyScale = {
@@ -1792,7 +1839,7 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
         .replace('#include <common>', drops ? GLASS_GRIME_VERTEX_PARS + KIT_PANE_VERTEX_PARS : GLASS_GRIME_VERTEX_PARS)
         .replace('#include <worldpos_vertex>', drops ? GLASS_GRIME_VERTEX_HOOK + KIT_PANE_VERTEX : GLASS_GRIME_VERTEX_HOOK);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;\n${KIT_SPOT_REACH_PARS}` : GLASS_GRIME_FRAGMENT_PARS)
+        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;\n${KIT_SPOT_REACH_PARS}\n${KIT_POOL_LIGHT_PARS}` : GLASS_GRIME_FRAGMENT_PARS)
         .replace('#include <color_fragment>', GLASS_GRIME_DECLARE)
         .replace('#include <normal_fragment_maps>', GLASS_GRIME_BODY)
         .replace('#include <lights_fragment_maps>', GRIME_SKY);
@@ -1800,7 +1847,10 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
         shader.uniforms.uKitPaneDropA = { value: drops[0] };
         shader.uniforms.uKitPaneDropB = { value: drops[1] };
         shader.uniforms.uKitSpotReach = spotReach!;
-        shader.fragmentShader = shader.fragmentShader.replace('#include <clipping_planes_fragment>', KIT_PANE_CLIP);
+        shader.uniforms.uKitPoolLight = poolLight!;
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <clipping_planes_fragment>', KIT_PANE_CLIP)
+          .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${kitPoolLight(KIT_DIRECT_CALL)}`);
       }
       return;
     }
@@ -1817,7 +1867,7 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
     shader.fragmentShader = fragment;
   };
   material.customProgramCacheKey = () =>
-    glass ? (drops ? `${CAR_GLASS_GRIME_PROGRAM_KEY}-panes-v2` : CAR_GLASS_GRIME_PROGRAM_KEY) : CAR_GRIME_PROGRAM_KEY;
+    glass ? (drops ? `${CAR_GLASS_GRIME_PROGRAM_KEY}-panes-v3` : CAR_GLASS_GRIME_PROGRAM_KEY) : CAR_GRIME_PROGRAM_KEY;
   return material;
 }
 
@@ -1837,6 +1887,20 @@ export function setCarSpotReach(materials: readonly THREE.Material[], mask: numb
   for (const material of materials) {
     const uniform = carSpotReach.get(material);
     if (uniform) uniform.value = mask;
+  }
+}
+
+/**
+ * The pooled lamp light on this car (render/lamppools.ts `lightOn`, `POOL_LIGHT_FLOATS`
+ * in scene coordinates), written into a kit car's body and glass; null for none. Any
+ * other material is left alone. A uniform write, on the one program every kit car shares.
+ */
+export function setCarPoolLight(materials: readonly THREE.Material[], light: Float32Array | null): void {
+  for (const material of materials) {
+    const uniform = carPoolLight.get(material);
+    if (!uniform) continue;
+    if (light) uniform.value.set(light);
+    else uniform.value.fill(0);
   }
 }
 

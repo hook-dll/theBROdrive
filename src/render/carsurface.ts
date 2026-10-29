@@ -15,6 +15,7 @@ import {
   setCarBodyHighlight,
   setCarBodyPaintColor,
   setCarGrime,
+  setCarPoolLight,
   setCarSpotReach,
 } from './materials';
 import { SPOT_REACH_ALL } from './lightshader';
@@ -33,6 +34,8 @@ export class CarBodySurface {
   private appliedHighlight = 0;
   private appliedSpotReach = SPOT_REACH_ALL;
   private appliedScratches = -1;
+  /** Whether the last `setPoolLight` lit the car, so a dark car writes nothing. */
+  private poolLit = false;
 
   constructor(
     /** This car's own paint materials, captured when it was instanced. */
@@ -84,6 +87,17 @@ export class CarBodySurface {
     this.appliedSpotReach = mask;
     setCarSpotReach(this.paint, mask);
     setCarSpotReach(this.glass, mask);
+  }
+
+  /**
+   * The pooled lamp light on this car (render/lamppools.ts `lightOn`), for a kit car's
+   * body and glass; null for none, which is free when it was none already.
+   */
+  setPoolLight(light: Float32Array | null): void {
+    if (light === null && !this.poolLit) return;
+    this.poolLit = light !== null;
+    setCarPoolLight(this.paint, light);
+    setCarPoolLight(this.glass, light);
   }
 
   /** Frees this car's own paint, glass and decal materials and its bone textures. */

@@ -188,6 +188,40 @@
 
 ### Changed
 
+- LAMP POOLS LIGHT LIKE THE LAMP THEY STAND FOR, CARS IN ANY BEAM CAST SHADOWS, AND A
+  POOLED BEAM LIGHTS THE CARS IT REACHES (`render/lamppools.ts`, new
+  `render/lampoccluders.ts`, `vehicle/vehiclelamps.ts` `syncLampShade`,
+  `render/materials.ts` `setCarPoolLight`).
+  - Brightness. A headlamp pool now covers the whole cone out to 85% of the beam's
+    cutoff (8 x 5 grid, was 6 x 3 to 75 m with its sides faded from 70%), takes the
+    ground's own shading term by term (Lambert on the ground's normal at each grid
+    vertex, the backscatter of `render/groundlight.ts`, the shoulder's stone and the
+    verge's fall, a spread of normals for the relief a grazing beam catches), and the
+    asphalt and sand reflectances were refitted by reading the scene target, same lamp as
+    slot and as pool at one pose, 266 points from 8 to 200 m. Slot/pool light, sum per
+    band, before -> after: asphalt <30 m 1.44 -> 0.96, 30-60 m 1.60 -> 1.01, 60-120 m
+    pool dark -> 0.95, >120 m pool dark -> 1.08; sand <30 m 1.69 -> 1.10, 30-60 m 1.75
+    -> 0.97, 60-120 m pool dark -> 0.95, >120 m pool dark -> 1.28; the verge 0.5-0.8 near
+    (was 0.5-0.7) and still darker than a slot past 60 m.
+  - Shadows. The eight cars nearest the eye are oriented boxes (their chassis box); a
+    pool's light is cut by the boxes its cone reaches, with a penumbra that widens away
+    from the car. A lamp that holds a spotlight slot lays a SHADE pool: the same light
+    with its colour negated, only in the wedge behind the boxes in its beam, where they
+    stop it. Only the driven car's one shadowed headlamp still has a shadow map.
+  - Light on cars. Each car's kit body and glass take the pooled beam that puts the most
+    light on it (the others' share folded in, up to x3) as one more lamp pair evaluated
+    per pixel with the spot cone and range, like a slot (`lightOn`). Posts and walls are
+    still lit by slots only.
+  - Cost, blessing 2560x1440, M2 Pro, frozen frame, 4 lit cars round the player: all
+    pools 0.7-1.0 ms chase, 0.8 ms cabin; light on cars 0.04 ms chase, 0.66 ms cabin (the
+    car behind lights the cabin); shade pools with every beam a slot 0.45 ms chase, 0.8 ms
+    cabin. The box test first sat in the ground's spot loop: 0.75 ms with no box in any
+    beam and 3.5 ms with ten slots, so it moved to the pools. A `flat` varying on the
+    pool shader cost 18 ms from the cabin on ANGLE/Metal and is gone.
+  - Programs: the lamp-pool program changes, the kit body (`-kit-v4`) and kit glass
+    (`-panes-v3`) keys move on; no program is added and none links mid-drive (three night
+    drives, seeds 3869760056, 2320391776, 1017765800: 92 programs throughout).
+
 - A LAY-BY ON WIDENED ROAD JOINS THE ASPHALT AGAIN (`world/roadsurface.ts`
   `WIDE_SECTION_LATERALS`). The ribbon's open-road cross-section still ended in 5.8 m
   literals after lanes went to 3.2 m, so wherever the road was wider than two lanes (a

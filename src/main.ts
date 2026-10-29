@@ -99,7 +99,10 @@ const HELD_SLOT_SCORE_BONUS = 1.5;
 const MIN_SLOT_VIEW_SCORE = 0.02;
 /** The player's car as a lit target for that ranking: a sphere round the cabin, metres. */
 const PLAYER_CAR_LIT_RADIUS_M = 2.4;
+/** Cars past this from the eye (squared, m2) take no pooled lamp light on their bodies. */
+const POOL_LIT_CAR_RANGE_SQ = 200 * 200;
 import { LampPoolField, LampView } from './render/lamppools';
+import { LampOccluders } from './render/lampoccluders';
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
 import { DesertTileStreamer } from './world/deserttiles';
@@ -423,7 +426,9 @@ async function boot(): Promise<void> {
   // never reassigned in one frame (render/slotpool.ts).
   const beamPool = new FadingSlotPool(vehicleLights.lightCount, LAMP_HANDOVER_S);
   // Every lit lamp without a slot lays its light on the ground as a pool instead, in one
-  // draw (render/lamppools.ts); `lampView` ranks the headlamps for the slots.
+  // draw (render/lamppools.ts); `lampView` ranks the headlamps for the slots. The cars
+  // nearest the eye stand in the light of both tiers as boxes (render/lampoccluders.ts).
+  const lampOccluders = new LampOccluders();
   const lampPools = new LampPoolField(
     renderer.scene,
     origin,
@@ -439,6 +444,7 @@ async function boot(): Promise<void> {
       heightAt: (x, z, s) => terrain.heightAt(x, z, s),
     },
     vehicleLights.headlightDistanceScale,
+    lampOccluders,
   );
   const lampView = new LampView();
   // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
@@ -2957,6 +2963,11 @@ async function boot(): Promise<void> {
       const share = beamPool.share(driving, DOME_BEAM_GROUP);
       if (share > 0) driving.syncDomeLight(vehicleLights, share);
     }
+    // The cars nearest the eye, as the boxes both tiers' light is cut by.
+    lampOccluders.begin(cam);
+    for (const vehicle of vehicles.values()) vehicle.offerLampOccluder(lampOccluders);
+    traffic.forEachVehicle((_, vehicle) => vehicle.offerLampOccluder(lampOccluders));
+    lampOccluders.end();
     lampPools.beginFrame(activeS);
     // The walk starts at a different car each frame, so the pools' terrain samples
     // (render/lamppools.ts `takeSamples`) go round every car instead of the first few.
@@ -2972,16 +2983,30 @@ async function boot(): Promise<void> {
           if (!shadowedHeadlamps && share > 0) {
             vehicle.syncProjectedLights(vehicleLights, 'front', share, false);
           }
+          // The cars in their light cast its shadows (render/lamppools.ts, shade pools);
+          // the shadowed beam's own map casts its lamp's.
+          if (share > 0) vehicle.syncLampShade(lampPools, share, shadowedHeadlamps);
           continue;
         }
         if (share > 0) {
           vehicle.syncProjectedLights(vehicleLights, BEAM_GROUPS[g], litGains[i] * share, false);
+          // A slot casts no shadow of its own: its headlamps' shade pool cuts the cars in
+          // its beam out of the ground it lights.
+          if (g === 0) vehicle.syncLampShade(lampPools, litGains[i] * share, false);
         }
         if (share < 1) vehicle.syncLampPool(lampPools, BEAM_GROUPS[g], litGains[i] * (1 - share));
       }
     }
     lampPools.endFrame();
     vehicleLights.endFrame();
+    // Every car near enough to see takes the pooled light that reaches it on its body
+    // and glass (render/lamppools.ts `lightOn`): a slot lights a car, so must a pool.
+    for (const vehicle of vehicles.values()) {
+      vehicle.syncPoolLight(vehicle.root.position.distanceToSquared(cam) < POOL_LIT_CAR_RANGE_SQ ? lampPools : null);
+    }
+    traffic.forEachVehicle((_, vehicle) => {
+      vehicle.syncPoolLight(vehicle.root.position.distanceToSquared(cam) < POOL_LIT_CAR_RANGE_SQ ? lampPools : null);
+    });
     // The car the player sits in fills the screen from the cabin, and every spot slot
     // that lights nothing of it is a whole light per pixel of it (render/lightshader.ts
     // `SPOT_REACH`): its body and glass skip the beams that cannot reach it. A car left
