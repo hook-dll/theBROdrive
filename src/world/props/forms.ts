@@ -909,7 +909,7 @@ export interface BreakableProp {
   /** Height (m) of the standing prop, for the impact test. */
   readonly height: number;
   /** The instance to blank, and the collider to switch off, when it goes. */
-  readonly mesh: THREE.InstancedMesh;
+  readonly mesh: THREE.InstancedMesh | THREE.BatchedMesh;
   readonly instance: number;
   readonly collider: RAPIER.Collider;
 }

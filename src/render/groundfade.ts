@@ -104,6 +104,9 @@ export function applyGroundFade<T extends THREE.MeshStandardMaterial>(material: 
 		#ifdef USE_INSTANCING
 		groundFadeWorld = instanceMatrix * groundFadeWorld;
 		#endif
+		#ifdef USE_BATCHING
+		groundFadeWorld = batchingMatrix * groundFadeWorld;
+		#endif
 		vGroundFadeLocal = groundFadeWorld.xyz;
 		vGroundFadeXZ = ( modelMatrix * groundFadeWorld ).xz;
 	}`,

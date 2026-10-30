@@ -3,6 +3,7 @@ import { hash01 } from '../../core/rng';
 import type { Impactor } from '../debris';
 import type { WorldOrigin } from '../origin';
 import type { WheelSpray } from '../../render/wheelspray';
+import { hideInstance } from './instancebatch';
 
 /**
  * Ground cover the car bursts through: tufts, shrubs and rosettes go up in a puff of
@@ -28,7 +29,6 @@ const GRID_CELL = 6;
 /** Height band, relative to a prop's ground, the car's centre must be inside to hit it. */
 const HIT_BELOW = -1;
 const HIT_ABOVE = 2.6;
-const ZERO_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /** One prop, as the scatter hands it over. Positions are absolute world metres. */
 export interface GroundCoverSpot {
@@ -38,10 +38,10 @@ export interface GroundCoverSpot {
   readonly z: number;
   /** Hit radius, metres: the visible footprint, not the form's bounding sphere. */
   readonly radius: number;
-  readonly mesh: THREE.InstancedMesh;
+  readonly mesh: THREE.InstancedMesh | THREE.BatchedMesh;
   readonly instance: number;
   /** Its contact shadow, when it has one. */
-  readonly shadow: THREE.InstancedMesh | null;
+  readonly shadow: THREE.InstancedMesh | THREE.BatchedMesh | null;
   readonly shadowInstance: number;
 }
 
@@ -149,12 +149,8 @@ export class GroundCoverField {
             if (!this.touches(s, car)) continue;
             h.burst[i] = 1;
             this.broken.add(s.id);
-            s.mesh.setMatrixAt(s.instance, ZERO_MATRIX);
-            s.mesh.instanceMatrix.needsUpdate = true;
-            if (s.shadow) {
-              s.shadow.setMatrixAt(s.shadowInstance, ZERO_MATRIX);
-              s.shadow.instanceMatrix.needsUpdate = true;
-            }
+            hideInstance(s.mesh, s.instance);
+            if (s.shadow) hideInstance(s.shadow, s.shadowInstance);
             this.spray.emitBurst(
               s.x - this.origin.x,
               s.groundY + 0.05,

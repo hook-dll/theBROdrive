@@ -32,7 +32,7 @@ import {
   type PropForm,
 } from './forms';
 import { allocateContactShadows, type ContactShadowSpot } from './contactshadow';
-import type { BatchSlot } from './instancebatch';
+import { batchedProgramAnchor, type BatchSlot } from './instancebatch';
 import {
   groundCoverDensity,
   type GroundCoverField,
@@ -203,7 +203,7 @@ interface ScatterPlacement {
   scale: number;
   radius: number;
   /** Filled in by the instancing pass, so a break can blank the right instance. */
-  mesh: THREE.InstancedMesh | null;
+  mesh: THREE.InstancedMesh | THREE.BatchedMesh | null;
   instance: number;
   /** The ground under the prop (its origin is sunk below it). */
   groundY: number;
@@ -278,6 +278,23 @@ export function addStatic(
   bodies.push(body);
   colliders.push(collider);
   return collider;
+}
+
+/**
+ * The scatter's standing forms draw as instances of the props' multi-draw batches
+ * (props/instancebatch.ts), a program of their own and its depth program: this holds
+ * them from boot, with the shadow flags the forms are allocated with (they cast and
+ * receive; the ground cover, in pages, neither).
+ */
+export function scatterProgramAnchor(): THREE.Object3D {
+  const kinds = [...sandForms(), ...rockForms()].map((form) => ({
+    geometry: form.geometry,
+    material: form.material,
+    lod: form.lod,
+    castShadow: true,
+    receiveShadow: true,
+  }));
+  return batchedProgramAnchor('scatter-batch-anchor', kinds);
 }
 
 export class ScatterProvider implements ChunkProvider {
@@ -545,8 +562,8 @@ export class ScatterProvider implements ChunkProvider {
       }
     }
 
-    // One InstancedMesh per form per chunk. The form geometry/material is shared
-    // across chunks; only the instance buffers are per-chunk.
+    // Every form's instances go into the shared batches (props/instancebatch.ts): the
+    // standing forms into the band's multi-draw batch, the ground cover into pages.
     const byForm = new Map<PropForm, ScatterPlacement[]>();
     for (const pl of placements.concat(cover)) {
       let list = byForm.get(pl.form);
@@ -568,7 +585,7 @@ export class ScatterProvider implements ChunkProvider {
         _dummy.rotation.set(pl.rx, pl.ry, pl.rz);
         _dummy.scale.setScalar(pl.scale);
         _dummy.updateMatrix();
-        // Shared with other chunks of the band; culling is by slot, see instancebatch.ts.
+        // Shared with other chunks of the band; culling is by instance or page, see instancebatch.ts.
         const slot = ctx.batches.allocate(ctx, kind, _dummy.matrix);
         pl.mesh = slot.mesh;
         pl.instance = slot.instance;

@@ -268,6 +268,24 @@
   crosshair and the seat prompt use the last result between refreshes. The on-foot aim
   is unchanged.
 
+- SCATTER AND POLE BODIES IN ONE MULTI-DRAW PER MATERIAL, CULLED PER INSTANCE
+  (`world/props/instancebatch.ts`, `scatter.ts`, `poles.ts`, `debris.ts`,
+  `groundcover.ts`, `render/groundfade.ts`). The roadside forms and the pole bodies
+  were pages of one `InstancedMesh` per geometry, material and band of four chunks
+  (800 m): a page whose sphere touched the view drew every instance of its band, behind
+  the camera or 600 m off, in the frame, the sun's cascades and each of the three live
+  mirrors. Every opaque, single-material kind without a `lod` is now an instance of one
+  three `BatchedMesh` per material, shadow flags, vertex layout and band of sixteen
+  chunks: one multi-draw per pass, each instance frustum-culled on its own in every pass.
+  Programs are linked at boot (`batchedProgramAnchor`, `scatterProgramAnchor`, the pole
+  anchor); a broken prop leaves the draw (`hideInstance`); a rebase moves only the batch.
+  Contact shadows, delineators and `lod` kinds stay in pages. Measured in the cabin
+  (seed `flick`, km 21, Blessing, traffic High, mirrors every frame): the props went
+  32 → 5 draws and 144k → 102k triangles in the main pass and 25 → 5 draws and
+  158k → 50k triangles in each mirror; poles 22 → 14 and 10 → 6 draws. A whole mirror
+  pass went 68 → 45 draws and 371k → 210k triangles, the main pass 155 → 118. Same
+  props, same places (fixed-camera shots at km 40); a 3-minute autopilot drive paced the
+  same as before with no program linked mid-drive.
 
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts

@@ -189,10 +189,22 @@ if (!target) {
   check('zero-speed contact disables pile', !prop.collider.isEnabled(), 'disabled');
   check('recorded in state', world.state.flattenedProps.includes(prop.id), `id ${prop.id}`);
 
-  const matrix = new THREE.Matrix4();
-  prop.mesh.getMatrixAt(prop.instance, matrix);
-  const scale = new THREE.Vector3().setFromMatrixScale(matrix);
-  check('instance blanked', scale.length() < 1e-6, `scale ${scale.length().toFixed(3)}`);
+  // A batched prop leaves the multi-draw; a page's slot is zeroed (props/instancebatch.ts `hideInstance`).
+  if (prop.mesh instanceof THREE.BatchedMesh) {
+    // `getVisibleAt` throws for an instance its chunk has already released.
+    let hidden: boolean | string;
+    try {
+      hidden = !prop.mesh.getVisibleAt(prop.instance);
+    } catch {
+      hidden = 'released';
+    }
+    check('instance hidden', hidden === true, hidden === 'released' ? 'instance released' : `visible ${!hidden}`);
+  } else {
+    const matrix = new THREE.Matrix4();
+    prop.mesh.getMatrixAt(prop.instance, matrix);
+    const scale = new THREE.Vector3().setFromMatrixScale(matrix);
+    check('instance blanked', scale.length() < 1e-6, `scale ${scale.length().toFixed(3)}`);
+  }
 
   const spawned = physics.world.bodies.len() - bodiesBefore;
   check('three pile pieces spawned', spawned === 3, `${spawned} bodies`);

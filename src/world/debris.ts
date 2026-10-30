@@ -6,6 +6,7 @@ import type { GameWorld } from '../game/state';
 import type { WorldOrigin } from './origin';
 import type { BreakableProp, PropPiece } from './props/forms';
 import { breakablePieceDefs } from './props/forms';
+import { hideInstance } from './props/instancebatch';
 import {
   createMedicineRemnantMesh,
   disposeItemMeshResources,
@@ -124,9 +125,6 @@ interface Piece {
   age: number;
   sleepingSeconds: number;
 }
-
-/** Zero-scale matrix: what a blanked instance gets. Written once, reused forever. */
-const BLANK_MATRIX = new THREE.Matrix4().makeScale(0, 0, 0);
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _yaw = new THREE.Quaternion();
@@ -495,8 +493,7 @@ export class DebrisField {
     // DISABLED rather than removed, because the chunk that created the collider still
     // owns its body and will tear it down on unload — removing it here would leave the
     // streamer holding a dead handle.
-    prop.mesh.setMatrixAt(prop.instance, BLANK_MATRIX);
-    prop.mesh.instanceMatrix.needsUpdate = true;
+    hideInstance(prop.mesh, prop.instance);
     prop.collider.setEnabled(false);
 
     _yaw.setFromAxisAngle(_up, prop.yaw);

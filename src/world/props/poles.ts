@@ -36,6 +36,7 @@ import type { ChunkContext, ChunkContent, ChunkProvider } from '../chunks';
 import { deformIcosahedron, paintAsMaterial } from './forms';
 import { makePoleMaterial, plainPoleMaterial, POLE_GEAR_Y, poleDesign, poleDesignSpacing, poleDesignsOfEra, poleMaterial, type PoleDesign } from './poledesigns';
 import { addStatic, leanRotation } from './scatter';
+import { batchedProgramAnchor, type BatchKind, type BatchSlot } from './instancebatch';
 
 // ---------------------------------------------------------------------------
 // Scratch objects reused across the per-chunk build loops (never per-frame).
@@ -45,6 +46,17 @@ const _q2 = new THREE.Quaternion();
 const _poleQuat = new THREE.Quaternion();
 const _poleAt = new THREE.Vector3();
 const _unitScale = new THREE.Vector3(1, 1, 1);
+const _poleMatrix = new THREE.Matrix4();
+/** Each design geometry's kind: instances of the props' multi-draw batch, casting and receiving. */
+const poleBodyKinds = new WeakMap<THREE.BufferGeometry, BatchKind>();
+function poleBodyKind(geometry: THREE.BufferGeometry): BatchKind {
+  let kind = poleBodyKinds.get(geometry);
+  if (!kind) {
+    kind = { geometry, material: poleMaterial(), castShadow: true, receiveShadow: true };
+    poleBodyKinds.set(geometry, kind);
+  }
+  return kind;
+}
 const _axis = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -944,8 +956,9 @@ export class PoleProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const poses: { pose: PolePose; section: PoleSection }[] = [];
-    // Pole bodies by design geometry, drawn as one InstancedMesh each below.
-    const bodyMatrices = new Map<THREE.BufferGeometry, THREE.Matrix4[]>();
+    // Pole bodies: instances of the props' multi-draw batch, culled one by one
+    // (props/instancebatch.ts).
+    const bodySlots: BatchSlot[] = [];
 
     const seed = ctx.world.seed;
     const ox = ctx.originX;
@@ -959,10 +972,8 @@ export class PoleProvider implements ChunkProvider {
       poleQuaternion(pose.twist, pose.leanAngle, pose.leanAz, _poleQuat);
       _poleAt.set(pose.baseX - ox, pose.baseY, pose.baseZ - oz);
       const body = pose.fitted ? pose.design.full : pose.design.mast;
-      const matrix = new THREE.Matrix4().compose(_poleAt, _poleQuat, _unitScale);
-      const list = bodyMatrices.get(body);
-      if (list) list.push(matrix);
-      else bodyMatrices.set(body, [matrix]);
+      _poleMatrix.compose(_poleAt, _poleQuat, _unitScale);
+      bodySlots.push(ctx.batches.allocate(ctx, poleBodyKind(body), _poleMatrix));
 
       const poleGroup = new THREE.Group();
       poleGroup.position.copy(_poleAt);
@@ -978,20 +989,6 @@ export class PoleProvider implements ChunkProvider {
         addLegColliders(ctx, bodies, colliders, pose.design, pose.baseX, pose.baseY, pose.baseZ, pose.twist, pose.leanAngle, pose.leanAz);
       }
     });
-
-    // One InstancedMesh per design geometry: a chunk of poles is one draw per design.
-    const bodyMeshes: THREE.InstancedMesh[] = [];
-    for (const [geometry, matrices] of bodyMatrices) {
-      const mesh = new THREE.InstancedMesh(geometry, poleMaterial(), matrices.length);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      matrices.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
-      mesh.instanceMatrix.needsUpdate = true;
-      // Culled on its instances' bounds: the design's own sphere sits at the pole root.
-      mesh.computeBoundingSphere();
-      group.add(mesh);
-      bodyMeshes.push(mesh);
-    }
 
     // Wires. The span may land in the next chunk, so its far end is recomputed from
     // the same pure function rather than read from a neighbour's content — otherwise
@@ -1062,40 +1059,39 @@ export class PoleProvider implements ChunkProvider {
       colliders,
       dispose: () => {
         wireGeometry?.dispose();
-        for (const mesh of bodyMeshes) mesh.dispose();
+        for (const slot of bodySlots) ctx.batches.release(slot);
       },
     };
   }
 }
 
 /**
- * Compiles the pole programs at boot. A chunk's pole bodies are InstancedMeshes, a
- * different program from a plain Mesh, and linking it on first draw would hitch on
- * Windows. A pole with an anomaly is a plain Mesh, and so is what hangs on it (tarp and
- * rope, nest, transformer can or loudspeaker, `poleFitting`), on the same plain material:
- * the `plain` anchor holds that program (before, the fittings had materials of their
- * own, and the first nest in view linked one mid-drive: 17 ms on the Mac, seed `flick`).
- * The wires are plain Meshes too, on `wireMaterials` (transparent, their own patches:
- * two programs of their own), and exist only once a chunk with a span streams in, so the
- * `wire` anchors are a real wire from `WireBuilder`, attribute for attribute.
- * The anchors are never drawn: their group stays invisible. Each copies the shadow flags
- * of the mesh it stands for.
+ * Compiles the pole programs at boot. A chunk's pole bodies are instances of the props'
+ * multi-draw batch (props/instancebatch.ts), a different program from a plain Mesh, and
+ * linking it on first draw would hitch on Windows: the `bodies` anchor is that batch,
+ * over a real design's geometry. A pole with an anomaly is a plain Mesh, and so is what
+ * hangs on it (tarp and rope, nest, transformer can or loudspeaker, `poleFitting`), on
+ * the same plain material: the `plain` anchor holds that program (before, the fittings
+ * had materials of their own, and the first nest in view linked one mid-drive: 17 ms on
+ * the Mac, seed `flick`). The wires are plain Meshes too, on `wireMaterials`
+ * (transparent, their own patches: two programs of their own), and exist only once a
+ * chunk with a span streams in, so the `wire` anchors are a real wire from
+ * `WireBuilder`, attribute for attribute. The anchors are never drawn: their group stays
+ * invisible. Each copies the shadow flags of the mesh it stands for.
  */
 export function poleProgramAnchor(): THREE.Object3D {
   const group = new THREE.Group();
   group.name = 'pole-anchor';
   group.visible = false;
+  const bodies = batchedProgramAnchor('pole-batch-anchor', [poleBodyKind(poleDesign(0).mast)]);
   const geometry = new THREE.BoxGeometry(0.01, 0.01, 0.01);
   const count = geometry.getAttribute('position').count;
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
-  const anchor = new THREE.InstancedMesh(geometry, poleMaterial(), 1);
-  anchor.castShadow = true;
-  anchor.receiveShadow = true;
   const plain = new THREE.Mesh(geometry, plainPoleMaterial());
   plain.castShadow = true;
   plain.receiveShadow = true;
   const wires = new WireBuilder();
   wires.tube([[0, 0, 0], [0, 0, 0.01]], 0.001, 0xffffff);
-  group.add(anchor, plain, ...wireMeshes(wires.geometry()));
+  group.add(bodies, plain, ...wireMeshes(wires.geometry()));
   return group;
 }

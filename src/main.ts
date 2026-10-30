@@ -139,7 +139,7 @@ import { DelineatorProvider } from './world/props/delineators';
 import { MonumentProvider, monumentProgramAnchor } from './world/props/monuments';
 import { PoleProvider, poleProgramAnchor } from './world/props/poles';
 import { delineatorProgramAnchor } from './world/props/delineators';
-import { ScatterProvider } from './world/props/scatter';
+import { ScatterProvider, scatterProgramAnchor } from './world/props/scatter';
 import { SidetrackProvider, sidetrackProgramAnchor } from './world/sidetrack';
 import { RaceTrackProvider, RaceTrackSiteProvider, raceTrackProgramAnchor } from './world/racetrack/mesh';
 import { updateWeather, weather, weatherBeginS } from './world/weather';
@@ -590,6 +590,7 @@ async function boot(): Promise<void> {
     raceTrackProgramAnchor(),
     poleProgramAnchor(),
     delineatorProgramAnchor(),
+    scatterProgramAnchor(),
     itemProgramAnchor(),
     mirrorProgramAnchor(),
     marketProgramAnchor(),
