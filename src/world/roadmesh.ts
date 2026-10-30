@@ -1010,8 +1010,8 @@ export class RoadMeshProvider implements ChunkProvider {
     const indices = new Uint32Array((rowCount - 1) * (latCount - 1) * 6);
 
     const group = new THREE.Group();
-    // The mirror draws `render/farroad.ts` instead: one low-poly ribbon for the whole
-    // view. This group (surface, bed, skirt) is hidden for the mirror pass.
+    // The mirror draws `render/farworld.ts` instead: the real surface, merged with the
+    // terrain. This group (surface, bed, skirt) is hidden for the mirror pass.
     group.userData.mirrorSkip = true;
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
@@ -1211,8 +1211,8 @@ export class RoadMeshProvider implements ChunkProvider {
 
       const roadMesh = new THREE.Mesh(geometry, roadMaterial);
       // The mirror merges this exact surface (material and every look attribute) into
-      // one far mesh (render/farroad.ts); the chunk group is hidden in that pass.
-      roadMesh.userData.farRoadSurface = true;
+      // one far mesh (render/farworld.ts); the chunk group is hidden in that pass.
+      roadMesh.userData.farWorldSurface = true;
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;

@@ -260,16 +260,21 @@
 
 ### Changed
 
-- MIRROR WORLD, FIRST SLICE: THE FAR ROAD (`render/farroad.ts`,
-  `render/carmirrors.ts`, `world/roadmesh.ts`, `main.ts`). The road chunks are tagged
-  `mirrorSkip` and hidden for the mirror pass. In their place the mirror draws the real
-  road surface: every chunk's surface mesh is merged, with its world matrix, into one
-  mesh carrying the same `roadMaterial` and every attribute it reads (`color`, `uv`,
-  `aRoadCourse`, `aRoadEdge`), so surface type, texture, paint and wear are the ones the
-  player sees. One draw, on `FAR_WORLD_LAYER`; the mirror's camera enables that layer and
-  the main camera never does. Rebuilt only when the streamed surface set or the floating
-  origin changes. The road casts no shadow, so replacing it cannot leave a shadow without
-  its object. Terrain and props are the next slices.
+- MIRROR WORLD: THE FAR GROUND AND ROAD (`render/farworld.ts`,
+  `render/carmirrors.ts`, `world/roadmesh.ts`, `world/terrainmesh.ts`, `main.ts`). The
+  ground and road are the world a mirror is read by, so this does not invent them. The
+  road's surface and every terrain chunk are tagged `farWorldSurface`; their chunk groups
+  are tagged `mirrorSkip` and hidden for the mirror pass. `FarWorld` merges the real
+  meshes, with their world matrices, per material into one mesh each, carrying the very
+  same materials and every attribute they read: road surface type, texture, paint and
+  wear; the desert's colours and slopes. A few draws, on `FAR_WORLD_LAYER`; the mirror's
+  camera enables that layer and the main camera never does. Rebuilt only when the
+  streamed set or the floating origin changes. Only non-casting surfaces move: the road
+  and terrain cast no shadow, so replacing them cannot leave a shadow without its object,
+  and their merged copies still receive the sun shadow map, so cars', poles' and
+  buildings' shadows fall on the road and sand as before. Casting props are the next
+  slice and need a mirror shadow map (or no sun shadows in the mirror) before they move.
+  The far world ahead of the main camera, at the far-car distance, is the next slice.
 
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every

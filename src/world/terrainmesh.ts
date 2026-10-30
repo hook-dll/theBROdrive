@@ -1282,7 +1282,11 @@ export class TerrainMeshProvider implements ChunkProvider {
     // as kilometre-scale dark plates across otherwise sunlit sand, so terrain uses
     // its direct/hemisphere light uniformly instead.
     mesh.receiveShadow = false;
+    // The mirror merges this exact terrain (material and colours) into the far world;
+    // the chunk group is hidden in that pass (render/farworld.ts).
+    mesh.userData.farWorldSurface = true;
     const group = new THREE.Group();
+    group.userData.mirrorSkip = true;
     group.add(mesh);
 
     return {

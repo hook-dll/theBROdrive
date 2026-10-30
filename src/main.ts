@@ -46,7 +46,7 @@ import { MarketField, marketProgramAnchor } from './world/market';
 import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
-import { FarRoad } from './render/farroad';
+import { FarWorld } from './render/farworld';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { MachineFocus } from './player/machinefocus';
@@ -411,8 +411,8 @@ async function boot(): Promise<void> {
   renderer.setMsaa(world.state.settings.msaa);
   renderer.setTaa(world.state.settings.taa);
   renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
-  // The mirror world's road: the real road surfaces merged into one draw.
-  const farRoad = new FarRoad(renderer.scene);
+  // The mirror world's ground and road: the real meshes merged into a few draws.
+  const farWorld = new FarWorld(renderer.scene);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
     const transition = document.fullscreenElement
@@ -565,7 +565,7 @@ async function boot(): Promise<void> {
     },
   );
   carMirrors.setEnabled(world.state.settings.cabinMirrors);
-  carMirrors.setFarRoad(farRoad);
+  carMirrors.setFarWorld(farWorld);
   const trunkView = new TrunkView(renderer.scene);
   // The opening of the card machine the player stands at (world/cardmachine.ts), drawn
   // as a boot's grid; its own instance, so an open boot on the lay-by stays drawn beside it.
@@ -3398,7 +3398,7 @@ async function boot(): Promise<void> {
         hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
       }
     }
-    farRoad.update(activeS, origin.x, origin.z);
+    farWorld.update(activeS, origin.x, origin.z);
     carMirrors.update(driving?.kit ?? null, camera.mode === 'cabin');
     frameProfiler?.begin('draw');
     renderer.render();
