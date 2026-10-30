@@ -554,18 +554,6 @@ export class DesertTileStreamer {
     const mesh = new THREE.Mesh(geometry, DESERT_TILE_MATERIAL);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
-    // The game's ground is these tiles, not TerrainMeshProvider. The mirror and the
-    // main far world merge this exact mesh; the tile's props stay in their group.
-    mesh.userData.farWorldSurface = true;
-    mesh.userData.farWorldCenterX = (tx + 0.5) * DESERT_TILE_SIZE;
-    mesh.userData.farWorldCenterZ = (tz + 0.5) * DESERT_TILE_SIZE;
-    mesh.userData.farWorldHalf = DESERT_TILE_SIZE / 2;
-    mesh.userData.farWorldHideSelf = true;
-    mesh.userData.mirrorSkip = true;
-    mesh.userData.farWorldGridRows = TILE_VERTS;
-    mesh.userData.farWorldGridColumns = TILE_VERTS;
-    mesh.userData.farWorldGridStride = 4;
-    mesh.userData.farWorldGridWinding = 'desert';
     group.add(mesh);
 
     const { props, meshes } = this.buildProps(
@@ -576,17 +564,6 @@ export class DesertTileStreamer {
       data.regionS,
       group,
     );
-    // Every prop of the tile is a far-world proxy candidate: near it draws itself, far
-    // the far world draws one box for it (render/farworld.ts), so the tile's prop draw
-    // calls do not grow the far frame.
-    for (const child of group.children) {
-      if (child === mesh) continue;
-      child.userData.farWorldProp = true;
-      child.userData.farWorldCenterX = mesh.userData.farWorldCenterX;
-      child.userData.farWorldCenterZ = mesh.userData.farWorldCenterZ;
-      child.userData.farWorldHalf = mesh.userData.farWorldHalf;
-      child.userData.mirrorSkip = true;
-    }
     freezeStaticSubtree(group);
 
     return {

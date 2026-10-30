@@ -421,7 +421,6 @@ async function boot(): Promise<void> {
     rangeBehind: 200,
     hideGroups: true,
     visible: true,
-    coarse: true,
   });
   renderer.camera.layers.enable(MAIN_FAR_LAYER);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
@@ -3409,10 +3408,8 @@ async function boot(): Promise<void> {
         hud.setToast(`photograph taken — ${cameraItem.framesRemaining} frames left`);
       }
     }
-    const playerAbsX = origin.x + renderer.camera.position.x;
-    const playerAbsZ = origin.z + renderer.camera.position.z;
     farWorld.update(activeS, origin.x, origin.z);
-    mainFarWorld.update(activeS, origin.x, origin.z, playerAbsX, playerAbsZ);
+    mainFarWorld.update(activeS, origin.x, origin.z);
     carMirrors.update(driving?.kit ?? null, camera.mode === 'cabin');
     frameProfiler?.begin('draw');
     renderer.render();

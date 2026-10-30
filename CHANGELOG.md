@@ -260,35 +260,33 @@
 
 ### Changed
 
-- MAIN FAR WORLD, A REAL LOD (`render/farworld.ts`, `render/griddecimate.ts`,
-  `main.ts`, `world/deserttiles.ts`, `world/roadmesh.ts`). The far world is not the near
-  geometry merged: it is the real surface at a coarser grid. The desert tile keeps every
-  fourth row/column (80×80 cells → 20×20), the road every second, and every attribute
-  and material is retained, so the road's paint/texture and the desert's colours survive.
-  Props become one instanced box draw, with their real footprints and an averaged
-  material colour. The far set is on `MAIN_FAR_LAYER` (5), the near chunks stay whole,
-  and the switch is at the 200 m chunk boundary. Measured at one spot, main render:
-  far 232 calls / 642k triangles against 271 / 689k with the far world off — draw calls
-  and triangles both down, which the first exact-geometry merge could not do (it only
-  reduced calls, and with culling off it raised triangles). The mirror keeps the exact
-  road (the road's look is what a mirror is read by) and uses the same prop boxes, on
-  its own layer; neither instance draws in the other's pass. The far prop boxes cast no
-  shadow map yet; near shadows are unchanged.
+- MAIN FAR WORLD (`render/farworld.ts`, `main.ts`, `world/roadmesh.ts`,
+  `world/terrainmesh.ts`). A second `FarWorld` merges the real road surface and terrain
+  of the chunks at least 200 m ahead or behind, per material, on `MAIN_FAR_LAYER` (5).
+  The near chunks stay whole; the far chunks' groups are hidden and their surfaces are
+  drawn by the merged meshes, one draw per material. The switch is at the world's 200 m
+  chunk boundary, which is what a 200 m chunk can honestly do without splitting it; the
+  merged copies keep the same materials, attributes and colours, and receive the sun
+  shadow map. The near world ahead of the main camera is therefore replaced at the
+  chunk edge, not faded. Props and every casting object stay in the near world for now;
+  shadows are unchanged. The mirror's all-surface far world is unchanged and on its own
+  layer, so the two never draw in each other's pass.
 
-- MIRROR WORLD: THE FAR GROUND, ROAD AND PROPS (`render/farworld.ts`,
-  `render/carmirrors.ts`, `world/deserttiles.ts`, `world/roadmesh.ts`, `main.ts`). The
+- MIRROR WORLD: THE FAR GROUND AND ROAD (`render/farworld.ts`,
+  `render/carmirrors.ts`, `world/roadmesh.ts`, `world/terrainmesh.ts`, `main.ts`). The
   ground and road are the world a mirror is read by, so this does not invent them. The
-  road's surface and the desert tiles are tagged `farWorldSurface`; their ground meshes
-  are hidden for the mirror pass. `FarWorld` adds the exact surfaces to one `BatchedMesh`
-  per material, with per-object frustum culling, on `FAR_WORLD_LAYER`; the mirror camera
-  enables that layer and the main camera never does. The road keeps its exact geometry
-  and every look attribute; the desert tiles are exact too in the mirror. Props become
-  one instanced box draw, so their many draw calls do not enter the mirror; near props
-  are hidden for that pass. Rebuilt only when the streamed set or the floating origin
-  changes. The road and terrain cast no shadow, so replacing them cannot leave a shadow
-  without its object; their copies receive the sun shadow map. Far prop boxes do not cast
-  yet; near shadows are unchanged. The mirror's far world is on its own layer and never
-  draws in the main camera's pass.
+  road's surface and every terrain chunk are tagged `farWorldSurface`; their chunk groups
+  are tagged `mirrorSkip` and hidden for the mirror pass. `FarWorld` merges the real
+  meshes, with their world matrices, per material into one mesh each, carrying the very
+  same materials and every attribute they read: road surface type, texture, paint and
+  wear; the desert's colours and slopes. A few draws, on `FAR_WORLD_LAYER`; the mirror's
+  camera enables that layer and the main camera never does. Rebuilt only when the
+  streamed set or the floating origin changes. Only non-casting surfaces move: the road
+  and terrain cast no shadow, so replacing them cannot leave a shadow without its object,
+  and their merged copies still receive the sun shadow map, so cars', poles' and
+  buildings' shadows fall on the road and sand as before. Casting props are the next
+  slice and need a mirror shadow map (or no sun shadows in the mirror) before they move.
+  The far world ahead of the main camera, at the far-car distance, is the next slice.
 
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
