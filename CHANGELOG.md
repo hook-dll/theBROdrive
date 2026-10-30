@@ -267,7 +267,11 @@
   camera stands at the **player's-side door glass's reflected eye** — outside the car
   beside that door, where the mirror is — not 3 m behind the body. The average of the two
   door reflections is not used: it lands on the centreline inside the cabin, and the pass
-  then shades the interior (25-32 ms of GPU against 5-7 ms from the door). The inner
+  then shades the interior (25-32 ms of GPU against 5-7 ms from the door). A glass whose
+  built normal points away from the driver (a mirrored door half) has the normal flipped
+  before reflecting, or the eye lands on the cabin side again; the chosen reflection is
+  then pushed 0.4 m further out, and the player's own car is hidden for the shared pass,
+  so its mirror housing, door skin and cabin cannot fill the view or the pass. The inner
   glass never places the eye (it would pull it in front of the windshield), but still
   shapes the union and its own UVs.
 

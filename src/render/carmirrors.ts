@@ -85,6 +85,12 @@ const SHARED_MARGIN_SHARE = 0.06;
 const SHARED_DENSITY_HEADROOM = 1.12;
 const SHARED_MIN_PX_PER_RAD = 256;
 const SHARED_MAX_PX_PER_RAD = 6000;
+/**
+ * How far past the chosen door reflection the shared eye stands, metres. The exact
+ * reflection lies on the glass's outer side but can still sit in the mirror housing or
+ * against the door skin; this clears it without changing the view's direction.
+ */
+const SHARED_EYE_OUT_M = 0.4;
 
 interface View {
   readonly material: THREE.MeshBasicMaterial;
@@ -148,6 +154,7 @@ const _ndc = new THREE.Vector3();
 const _direction = new THREE.Vector3();
 const _reflected = new THREE.Vector3();
 const _mirrored = new THREE.Vector3();
+const _chosenNormal = new THREE.Vector3();
 const _projected = new THREE.Vector3();
 const _view = new THREE.Vector3();
 
@@ -292,16 +299,30 @@ export class CarMirrors {
     for (const face of positionFaces) {
       _world.setFromMatrixPosition(face.matrixWorld);
       _normal.set(0, 0, -1).transformDirection(face.matrixWorld).normalize();
-      const distance = _direction.subVectors(_eye, _world).dot(_normal);
-      if (distance <= 0.02) continue;
+      let distance = _direction.subVectors(_eye, _world).dot(_normal);
+      if (Math.abs(distance) <= 0.02) continue;
+      // The glass normal is the build's local -Z, which some mirrored door halves turn
+      // away from the driver. Orient it towards the eye before reflecting; otherwise the
+      // reflection lands on the cabin side and the eye ends up inside the car.
+      if (distance < 0) {
+        _normal.negate();
+        distance = -distance;
+      }
       // The eye reflected through the glass: `E - 2 ((E - P) . n) n`.
       _mirrored.copy(_eye).addScaledVector(_normal, -2 * distance);
       const toEye = _mirrored.distanceToSquared(_eye);
       if (toEye < bestDistance) {
         bestDistance = toEye;
         _average.copy(_mirrored);
+        _chosenNormal.copy(_normal);
         chosen = true;
       }
+    }
+    if (chosen) {
+      // Clear the glass and its housing: the eye stays on the outer side the reflection
+      // already put it on, just far enough that no part of the car sits on the near
+      // plane. The view direction is unchanged.
+      _average.addScaledVector(_chosenNormal, -SHARED_EYE_OUT_M);
     }
     if (!chosen) {
       // No usable door reflection (a model mid-load, a malformed glass): the average of
@@ -529,7 +550,17 @@ export class CarMirrors {
    */
   private readonly standIn = (_id: string, vehicle: Vehicle): void => {
     const root = vehicle.root;
-    if (vehicle.kit === this.shown || !root.visible || !vehicle.addStandIn(this.standIns)) return;
+    if (vehicle.kit === this.shown) {
+      // The car the mirrors belong to is hidden for the shared pass: its mirror housing,
+      // door skin and cabin would otherwise be drawn by the eye standing at the glass,
+      // which read as "the mirror shows a mirror" and filled the pass with interior.
+      if (root.visible) {
+        root.visible = false;
+        this.hidden.push(root);
+      }
+      return;
+    }
+    if (!root.visible || !vehicle.addStandIn(this.standIns)) return;
     root.visible = false;
     this.hidden.push(root);
   };
