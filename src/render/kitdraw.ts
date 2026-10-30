@@ -134,10 +134,7 @@ export function prepareKitDraw(body: THREE.Object3D): KitDrawModel {
     // invisible object, so the frame, the sun and every mirror skip the proxy subtree.
     // Raycasting ignores `visible` (it tests layers only), so interaction, the car lab
     // and sticker placement still meet these parts; `interaction.shownUnder` accepts a
-    // pick proxy's own hidden flag and checks its ancestors instead. The flag also lets
-    // `collectPieces` (farcars.ts) keep the part for the static shell and far/mid bakes,
-    // which read the model rather than the rendered frame.
-    mesh.userData.kitPickProxy = true;
+    // pick proxy's own hidden flag and checks its ancestors instead.
     mesh.visible = false;
     mesh.castShadow = false;
     mesh.receiveShadow = false;
@@ -323,7 +320,6 @@ export function attachKitWheels(model: KitWheelModel, wheels: ReadonlyMap<string
       if (!(node as THREE.Mesh).isMesh) return;
       node.layers.set(KIT_PICK_LAYER);
       // A pick proxy: raycast only, never drawn or walked (the body's rule above).
-      node.userData.kitPickProxy = true;
       node.visible = false;
       node.castShadow = false;
     });
