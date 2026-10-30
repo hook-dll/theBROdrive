@@ -260,14 +260,6 @@
 
 ### Changed
 
-- TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
-  `makeField`). A driver asks the coordinator for its view of the stream at every
-  decision (12 Hz, 30 cars, plus the player's own), and each ask used to allocate the
-  field object, its reusable neighbour buffer and three closures. The field is now
-  cached in a `WeakMap` by its owner and exclusion id; `snapshot()` already resets its
-  count and refills the same typed arrays, so a cached field reads exactly like a new
-  one. No allocation per decision.
-
 - DELINEATOR RUNS ARE STREAMED IN SLICES (`world/props/delineators.ts`
   `buildSteps`). The provider used to plant a whole reflector run in one scheduler
   job. It is now a resumable generator: it yields between runs and every 16 posts while
