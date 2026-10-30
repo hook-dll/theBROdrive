@@ -254,6 +254,16 @@
 
 ### Changed
 
+- PICK PROXIES ARE OUT OF THE RENDER WALK (`render/kitdraw.ts`;
+  `player/interaction.ts`). Every kit car keeps its ~150 built parts as pick proxies on
+  `KIT_PICK_LAYER` for raycasting, and they used to sit in the scene graph with
+  `visible = true`, so the frame, the sun and every mirror walked them and rejected them
+  by layer. They are now `visible = false`: `WebGLRenderer.projectObject` returns on an
+  invisible object, so no render pass enters the proxy or its subtree. Raycasting tests
+  layers, not visibility, so interaction, the car lab and sticker placement still meet
+  the parts; `shownUnder` now accepts a pick proxy's own hidden flag and checks its
+  ancestors instead (a shut door or a hidden detail group still gates it).
+
 - ONE REAR PASS FOR ALL THREE LIVE MIRRORS (`render/carmirrors.ts`; one shared
   1024×384 half-float target, one wide rear camera, the same three unlit face materials).
   The old path drew the whole scene three times, once per glass, 58–99 draws a pass. Now
