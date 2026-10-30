@@ -286,7 +286,10 @@
   invisible object, so no render pass enters the proxy or its subtree. Raycasting tests
   layers, not visibility, so interaction, the car lab and sticker placement still meet
   the parts; `shownUnder` now accepts a pick proxy's own hidden flag and checks its
-  ancestors instead (a shut door or a hidden detail group still gates it).
+  ancestors instead (a shut door or a hidden detail group still gates it). The merge
+  walk (`render/farcars.ts` `collectPieces`) keeps a `kitPickProxy` part even when it is
+  hidden, so the static shell and the far/mid meshes still read the whole model; without
+  that, a static kit car found no shell and the game refused to start.
 
 - ONE REAR PASS FOR ALL THREE LIVE MIRRORS (`render/carmirrors.ts`; one shared
   1024×384 half-float target, one wide rear camera, the same three unlit face materials).

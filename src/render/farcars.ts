@@ -170,7 +170,9 @@ export function collectPieces<S>(
 ): Piece<S>[] {
   const pieces: Piece<S>[] = [];
   const walk = (node: THREE.Object3D, parent: THREE.Matrix4): void => {
-    if (!node.visible || (!whole && KIT_DETAIL_GROUPS.has(node.name))) return;
+    // A pick proxy is `visible = false` so no render pass walks it, but it is still the
+    // model's part for the merges that build the static shell and the far/mid meshes.
+    if ((!node.visible && node.userData.kitPickProxy !== true) || (!whole && KIT_DETAIL_GROUPS.has(node.name))) return;
     const local = node.matrixAutoUpdate ? _local.compose(node.position, node.quaternion, node.scale) : node.matrix;
     const matrix = new THREE.Matrix4().multiplyMatrices(parent, local);
     if (node instanceof THREE.Mesh) {
