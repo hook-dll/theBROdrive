@@ -359,6 +359,18 @@
   pass 54 → 42 draws, each mirror 29 → 25; near and sub-pixel far spans unchanged at
   fixed cameras.
 
+- FAR DESERT TILES DRAW COARSE ON THE FULL BUILD (`world/deserttiledata.ts`
+  `farIndices`, `world/deserttiles.ts` `GROUND_FAR_M`, `InstanceBatches.setGeometry`).
+  With grass Full (the full build) every tile drew its whole 80×80 lattice to the edge of
+  the view: 189k of the frame's 720k triangles in the cabin at km 21. The worker now also
+  writes the tile's coarse indices (`writeCoarseIndices`, the light build's: 2×2 blocks
+  over open sand, the road's neighbourhood fine, no crack against any neighbour), and a
+  tile whose nearest edge is past 300 m from the camera, where its relief starts to fade
+  into the vista, draws them; 40 m of hysteresis. The switch rewrites the tile's ground
+  slot in place (≤ 0.3 ms; 70 switches in a 2.5-minute drive, pacing unchanged). Tile
+  ground 189k → 127k triangles in the main pass; fixed-camera shots across the threshold
+  unchanged. The light builds, whose tiles are coarse already, carry no second index.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow

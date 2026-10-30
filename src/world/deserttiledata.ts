@@ -72,6 +72,13 @@ export interface DesertTileData {
   readonly indices: Uint32Array;
   /** How much of `indices` is drawn; less than its length when drawn coarse. */
   readonly indexCount: number;
+  /**
+   * The same ground drawn coarse for a tile far from the camera (`writeCoarseIndices`:
+   * 2×2 blocks over open sand, the road's neighbourhood kept fine, no crack against any
+   * neighbour), on the full build only. Empty where `indices` is already coarse.
+   */
+  readonly farIndices: Uint32Array;
+  readonly farIndexCount: number;
   readonly propSurfaces: Uint8Array;
   readonly regionS: number;
 }
@@ -369,6 +376,8 @@ export function generateDesertTileData(
   const indexCount = context.coarseAway
     ? writeCoarseIndices(context, indices, startX, startZ, farFromRoad)
     : writeFullIndices(indices);
+  const farIndices = fit(into?.farIndices, context.coarseAway ? 0 : DESERT_TILE_CELLS * DESERT_TILE_CELLS * 6, Uint32Array);
+  const farIndexCount = context.coarseAway ? 0 : writeCoarseIndices(context, farIndices, startX, startZ, farFromRoad);
 
   const propSurfaces = fit(into?.propSurfaces, MAX_TILE_PROPS, Uint8Array);
   propSurfaces.fill(0);
@@ -401,7 +410,7 @@ export function generateDesertTileData(
     propSurfaces[i] = surface;
   }
 
-  return { heights, positions, detailOffsets, normals, colors, indices, indexCount, propSurfaces, regionS };
+  return { heights, positions, detailOffsets, normals, colors, indices, indexCount, farIndices, farIndexCount, propSurfaces, regionS };
 }
 
 /** The ground as the tiles draw it at one point: see `tileGroundSampler`. */
@@ -502,6 +511,7 @@ export function desertTileDataTransfers(data: DesertTileData): Transferable[] {
     data.normals.buffer as ArrayBuffer,
     data.colors.buffer as ArrayBuffer,
     data.indices.buffer as ArrayBuffer,
+    data.farIndices.buffer as ArrayBuffer,
     data.propSurfaces.buffer as ArrayBuffer,
   ];
 }

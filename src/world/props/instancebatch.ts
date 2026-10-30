@@ -317,6 +317,20 @@ export class InstanceBatches {
   }
 
   /**
+   * Rewrites a `reserve` slot's geometry in place (a desert tile's ground switching
+   * between its fine and far indices). The geometry must have the layout the slot was
+   * made with and fit its reserved size.
+   */
+  setGeometry(slot: BatchSlot, geometry: THREE.BufferGeometry): void {
+    if (!(slot.mesh instanceof THREE.BatchedMesh)) return;
+    const batch = this.batchOf.get(slot.mesh);
+    if (!batch) return;
+    const id = batch.mesh.getGeometryIdAt(slot.instance);
+    if (!batch.reserved.has(id)) throw new Error('InstanceBatches.setGeometry: not a reserved slot');
+    batch.mesh.setGeometryAt(id, batchSource(geometry, batch.mesh.material as THREE.Material).geometry);
+  }
+
+  /**
    * Gives a slot back. It is blanked, so it draws nothing, and its index is reused.
    * Callers forget any breakable or cover handle on the slot first.
    */

@@ -240,14 +240,37 @@ const GROUND_RESERVE = { vertices: TILE_VERTS * TILE_VERTS, indices: DESERT_TILE
  * A tile's ground as the batches take it: its own attributes, and an index of only the
  * triangles it draws. A coarse tile writes fewer indices than its buffer holds (the
  * rest is a recycled tile's, `setDrawRange` hides them on a mesh), and a batch copies
- * the whole index it is given, never a draw range.
+ * the whole index it is given, never a draw range. `far` takes the tile's far indices
+ * where it has them (the full build; see `DesertTileData.farIndices`).
  */
-function groundKind(tile: DesertTile): BatchKind {
+function groundKind(tile: DesertTile, far: boolean): BatchKind {
   const view = new THREE.BufferGeometry();
   for (const [name, attribute] of Object.entries(tile.geometry.attributes)) view.setAttribute(name, attribute);
-  view.setIndex(new THREE.BufferAttribute(tile.data.indices.subarray(0, tile.data.indexCount), 1));
+  const data = tile.data;
+  const index = far && data.farIndexCount > 0
+    ? data.farIndices.subarray(0, data.farIndexCount)
+    : data.indices.subarray(0, data.indexCount);
+  view.setIndex(new THREE.BufferAttribute(index, 1));
   view.computeBoundingSphere();
   return { geometry: view, material: DESERT_TILE_MATERIAL, castShadow: false, receiveShadow: true, reserve: GROUND_RESERVE };
+}
+
+/**
+ * Past this distance from the camera to a tile's nearest edge, metres, its ground draws
+ * its far indices. It is where the tile's fine relief starts to fade into the vista
+ * (`DESERT_TILE_FADE_FULL`); the coarse blocks keep every other lattice vertex of open
+ * sand and the road's neighbourhood whole, and fixed-camera shots across the threshold
+ * showed no difference. Measured at 480 m (relief gone) it simplified 5 tiles of 25,
+ * at 300 m 13.
+ */
+const GROUND_FAR_M = DESERT_TILE_FADE_FULL;
+/** A far tile turns fine again only this far inside the line it crossed. */
+const GROUND_FAR_HYSTERESIS_M = 40;
+
+/** Ground distance from (`x`, `z`) to a tile's square, metres; 0 inside it. */
+function tileDistance(tile: DesertTile, x: number, z: number): number {
+  const half = DESERT_TILE_SIZE / 2;
+  return Math.hypot(Math.max(0, Math.abs(tile.centreX - x) - half), Math.max(0, Math.abs(tile.centreZ - z) - half));
 }
 
 interface DesertTile {
@@ -264,6 +287,8 @@ interface DesertTile {
   readonly batchChunk: BatchChunk;
   /** The ground's slot in the batches while the tile is live; its own mesh stays hidden. */
   ground: BatchSlot | null;
+  /** Whether the ground slot holds the far indices (`GROUND_FAR_M`). */
+  groundFar: boolean;
   readonly heights: Float32Array;
   /**
    * The buffer set backing `heights`, `geometry` and the collider, kept so teardown
@@ -676,6 +701,7 @@ export class DesertTileStreamer {
       meshes,
       batchChunk: tileBatchChunk(tx, tz, centreX, centreZ),
       ground: null,
+      groundFar: false,
       heights: data.heights,
       data,
       props,
@@ -697,7 +723,8 @@ export class DesertTileStreamer {
     this.scene.add(tile.group);
     this.tiles.set(tile.key, tile);
     // The ground is one instance of the band's ground batch, in the tile centre's frame.
-    tile.ground = this.propBatches.allocate(tile.batchChunk, groundKind(tile), IDENTITY);
+    tile.groundFar = Number.isFinite(this.lastX) && tileDistance(tile, this.lastX, this.lastZ) > GROUND_FAR_M;
+    tile.ground = this.propBatches.allocate(tile.batchChunk, groundKind(tile, tile.groundFar), IDENTITY);
     // The props join the shared batches now, as the tile becomes the drawn one; their
     // matrices are relative to the tile centre (`batchChunk.origin`), at their fade.
     for (const prop of tile.props) {
@@ -806,6 +833,15 @@ export class DesertTileStreamer {
   private syncPropFades(cameraX: number, cameraZ: number): void {
     const fadeSpan = DESERT_TILE_FADE_GONE - DESERT_TILE_FADE_FULL;
     for (const tile of this.tiles.values()) {
+      // The ground's LOD: far indices past GROUND_FAR_M, with hysteresis.
+      if (tile.ground && tile.data.farIndexCount > 0) {
+        const distance = tileDistance(tile, cameraX, cameraZ);
+        const far = tile.groundFar ? distance > GROUND_FAR_M - GROUND_FAR_HYSTERESIS_M : distance > GROUND_FAR_M;
+        if (far !== tile.groundFar) {
+          tile.groundFar = far;
+          this.propBatches.setGeometry(tile.ground, groundKind(tile, far).geometry);
+        }
+      }
       for (const prop of tile.props) {
         if (!prop.mesh) continue;
         const dx = tile.centreX + prop.x - cameraX;
