@@ -279,19 +279,7 @@ export class DelineatorProvider implements ChunkProvider {
     private readonly breakables?: BreakableSink,
   ) {}
 
-  /**
-   * Synchronous callers (the labs and tools) drain the sliced build. The streamer uses
-   * `buildSteps`, which yields between runs and every 16 posts so a scheduler job can
-   * stop at its deadline instead of planting a whole run in one frame.
-   */
   build(ctx: ChunkContext): ChunkContent | null {
-    const steps = this.buildSteps(ctx);
-    let step = steps.next();
-    while (!step.done) step = steps.next();
-    return step.value;
-  }
-
-  *buildSteps(ctx: ChunkContext): Iterator<void, ChunkContent | null> {
     const seed = ctx.world.seed;
     const ox = ctx.originX;
     const oz = ctx.originZ;
@@ -338,9 +326,6 @@ export class DelineatorProvider implements ChunkProvider {
           id,
         });
       });
-      // A run is collected whole before any slot is taken; a run boundary is the
-      // natural slice point.
-      yield;
     }
     if (posts.length === 0) return null;
 
@@ -356,7 +341,6 @@ export class DelineatorProvider implements ChunkProvider {
     // instance sits at, so the solid post occupies exactly the drawn post.
     const halfHeight = (DELINEATOR_HEIGHT - DELINEATOR_EMBED) * 0.5;
     for (let i = 0; i < posts.length; i++) {
-      if ((i & 15) === 0) yield;
       const post = posts[i]!;
       _dummy.position.set(post.x - ox, post.y, post.z - oz);
       _dummy.rotation.set(0, post.yaw, 0);

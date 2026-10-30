@@ -260,14 +260,6 @@
 
 ### Changed
 
-- DELINEATOR RUNS ARE STREAMED IN SLICES (`world/props/delineators.ts`
-  `buildSteps`). The provider used to plant a whole reflector run in one scheduler
-  job. It is now a resumable generator: it yields between runs and every 16 posts while
-  taking slots and building colliders, so a 1 ms job can stop at its deadline and resume
-  on the chunk's next job. `build` remains for synchronous callers and drains the same
-  generator. Nothing is attached until the run completes, so a slice boundary cannot
-  leave a half-planted run in the scene.
-
 - THE SEATED KIT RAY IS NOT RUN EVERY TICK (`player/interaction.ts`
   `SEATED_KIT_AIM_INTERVAL_S`, `fixedUpdate`, `seatedKitPart`). In the cabin it walked
   the whole car — 151 pick proxies, about 15.9k triangles — on every fixed step, because
