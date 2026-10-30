@@ -563,12 +563,8 @@ interface KitDoor {
 
 /** Is every node from `object` up to `root` drawn? A hidden program anchor is not a part. */
 function shownUnder(object: THREE.Object3D, root: THREE.Object3D): boolean {
-  // A pick proxy is deliberately `visible = false` so no render pass walks it; its own
-  // flag says "not drawn", not "not there". Its ancestors still gate it (a shut door,
-  // a hidden detail group), so those are checked as before.
-  const pickProxy = (object.layers.mask & (1 << KIT_PICK_LAYER)) !== 0;
   for (let node: THREE.Object3D | null = object; node && node !== root; node = node.parent) {
-    if (!node.visible && !(node === object && pickProxy)) return false;
+    if (!node.visible) return false;
   }
   return true;
 }
