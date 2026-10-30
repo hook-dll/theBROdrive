@@ -15,6 +15,7 @@ import { SCENE_FROM_SCREEN_GLSL } from './displaytransform';
 import { cloudPanUniform, setCloudSunShift } from './cloudshadow';
 import { CLOUD_PERIOD_M } from './cloudfield';
 import { CloudLayer } from './clouds';
+import { SKY_LAYER } from '../core/renderer';
 
 /**
  * Analytic atmosphere around a real Tycho-2 star catalogue and ephemerides for
@@ -1297,6 +1298,11 @@ export class Sky {
     scene.add(this.hemiLight);
 
     scene.add(this.root);
+    // The sky and its clouds are one layer of their own: the main camera sees them, a
+    // mirror draws them in a separate pass with a long far plane, and the mirror's world
+    // pass (short far plane) never sees them. See `SKY_LAYER` in core/renderer.ts.
+    this.root.traverse((object) => object.layers.set(SKY_LAYER));
+    this.clouds.root.traverse((object) => object.layers.set(SKY_LAYER));
   }
 
   /**

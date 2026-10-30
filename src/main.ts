@@ -8,7 +8,7 @@ import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { prefersMobilePresentation, Renderer } from './core/renderer';
+import { prefersMobilePresentation, Renderer, SKY_LAYER } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -512,6 +512,8 @@ async function boot(): Promise<void> {
     mobilePresentation,
   );
   const sky = new Sky(renderer.scene, renderer.fog, renderer.renderer, starField);
+  // The sky lives on its own layer now; the main camera is the one that must see it.
+  renderer.camera.layers.enable(SKY_LAYER);
   // The sun's shadow map is sized by the tier (`GraphicsTier.sunShadowMapSize`).
   sky.setQuality(world.state.settings.graphicsQuality, mobilePresentation);
   sky.setShadowMode(world.state.settings.shadows);
