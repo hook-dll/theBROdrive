@@ -1010,6 +1010,9 @@ export class RoadMeshProvider implements ChunkProvider {
     const indices = new Uint32Array((rowCount - 1) * (latCount - 1) * 6);
 
     const group = new THREE.Group();
+    // The mirror draws `render/farroad.ts` instead: one low-poly ribbon for the whole
+    // view. This group (surface, bed, skirt) is hidden for the mirror pass.
+    group.userData.mirrorSkip = true;
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const disposables: THREE.BufferGeometry[] = [];

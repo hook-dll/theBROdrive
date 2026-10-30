@@ -41,6 +41,7 @@ import type { Renderer } from '../core/renderer';
 import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
 import type { Vehicle } from '../vehicle/vehicle';
 import { FarCarField } from './farcars';
+import { FAR_WORLD_LAYER, type FarRoad } from './farroad';
 import { adoptReversedDepth } from './depthconvention';
 import { aimMirrorCamera, mirrorFaceGeometry } from './mirrorview';
 
@@ -127,6 +128,12 @@ export class CarMirrors {
   private readonly standIns: FarCarField;
   /** Roots hidden for the mirror renders under way, put back after them. */
   private readonly hidden: THREE.Object3D[] = [];
+  /** The far road the mirror shows instead of the near road chunks. */
+  private farRoad: FarRoad | null = null;
+  /** Scene objects tagged `mirrorSkip` (the road chunks), and their own visible flags. */
+  private readonly skipped: THREE.Object3D[] = [];
+  private readonly skippedWas: boolean[] = [];
+  private skippedHidden = 0;
 
   constructor(
     private readonly renderer: Renderer,
@@ -140,6 +147,11 @@ export class CarMirrors {
     adoptReversedDepth(this.camera, renderer.reversedDepth);
     this.standIns = new FarCarField(renderer.scene);
     this.standIns.setVisible(false);
+    // Road chunks are tagged `mirrorSkip` (roadmesh.ts) and hidden for the mirror pass;
+    // scene events keep the list current as chunks stream in and out.
+    renderer.scene.traverse(this.collectSkipped);
+    renderer.scene.addEventListener('childadded', ({ child }) => child.traverse(this.collectSkipped));
+    renderer.scene.addEventListener('childremoved', ({ child }) => this.forgetSkipped(child));
     this.setQuality(quality);
     renderer.setMirrorPass(this);
   }
@@ -187,12 +199,19 @@ export class CarMirrors {
     this.enabled = enabled;
   }
 
+  /** The far road the mirror draws while the near road chunks are hidden. */
+  setFarRoad(farRoad: FarRoad | null): void {
+    this.farRoad = farRoad;
+  }
+
   /**
    * Once a frame, before the frame is drawn: `kit` is the rig of the car the player sits
    * in (any seat), `cabinView` whether the camera is the cabin view.
    */
   update(kit: KitRig | null, cabinView: boolean): void {
     this.show(this.enabled && this.scale > 0 && cabinView ? kit : null);
+    // The far road is the mirror's only road; the main camera never sees its layer.
+    this.farRoad?.setVisible(this.shown !== null);
   }
 
   /**
@@ -210,6 +229,8 @@ export class CarMirrors {
     this.lastMs = now;
     this.owed = this.rate === null ? count : Math.min(this.owed + seconds * this.rate * count, 2 * count);
     let swapped = false;
+    // The near road chunks are replaced by `FarRoad` for this pass only.
+    this.hideSkipped();
     try {
       for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
         const face = kit.mirrorFaces[this.next++ % count]!;
@@ -229,6 +250,7 @@ export class CarMirrors {
         this.stats.renders++;
       }
     } finally {
+      this.restoreSkipped();
       if (swapped) this.restoreCars();
     }
   }
@@ -259,6 +281,33 @@ export class CarMirrors {
     this.standIns.setVisible(false);
   }
 
+  private readonly collectSkipped = (object: THREE.Object3D): void => {
+    if (object.userData.mirrorSkip === true && !this.skipped.includes(object)) this.skipped.push(object);
+  };
+
+  /** Drops every skipped object in `root`, which has just been taken out of the scene. */
+  private forgetSkipped(root: THREE.Object3D): void {
+    for (let i = this.skipped.length - 1; i >= 0; i--) {
+      let node: THREE.Object3D | null = this.skipped[i]!;
+      while (node !== null && node !== root) node = node.parent;
+      if (node === root) this.skipped.splice(i, 1);
+    }
+  }
+
+  private hideSkipped(): void {
+    for (let i = 0; i < this.skipped.length; i++) {
+      const object = this.skipped[i]!;
+      this.skippedWas[i] = object.visible;
+      object.visible = false;
+      this.skippedHidden = i + 1;
+    }
+  }
+
+  private restoreSkipped(): void {
+    for (let i = 0; i < this.skippedHidden; i++) this.skipped[i]!.visible = this.skippedWas[i]!;
+    this.skippedHidden = 0;
+  }
+
   private show(kit: KitRig | null): void {
     if (kit === this.shown) return;
     if (this.shown) for (const face of this.shown.mirrorFaces) face.visible = false;
@@ -277,6 +326,9 @@ export class CarMirrors {
    */
   private aim(face: THREE.Mesh): boolean {
     _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
-    return aimMirrorCamera(this.camera, face, _eye, this.renderer.camera.far);
+    const aimed = aimMirrorCamera(this.camera, face, _eye, this.renderer.camera.far);
+    // The far road (and whatever far world follows it) is on its own layer.
+    this.camera.layers.enable(FAR_WORLD_LAYER);
+    return aimed;
   }
 }

@@ -260,6 +260,15 @@
 
 ### Changed
 
+- MIRROR WORLD, FIRST SLICE: THE FAR ROAD (`render/farroad.ts`,
+  `render/carmirrors.ts`, `world/roadmesh.ts`, `main.ts`). The road chunks are tagged
+  `mirrorSkip` and hidden for the mirror pass; in their place one low-poly ribbon on
+  `FAR_WORLD_LAYER` follows the player 700 m behind and ahead, rebuilt every 60 m. The
+  mirror's world camera enables that layer; the main camera never does, so the drive is
+  unchanged. The road casts no shadow, so replacing it cannot leave a shadow without its
+  object. This is the first part of the world's far representation, the analogue of the
+  far cars the mirrors already use; terrain and props are next.
+
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
   decision (12 Hz, 30 cars, plus the player's own), and each ask used to allocate the
