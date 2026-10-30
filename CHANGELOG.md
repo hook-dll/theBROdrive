@@ -300,6 +300,24 @@
   (67 → 94 props as tiles streamed); a tile prop still breaks (instance hidden, collider
   off, flattened in the save); a close-up at a fixed camera is unchanged.
 
+- THE ROAD'S PARTS IN THE SAME MULTI-DRAW BATCHES (`world/roadmesh.ts`,
+  `render/cloudshadow.ts`, `world/terrainmesh.ts`). A road chunk drew its surface, bed,
+  shoulder and markings as three or four meshes, so the ~7 chunks in view cost about 21
+  draws in the frame and 12 in each mirror. They are now instances of the streamer's
+  shared batches, one draw per material for every chunk in view, each chunk culled on
+  its own. The slots are taken in the step that completes the build, so a build a rebase
+  cancels holds none, and given back by the contribution's `dispose`. The meshes stay in
+  the chunk's group, hidden, in their old order: the road tools and the road lab read
+  their vertices, and no render pass walks them. The cloud shade and the ground's patch
+  and fade hooks computed the world position as `modelMatrix * position`, which for a
+  batch misses the instance's own offset (the chunk's origin against the batch's
+  anchor); under `USE_BATCHING` they now include `batchingMatrix`, and nothing else
+  compiles differently. Tools that build road chunks with a context of their own
+  (`offroad-feel`, `road-lanes`) now give it its batches. Cabin, km 21, Blessing: the
+  frame's main pass 90 → 72 draws, each mirror 47 → 38; the same road at fixed cameras
+  (texture, shoulder, skid marks), and a drive across two origin rebases left the road,
+  its paint and the props exactly in place (every tile prop within 0.000 m).
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow

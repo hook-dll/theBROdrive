@@ -154,7 +154,13 @@ uniform float uWet;
  * the haze has the ground half washed out, and the map fades before the far rings.
  */
 const CLOUD_VERTEX_HOOK = /* glsl */ `#include <worldpos_vertex>
+	// A multi-draw instance's own offset is in batchingMatrix (props/instancebatch.ts:
+	// the road's chunks share batches), not in modelMatrix.
+	#ifdef USE_BATCHING
+	vec3 cloudWorld = ( modelMatrix * batchingMatrix * vec4( transformed, 1.0 ) ).xyz;
+	#else
 	vec3 cloudWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+	#endif
 	float cloudDist = distance( cloudWorld, cameraPosition );
 	vCloudShade = uCloudStrength > 0.0 ? cloudShade( cloudWorld ) : 0.0;
 	// Wet ground dries in patches, not as one sheet: a nine-metre noise decides which

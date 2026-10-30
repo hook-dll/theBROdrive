@@ -76,6 +76,7 @@ import {
 import { digressiveRate, type TyreContact } from '../src/vehicle/tyrecontact';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { type ChunkContext } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { DESERT_TILE_SIZE, DesertTileStreamer } from '../src/world/deserttiles';
 import { WorldOrigin } from '../src/world/origin';
 import { CHUNK_LENGTH } from '../src/world/ranges';
@@ -231,6 +232,7 @@ function keepGround(g: Ground, absX: number, absZ: number, s: number, lateral: n
       hasPhysics: true,
       originX: g.origin.x,
       originZ: g.origin.z,
+      batches: new InstanceBatches(g.origin),
     } as unknown as ChunkContext;
     const content = g.roadProvider.build(ctx);
     if (!content) continue;

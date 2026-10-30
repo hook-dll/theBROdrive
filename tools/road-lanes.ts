@@ -28,6 +28,7 @@ import * as THREE from 'three';
 import { PhysicsWorld } from '../src/core/physics';
 import { SurfaceType } from '../src/core/surfaces';
 import { type ChunkContent, type ChunkContext } from '../src/world/chunks';
+import { InstanceBatches } from '../src/world/props/instancebatch';
 import { tileGroundSampler, type DrawnGroundSample } from '../src/world/deserttiledata';
 import { laybyOuterAt, laybysBetween, type Layby } from '../src/world/layby';
 import { LaybyMeshProvider } from '../src/world/laybymesh';
@@ -90,6 +91,7 @@ function build(chunkIndex: number): Built {
     hasPhysics: false,
     originX: 0,
     originZ: 0,
+    batches: new InstanceBatches({ x: 0, z: 0 }),
   } as unknown as ChunkContext;
 
   const content = provider.build(ctx);
@@ -352,6 +354,7 @@ function measureLayby(
       hasPhysics: true,
       originX: ox,
       originZ: oz,
+      batches: new InstanceBatches({ x: ox, z: oz }),
     } as unknown as ChunkContext;
     const contents = [ribbon.build(ctx), pads.build(ctx)].filter((c): c is ChunkContent => c !== null);
     const drawn: THREE.Mesh[] = [];

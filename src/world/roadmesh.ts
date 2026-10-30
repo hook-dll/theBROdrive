@@ -48,6 +48,10 @@ import { terminusWeight } from './terminus';
 import { laybyNear, laybyOuterAt } from './layby';
 import { DESERT_SHOULDER_MATERIAL, TERRAIN_COLLIDER_SURFACE } from './terrainmesh';
 import type { ChunkContent, ChunkContext, ChunkProvider } from './chunks';
+import type { BatchSlot } from './props/instancebatch';
+
+/** A road part's matrix in its chunk's frame: its vertices are already written there. */
+const IDENTITY = new THREE.Matrix4();
 
 /**
  * The asphalt ribbon, banked into corners and displaced by a layered surface field —
@@ -1013,6 +1017,8 @@ export class RoadMeshProvider implements ChunkProvider {
     const bodies: RAPIER.RigidBody[] = [];
     const colliders: RAPIER.Collider[] = [];
     const disposables: THREE.BufferGeometry[] = [];
+    /** The visual meshes, batched when the build completes (see the end of the build). */
+    const drawn: THREE.Mesh[] = [];
     let completed = false;
 
     try {
@@ -1210,7 +1216,7 @@ export class RoadMeshProvider implements ChunkProvider {
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
-      group.add(roadMesh);
+      drawn.push(roadMesh);
 
       // Close both open edges down into the terrain. This is deliberately visual-only:
       // tyres still collide with the exact top ribbon, and the skirt remains buried
@@ -1262,7 +1268,7 @@ export class RoadMeshProvider implements ChunkProvider {
       bedGeometry.computeVertexNormals();
       const bedMesh = new THREE.Mesh(bedGeometry, roadBedMaterial);
       bedMesh.receiveShadow = true;
-      group.add(bedMesh);
+      drawn.push(bedMesh);
       yield;
 
       const shoulder = yield* this.buildShoulderSteps(ctx, positions, sCount, latCount);
@@ -1270,7 +1276,7 @@ export class RoadMeshProvider implements ChunkProvider {
         disposables.push(shoulder.geometry);
         const shoulderMesh = new THREE.Mesh(shoulder.geometry, DESERT_SHOULDER_MATERIAL);
         shoulderMesh.receiveShadow = true;
-        group.add(shoulderMesh);
+        drawn.push(shoulderMesh);
         if (hasPhysics) {
           // Slabs, as the ribbon's: rows of the same vertices, sharing boundary rows. The
           // drawn strip is loose shoulder; the skirt beyond it is the tiles' own ground.
@@ -1347,10 +1353,28 @@ export class RoadMeshProvider implements ChunkProvider {
       );
       if (markings) {
         disposables.push(markings.geometry);
-        group.add(markings);
+        drawn.push(markings);
       }
       yield;
 
+      // The drawn parts join the props' shared multi-draw batches (props/instancebatch.ts)
+      // only now, in the step that completes the build, so no slot is taken by a build a
+      // rebase cancels. One draw per material for every chunk in view, each chunk culled
+      // on its own, instead of three or four draws per chunk. The meshes stay in the
+      // chunk's group, hidden, in their old order: they are the record of what the chunk
+      // drew (the road tools and the lab read their vertices), and no pass walks them.
+      const slots: BatchSlot[] = [];
+      for (const mesh of drawn) {
+        slots.push(ctx.batches.allocate(ctx, {
+          geometry: mesh.geometry,
+          material: mesh.material as THREE.Material,
+          castShadow: mesh.castShadow,
+          receiveShadow: mesh.receiveShadow,
+          renderOrder: mesh.renderOrder,
+        }, IDENTITY));
+        mesh.visible = false;
+        group.add(mesh);
+      }
       // The trimeshes are created disabled and switched on by ChunkStreamer once the
       // whole contribution is attached (see ChunkContent.colliders).
       completed = true;
@@ -1359,6 +1383,7 @@ export class RoadMeshProvider implements ChunkProvider {
         bodies,
         colliders,
         dispose: () => {
+          for (const slot of slots) ctx.batches.release(slot);
           for (const g of disposables) g.dispose();
         },
       };

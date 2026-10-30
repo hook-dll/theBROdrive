@@ -341,7 +341,13 @@ float groundNoise( vec2 p, float cells, float salt ) {
 
 const GROUND_VERTEX_HOOK = (crests: boolean): string => /* glsl */ `#include <worldpos_vertex>
 {
+  // A multi-draw instance's own offset is in batchingMatrix (the road's shoulder
+  // shares batches: props/instancebatch.ts), not in modelMatrix.
+  #ifdef USE_BATCHING
+  vec3 groundAt = ( modelMatrix * batchingMatrix * vec4( transformed, 1.0 ) ).xyz;
+  #else
   vec3 groundAt = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+  #endif
   vec2 p = groundAt.xz + uGroundPan;
   vGroundWorld = p;
   float far = smoothstep( 700.0, 1600.0, distance( groundAt, cameraPosition ) );
@@ -661,7 +667,11 @@ export function applyDesertGround(
       vertex = vertex.replace(
         '#include <begin_vertex>',
         `vec3 transformed = vec3( position );
+#ifdef USE_BATCHING
+float tileDistance = length( ( modelMatrix * batchingMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
+#else
 float tileDistance = length( ( modelMatrix * vec4( position, 1.0 ) ).xz - cameraPosition.xz );
+#endif
 float detailFade = smoothstep( ${DESERT_TILE_FADE_FULL.toFixed(1)}, ${DESERT_TILE_FADE_GONE.toFixed(1)}, tileDistance );
 transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShoulderGrit;' : ''}`,
       );
