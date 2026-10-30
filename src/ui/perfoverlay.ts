@@ -25,6 +25,9 @@
  * The header names the LIMIT over the last second: GPU when its time fills the
  * interval, CPU (with its biggest section) when main-thread work does, the cap when
  * neither does and the interval sits on the cap, otherwise vsync or the browser.
+ * The GPU line splits the GPU's frame by pass: the clouds' and the sun's shadow maps,
+ * the scene's opaque and transparent lists, the post passes and the live mirrors
+ * (core/renderer.ts `GPU_PARTS`), so a GPU limit says which pass holds it.
  * Memory is the JS heap (Chromium only), GPU-side object counts from three.js, and the
  * physics world's body count. Worker threads (terrain, vista, forest) are not visible
  * from the main thread; their cost shows only as what they leave the main thread to do.
@@ -33,12 +36,15 @@
  */
 
 import type { FrameProfiler } from '../core/frameprofiler';
+import { GPU_PARTS, type GpuPart } from '../core/renderer';
 
 /** What the overlay reads each frame; every source is a cheap getter. */
 export interface PerfSources {
   readonly profiler: FrameProfiler;
   readonly gpuMs: () => number | null;
   readonly measuresGpu: () => boolean;
+  /** Mean GPU time of one part of the frame, ms (core/renderer.ts `gpuPartMs`). */
+  readonly gpuPartMs: (part: GpuPart) => number;
   /** The presentation target, FPS: the cap, or null when uncapped. */
   readonly frameCap: () => number | null;
   /**
@@ -58,7 +64,7 @@ export interface PerfSources {
 const HISTORY = 480;
 const WIDTH = 480;
 const GRAPH_H = 110;
-const HEADER_H = 60;
+const HEADER_H = 74;
 const MEMORY_H = 22;
 const HEIGHT = HEADER_H + GRAPH_H + MEMORY_H;
 /** Milliseconds at the top of the graph. A frame past it is clipped and flagged. */
@@ -322,6 +328,10 @@ export class PerfOverlay {
       6,
       46,
     );
+    // Where the GPU's frame goes, pass by pass (core/renderer.ts `GPU_PARTS`).
+    if (gpu !== null) {
+      g.fillText(GPU_PARTS.map((part) => `${part === 'transparent' ? 'transp' : part} ${this.sources.gpuPartMs(part).toFixed(1)}`).join('  '), 6, 60);
+    }
 
     // The graph.
     const y0 = HEADER_H + GRAPH_H;

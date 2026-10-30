@@ -760,6 +760,7 @@ async function boot(): Promise<void> {
         profiler: frameProfiler,
         gpuMs: () => renderer.latestGpuMs,
         measuresGpu: () => renderer.measuresGpuTime,
+        gpuPartMs: (part) => renderer.gpuPartMs(part),
         frameCap: () => world.state.settings.frameRateLimit,
         scheduledHz: () => loop.presentation.scheduledHz,
         drawCalls: () => renderer.drawCalls,

@@ -4,6 +4,18 @@
 
 ### Added
 
+- THE GPU'S FRAME BY PASS IN THE PERFORMANCE OVERLAY (`core/renderer.ts` `GPU_PARTS`,
+  `gpuPart`, `gpuPartMs`; `ui/perfoverlay.ts`). Where the overlay said only "limit: GPU",
+  a fourth header line now reads the mean GPU time of each part of the frame over about
+  half a second: `clouds` (their shadow map), `shadows` (the sun's two cascades),
+  `opaque` and `transp` (the scene pass's two lists, split at its first transparent
+  draw), `post` (haze, grade, ink, TAA, FSR, present) and `mirrors` (every live mirror's
+  scene pass). Timer queries cannot nest, so a frame is now a run of back-to-back
+  queries, one per part, and the frame time the launch's tier choice and `gpuFrameMs`
+  read is their sum. Headless on the M2 Pro, cabin, Blessing, autopilot at km 3: clouds
+  0.5, shadows 0.8–1.2, opaque 4.4–7.6, transparent 4.7–8.1, post 3.5–5.0, mirrors
+  4.9–9.7 ms; the parts summed 19.7 ms against the old single query's 20.4.
+
 - CABIN MIRRORS CAN BE TURNED OFF (`Settings.cabinMirrors`; menu Settings →
   **Cabin mirrors**: On / Off; `render/carmirrors.ts` `setEnabled`, `main.ts`). Off hides
   the live faces and runs no mirror pass; the static glass shows. On by default, and an

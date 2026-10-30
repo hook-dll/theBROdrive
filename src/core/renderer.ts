@@ -300,7 +300,7 @@ function drawPhotoMileage(
 }
 
 
-const MAX_PENDING_GPU_QUERIES = 8;
+const MAX_PENDING_GPU_FRAMES = 8;
 /**
  * The GPU running average behind `gpuFrameMs` and the launch's rung measurement
  * (app/bootwarmup.ts). An exponential mean, not a streak or a window: a brief stall
@@ -362,10 +362,27 @@ interface GpuTimerQueryExtension {
   readonly GPU_DISJOINT_EXT: number;
 }
 
-interface PendingGpuQuery {
-  readonly query: WebGLQuery;
+/**
+ * The parts of a frame the GPU is timed in, in the order a frame meets them. Timer
+ * queries cannot nest, so a frame is a run of back-to-back queries, one per part
+ * (`gpuPart`), and its time is their sum.
+ *  - `clouds`: the clouds' shadow map (render/clouds.ts).
+ *  - `shadows`: the sun's shadow maps, both cascades.
+ *  - `opaque`, `transparent`: the scene pass's two lists; glass, smoke, decals and the
+ *    contact shadows are in the second.
+ *  - `post`: everything after the scene pass (haze, grade, ink, TAA, FSR, present).
+ *  - `mirrors`: the live mirrors, each a whole scene pass.
+ */
+export const GPU_PARTS = ['clouds', 'shadows', 'opaque', 'transparent', 'post', 'mirrors'] as const;
+export type GpuPart = (typeof GPU_PARTS)[number];
+
+interface PendingGpuFrame {
+  readonly queries: { readonly part: GpuPart; readonly query: WebGLQuery }[];
   readonly eligible: boolean;
 }
+
+/** Weight of a frame in each part's running mean (`gpuPartMs`): about half a second. */
+const GPU_PART_WEIGHT = 0.06;
 
 
 
@@ -470,7 +487,13 @@ export class Renderer {
   private quality: GraphicsQuality;
   private readonly timerQueryGl: WebGL2RenderingContext | null;
   private readonly timerQueryExt: GpuTimerQueryExtension | null;
-  private readonly pendingGpuQueries: PendingGpuQuery[] = [];
+  private readonly pendingGpuFrames: PendingGpuFrame[] = [];
+  /** The frame being timed, and the part its open query times; null between frames. */
+  private gpuFrame: PendingGpuFrame | null = null;
+  private gpuPartOpen: GpuPart | null = null;
+  /** While a part may not be split (the mirrors' scene passes): see `gpuPart`. */
+  private gpuPartHeld = false;
+  private readonly gpuPartMeans = new Map<GpuPart, number>();
   private queryEligible = false;
   /** Exponential mean of the admitted GPU durations, ms; null since the last reset. */
   private gpuAverageMs: number | null = null;
@@ -546,11 +569,21 @@ export class Renderer {
     const drawShadows = shadowMap.render.bind(shadowMap);
     shadowMap.render = (lights, scene, camera) => {
       camera.layers.enable(SHADOW_ONLY_LAYER);
+      const part = this.gpuPartOpen;
+      this.gpuPart('shadows');
       try {
         drawShadows(lights, scene, camera);
       } finally {
         camera.layers.disable(SHADOW_ONLY_LAYER);
+        if (part !== null) this.gpuPart(part);
       }
+    };
+    // The scene pass's transparent list follows its opaque one in the same `render`:
+    // its first draw starts the `transparent` part.
+    const drawBuffer = this.renderer.renderBufferDirect.bind(this.renderer);
+    this.renderer.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
+      if (this.gpuPartOpen === 'opaque' && material.transparent) this.gpuPart('transparent');
+      drawBuffer(camera, scene, geometry, material, object, group);
     };
     // No Three tone mapping: the display transform is the fullscreen pass's own
     // (render/displaytransform.ts), applied once to the whole frame. Every scene material
@@ -1125,12 +1158,20 @@ export class Renderer {
 
   render(): void {
     this.pollGpuQueries();
-    const query = this.beginGpuTimerQuery();
+    this.beginGpuFrame();
     try {
       this.drawFrame();
-      this.mirrorPass?.draw();
+      if (this.mirrorPass) {
+        this.gpuPart('mirrors');
+        this.gpuPartHeld = true;
+        try {
+          this.mirrorPass.draw();
+        } finally {
+          this.gpuPartHeld = false;
+        }
+      }
     } finally {
-      if (query !== null) this.endGpuTimerQuery();
+      this.endGpuFrame();
     }
   }
 
@@ -1254,15 +1295,18 @@ export class Renderer {
     //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
     // cutscene's ground does not read it.
+    this.gpuPart('clouds');
     if (scene === this.scene) this.cloudShadowPass?.draw();
     const temporal = this.taaActive();
     this.renderer.setRenderTarget(this.hazeTarget);
+    this.gpuPart('opaque');
     if (temporal) {
       const now = performance.now();
       this.temporal.begin(camera, now);
       try {
         this.renderer.render(scene, camera);
       } finally {
+        this.gpuPart('post');
         this.temporal.drawMotion(this.renderer, scene, camera);
       }
       this.renderer.setRenderTarget(this.frameTarget);
@@ -1271,6 +1315,7 @@ export class Renderer {
       return;
     }
     this.renderer.render(scene, camera);
+    this.gpuPart('post');
     if (this.shrinking) {
       this.renderer.setRenderTarget(this.frameTarget);
       this.renderer.render(this.hazeScene, this.hazeCamera);
@@ -1344,11 +1389,11 @@ export class Renderer {
    */
   renderAlternate(scene: THREE.Scene, camera: THREE.PerspectiveCamera): void {
     this.pollGpuQueries();
-    const query = this.beginGpuTimerQuery();
+    this.beginGpuFrame();
     try {
       this.drawFrame(scene, camera);
     } finally {
-      if (query !== null) this.endGpuTimerQuery();
+      this.endGpuFrame();
     }
   }
 
@@ -1558,27 +1603,48 @@ export class Renderer {
     this.queryEligible = eligible;
   }
 
-  private beginGpuTimerQuery(): WebGLQuery | null {
-    const gl = this.timerQueryGl;
-    const ext = this.timerQueryExt;
-    if (gl === null || ext === null || this.pendingGpuQueries.length >= MAX_PENDING_GPU_QUERIES) {
-      return null;
-    }
-
-    const query = gl.createQuery();
-    if (query === null) return null;
-    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
-    this.pendingGpuQueries.push({
-      query,
-      eligible: this.queryEligible,
-    });
-    return query;
+  /**
+   * Mean GPU time of each part of the frame (`GPU_PARTS`), ms, over about the last half
+   * second; a part the frames have not drawn reads 0. For the live graph
+   * (ui/perfoverlay.ts), to say WHICH pass holds the GPU when it is the limit.
+   */
+  gpuPartMs(part: GpuPart): number {
+    return this.gpuPartMeans.get(part) ?? 0;
   }
 
-  private endGpuTimerQuery(): void {
-    const gl = this.timerQueryGl;
-    const ext = this.timerQueryExt;
-    if (gl !== null && ext !== null) gl.endQuery(ext.TIME_ELAPSED_EXT);
+  private beginGpuFrame(): void {
+    if (this.timerQueryGl === null || this.timerQueryExt === null) return;
+    if (this.pendingGpuFrames.length >= MAX_PENDING_GPU_FRAMES) return;
+    this.gpuFrame = { queries: [], eligible: this.queryEligible };
+  }
+
+  /**
+   * Closes the open part's query and opens one for `part`, in the frame being timed. A
+   * no-op between frames (a photograph's draw), while the open part is `part`, and while
+   * the part is held (a mirror's scene pass would otherwise split into its own shadows,
+   * opaque and transparent parts and read as the frame's).
+   */
+  private gpuPart(part: GpuPart): void {
+    const frame = this.gpuFrame;
+    if (frame === null || this.gpuPartHeld || this.gpuPartOpen === part) return;
+    const gl = this.timerQueryGl!;
+    const ext = this.timerQueryExt!;
+    if (this.gpuPartOpen !== null) gl.endQuery(ext.TIME_ELAPSED_EXT);
+    this.gpuPartOpen = null;
+    const query = gl.createQuery();
+    if (query === null) return;
+    gl.beginQuery(ext.TIME_ELAPSED_EXT, query);
+    frame.queries.push({ part, query });
+    this.gpuPartOpen = part;
+  }
+
+  private endGpuFrame(): void {
+    const frame = this.gpuFrame;
+    if (frame === null) return;
+    if (this.gpuPartOpen !== null) this.timerQueryGl!.endQuery(this.timerQueryExt!.TIME_ELAPSED_EXT);
+    this.gpuPartOpen = null;
+    this.gpuFrame = null;
+    if (frame.queries.length > 0) this.pendingGpuFrames.push(frame);
   }
 
   /** Non-blockingly collects completed GPU timings in submission order. */
@@ -1592,20 +1658,32 @@ export class Renderer {
       return;
     }
 
-    while (this.pendingGpuQueries.length > 0) {
-      const pending = this.pendingGpuQueries[0];
-      if (!gl.getQueryParameter(pending.query, gl.QUERY_RESULT_AVAILABLE)) return;
+    while (this.pendingGpuFrames.length > 0) {
+      const pending = this.pendingGpuFrames[0]!;
+      // A frame's queries finish in order: its last one done, all are.
+      if (!gl.getQueryParameter(pending.queries.at(-1)!.query, gl.QUERY_RESULT_AVAILABLE)) return;
       if (gl.getParameter(ext.GPU_DISJOINT_EXT)) {
         this.disposeGpuQueries();
         return;
       }
 
-      this.pendingGpuQueries.shift();
-      const result = gl.getQueryParameter(pending.query, gl.QUERY_RESULT);
-      const gpuMs = typeof result === 'number' ? result / 1_000_000 : Number.NaN;
-      gl.deleteQuery(pending.query);
+      this.pendingGpuFrames.shift();
+      let gpuMs = 0;
+      const partMs = new Map<GpuPart, number>();
+      for (const { part, query } of pending.queries) {
+        const result = gl.getQueryParameter(query, gl.QUERY_RESULT);
+        gl.deleteQuery(query);
+        const ms = typeof result === 'number' ? result / 1_000_000 : Number.NaN;
+        gpuMs += ms;
+        partMs.set(part, (partMs.get(part) ?? 0) + ms);
+      }
       if (!Number.isFinite(gpuMs) || gpuMs < 0) continue;
       this.latestGpuMsValue = gpuMs;
+      for (const part of GPU_PARTS) {
+        const ms = partMs.get(part) ?? 0;
+        const mean = this.gpuPartMeans.get(part);
+        this.gpuPartMeans.set(part, mean === undefined ? ms : mean + (ms - mean) * GPU_PART_WEIGHT);
+      }
       if (!pending.eligible) continue;
       this.gpuSamples += 1;
       if (this.gpuSamples <= GPU_DISCARD_SAMPLES) continue;
@@ -1617,11 +1695,11 @@ export class Renderer {
 
   private disposeGpuQueries(): void {
     if (this.timerQueryGl !== null) {
-      for (const { query } of this.pendingGpuQueries) {
-        this.timerQueryGl.deleteQuery(query);
+      for (const frame of this.pendingGpuFrames) {
+        for (const { query } of frame.queries) this.timerQueryGl.deleteQuery(query);
       }
     }
-    this.pendingGpuQueries.length = 0;
+    this.pendingGpuFrames.length = 0;
   }
 
   /**
