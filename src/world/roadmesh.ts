@@ -1210,6 +1210,9 @@ export class RoadMeshProvider implements ChunkProvider {
       geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
 
       const roadMesh = new THREE.Mesh(geometry, roadMaterial);
+      // The mirror merges this exact surface (material and every look attribute) into
+      // one far mesh (render/farroad.ts); the chunk group is hidden in that pass.
+      roadMesh.userData.farRoadSurface = true;
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
