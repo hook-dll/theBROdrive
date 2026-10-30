@@ -254,6 +254,25 @@
 
 ### Changed
 
+- ONE REAR PASS FOR ALL THREE LIVE MIRRORS (`render/carmirrors.ts`; one shared
+  1024×384 half-float target, one wide rear camera, the same three unlit face materials).
+  The old path drew the whole scene three times, once per glass, 58–99 draws a pass. Now
+  one pass per frame serves every face: each face's UVs are the eye-to-glass ray
+  reflected by that glass and projected into the shared camera. No new program, no shadow
+  pass, no post pass; `Renderer.renderMirror` still turns off the scene matrix walk and
+  the sun's shadow update for the pass, and the shared target scales with the tier's
+  `mirrorScale` (none on Very Low). `Settings.mirrorFrameRate` now paces the shared pass,
+  so at 10/s all three faces update together.
+  - The approximation is parallax: the three glasses sit 0.8–1.4 m apart, and the shared
+    image comes from one point about 3 m behind the car, so a near object can be a few
+    degrees off relative to the background in a face whose glass is not at that point
+    (about 1 m at 10 m, 1° at 50 m). Far land, sky and the horizon are effectively exact.
+  - The inner mirror is the most approximate: its reflected rays pass through the cabin,
+    while the shared camera stands behind the car, so it shows the road behind rather
+    than the rear seat and pillars. Side mirrors keep the following traffic.
+  - The shared camera is aimed by the inner glass's outward normal (the car's rear), not
+    the main camera's forward, so a turned head cannot swing it; its up follows the car.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow
