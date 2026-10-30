@@ -287,6 +287,19 @@
   props, same places (fixed-camera shots at km 40); a 3-minute autopilot drive paced the
   same as before with no program linked mid-drive.
 
+- DESERT TILE PROPS IN THE SAME MULTI-DRAW BATCHES (`world/deserttiles.ts`,
+  `InstanceBatches.place`). A tile drew its props as one InstancedMesh per form, so the
+  5×5 square cost about two dozen draws, each the whole tile's instances of one form.
+  They are now instances of the streamer's own `InstanceBatches`: one multi-draw per
+  material and square of 4×4 tiles, culled per instance. Slots are taken when a tile goes
+  live and given back at teardown (after its breakables are forgotten), so a replacement
+  built off-scene draws nothing until it changes places; the distance fade rewrites a
+  slot through `place`, in the batch's frame. Programs from boot
+  (`desertPropProgramAnchor`). Cabin, km 21, Blessing: tile props 24 → 4 draws, the main
+  pass 110 → 90. Slots matched the live tiles' props at every check of a 3-minute drive
+  (67 → 94 props as tiles streamed); a tile prop still breaks (instance hidden, collider
+  off, flattened in the save); a close-up at a fixed camera is unchanged.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow

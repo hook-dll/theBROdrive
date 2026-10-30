@@ -113,7 +113,7 @@ import { LampPoolField, LampView } from './render/lamppools';
 import { LampOccluders } from './render/lampoccluders';
 import { ContactPatchField } from './render/contactpatches';
 import { ChunkStreamer } from './world/chunks';
-import { DesertTileStreamer } from './world/deserttiles';
+import { DesertTileStreamer, desertPropProgramAnchor } from './world/deserttiles';
 import { MesaColliders } from './world/mesacolliders';
 import {
   STATE_GROUND_PROBE_DOWN_M,
@@ -591,6 +591,7 @@ async function boot(): Promise<void> {
     poleProgramAnchor(),
     delineatorProgramAnchor(),
     scatterProgramAnchor(),
+    desertPropProgramAnchor(),
     itemProgramAnchor(),
     mirrorProgramAnchor(),
     marketProgramAnchor(),

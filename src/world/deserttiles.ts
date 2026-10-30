@@ -11,10 +11,13 @@ import {
   desertPropForms,
   pickDesertForm,
   propPieces,
+  rockForms,
+  sandForms,
   type BreakableSink,
   type DesertPropForm,
 } from './props/forms';
 import { buildContactShadows, contactShadowMatrix } from './props/contactshadow';
+import { batchedProgramAnchor, InstanceBatches, type BatchChunk, type BatchKind, type BatchSlot } from './props/instancebatch';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
 import type { Terrain } from './terrain';
@@ -134,7 +137,7 @@ interface DesertPropPlacement {
   readonly leanAxisZ: number;
   renderScale: number;
   readonly radius: number;
-  mesh: THREE.InstancedMesh | null;
+  mesh: THREE.InstancedMesh | THREE.BatchedMesh | null;
   instance: number;
   /** The ground under the prop, and its contact shadow's batch (same index as the prop). */
   readonly groundY: number;
@@ -172,6 +175,45 @@ function writeInstanceTransform(prop: DesertPropPlacement, fade: number): void {
   instanceScratch.updateMatrix();
 }
 
+/** Tiles per side of one band of the props' shared batches: 4 × 240 m. */
+const PROP_BAND_TILES = 4;
+
+/**
+ * The frame a tile's props are placed in. A tile's matrices are relative to its centre,
+ * so the centre is the chunk origin; the chunk index only picks the band, and every
+ * tile of one `PROP_BAND_TILES` square gets the same one (a multi-draw band is
+ * `chunkIndex / 16`, a page band `chunkIndex / 4`: both distinct per square). A band
+ * stays within a kilometre, so its batch anchor keeps every instance near f32's best.
+ */
+function tileBatchChunk(tx: number, tz: number, centreX: number, centreZ: number): BatchChunk {
+  const bx = Math.floor(tx / PROP_BAND_TILES) + 32768;
+  const bz = Math.floor(tz / PROP_BAND_TILES) + 32768;
+  return { chunkIndex: (bx * 65536 + bz) * 16, originX: centreX, originZ: centreZ };
+}
+
+const desertPropKinds = new WeakMap<DesertPropForm, BatchKind>();
+/**
+ * A form as the tile props' batches take it: casting and receiving, drawn before the
+ * contact shadows (renderOrder 0.5: the scatter draws the same forms in its own batches
+ * at 0, and interleaving the two re-resolved the program on every change).
+ */
+function desertPropKind(form: DesertPropForm): BatchKind {
+  let kind = desertPropKinds.get(form);
+  if (!kind) {
+    kind = { geometry: form.geometry, material: form.material, castShadow: true, receiveShadow: true, renderOrder: 0.5 };
+    desertPropKinds.set(form, kind);
+  }
+  return kind;
+}
+
+/**
+ * The tile props' multi-draw programs from boot (see .omp/rules/shader-variants.md):
+ * every desert form as `desertPropKind` gives it to the batches.
+ */
+export function desertPropProgramAnchor(): THREE.Object3D {
+  return batchedProgramAnchor('desert-prop-anchor', [...sandForms(), ...rockForms()].map(desertPropKind));
+}
+
 interface DesertTile {
   readonly tx: number;
   readonly tz: number;
@@ -180,7 +222,10 @@ interface DesertTile {
   readonly centreZ: number;
   readonly group: THREE.Group;
   readonly geometry: THREE.BufferGeometry;
+  /** The tile's contact shadows, the one mesh it still owns (props draw from `propBatches`). */
   readonly meshes: readonly THREE.InstancedMesh[];
+  /** The frame its props are placed in: the tile centre, in its band of tiles (see `tileBatchChunk`). */
+  readonly batchChunk: BatchChunk;
   readonly heights: Float32Array;
   /**
    * The buffer set backing `heights`, `geometry` and the collider, kept so teardown
@@ -292,6 +337,14 @@ export class DesertTileStreamer {
    * held for no reason.
    */
   private readonly recycled: DesertTileData[] = [];
+  /**
+   * Every live tile's props, as instances of the shared multi-draw batches
+   * (props/instancebatch.ts): one draw per material and band of `PROP_BAND_TILES`²
+   * tiles, each instance culled on its own, instead of one InstancedMesh per form per
+   * tile. Slots are taken when a tile goes live and given back at its teardown, so a
+   * replacement assembled off-scene draws nothing until it changes places.
+   */
+  private readonly propBatches: InstanceBatches;
 
   constructor(
     private readonly seed: number,
@@ -306,6 +359,9 @@ export class DesertTileStreamer {
     private readonly workerFactory?: DesertTileWorkerFactory,
   ) {
     this.worker = this.createWorker();
+    this.propBatches = new InstanceBatches(origin);
+    this.propBatches.root.name = 'desert-prop-batches';
+    scene.add(this.propBatches.root);
   }
 
 
@@ -433,6 +489,7 @@ export class DesertTileStreamer {
       // Frozen at creation (see `freezeStaticSubtree`): the root recomposes, the rest follows.
       tile.group.updateMatrix();
     }
+    this.propBatches.rebase();
   }
 
   /** Releases the worker and every tile-owned Three/Rapier resource. */
@@ -450,6 +507,8 @@ export class DesertTileStreamer {
     for (const tile of this.replacements.values()) this.teardown(tile);
     this.replacements.clear();
     this.scheduler.setPending('desert', false);
+    this.propBatches.dispose();
+    this.scene.remove(this.propBatches.root);
   }
 
   get visualTileCount(): number {
@@ -575,6 +634,7 @@ export class DesertTileStreamer {
       group,
       geometry,
       meshes,
+      batchChunk: tileBatchChunk(tx, tz, centreX, centreZ),
       heights: data.heights,
       data,
       props,
@@ -595,6 +655,14 @@ export class DesertTileStreamer {
     tile.group.updateMatrix();
     this.scene.add(tile.group);
     this.tiles.set(tile.key, tile);
+    // The props join the shared batches now, as the tile becomes the drawn one; their
+    // matrices are relative to the tile centre (`batchChunk.origin`), at their fade.
+    for (const prop of tile.props) {
+      writeInstanceTransform(prop, prop.scale > 0 ? prop.renderScale / prop.scale : 1);
+      const slot = this.propBatches.allocate(tile.batchChunk, desertPropKind(prop.form), instanceScratch.matrix);
+      prop.mesh = slot.mesh;
+      prop.instance = slot.instance;
+    }
   }
 
 
@@ -671,43 +739,10 @@ export class DesertTileStreamer {
       });
     }
 
+    // The props themselves are instances of the shared batches, taken when the tile goes
+    // live (`goLive`). They used to be one InstancedMesh per form per tile — about two
+    // dozen draws in the frame for the 5×5 square, each drawing its whole tile.
     const meshes: THREE.InstancedMesh[] = [];
-    const byForm = new Map<DesertPropForm, DesertPropPlacement[]>();
-    for (const prop of props) {
-      const list = byForm.get(prop.form);
-      if (list) list.push(prop);
-      else byForm.set(prop.form, [prop]);
-    }
-    for (const [form, placements] of byForm) {
-      const instances = new THREE.InstancedMesh(form.geometry, form.material, placements.length);
-      instances.castShadow = true;
-      instances.receiveShadow = true;
-      // Their own place in the opaque list. The scatter's batch pages draw the same forms
-      // in the same materials without receiving shadows, and three sorts opaque draws by
-      // material then distance: interleaved, every change between the two re-resolved the
-      // material's program and uploaded all its uniforms again (16 times a frame on the
-      // road at km 30). Before the contact shadows (1), which lie over what is drawn first.
-      instances.renderOrder = 0.5;
-      for (let i = 0; i < placements.length; i++) {
-        const prop = placements[i]!;
-        writeInstanceTransform(prop, 1);
-        instances.setMatrixAt(i, instanceScratch.matrix);
-        prop.mesh = instances;
-        prop.instance = i;
-      }
-      instances.instanceMatrix.needsUpdate = true;
-      // Culling bounds over the instances at FULL size, computed now, before the first
-      // fade write. Left to three, the sphere was computed lazily at the first cull —
-      // after `syncPropFades` had already shrunk a freshly streamed tile's props towards
-      // zero — and then never again, so a tile that grew to full size kept bounds a
-      // fraction of its props (measured: 52 of 61 live meshes, a lone cactus at radius
-      // 0), and a prop vanished as soon as its origin left the view. Fades and breaks
-      // only ever shrink an instance, so the full-size sphere stays conservative for
-      // the tile's whole life, and a rebase moves the tile group it is local to.
-      instances.computeBoundingSphere();
-      group.add(instances);
-      meshes.push(instances);
-    }
     const shadows = buildContactShadows(
       props.map((prop) => ({ x: prop.x, groundY: prop.groundY, z: prop.z, radius: prop.radius, height: prop.height })),
     );
@@ -745,8 +780,7 @@ export class DesertTileStreamer {
 
         prop.renderScale = renderScale;
         writeInstanceTransform(prop, fade);
-        prop.mesh.setMatrixAt(prop.instance, instanceScratch.matrix);
-        prop.mesh.instanceMatrix.needsUpdate = true;
+        this.propBatches.place(prop as BatchSlot, tile.batchChunk, instanceScratch.matrix);
         if (prop.shadow) {
           prop.shadow.setMatrixAt(prop.shadowInstance, contactShadowMatrix(prop, fade, shadowScratch));
           prop.shadow.instanceMatrix.needsUpdate = true;
@@ -1278,6 +1312,13 @@ export class DesertTileStreamer {
     this.scene.remove(tile.group);
     tile.geometry.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
+    // A live tile's props give their batch slots back, after `demote` above has forgotten
+    // their breakables; a replacement that never went live holds none.
+    for (const prop of tile.props) {
+      if (!prop.mesh) continue;
+      this.propBatches.release(prop as BatchSlot);
+      prop.mesh = null;
+    }
     // Every caller drops the tile from `tiles` or `replacements` around this call, and
     // the geometry above is gone, so nothing can read these buffers again: they are
     // free to be written over by the next tile the worker builds.

@@ -284,6 +284,21 @@ export class InstanceBatches {
   }
 
   /**
+   * Rewrites a held slot's matrix: `local` in `chunk`'s frame, as `allocate` took it. For
+   * an owner that moves its instances after placing them (the desert tiles' fade). The
+   * bounds are not grown: a caller may only shrink or keep an instance inside them.
+   */
+  place(slot: BatchSlot, chunk: BatchChunk, local: THREE.Matrix4): void {
+    const owner = slot.mesh instanceof THREE.BatchedMesh ? this.batchOf.get(slot.mesh) : this.pageOf.get(slot.mesh);
+    if (!owner) return;
+    _matrix.copy(local);
+    _matrix.elements[12] += chunk.originX - owner.anchorX;
+    _matrix.elements[14] += chunk.originZ - owner.anchorZ;
+    slot.mesh.setMatrixAt(slot.instance, _matrix);
+    if (slot.mesh instanceof THREE.InstancedMesh) slot.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
    * Gives a slot back. It is blanked, so it draws nothing, and its index is reused.
    * Callers forget any breakable or cover handle on the slot first.
    */
