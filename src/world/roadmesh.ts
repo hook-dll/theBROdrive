@@ -1215,6 +1215,10 @@ export class RoadMeshProvider implements ChunkProvider {
       roadMesh.userData.farWorldSurface = true;
       roadMesh.userData.farWorldChunkStart = ctx.sStart;
       roadMesh.userData.farWorldChunkEnd = ctx.sEnd;
+      roadMesh.userData.farWorldGridRows = rowCount;
+      roadMesh.userData.farWorldGridColumns = latCount;
+      roadMesh.userData.farWorldGridStride = 2;
+      roadMesh.userData.farWorldGridWinding = 'road';
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;
