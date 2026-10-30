@@ -164,13 +164,6 @@ const SUPERSAMPLE_WITHOUT_FXAA = 1.4;
 export const SHADOW_ONLY_LAYER = 1;
 
 /**
- * The sky's own layer (dome, stars, planets, Moon, clouds). The main camera enables it;
- * a mirror's world pass does not, so the world can be cut at a short far plane while the
- * sky is drawn first, with a camera far enough to hold the dome.
- */
-export const SKY_LAYER = 3;
-
-/**
  * Steps per colour channel in the retro finish. Few enough that the dithered bands read
  * as a period framebuffer; enough that skin-tone paint and dusk skies keep their hue.
  */
@@ -1162,32 +1155,18 @@ export class Renderer {
    * world matrices and every shadow map, so this pass walks neither again, and it has no
    * post pass. Its draws add to the frame's `info` counters (reset once per frame).
    */
-  renderMirror(target: THREE.WebGLRenderTarget, camera: THREE.Camera, skyCamera?: THREE.Camera): void {
+  renderMirror(target: THREE.WebGLRenderTarget, camera: THREE.Camera): void {
     const shadows = this.renderer.shadowMap;
     const autoUpdate = shadows.autoUpdate;
     const needsUpdate = shadows.needsUpdate;
     const matrices = this.scene.matrixWorldAutoUpdate;
-    const autoClear = this.renderer.autoClear;
     shadows.autoUpdate = false;
     shadows.needsUpdate = false;
     this.scene.matrixWorldAutoUpdate = false;
     try {
       this.renderer.setRenderTarget(target);
-      if (skyCamera !== undefined) {
-        // The sky first, with the long far plane it needs; then the world with the mirror's
-        // short far plane over it, without clearing what the sky pass wrote.
-        this.renderer.autoClear = true;
-        this.renderer.render(this.scene, skyCamera);
-        this.renderer.autoClear = false;
-        this.renderer.render(this.scene, camera);
-      } else {
-        const mask = camera.layers.mask;
-        camera.layers.enable(SKY_LAYER);
-        this.renderer.render(this.scene, camera);
-        camera.layers.mask = mask;
-      }
+      this.renderer.render(this.scene, camera);
     } finally {
-      this.renderer.autoClear = autoClear;
       this.renderer.setRenderTarget(null);
       this.scene.matrixWorldAutoUpdate = matrices;
       shadows.autoUpdate = autoUpdate;

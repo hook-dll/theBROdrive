@@ -29,17 +29,15 @@
  * traffic in one draw per batch: a near kit car in full was some 60 draws of a mirror's
  * ~200 (measured on the M2 Pro, High traffic), in a picture a few centimetres across. A
  * car with a door, lid or pane off its stop keeps its own body, which the far mesh does
- * not show. The world in a mirror is cut at `MIRROR_FAR_M` (100 m); the sky is not. The
- * dome, stars, planets and clouds sit on `SKY_LAYER`, and each mirror draws them first in
- * a tiny separate pass whose camera keeps the scene's far plane. The world pass then
- * draws with the short far plane and `autoClear` off, so the sky already in the target
- * stays. Without the split, 100 m would clip the 3 km dome and take the clouds with it.
+ * not show. The draw distance is the scene's: a mirror's nearer far plane cut its draws by
+ * under five percent (the world's batches each span hundreds of metres) and would clip
+ * the sky dome.
  */
 
 import * as THREE from 'three';
 import type { KitMirror } from '../carkit/names';
 import type { KitRig } from '../carkit/rig';
-import { SKY_LAYER, type Renderer } from '../core/renderer';
+import type { Renderer } from '../core/renderer';
 import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
 import type { Vehicle } from '../vehicle/vehicle';
 import { FarCarField } from './farcars';
@@ -50,9 +48,6 @@ import { aimMirrorCamera, mirrorFaceGeometry } from './mirrorview';
 export type MirrorCarSource = (visit: (id: string, vehicle: Vehicle) => void) => void;
 
 const MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
-
-/** How far the world is drawn in a mirror, metres; the sky is drawn in its own pass. */
-const MIRROR_FAR_M = 100;
 
 /** Target pixels at full scale, about each glass's aspect (19 x 4.4 cm, 10 x 7 cm). */
 const PIXELS: Readonly<Record<KitMirror, readonly [number, number]>> = {
@@ -128,8 +123,6 @@ export class CarMirrors {
   private owed = 0;
   private lastMs = -1;
   private readonly camera = new THREE.PerspectiveCamera();
-  /** The same window with the scene's far plane, for the sky alone. */
-  private readonly skyCamera = new THREE.PerspectiveCamera();
   /** The cars drawn in the mirrors as their far mesh, in the far batches; shown only while a mirror draws. */
   private readonly standIns: FarCarField;
   /** Roots hidden for the mirror renders under way, put back after them. */
@@ -145,7 +138,6 @@ export class CarMirrors {
     // Its off-axis projection is built by `aim`, so the camera takes the scene's depth
     // convention now, not at its first draw (render/depthconvention.ts).
     adoptReversedDepth(this.camera, renderer.reversedDepth);
-    adoptReversedDepth(this.skyCamera, renderer.reversedDepth);
     this.standIns = new FarCarField(renderer.scene);
     this.standIns.setVisible(false);
     this.setQuality(quality);
@@ -231,7 +223,7 @@ export class CarMirrors {
         }
         // Its own face lies on the near plane, and drawing it would sample the target being drawn.
         face.visible = false;
-        this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera, this.skyCamera);
+        this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
         // Shown only once drawn, so a face never shows an empty or another car's target.
         face.visible = true;
         this.stats.renders++;
@@ -285,11 +277,6 @@ export class CarMirrors {
    */
   private aim(face: THREE.Mesh): boolean {
     _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
-    const world = aimMirrorCamera(this.camera, face, _eye, MIRROR_FAR_M);
-    const sky = aimMirrorCamera(this.skyCamera, face, _eye, this.renderer.camera.far);
-    // The world pass sees layer 0 only; the sky pass sees its own layer.
-    this.camera.layers.set(0);
-    this.skyCamera.layers.set(SKY_LAYER);
-    return world && sky;
+    return aimMirrorCamera(this.camera, face, _eye, this.renderer.camera.far);
   }
 }

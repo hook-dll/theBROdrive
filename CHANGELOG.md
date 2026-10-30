@@ -260,16 +260,6 @@
 
 ### Changed
 
-- MIRRORS DRAW THE WORLD TO 100 M AND THE SKY AS BEFORE (`render/carmirrors.ts`
-  `MIRROR_FAR_M`; `core/renderer.ts` `SKY_LAYER`, `renderMirror`; `render/sky.ts`). The
-  dome, stars, planets, the Moon and the clouds sit on their own layer. A mirror draws
-  them first with a camera that keeps the scene's far plane, then draws the world with
-  `far = 100` and `autoClear` off, so the sky already in the target stays. The main camera
-  enables the sky layer; a mirror's world pass sees layer 0 only. World draws past 100 m
-  disappear from the mirrors; the sky, its exposure and its clouds do not change. Callers
-  that render a mirror without a sky camera (the toilet mirror's own path) enable the sky
-  layer for that one pass.
-
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
   decision (12 Hz, 30 cars, plus the player's own), and each ask used to allocate the
