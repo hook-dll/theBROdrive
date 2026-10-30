@@ -117,6 +117,12 @@ const KIT_OPENING_SLACK = 0.08;
 /** How long F holds a momentary fitting (the horn) down, seconds. */
 const KIT_PRESS_SECONDS = 0.3;
 /**
+ * How often the seated kit ray is re-cast. It walks the whole car (151 pick proxies in
+ * the cabin); the crosshair can live with a tenth of a second, while F, a new car and a
+ * cabin/chase switch refresh it immediately.
+ */
+const SEATED_KIT_AIM_INTERVAL_S = 0.1;
+/**
  * Heaviest single thing a player can take into the cabin, kg: what fits on a lap or
  * the back seat. An engine (118 kg and up) is carried to a car, not ridden with.
  */
@@ -733,6 +739,12 @@ export class Interaction {
   private kitPress: { rig: KitRig; control: KitControl; left: number } | null = null;
   /** The hand-aimed part (the inside mirror) F is held on: the mouse turns it, not the head. */
   private kitAim: { vehicle: Vehicle; rig: KitRig; control: KitControl } | null = null;
+  /** The seated kit aim, re-cast at `SEATED_KIT_AIM_INTERVAL_S` and on every F. */
+  private seatedAim: KitPicked | null = null;
+  private seatedSeat: PlayerSeat | null = null;
+  private seatedAimVehicle: Vehicle | null = null;
+  private seatedAimCabin = false;
+  private seatedAimClock = 0;
   /** A seated press main.ts answers; see `takeCabinPress`. */
   private cabinPress: 'hazard' | 'radio' | null = null;
   /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
@@ -950,17 +962,32 @@ export class Interaction {
       // appears on it (`actionable`), and a refused exit is the door that stays shut.
       const active = this.getVehicle();
       const rig = active?.vehicle.kit ?? null;
-      let aimed: KitPicked | null = null;
-      // Another seat in the aim, from the cabin view, at any speed: F moves the occupant
-      // into it (over the tunnel, between the seats) instead of out.
-      let seat: PlayerSeat | null = null;
-      if (active && rig) {
-        aimed = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
-        const other = this.kitAimed.seat;
-        if (cabinView && other !== null && other !== this.world.state.player.seat) {
-          seat = other;
+      if (!active || !rig) {
+        this.seatedAim = null;
+        this.seatedSeat = null;
+        this.seatedAimVehicle = null;
+        this.seatedAimClock = 0;
+      } else {
+        this.seatedAimClock = Math.max(0, this.seatedAimClock - dt);
+        const refresh =
+          pressed ||
+          this.seatedAimClock <= 0 ||
+          this.seatedAimVehicle !== active.vehicle ||
+          this.seatedAimCabin !== cabinView;
+        if (refresh) {
+          this.seatedAimClock = SEATED_KIT_AIM_INTERVAL_S;
+          this.seatedAimVehicle = active.vehicle;
+          this.seatedAimCabin = cabinView;
+          this.seatedAim = this.seatedKitPart(active.vehicle, eyeX, eyeY, eyeZ, dirX, dirY, dirZ, cabinView);
+          const other = this.kitAimed.seat;
+          this.seatedSeat =
+            cabinView && other !== null && other !== this.world.state.player.seat ? other : null;
         }
       }
+      const aimed = this.seatedAim;
+      // Another seat in the aim, from the cabin view, at any speed: F moves the occupant
+      // into it (over the tunnel, between the seats) instead of out.
+      const seat = this.seatedSeat;
       // ONE F, SEATED, first match wins: the part in the aim, another seat in the aim, out
       // of the car. The held item is never used from a seat.
       if (pressed) {

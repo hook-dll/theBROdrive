@@ -254,6 +254,14 @@
 
 ### Changed
 
+- THE SEATED KIT RAY IS NOT RUN EVERY TICK (`player/interaction.ts`
+  `SEATED_KIT_AIM_INTERVAL_S`, `fixedUpdate`, `seatedKitPart`). In the cabin it walked
+  the whole car — 151 pick proxies, about 15.9k triangles — on every fixed step, because
+  the chase view's door-box prefilter does not apply there. It is now re-cast at 10 Hz
+  and immediately on F, when the car changes and when the cabin/chase view switches; the
+  crosshair and the seat prompt use the last result between refreshes. The on-foot aim
+  is unchanged.
+
 - PICK PROXIES ARE OUT OF THE RENDER WALK (`render/kitdraw.ts`;
   `player/interaction.ts`). Every kit car keeps its ~150 built parts as pick proxies on
   `KIT_PICK_LAYER` for raycasting, and they used to sit in the scene graph with
