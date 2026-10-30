@@ -1089,6 +1089,17 @@ export class RoadTraffic {
    * stream and redo the projection.
    */
   fieldFor(owner: FieldOwner, excludeId: string): TrafficField {
+    const cached = this.fields.get(owner);
+    if (cached !== undefined && cached.excludeId === excludeId) return cached.field;
+    const field = this.makeField(owner, excludeId);
+    this.fields.set(owner, { excludeId, field });
+    return field;
+  }
+
+  /** Fields by the driver that reads them: one object and one set of buffers per driver. */
+  private readonly fields = new WeakMap<FieldOwner, { excludeId: string; field: TrafficField }>();
+
+  private makeField(owner: FieldOwner, excludeId: string): TrafficField {
     const buffer = {
       s: 0,
       lateral: 0,
