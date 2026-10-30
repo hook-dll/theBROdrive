@@ -464,6 +464,16 @@ export const UPSCALINGS = ['off', 'fsr'] as const;
 export type Upscaling = (typeof UPSCALINGS)[number];
 
 /**
+ * Multisampling of the scene target (`Settings.msaa`): samples per pixel, 0 for none.
+ * Not a tier default anywhere; off until the player picks it in the Antialiasing row,
+ * which makes it and FXAA one choice (Off / FXAA / MSAA 2x / MSAA 4x). Never on Very Low.
+ * The colour and the depth the post pass reads are resolved from the samples every
+ * frame, so the drawn outlines still follow one sample's depth.
+ */
+export const MSAA_SAMPLES = [0, 2, 4] as const;
+export type MsaaSamples = (typeof MSAA_SAMPLES)[number];
+
+/**
  * RCAS strength under FSR (`Settings.sharpness`), as RCAS's own linear amount
  * exp2(-stops): 1 the most it allows, 0 none (the pass is skipped). 0.85 is about the
  * 0.2 stops AMD's samples default to.
@@ -586,6 +596,8 @@ export interface Settings {
   retroLines: RetroLines;
   /** FXAA: edge antialiasing in the post pass, on the shaded picture (render/hazeshader.ts). */
   fxaa: boolean;
+  /** Scene-target multisampling, samples per pixel; see `MSAA_SAMPLES`. Off unless chosen. */
+  msaa: MsaaSamples;
   /** How a frame below the screen's size is brought up to it; see `UPSCALINGS`. Off unless chosen. */
   upscaling: Upscaling;
   /** RCAS sharpening under FSR, 0..1; see `DEFAULT_SHARPNESS`. */
@@ -731,6 +743,7 @@ export const DEFAULT_SETTINGS: Settings = {
   frameScale: 1,
   retroLines: 360,
   fxaa: true,
+  msaa: 0,
   upscaling: 'off',
   sharpness: DEFAULT_SHARPNESS,
   shadows: 'full',
@@ -797,6 +810,7 @@ export function withQualityPreset(
     frameScale: 1,
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
+    msaa: 0,
     shadows: shadowModeDefault(quality),
     frameRateLimit: null,
   };
@@ -812,6 +826,7 @@ export function qualityPresetOf(settings: Settings, mobilePresentation: boolean)
     settings.viewDistance === preset
     && settings.trafficDensity === preset
     && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
+    && settings.msaa === 0
     && settings.shadows === shadowModeDefault(settings.graphicsQuality)
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro'
@@ -980,12 +995,15 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // The tier they chose is the answer, and it is right there in the same object.
     // `eyeAdaptation` lived here once and is deliberately not migrated: exposure is
     // analytic now, so a stored preference has nothing left to select.
-    // The rung's own default until the player chooses. A stored `msaa` is deliberately
-    // not migrated: multisampling is gone, and FXAA is a different trade to choose.
+    // The rung's own default until the player chooses.
     fxaa:
       typeof obj.fxaa === 'boolean'
         ? obj.fxaa
         : obj.graphicsQuality !== 'acceptable' && obj.graphicsQuality !== 'retro',
+    // Off unless stored as a sample count. A save from before 2026-10-15 holds `msaa` as
+    // a boolean, then most tiers' default rather than a choice; it reads as off, so it
+    // changes no one's picture.
+    msaa: (MSAA_SAMPLES as readonly unknown[]).includes(obj.msaa) ? (obj.msaa as MsaaSamples) : 0,
     // Missing means a save from before the upscaler: the compositor's stretch it drew.
     upscaling: (UPSCALINGS as readonly unknown[]).includes(obj.upscaling) ? (obj.upscaling as Upscaling) : 'off',
     // Snapped to the slider's step (divided back by the steps per unit, so 0.85 stays

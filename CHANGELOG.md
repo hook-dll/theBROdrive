@@ -4,6 +4,22 @@
 
 ### Added
 
+- MSAA IS BACK AS AN ANTIALIASING CHOICE, TO COMPARE WITH FXAA (`Settings.msaa`,
+  `MSAA_SAMPLES`; `core/renderer.ts` `setMsaa`; menu Settings → Quality →
+  **Antialiasing**: Off / FXAA / MSAA 2x / MSAA 4x).
+  - MSAA multisamples the scene target (`hazeTarget.samples`); Three resolves colour and
+    depth into the same textures after the scene pass, so the post pass (weather, ink
+    gate, FXAA) reads what it always did, the reversed-Z float depth included (the
+    multisampled depth takes the depth texture's 32-bit float format). Mirrors stay
+    single-sampled. Never on Very Low; kept at every Resolution multiple.
+  - One choice: picking MSAA turns FXAA off and picking FXAA or Off turns MSAA off. MSAA
+    is part of the preset (a preset sets it off; on, the settings read as Custom), and a
+    launch measurement off a preset keeps FXAA off under a chosen MSAA.
+  - Live, no reload, no program: no shader depends on the sample count; a switch only
+    reallocates the target on its next bind.
+  - Off for everyone until picked. A save's pre-2026-10-15 boolean `msaa` is not a
+    sample count and reads as off. The frame report's settings line says `msaa 4x`.
+
 - SMART UPSCALING: FSR 1 (`render/fsr.ts`; `core/renderer.ts` `setUpscaling`,
   `drawFrame`; `Settings.upscaling`, `Settings.sharpness`, `UPSCALINGS`; menu
   Settings → Quality → **Upscaling**, **Sharpness**). AMD FidelityFX Super Resolution 1 (MIT,

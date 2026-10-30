@@ -373,3 +373,12 @@ only under FSR; default 85%, 0% no sharpening). At Screen FSR only sharpens; at 
 ×2 it does nothing; Very Low never uses it. For a 144 Hz frame that still looks close to
 Screen, try FSR at ×0.75, then ×0.67; for a crisper Screen, FSR at Screen. Everything
 applies at once, with no reload. `Settings.upscaling`, `Settings.sharpness`.
+
+## Antialiasing
+
+Settings → Quality → **Antialiasing**: **Off**, **FXAA** (the post pass smooths edge
+steps in the finished picture; each rung's own default, left off at ×1.5 and ×2), **MSAA
+2x** and **MSAA 4x** (the scene is drawn with 2 or 4 samples per pixel and resolved
+before the post pass; smooth geometry edges, sharp texture, the dearest). One choice,
+never two stacked; MSAA is off unless picked, kept at every Resolution, never on Very
+Low. Applies at once, with no reload. `Settings.fxaa`, `Settings.msaa`.

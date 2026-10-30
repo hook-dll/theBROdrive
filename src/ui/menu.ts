@@ -1715,29 +1715,43 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // FXAA in the post pass. Not on Very Low: its square pixels are the look. Every row
-      // runs from the cheapest choice on the left to the dearest on the right.
+      // FXAA in the post pass, or the scene target multisampled: one choice, the two never
+      // stacked. Not on Very Low: its square pixels are the look. Every row runs from the
+      // cheapest choice on the left to the dearest on the right.
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Antialiasing', [
         {
           label: 'Off',
           icon: 'gfx1',
           hint: 'Jagged edges left as they are. Resolution and the drawn outlines still apply.',
-          active: () => !settings.fxaa,
+          active: () => !settings.fxaa && settings.msaa === 0,
           pick: () => {
             settings.fxaa = false;
+            settings.msaa = 0;
             changed();
           },
         },
         {
           label: 'FXAA',
-          icon: 'gfx3',
+          icon: 'gfx2',
           hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch. Left off at ×1.5 and ×2, whose extra pixels smooth the edges already.',
-          active: () => settings.fxaa,
+          active: () => settings.fxaa && settings.msaa === 0,
           pick: () => {
             settings.fxaa = true;
+            settings.msaa = 0;
             changed();
           },
         },
+        ...([2, 4] as const).map((samples) => ({
+          label: `MSAA ${samples}x`,
+          icon: 'gfx3' as const,
+          hint: `Draws ${samples} samples per pixel along every geometry edge and averages them: sharp texture, but the edges inside leaves and shading stay as they are. Costs the most, and more at ×1.5 and ×2.`,
+          active: () => settings.msaa === samples,
+          pick: () => {
+            settings.fxaa = false;
+            settings.msaa = samples;
+            changed();
+          },
+        })),
       ])]),
       // The sun's shadow, independent of the rung: Near keeps only the cascade around
       // the camera, which is where a car standing on the ground is read.
@@ -2654,6 +2668,7 @@ export class MainMenu {
         frameScale: base.frameScale,
         retroLines: base.retroLines,
         fxaa: base.fxaa,
+        msaa: base.msaa,
         upscaling: base.upscaling,
         sharpness: base.sharpness,
         shadows: base.shadows,
@@ -2691,6 +2706,7 @@ export class MainMenu {
           frameScale: settings.frameScale,
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
+          msaa: settings.msaa,
           upscaling: settings.upscaling,
           sharpness: settings.sharpness,
           shadows: settings.shadows,

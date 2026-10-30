@@ -407,6 +407,7 @@ async function boot(): Promise<void> {
     world.state.settings.shadows,
   );
   renderer.setRetroLines(world.state.settings.retroLines);
+  renderer.setMsaa(world.state.settings.msaa);
   renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
@@ -834,7 +835,8 @@ async function boot(): Promise<void> {
             + `dpr ${window.devicePixelRatio.toFixed(2)}`,
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
-            + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}, upscaling ${s.upscaling}`
+            + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}, msaa ${s.msaa ? `${s.msaa}x` : 'off'}, `
+            + `upscaling ${s.upscaling}`
             + (s.upscaling === 'fsr' ? ` (sharpness ${Math.round(s.sharpness * 100)}%)` : ''),
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
@@ -3656,6 +3658,7 @@ async function boot(): Promise<void> {
       pads.setSteeringSensitivity(world.state.settings.controllerSteerSensitivity);
       audio.applySettings(world.state.settings);
       renderer.setFxaa(world.state.settings.fxaa);
+      renderer.setMsaa(world.state.settings.msaa);
       renderer.setShadowMode(world.state.settings.shadows);
       sky.setShadowMode(world.state.settings.shadows);
       renderer.setFrameScale(world.state.settings.frameScale);

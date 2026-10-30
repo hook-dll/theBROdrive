@@ -21,6 +21,7 @@ import {
   type FrameScale,
   type RetroLines,
   type Upscaling,
+  type MsaaSamples,
 } from '../game/settings';
 import type { ShadeTint } from '../items/items';
 
@@ -437,6 +438,8 @@ export class Renderer {
   private paniniStrength = DEFAULT_PANINI;
   /** `Settings.fxaa`, kept so a rung change can apply it (never on the retro rung). */
   private fxaa: boolean;
+  /** `Settings.msaa`, kept so a rung change can apply it (never on the retro rung). */
+  private msaa: MsaaSamples = 0;
   /** `Settings.shadows`, kept so a rung change can apply it (phones may still force off). */
   private shadowMode: ShadowMode;
   /** Reused 2D target for compact photographs; created only when the shutter fires. */
@@ -484,9 +487,9 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       // NOT antialiased. Every rung draws scene pixels into `hazeTarget`; the
-      // antialiasing, where the player wants it, is FXAA in the fullscreen pass. A
-      // multisampled backbuffer would allocate and resolve an image that cannot differ
-      // by one pixel after that pass.
+      // antialiasing, where the player wants it, is FXAA in the fullscreen pass or that
+      // target's own multisampling (`setMsaa`). A multisampled backbuffer would allocate
+      // and resolve an image that cannot differ by one pixel after that pass.
       antialias: false,
       // Never ask a phone for its highest-performance configuration. On a desktop this
       // hint picks the discrete GPU, which is what it is for; on a phone there is only
@@ -576,11 +579,12 @@ export class Renderer {
     // LINEAR HDR (`sceneTargetType`): the scene's radiance, unclipped, so the sun's disc,
     // a lamp lens and glinting paint keep their excess for the tone curve to roll off.
     //
-    // NOT MULTISAMPLED. Four samples were the costliest line of the frame for what they
-    // did: the target has a depth texture the pass reads, so every frame resolved colour
-    // AND depth from four samples, at up to 4800x2700 on Blessing on top of its
-    // supersampling. FXAA (`Settings.fxaa`) works on the shaded picture in the pass that
-    // already reads it.
+    // NOT MULTISAMPLED BY DEFAULT. Four samples were the costliest line of the frame for
+    // what they did: the target has a depth texture the pass reads, so every frame
+    // resolved colour AND depth from four samples, at up to 4800x2700 on Blessing on top
+    // of its supersampling. FXAA (`Settings.fxaa`) works on the shaded picture in the
+    // pass that already reads it. Multisampling is back only as the player's choice to
+    // compare with it (`Settings.msaa`, `setMsaa`).
     //
     // FLOAT DEPTH under reversed Z: the convention only pays on a float buffer (on 24-bit
     // fixed point it spends its steps as the ordinary one does). The ordinary buffer keeps
@@ -1550,13 +1554,14 @@ export class Renderer {
   }
 
   /**
-   * Switches the resolution tier in place. FXAA and shadows stay the player's choice;
-   * only the retro rung, whose pixels are meant to show, never draws FXAA.
+   * Switches the resolution tier in place. Antialiasing and shadows stay the player's
+   * choice; only the retro rung, whose pixels are meant to show, never draws FXAA or MSAA.
    */
   setQuality(quality: GraphicsQuality): void {
     if (quality === this.quality) return;
     this.quality = quality;
     this.setFxaa(this.fxaa);
+    this.applyMsaa();
     this.applyRetroCanvas();
     // The phone rule is read from the table through `shadowModeFor`, never re-derived,
     // so it cannot disagree with the one the constructor used.
@@ -1648,6 +1653,30 @@ export class Renderer {
   private applyFxaa(): void {
     const on = this.fxaa && this.quality !== 'retro' && this.supersample < SUPERSAMPLE_WITHOUT_FXAA;
     this.hazeMaterial.uniforms.uFxaa.value = on ? 1 : 0;
+  }
+
+  /**
+   * `Settings.msaa`: the scene target's samples per pixel, 0 for none. Never on the retro
+   * rung. Kept at any frame multiple: the player chose it to compare.
+   *
+   * Three draws a multisampled target into renderbuffers and blits colour AND depth into
+   * this target's textures after the scene pass (`resolveDepthBuffer`, on by default), so
+   * the post pass reads the same two textures either way; the multisampled depth has the
+   * depth texture's format (32-bit float under reversed Z). No program depends on the
+   * sample count, so a switch links nothing; it reallocates the target on its next bind.
+   */
+  setMsaa(samples: MsaaSamples): void {
+    this.msaa = samples;
+    this.applyMsaa();
+  }
+
+  private applyMsaa(): void {
+    const samples = this.quality === 'retro' ? 0 : this.msaa;
+    if (this.hazeTarget.samples === samples) return;
+    this.hazeTarget.samples = samples;
+    // Sample count is allocation state: the next `setRenderTarget` builds the target
+    // again, its colour and depth textures included (the objects the pass holds stay).
+    this.hazeTarget.dispose();
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */

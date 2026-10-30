@@ -337,6 +337,7 @@ for (const mobile of [false, true]) {
         { viewDistance: preset === 'high' ? 'low' : 'high' },
         { trafficDensity: preset === 'high' ? 'low' : 'high' },
         { fxaa: !on.fxaa },
+        { msaa: 4 },
         { frameRateLimit: 60 },
         on.graphicsQuality === 'retro'
           ? { retroLines: 540 }
