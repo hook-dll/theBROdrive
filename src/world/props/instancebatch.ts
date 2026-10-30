@@ -7,8 +7,8 @@ import * as THREE from 'three';
  * cost a dozen draw calls for a handful of instances each. Here the chunks of a band
  * share what draws them, in one of two forms.
  *
- * MULTI-DRAW BATCHES, for every opaque kind with one material and no `lod`: the scatter's
- * standing forms and the pole bodies. All such kinds of one material, shadow flags and
+ * MULTI-DRAW BATCHES, for every opaque kind with one material: the scatter's standing
+ * forms, the ground cover and the pole bodies. All such kinds of one material, shadow flags and
  * vertex layout in `BATCHED_BAND_CHUNKS` consecutive chunks are instances of ONE
  * `BatchedMesh`, whatever their geometry: one multi-draw per pass, and three culls each
  * instance on its own (`perObjectFrustumCulled`) in every pass, the shadow cascades
@@ -27,11 +27,11 @@ import * as THREE from 'three';
  *  - A released instance is deleted and its id reused; a broken prop leaves the draw
  *    (`hideInstance`). The batch is disposed with its last instance.
  *
- * PAGES, for the rest: the contact shadows (transparent, sorted back to front as one
- * object), the delineators (two materials over groups, which a multi-draw cannot split)
- * and the `lod` kinds. The chunks of one band (`BATCH_BAND_CHUNKS`) share pages per
- * geometry and material pair. A page is one `InstancedMesh` of `BATCH_PAGE_SLOTS` slots.
- * It is removed as soon as its last slot is released.
+ * PAGES, for the rest: the delineators (two materials over groups, which a multi-draw
+ * cannot split) and transparent kinds that must sort. The chunks of one band
+ * (`BATCH_BAND_CHUNKS`) share pages per geometry and material pair. A page is one
+ * `InstancedMesh` of `BATCH_PAGE_SLOTS` slots. It is removed as soon as its last slot is
+ * released.
  *
  * Frame of reference: a page or batch is anchored at the floating origin when it was
  * created. A slot's matrix is written relative to that anchor, so a rebase only moves
@@ -42,21 +42,13 @@ import * as THREE from 'three';
  * geometry sphere transformed by each slot's matrix. It never shrinks while it lives,
  * so it stays conservative.
  *
- * Range (`BatchKind.lod`): a kind with a `lod` keeps its pages per world cell
- * (`LOD_CELL_M`) as well as per band, so a page is a patch of ground. `syncLod` then
- * sets each such page by how far the camera is from the nearest of its instances: the
- * kind's own geometry, its `far` geometry, or not drawn at all. Only the page's geometry
- * and visibility change, never its slots, so a `BatchSlot` held by a caller stays valid.
+ * Range (`BatchKind.lod`): the kinds with a `lod` (the ground cover) have batches of
+ * their own, and each pass's camera decides per instance (`lodSort`) from its ground
+ * distance to the instance's origin, the point the cover's vertex fade measures from:
+ * past `hideBeyond` it is not drawn, past `far.distance` it draws its `far` geometry.
+ * They were pages per 160 m cell, switched as a whole by the nearest instance to the
+ * main camera: ~80 visible pages, ~28 draws in the frame and ~13 in each mirror.
  */
-
-/**
- * Side of the world cell an LOD kind's pages are kept per, metres. Smaller cells follow
- * the camera more closely and cost more draw calls; at 160 m the ground cover inside its
- * 290 m fade is about twenty cells per form.
- */
-const LOD_CELL_M = 160;
-/** A page switches back to the nearer state only this far inside the line it crossed. */
-const LOD_HYSTERESIS_M = 8;
 
 /** Consecutive chunks that share one set of pages. */
 export const BATCH_BAND_CHUNKS = 4;
@@ -100,15 +92,15 @@ export interface BatchKind {
 
 /**
  * Range rules for a kind. Distances run across the ground (x, z) from the camera to the
- * page's nearest instance, the plane the ground cover's own fade is measured in.
+ * instance's origin, the plane the ground cover's own fade is measured in.
  */
 export interface BatchLod {
   /**
    * Drawn instead of the kind's geometry past `distance`. It must carry the same
-   * attributes, so the page keeps its shader program.
+   * attributes, so the batch keeps its shader program.
    */
   readonly far?: { readonly geometry: THREE.BufferGeometry; readonly distance: number };
-  /** Past this every instance has faded to nothing in the vertex shader: the page is not drawn. */
+  /** Past this the instance has faded to nothing in the vertex shader: it is not drawn. */
   readonly hideBeyond: number;
 }
 
@@ -148,14 +140,14 @@ interface Page {
   /** Slots ever handed out. The page draws `next` instances. */
   next: number;
   live: number;
-  /** For an LOD kind: what `syncLod` last set. */
-  range: PageRange;
 }
 
-const enum PageRange {
-  Near,
-  Far,
-  Hidden,
+/** A geometry's range rule in an LOD batch, its far form as a draw range of the batch. */
+interface LodRule {
+  readonly hideBeyond: number;
+  readonly farDistance: number;
+  readonly farStart: number;
+  readonly farCount: number;
 }
 
 /** A multi-draw batch: every batchable kind of one material, flags and layout in a band. */
@@ -171,6 +163,10 @@ interface Batch {
   readonly reserved: Set<number>;
   readonly freeGeometry: number[];
   live: number;
+  /** For an LOD batch: each geometry id's rule, and each instance's ground position. */
+  readonly lodRules: (LodRule | undefined)[] | null;
+  groundX: Float32Array;
+  groundZ: Float32Array;
 }
 
 /** What a kind's geometry is copied into a batch as, and the layout that picks the batch. */
@@ -236,7 +232,7 @@ function batchSource(geometry: THREE.BufferGeometry, material: THREE.Material): 
 
 /** Whether `kind` draws as an instance of a multi-draw batch rather than in a page. */
 function batchable(kind: BatchKind): boolean {
-  return !Array.isArray(kind.material) && (!kind.material.transparent || kind.orderFree === true) && !kind.lod;
+  return !Array.isArray(kind.material) && (!kind.material.transparent || kind.orderFree === true);
 }
 
 /**
@@ -257,8 +253,6 @@ export class InstanceBatches {
   readonly root = new THREE.Group();
   private readonly families = new Map<string, Family>();
   private readonly pageOf = new Map<THREE.InstancedMesh, Page>();
-  /** The pages of LOD kinds, the only ones `syncLod` walks. */
-  private readonly lodPages: Page[] = [];
   private readonly batches = new Map<string, Batch>();
   private readonly batchOf = new Map<THREE.BatchedMesh, Batch>();
 
@@ -271,12 +265,7 @@ export class InstanceBatches {
   allocate(chunk: BatchChunk, kind: BatchKind, local: THREE.Matrix4): BatchSlot {
     if (batchable(kind)) return this.allocateBatched(chunk, kind, local);
     const band = Math.floor(chunk.chunkIndex / BATCH_BAND_CHUNKS);
-    let key = `${identityOf(kind.geometry)}:${identityOf(kind.material)}:${band}`;
-    if (kind.lod) {
-      const cellX = Math.floor((local.elements[12] + chunk.originX) / LOD_CELL_M);
-      const cellZ = Math.floor((local.elements[14] + chunk.originZ) / LOD_CELL_M);
-      key += `:${cellX}:${cellZ}`;
-    }
+    const key = `${identityOf(kind.geometry)}:${identityOf(kind.material)}:${band}`;
     let family = this.families.get(key);
     if (!family) {
       family = { key, kind, pages: [] };
@@ -368,32 +357,6 @@ export class InstanceBatches {
     }
   }
 
-  /**
-   * Sets every LOD page's geometry and visibility for a camera at (`x`, `z`), in the
-   * render frame. Once per rendered frame, after the camera moved; it walks only the
-   * LOD pages (a few dozen) and touches a page only when its range changes.
-   */
-  syncLod(x: number, z: number): void {
-    for (const page of this.lodPages) {
-      const lod = page.family.kind.lod!;
-      const hideBeyond = lod.hideBeyond;
-      const sphere = page.sphere;
-      // Ground distance to the nearest point the page's instances can occupy.
-      const d = sphere.isEmpty()
-        ? Infinity
-        : Math.hypot(sphere.center.x + page.mesh.position.x - x, sphere.center.z + page.mesh.position.z - z) - sphere.radius;
-      const was = page.range;
-      let range: PageRange;
-      if (d > hideBeyond - (was === PageRange.Hidden ? LOD_HYSTERESIS_M : 0)) range = PageRange.Hidden;
-      else if (lod.far && d > lod.far.distance - (was === PageRange.Near ? 0 : LOD_HYSTERESIS_M)) range = PageRange.Far;
-      else range = PageRange.Near;
-      if (range === was) continue;
-      page.range = range;
-      page.mesh.visible = range !== PageRange.Hidden;
-      if (range !== PageRange.Hidden) page.mesh.geometry = range === PageRange.Far ? lod.far!.geometry : page.family.kind.geometry;
-    }
-  }
-
   /** Removes and frees every page and batch. */
   dispose(): void {
     for (const family of this.families.values()) {
@@ -407,7 +370,7 @@ export class InstanceBatches {
     const material = kind.material as THREE.Material;
     const source = batchSource(kind.geometry, material);
     const band = Math.floor(chunk.chunkIndex / BATCHED_BAND_CHUNKS);
-    const key = `${identityOf(material)}:${+!!kind.castShadow}${+!!kind.receiveShadow}:${kind.renderOrder ?? 0}:${band}${source.layout}`;
+    const key = `${identityOf(material)}:${+!!kind.castShadow}${+!!kind.receiveShadow}:${kind.renderOrder ?? 0}:${kind.lod ? 'lod' : ''}:${band}${source.layout}`;
     const batch = this.batches.get(key) ?? this.openBatch(key, kind, source.geometry);
     const mesh = batch.mesh;
 
@@ -415,23 +378,28 @@ export class InstanceBatches {
     if (geometryId !== undefined && kind.reserve) {
       mesh.setGeometryAt(geometryId, source.geometry);
     } else if (geometryId === undefined) {
-      const vertices = kind.reserve?.vertices ?? source.geometry.getAttribute('position').count;
-      const indices = kind.reserve?.indices ?? source.geometry.index!.count;
-      if (vertices > mesh.unusedVertexCount || indices > mesh.unusedIndexCount) {
-        let vertexCapacity = mesh.geometry.getAttribute('position').count;
-        let indexCapacity = mesh.geometry.index!.count;
-        const usedVertices = vertexCapacity - mesh.unusedVertexCount;
-        const usedIndices = indexCapacity - mesh.unusedIndexCount;
-        while (usedVertices + vertices > vertexCapacity) vertexCapacity *= 2;
-        while (usedIndices + indices > indexCapacity) indexCapacity *= 2;
-        mesh.setGeometrySize(vertexCapacity, indexCapacity);
-      }
       if (kind.reserve) {
-        geometryId = mesh.addGeometry(source.geometry, vertices, indices);
+        geometryId = addBatchGeometry(mesh, source.geometry, kind.reserve.vertices, kind.reserve.indices);
         batch.reserved.add(geometryId);
       } else {
-        geometryId = mesh.addGeometry(source.geometry);
+        geometryId = addBatchGeometry(mesh, source.geometry);
         batch.geometryIds.set(kind.geometry, geometryId);
+        if (kind.lod && batch.lodRules) {
+          const far = kind.lod.far;
+          let farStart = 0;
+          let farCount = 0;
+          if (far) {
+            const range = mesh.getGeometryRangeAt(addBatchGeometry(mesh, batchSource(far.geometry, material).geometry))!;
+            farStart = range.start;
+            farCount = range.count;
+          }
+          batch.lodRules[geometryId] = {
+            hideBeyond: kind.lod.hideBeyond,
+            farDistance: far ? far.distance : Infinity,
+            farStart,
+            farCount,
+          };
+        }
       }
     }
     if (mesh.instanceCount >= mesh.maxInstanceCount) mesh.setInstanceCount(mesh.maxInstanceCount * 2);
@@ -445,6 +413,19 @@ export class InstanceBatches {
     _matrix.elements[12] += chunk.originX - batch.anchorX;
     _matrix.elements[14] += chunk.originZ - batch.anchorZ;
     mesh.setMatrixAt(instance, _matrix);
+    if (batch.lodRules) {
+      if (instance >= batch.groundX.length) {
+        const size = mesh.maxInstanceCount;
+        const x = new Float32Array(size);
+        const z = new Float32Array(size);
+        x.set(batch.groundX);
+        z.set(batch.groundZ);
+        batch.groundX = x;
+        batch.groundZ = z;
+      }
+      batch.groundX[instance] = _matrix.elements[12];
+      batch.groundZ[instance] = _matrix.elements[14];
+    }
 
     _sphere.copy(source.geometry.boundingSphere!).applyMatrix4(_matrix);
     batch.sphere.union(_sphere);
@@ -461,8 +442,9 @@ export class InstanceBatches {
     mesh.castShadow = kind.castShadow ?? false;
     mesh.receiveShadow = kind.receiveShadow ?? false;
     mesh.renderOrder = kind.renderOrder ?? 0;
-    // Opaque: drawn in instance order, as a page draws its slots.
-    mesh.sortObjects = false;
+    // Opaque: drawn in instance order, as a page draws its slots. An LOD batch sorts, so
+    // its `customSort` sees each pass's list and takes out what is out of range.
+    mesh.sortObjects = kind.lod !== undefined;
     const sphere = new THREE.Sphere();
     sphere.makeEmpty();
     mesh.boundingSphere = sphere;
@@ -476,7 +458,12 @@ export class InstanceBatches {
       reserved: new Set(),
       freeGeometry: [],
       live: 0,
+      lodRules: kind.lod ? [] : null,
+      groundX: new Float32Array(kind.lod ? BATCHED_FIRST_INSTANCES : 0),
+      groundZ: new Float32Array(kind.lod ? BATCHED_FIRST_INSTANCES : 0),
     };
+    // @types/three leaves out the list items' instance `index`, which three does set.
+    if (kind.lod) mesh.customSort = (list, camera) => lodSort(batch, list as DrawItem[], camera);
     mesh.position.set(0, 0, 0);
     mesh.updateMatrix();
     this.batches.set(key, batch);
@@ -514,13 +501,11 @@ export class InstanceBatches {
       free: [],
       next: 0,
       live: 0,
-      range: PageRange.Near,
     };
     mesh.position.set(0, 0, 0);
     mesh.updateMatrix();
     family.pages.push(page);
     this.pageOf.set(mesh, page);
-    if (kind.lod) this.lodPages.push(page);
     this.root.add(mesh);
     return page;
   }
@@ -531,10 +516,70 @@ export class InstanceBatches {
     if (at >= 0) family.pages.splice(at, 1);
     if (family.pages.length === 0) this.families.delete(family.key);
     this.pageOf.delete(page.mesh);
-    if (family.kind.lod) this.lodPages.splice(this.lodPages.indexOf(page), 1);
     this.root.remove(page.mesh);
     page.mesh.dispose();
   }
+}
+
+/**
+ * Adds `geometry` to `mesh` (with `vertices` and `indices` reserved, when given), growing
+ * the batch's buffers by doubling first if it does not fit.
+ */
+function addBatchGeometry(mesh: THREE.BatchedMesh, geometry: THREE.BufferGeometry, vertices?: number, indices?: number): number {
+  const needVertices = vertices ?? geometry.getAttribute('position').count;
+  const needIndices = indices ?? geometry.index!.count;
+  if (needVertices > mesh.unusedVertexCount || needIndices > mesh.unusedIndexCount) {
+    let vertexCapacity = mesh.geometry.getAttribute('position').count;
+    let indexCapacity = mesh.geometry.index!.count;
+    const usedVertices = vertexCapacity - mesh.unusedVertexCount;
+    const usedIndices = indexCapacity - mesh.unusedIndexCount;
+    while (usedVertices + needVertices > vertexCapacity) vertexCapacity *= 2;
+    while (usedIndices + needIndices > indexCapacity) indexCapacity *= 2;
+    mesh.setGeometrySize(vertexCapacity, indexCapacity);
+  }
+  return mesh.addGeometry(geometry, vertices, indices);
+}
+
+/** One entry of three's per-pass multi-draw list (BatchedMesh `customSort`). */
+interface DrawItem {
+  start: number;
+  count: number;
+  z: number;
+  index: number;
+}
+
+const _eye = new THREE.Vector3();
+
+/**
+ * An LOD batch's draw list for one pass (the frame, a mirror, a shadow cascade): every
+ * instance past its `hideBeyond` from that pass's camera, across the ground, is taken
+ * out, one past its far distance draws its far geometry's range, and the rest is sorted
+ * near to far as three sorts an opaque batch.
+ */
+function lodSort(batch: Batch, list: DrawItem[], camera: THREE.Camera): void {
+  const rules = batch.lodRules!;
+  const mesh = batch.mesh;
+  _eye.setFromMatrixPosition(camera.matrixWorld);
+  const eyeX = _eye.x - mesh.position.x;
+  const eyeZ = _eye.z - mesh.position.z;
+  const groundX = batch.groundX;
+  const groundZ = batch.groundZ;
+  let kept = 0;
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i]!;
+    const rule = rules[mesh.getGeometryIdAt(item.index)];
+    if (rule) {
+      const d = Math.hypot(groundX[item.index]! - eyeX, groundZ[item.index]! - eyeZ);
+      if (d > rule.hideBeyond) continue;
+      if (d > rule.farDistance) {
+        item.start = rule.farStart;
+        item.count = rule.farCount;
+      }
+    }
+    list[kept++] = item;
+  }
+  list.length = kept;
+  list.sort((a, b) => a.z - b.z);
 }
 
 /**

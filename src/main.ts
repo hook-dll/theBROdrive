@@ -2737,8 +2737,6 @@ async function boot(): Promise<void> {
     // The post machines' wheels, levers, doors and flaps, the pumps' nozzles and hoses and
     // the key boxes ease on the rendered frame.
     fixtures.update(frameDt);
-    // The camera has moved for this frame: the ground cover's pages take their range.
-    streamer.syncLod(renderer.camera.position.x, renderer.camera.position.z);
     frameProfiler?.end('vehicles');
 
     frameProfiler?.begin('effects');

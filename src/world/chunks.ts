@@ -590,11 +590,6 @@ export class ChunkStreamer {
     this.batches.rebase();
   }
 
-  /** Range of the batch pages that have one, for the camera at (`x`, `z`) in the render frame. */
-  syncLod(x: number, z: number): void {
-    this.batches.syncLod(x, z);
-  }
-
   /** A build context in the CURRENT origin (see `ChunkContext.originX`). */
   private context(chunk: BuiltChunk): ChunkContext {
     return {

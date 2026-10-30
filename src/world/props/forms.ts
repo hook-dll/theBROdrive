@@ -107,9 +107,13 @@ const matCover = (() => {
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
-#ifdef USE_INSTANCING
+#if defined( USE_INSTANCING ) || defined( USE_BATCHING )
 {
+  #ifdef USE_BATCHING
+  vec3 coverOrigin = ( modelMatrix * batchingMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+  #else
   vec3 coverOrigin = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz;
+  #endif
   transformed *= 1.0 - smoothstep( ${COVER_FADE_FULL_M.toFixed(1)}, ${COVER_FADE_GONE_M.toFixed(1)}, distance( coverOrigin.xz, cameraPosition.xz ) );
 }
 #endif`,

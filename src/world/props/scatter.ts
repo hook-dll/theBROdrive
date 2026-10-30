@@ -281,10 +281,10 @@ export function addStatic(
 }
 
 /**
- * The scatter's standing forms draw as instances of the props' multi-draw batches
- * (props/instancebatch.ts), a program of their own and its depth program: this holds
- * them from boot, with the shadow flags the forms are allocated with (they cast and
- * receive; the ground cover, in pages, neither).
+ * The scatter's standing forms and, when this load grows it, the ground cover draw as
+ * instances of the props' multi-draw batches (props/instancebatch.ts), each a program of
+ * its own (with its depth program for the forms): this holds them from boot, with the
+ * shadow flags they are allocated with (the forms cast and receive; the cover neither).
  */
 export function scatterProgramAnchor(): THREE.Object3D {
   const kinds = [...sandForms(), ...rockForms()].map((form) => ({
@@ -294,6 +294,11 @@ export function scatterProgramAnchor(): THREE.Object3D {
     castShadow: true,
     receiveShadow: true,
   }));
+  if (groundCoverActive()) {
+    for (const form of groundCoverForms()) {
+      kinds.push({ geometry: form.geometry, material: form.material, lod: form.lod, castShadow: false, receiveShadow: false });
+    }
+  }
   return batchedProgramAnchor('scatter-batch-anchor', kinds);
 }
 

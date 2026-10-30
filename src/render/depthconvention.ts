@@ -54,6 +54,12 @@ export function adoptReversedDepth(camera: THREE.Camera, reversed: boolean): voi
  * once, right after construction, and only when `renderer.capabilities.reversedDepthBuffer`.
  */
 export function installReversedDepth(renderer: THREE.WebGLRenderer): void {
+  // Three before r187 sorted, swapped depth functions and offset polygons the old way,
+  // which this file no longer corrects: a checkout run on a stale `node_modules` (pulled,
+  // not reinstalled) drew a pale sheet with only the glass in it. Said here, not drawn.
+  if (Number(THREE.REVISION) < 187) {
+    throw new Error(`three r${THREE.REVISION} is installed; the game needs r187 (run npm install)`);
+  }
   const render = renderer.render.bind(renderer);
   renderer.render = (scene, camera) => {
     adoptReversedDepth(camera, true);

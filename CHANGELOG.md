@@ -371,6 +371,23 @@
   ground 189k → 127k triangles in the main pass; fixed-camera shots across the threshold
   unchanged. The light builds, whose tiles are coarse already, carry no second index.
 
+- GROUND COVER IN ONE MULTI-DRAW, RANGED PER INSTANCE (`world/props/instancebatch.ts`
+  `lodSort`, `addBatchGeometry`; `world/props/forms.ts` `matCover`; `scatter.ts`
+  `scatterProgramAnchor`). The tufts, bushes and rosettes were pages of one
+  `InstancedMesh` per form, band and 160 m cell, switched as a whole by their nearest
+  instance to the main camera (`syncLod`, removed): 367 pages at km 21 with grass Full,
+  79 of them drawn. They are now instances of the props' multi-draw batches, a batch of
+  their own; each pass's camera (frame, every mirror) drops an instance past its fade
+  (290 m) and draws a bush past 60 m as its far form, from that instance's own ground
+  distance. The fade reads `batchingMatrix` under `USE_BATCHING`; the program is anchored
+  at boot when the load grows cover. Cabin, km 21, Blessing, grass Full: main pass 70 →
+  43 draws, 640k → 593k triangles; each mirror 39.5 → 26 draws, 242k → 174k triangles.
+  Fixed-camera shots differ only where the sky and traffic moved (≤ 0.9% of pixels).
+
+- A STALE THREE SAYS SO (`render/depthconvention.ts`). After the r187 upgrade a checkout
+  run without `npm install` drew a pale sheet with only the glass in it; it now stops at
+  boot with "three r185 is installed; the game needs r187 (run npm install)".
+
 - THREE.JS r185 → r187 (`package.json`; `render/depthconvention.ts`,
   `render/lightshader.ts` `installReversedPcfFarTest`, `render/retro.ts`
   `installCheapSpecular`, `render/programbudget.ts` `KEY_PARAMETERS`,
