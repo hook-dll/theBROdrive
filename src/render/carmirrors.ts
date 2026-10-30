@@ -23,12 +23,13 @@
  *
  * The approximation is parallax. A true mirror has its own viewpoint (the eye reflected
  * through its own glass), and the three glasses sit 0.8-1.4 m apart. The shared image
- * comes from one point behind the car, so a near object can sit a few degrees off
- * relative to the background in a face whose glass is not at that point. Far land, sky
- * and the horizon are effectively exact. The inner mirror is the most approximate: its
- * reflected rays pass through the cabin, while the shared camera stands behind the car,
- * so it shows the road behind rather than the rear seat and pillars. Side mirrors,
- * which are what a driver checks, keep the world behind and the following traffic.
+ * comes from one point at the two door glasses' reflected eyes (outside the car beside
+ * the doors), so a near object can sit a few degrees off relative to the background in a
+ * face whose glass is not at that point. Far land, sky and the horizon are effectively
+ * exact. The inner mirror is the most approximate: its reflected rays pass through the
+ * cabin, while the shared camera stands outside at the doors, so it shows the road
+ * behind rather than the rear seat and pillars. Side mirrors, which are what a driver
+ * checks, keep the world behind and the following traffic.
  *
  * Sampling. For each face vertex the reflected direction is `d - 2 (d.n) n`, where `d`
  * is eye-to-glass and `n` the glass normal. That direction is projected into the shared
@@ -78,8 +79,6 @@ const SHARED_MAX_V_FOV_DEG = 80;
 /** Margin round the union, degrees and as a share of the span. */
 const SHARED_MARGIN_DEG = 2;
 const SHARED_MARGIN_SHARE = 0.06;
-/** How far behind the glasses the shared camera stands, metres. */
-const SHARED_BEHIND_M = 3;
 /** Sharpness headroom over the face's own screen pixels, and the clamps on the density. */
 const SHARED_DENSITY_HEADROOM = 1.12;
 const SHARED_MIN_PX_PER_RAD = 256;
@@ -146,6 +145,7 @@ const _world = new THREE.Vector3();
 const _ndc = new THREE.Vector3();
 const _direction = new THREE.Vector3();
 const _reflected = new THREE.Vector3();
+const _mirrored = new THREE.Vector3();
 const _projected = new THREE.Vector3();
 const _view = new THREE.Vector3();
 
@@ -271,9 +271,35 @@ export class CarMirrors {
     this.configureShared(kit);
     const faces = kit.mirrorFaces;
     const inner = faces.find((face) => face.userData.kitMirror === 'inner') ?? faces[0]!;
+    // THE SHARED EYE STANDS WHERE THE DOOR GLASSES DO, not behind the car. A mirror sees
+    // from the eye reflected through its glass; the two door reflections are outside the
+    // car beside the doors, so their average is a viewpoint close to the mirrors and
+    // clear of the body behind them. The inner glass would pull that average in front of
+    // the windshield (and its rays run through the cabin), so it is left out of the
+    // position when both doors exist; it still shapes the union window and its own UVs.
+    const sideFaces = faces.filter(
+      (face) => face.userData.kitMirror === 'left' || face.userData.kitMirror === 'right',
+    );
+    const positionFaces = sideFaces.length > 0 ? sideFaces : faces;
     _average.set(0, 0, 0);
-    for (const face of faces) _average.add(_world.setFromMatrixPosition(face.matrixWorld));
-    _average.multiplyScalar(1 / faces.length);
+    let mirrored = 0;
+    _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
+    for (const face of positionFaces) {
+      _world.setFromMatrixPosition(face.matrixWorld);
+      _normal.set(0, 0, -1).transformDirection(face.matrixWorld).normalize();
+      const distance = _direction.subVectors(_eye, _world).dot(_normal);
+      if (distance <= 0.02) continue;
+      // The eye reflected through the glass: `E - 2 ((E - P) . n) n`.
+      _mirrored.copy(_eye).addScaledVector(_normal, -2 * distance);
+      _average.add(_mirrored);
+      mirrored++;
+    }
+    if (mirrored > 0) {
+      _average.multiplyScalar(1 / mirrored);
+    } else {
+      for (const face of faces) _average.add(_world.setFromMatrixPosition(face.matrixWorld));
+      _average.multiplyScalar(1 / faces.length);
+    }
     // The inner glass faces the driver, so its outward normal is the car's rear. It is
     // car-relative, unlike the main camera's forward, which turns with the head.
     _rear.set(0, 0, -1).transformDirection(inner.matrixWorld).normalize();
@@ -288,7 +314,7 @@ export class CarMirrors {
       .addScaledVector(_right, sy * cp)
       .addScaledVector(_up, sp)
       .normalize();
-    this.sharedCamera.position.copy(_average).addScaledVector(_rear, SHARED_BEHIND_M);
+    this.sharedCamera.position.copy(_average);
     this.sharedCamera.up.copy(_up);
     _look.copy(this.sharedCamera.position).add(_view);
     this.sharedCamera.lookAt(_look);

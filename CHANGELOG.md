@@ -263,7 +263,11 @@
   target is that figure times the union's window, times the tier's `mirrorScale`, with a
   512..4096 by 256..2048 cap. A 4K display or a larger cabin view grows it; a phone's
   half-scale tier shrinks it. Recomputed only when the car, display, camera fov or tier
-  changes; the camera itself is re-aimed every pass. Still one pass, three faces.
+  changes; the camera itself is re-aimed every pass. Still one pass, three faces. The
+  camera stands at the average reflected eye of the two door glasses — outside the car
+  beside the doors, where the mirrors are — not 3 m behind the body; the inner glass is
+  left out of that position when both doors exist (it would pull the eye in front of the
+  windshield), but still shapes the union and its own UVs.
 
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
