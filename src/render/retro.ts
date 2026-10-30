@@ -78,21 +78,23 @@ export function installBuildProfile(quality: GraphicsQuality, grass: GrassMode):
 }
 
 /**
- * Blinn-Phong in place of multiscatter GGX for every direct light, in every lit material.
+ * Blinn-Phong in place of GGX for every direct light, in every lit material.
  *
- * Three's physical direct term evaluates the full GGX lobe AND two lookups into the DFG
- * table per light per fragment, and on an immediate-mode integrated GPU every overdrawn
- * fragment pays it again. A period renderer had no specular at all; this keeps a sun
- * glint on paint and glass for a fraction of the arithmetic. Installed into the shared
- * chunk before anything compiles, the same way render/lightshader.ts guards its light
- * loop, so the comic, ground and car materials that patch the standard shader all get it.
+ * Three's physical direct term evaluates the full GGX lobe per light per fragment (r187
+ * scales it by a multiscatter factor found once per fragment; r185 also read the DFG
+ * table per light), and on an immediate-mode integrated GPU every overdrawn fragment
+ * pays it again. A period renderer had no specular at all; this keeps a sun glint on
+ * paint and glass for a fraction of the arithmetic, the lobe alone, as before r187.
+ * Installed into the shared chunk before anything compiles, the same way
+ * render/lightshader.ts guards its light loop, so the comic, ground and car materials
+ * that patch the standard shader all get it.
  */
 function installCheapSpecular(): void {
   const chunk = THREE.ShaderChunk.lights_physical_pars_fragment;
-  const direct =
-    'reflectedLight.directSpecular += irradiance * BRDF_GGX_Multiscatter( directLight.direction, geometryViewDir, geometryNormal, material );';
+  const lobeLine = 'vec3 specularBRDF = BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );';
+  const direct = 'reflectedLight.directSpecular += irradiance * specularBRDF * material.multiScatteringCompensation;';
   const entry = 'void RE_Direct_Physical(';
-  if (!chunk.includes(direct) || !chunk.includes(entry)) {
+  if (!chunk.includes(lobeLine) || !chunk.includes(direct) || !chunk.includes(entry)) {
     throw new Error('Three physical direct-light shader layout changed');
   }
   // The physical program does not include the Blinn-Phong chunk, so the lobe is here.
@@ -111,10 +113,8 @@ function installCheapSpecular(): void {
 `;
   THREE.ShaderChunk.lights_physical_pars_fragment = chunk
     .replace(entry, lobe + entry)
-    .replace(
-      direct,
-      'reflectedLight.directSpecular += irradiance * retroSpecular( directLight.direction, geometryViewDir, geometryNormal, material );',
-    );
+    .replace(lobeLine, 'vec3 specularBRDF = retroSpecular( directLight.direction, geometryViewDir, geometryNormal, material );')
+    .replace(direct, 'reflectedLight.directSpecular += irradiance * specularBRDF;');
 }
 
 /**

@@ -905,8 +905,8 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 const NO_BLEND_COLOR = new THREE.Color(0, 0, 0);
 
 /**
- * `WebGLState.setBlending` as three r185 runs it: the blend colour and alpha come before
- * the premultiplied flag, which @types/three 0.185 leaves out.
+ * `WebGLState.setBlending` as three r187 runs it: the blend colour and alpha come before
+ * the premultiplied flag, which @types/three leaves out.
  */
 type SetBlending = (
   blending: THREE.Blending,
@@ -933,7 +933,7 @@ type SetBlending = (
  */
 function gateMoonPatchBlend(renderer: THREE.WebGLRenderer, material: THREE.Material): void {
   const state = renderer.state;
-  // See `SetBlending`: the typings name the r185 function with an older parameter list.
+  // See `SetBlending`: the typings name the function with an older parameter list.
   const setBlending = state.setBlending as unknown as SetBlending;
   const setMaterial = state.setMaterial.bind(state);
   state.setMaterial = (drawn, frontFaceCW, hardwareClippingPlanes) => {

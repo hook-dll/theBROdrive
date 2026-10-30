@@ -52,10 +52,12 @@ function hash(text: string): string {
 }
 
 /**
- * Parameters three r185 writes into a cache key from the precision on
- * (`getProgramCacheKeyParameters`); the two flag masks follow them.
+ * Parameters three r187 writes into a cache key from the precision on
+ * (`getProgramCacheKeyParameters`); the two flag masks follow them. r185 wrote 48: r187
+ * keys the PMREM by three fields instead of one and adds the sun lights, their shadows,
+ * the probe grids and the diffuse-roughness map's uv.
  */
-const KEY_PARAMETERS = 48;
+const KEY_PARAMETERS = 53;
 /** `reversedDepthBuffer`'s bit in the second mask (`getProgramCacheKeyBooleans`). */
 const REVERSED_DEPTH_BIT = 1 << 4;
 

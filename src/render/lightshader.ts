@@ -283,28 +283,24 @@ function installScreenAuthoredUnlit(): void {
 }
 
 /**
- * Three r185's PCF shadow on the reversed depth buffer (render/depthconvention.ts) still
- * ADDS the bias and drops only fragments past z = 1, both written for the ordinary
- * buffer (mrdoob/three.js#34891; its VSM and basic paths already flip). Reversed, a
- * fragment is nearer the light as its z grows, the far plane is z = 0, and the bias
- * (negative, toward the light) must be subtracted, or every receiver is pushed into its
- * own shadow. Every program alike, behind the define three sets for the page: no variant.
+ * Three's PCF shadow on the reversed depth buffer (render/depthconvention.ts) drops only
+ * fragments past z = 1, a test written for the ordinary buffer. Reversed, the shadow
+ * camera's far plane is z = 0, so a fragment past it must be dropped below 0. Three r187
+ * flips the BIAS itself (mrdoob/three.js#34892; r185 still added it, and this patch
+ * subtracted it) but not this test. Every program alike, behind the define three sets
+ * for the page: no variant.
  */
-function installReversedPcfBias(): void {
+function installReversedPcfFarTest(): void {
   const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
-  const marker = 'reversedPcfBias';
+  const marker = 'reversedPcfFarTest';
   if (chunk.includes(marker)) return;
-  const pcf = /shadowCoord\.xyz \/= shadowCoord\.w;\s*shadowCoord\.z \+= shadowBias;(\s*bool inFrustum = [^;]*;)\s*bool frustumTest = inFrustum && shadowCoord\.z <= 1\.0;/;
-  if (!pcf.test(chunk)) throw new Error('Three PCF shadow bias layout changed');
+  const upstreamBias = /#ifdef USE_REVERSED_DEPTH_BUFFER\s*shadowCoord\.z -= shadowBias;/;
+  const pcf = /(#if defined\( SHADOWMAP_TYPE_PCF \)[\s\S]*?bool inFrustum = [^;]*;)\s*bool frustumTest = inFrustum && shadowCoord\.z <= 1\.0;/;
+  if (!upstreamBias.test(chunk) || !pcf.test(chunk)) throw new Error('Three PCF shadow layout changed');
   THREE.ShaderChunk.shadowmap_pars_fragment = chunk.replace(
     pcf,
-    `shadowCoord.xyz /= shadowCoord.w;
+    `$1
 			// ${marker}
-			#ifdef USE_REVERSED_DEPTH_BUFFER
-			shadowCoord.z -= shadowBias;
-			#else
-			shadowCoord.z += shadowBias;
-			#endif$1
 			#ifdef USE_REVERSED_DEPTH_BUFFER
 			bool frustumTest = inFrustum && shadowCoord.z >= 0.0;
 			#else
@@ -317,6 +313,6 @@ installPointLightZeroGuard();
 installSpotLightDormantGuard();
 installSunShadowSlopeBias();
 installStableShadowFilter();
-installReversedPcfBias();
+installReversedPcfFarTest();
 installSunShadowCascade();
 installScreenAuthoredUnlit();

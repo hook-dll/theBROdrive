@@ -825,7 +825,7 @@ export class Renderer {
    * Loads the scene's light state into the render state its frames use, drawing nothing.
    *
    * Three's `render` draws the shadow pass BEFORE it sets up the frame's lights (three
-   * r185 `WebGLRenderer.render`), and a depth program's key carries the light counts. On
+   * r187 `WebGLRenderer.render`), and a depth program's key carries the light counts. On
    * the scene's very first frame that state is empty, so every caster the sun's pass met
    * linked a depth program keyed to no lights, and the next frame linked the same shader
    * again under the real counts: four duplicates on a drive resumed in the car (100
@@ -913,7 +913,7 @@ export class Renderer {
   /**
    * Links the depth program each caster in `object` will draw with in a shadow pass.
    *
-   * The materials are the ones `WebGLShadowMap.getDepthMaterial` (three r185) would
+   * The materials are the ones `WebGLShadowMap.getDepthMaterial` (three r187) would
    * hand the pass: the object's `customDepthMaterial`, or a depth material carrying the
    * source's shadow side (flipped, for PCF), alpha test, map and alpha map (handed over
    * whether or not alpha is tested), displacement. Each caster wears its depth material

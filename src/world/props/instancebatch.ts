@@ -22,8 +22,8 @@ import * as THREE from 'three';
  *  - Program: a batch is its own program (`USE_BATCHING`), linked at boot through
  *    `batchedProgramAnchor`, which builds its batches exactly as `allocate` does. Every
  *    batch makes its colour texture with its first instance, white, so the key always
- *    carries `batchingColor`: without one, three r185 tests `object.colorTexture` (a
- *    name the batch does not have) and resolves the program again on every draw.
+ *    carries `batchingColor` and every batch, the anchor's included, is one program
+ *    (three r185 also re-resolved a batch without one on every draw; fixed in r186).
  *  - A released instance is deleted and its id reused; a broken prop leaves the draw
  *    (`hideInstance`). The batch is disposed with its last instance.
  *

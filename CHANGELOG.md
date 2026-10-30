@@ -371,6 +371,30 @@
   ground 189k → 127k triangles in the main pass; fixed-camera shots across the threshold
   unchanged. The light builds, whose tiles are coarse already, carry no second index.
 
+- THREE.JS r185 → r187 (`package.json`; `render/depthconvention.ts`,
+  `render/lightshader.ts` `installReversedPcfFarTest`, `render/retro.ts`
+  `installCheapSpecular`, `render/programbudget.ts` `KEY_PARAMETERS`,
+  `config/program-budget.json`). r187 fixes in three itself three of the reversed-depth
+  gaps the game patched: the direction-less depth functions (`AlwaysDepth` stays
+  `AlwaysDepth`), the sort (it turns the distance term round instead of reversing the
+  sorted list, so `renderOrder` holds) and both polygon-offset terms, plus the PCF
+  shadow bias's sign. Left on top of r187 those patches flipped twice: the clouds' depth
+  reset drew NEVER and the sky dome sorted last, and the frame was a pale sheet with
+  only the transparent things in it. They are removed; the game keeps adopting each
+  camera before the cull and the PCF far-plane test (`z >= 0` reversed), which r187
+  still writes for the ordinary buffer. r187's direct light is the GGX lobe times a
+  multiscatter factor found once per fragment; Retro's Blinn-Phong now replaces that
+  lobe and drops the factor, the same glint as before (the old layout threw on the
+  Retro tier). The program key has 53 parameters before its masks (48 in r185), which
+  the budget's reversed-depth bit is found by. The budget list is rewritten from a boot
+  of each tier at seed flick (it had gone stale on HEAD already: every one of the 107
+  Blessing programs read as unlisted): retro 85, acceptable 85, standard 108, blessing
+  108, of which r187 adds one, `PMREMGGXIntegration`, at boot. Against r185 on the same
+  frames: tier start shots ≤ 0.04% of pixels apart, night sky and stars 0.00%, contact
+  shadows, markings, wires and the car's shadow and paint unchanged; draws the same
+  (cabin km 21: main 42, each mirror 25 / 159k triangles); a 2-minute autopilot drive
+  p50 = p99 = 16.7 ms, no program linked mid-drive.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow
