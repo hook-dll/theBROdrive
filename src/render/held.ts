@@ -23,6 +23,7 @@ import { setPartCondition } from './materials';
 import { isBrokenThing, itemMass } from '../items/items';
 import type { Item } from '../items/items';
 import type { CameraMode } from './cameras';
+import { trackMotion } from './taa';
 
 /**
  * Mirrors `CONDITION_PROGRAM_KEY` in ./materials. Condition materials are the
@@ -136,6 +137,8 @@ export class HeldItemView {
   private readonly root: THREE.Group;
   private readonly hand: THREE.Group;
   private mesh: THREE.Object3D | null = null;
+  /** Takes the viewmodel out of TAA's motion pass (render/taa.ts); it rides the camera. */
+  private readonly untrackMotion: () => void;
   private heldType: Item['type'] | null = null;
   private heldId: string | null = null;
   /** The held thing was drawn broken (items/items.ts `isBrokenThing`): it breaks in hand. */
@@ -158,6 +161,7 @@ export class HeldItemView {
     this.root.add(this.hand);
     this.root.visible = false;
     this.scene.add(this.root);
+    this.untrackMotion = trackMotion(this.root);
   }
 
 
@@ -415,6 +419,7 @@ export class HeldItemView {
   dispose(): void {
     this.clearMesh();
     this.scene.remove(this.root);
+    this.untrackMotion();
   }
 
   /* ---- internals ---- */

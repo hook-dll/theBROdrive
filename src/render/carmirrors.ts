@@ -24,13 +24,14 @@
  * no shadow pass, no scene matrix walk and no post pass (`Renderer.renderMirror`); small
  * fixed targets, halved on the low rung and none on Very Low (`GraphicsTier.mirrorScale`).
  *
- * Every car but the player's own is drawn in a mirror as its model's far mesh
- * (render/farcars.ts), one draw per model: a near kit car in full was some 60 draws of a
- * mirror's ~200 (measured on the M2 Pro, High traffic), in a picture a few centimetres
- * across. A car with a door, lid or pane off its stop keeps its own body, which the far
- * mesh does not show. The draw distance is the scene's: a mirror's nearer far plane cut
- * its draws by under five percent (the world's batches each span hundreds of metres)
- * and would clip the sky dome.
+ * Every car but the player's own is drawn in a mirror as its model's far mesh, an instance
+ * in the scene's far-car batches (render/farcars.ts), which draw it with the far and mid
+ * traffic in one draw per batch: a near kit car in full was some 60 draws of a mirror's
+ * ~200 (measured on the M2 Pro, High traffic), in a picture a few centimetres across. A
+ * car with a door, lid or pane off its stop keeps its own body, which the far mesh does
+ * not show. The draw distance is the scene's: a mirror's nearer far plane cut its draws by
+ * under five percent (the world's batches each span hundreds of metres) and would clip
+ * the sky dome.
  */
 
 import * as THREE from 'three';
@@ -122,7 +123,7 @@ export class CarMirrors {
   private owed = 0;
   private lastMs = -1;
   private readonly camera = new THREE.PerspectiveCamera();
-  /** The cars drawn in the mirrors as their far mesh; shown only while a mirror draws. */
+  /** The cars drawn in the mirrors as their far mesh, in the far batches; shown only while a mirror draws. */
   private readonly standIns: FarCarField;
   /** Roots hidden for the mirror renders under way, put back after them. */
   private readonly hidden: THREE.Object3D[] = [];
@@ -137,7 +138,7 @@ export class CarMirrors {
     // Its off-axis projection is built by `aim`, so the camera takes the scene's depth
     // convention now, not at its first draw (render/depthconvention.ts).
     adoptReversedDepth(this.camera, renderer.reversedDepth);
-    this.standIns = new FarCarField(renderer.scene, 'mirror-cars');
+    this.standIns = new FarCarField(renderer.scene);
     this.standIns.setVisible(false);
     this.setQuality(quality);
     renderer.setMirrorPass(this);

@@ -369,7 +369,7 @@ Settings → Quality: **Resolution** is the frame as a multiple of the screen (�
 it: **Off** (default) is the browser's bilinear stretch; **FSR** is AMD FidelityFX Super
 Resolution 1 (`src/render/fsr.ts`): EASU rebuilds the screen's pixels from the frame,
 keeping edges and lettering as lines, then RCAS sharpens them by **Sharpness** (shown
-only under FSR; default 85%, 0% no sharpening). At Screen FSR only sharpens; at ×1.5 and
+under FSR or TAA; default 85%, 0% no sharpening). At Screen FSR only sharpens; at ×1.5 and
 ×2 it does nothing; Very Low never uses it. For a 144 Hz frame that still looks close to
 Screen, try FSR at ×0.75, then ×0.67; for a crisper Screen, FSR at Screen. Everything
 applies at once, with no reload. `Settings.upscaling`, `Settings.sharpness`.
@@ -377,8 +377,18 @@ applies at once, with no reload. `Settings.upscaling`, `Settings.sharpness`.
 ## Antialiasing
 
 Settings → Quality → **Antialiasing**: **Off**, **FXAA** (the post pass smooths edge
-steps in the finished picture; each rung's own default, left off at ×1.5 and ×2), **MSAA
-2x** and **MSAA 4x** (the scene is drawn with 2 or 4 samples per pixel and resolved
-before the post pass; smooth geometry edges, sharp texture, the dearest). One choice,
-never two stacked; MSAA is off unless picked, kept at every Resolution, never on Very
-Low. Applies at once, with no reload. `Settings.fxaa`, `Settings.msaa`.
+steps in the finished picture; each rung's own default, left off at ×1.5 and ×2), **TAA**
+(temporal: the camera is nudged a fraction of a pixel each frame and the finished picture,
+outlines included, is blended with the frames before it, reprojected; then sharpened by
+**Sharpness**; it removes stair-steps and their crawl in motion), **MSAA 2x** and **MSAA
+4x** (the scene is drawn with 2 or 4 samples per pixel and resolved before the post pass;
+smooth geometry edges, sharp texture, the dearest). One choice, never two stacked; MSAA
+and TAA are off unless picked, kept at every Resolution, never on Very Low. Under FSR
+below Screen, TAA runs at the frame's size before the upscale. Applies at once, with no
+reload. `Settings.fxaa`, `Settings.msaa`, `Settings.taa`.
+
+TAA's known limits: something moving fast across the picture that is not a car, a
+trailer or the held item (birds, debris, dust, rain, far traffic drawn by the far field)
+can leave a faint trail for a few frames; a surface that comes out from behind another
+is jagged for a few frames; the first frames after a cut, a teleport or the menu are
+drawn from themselves alone; a car's spinning wheels and opening doors blend a little.

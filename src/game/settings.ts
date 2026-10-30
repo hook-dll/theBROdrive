@@ -466,7 +466,8 @@ export type Upscaling = (typeof UPSCALINGS)[number];
 /**
  * Multisampling of the scene target (`Settings.msaa`): samples per pixel, 0 for none.
  * Not a tier default anywhere; off until the player picks it in the Antialiasing row,
- * which makes it and FXAA one choice (Off / FXAA / MSAA 2x / MSAA 4x). Never on Very Low.
+ * which makes it, FXAA and TAA one choice (Off / FXAA / MSAA 2x / MSAA 4x / TAA). Never on
+ * Very Low.
  * The colour and the depth the post pass reads are resolved from the samples every
  * frame, so the drawn outlines still follow one sample's depth.
  */
@@ -474,9 +475,9 @@ export const MSAA_SAMPLES = [0, 2, 4] as const;
 export type MsaaSamples = (typeof MSAA_SAMPLES)[number];
 
 /**
- * RCAS strength under FSR (`Settings.sharpness`), as RCAS's own linear amount
- * exp2(-stops): 1 the most it allows, 0 none (the pass is skipped). 0.85 is about the
- * 0.2 stops AMD's samples default to.
+ * RCAS strength under FSR and after TAA (`Settings.sharpness`), as RCAS's own linear
+ * amount exp2(-stops): 1 the most it allows, 0 none (the pass is skipped, or under TAA
+ * copies). 0.85 is about the 0.2 stops AMD's samples default to.
  */
 export const DEFAULT_SHARPNESS = 0.85;
 export const SHARPNESS_STEP = 0.05;
@@ -598,6 +599,11 @@ export interface Settings {
   fxaa: boolean;
   /** Scene-target multisampling, samples per pixel; see `MSAA_SAMPLES`. Off unless chosen. */
   msaa: MsaaSamples;
+  /**
+   * Temporal antialiasing after the post pass (render/taa.ts): the third kind in the
+   * Antialiasing row, never stacked with FXAA or MSAA. Off unless chosen; never on Very Low.
+   */
+  taa: boolean;
   /** How a frame below the screen's size is brought up to it; see `UPSCALINGS`. Off unless chosen. */
   upscaling: Upscaling;
   /** RCAS sharpening under FSR, 0..1; see `DEFAULT_SHARPNESS`. */
@@ -744,6 +750,7 @@ export const DEFAULT_SETTINGS: Settings = {
   retroLines: 360,
   fxaa: true,
   msaa: 0,
+  taa: false,
   upscaling: 'off',
   sharpness: DEFAULT_SHARPNESS,
   shadows: 'full',
@@ -811,6 +818,7 @@ export function withQualityPreset(
     retroLines: 360,
     fxaa: GRAPHICS_TIERS[quality].fxaa,
     msaa: 0,
+    taa: false,
     shadows: shadowModeDefault(quality),
     frameRateLimit: null,
   };
@@ -827,6 +835,7 @@ export function qualityPresetOf(settings: Settings, mobilePresentation: boolean)
     && settings.trafficDensity === preset
     && settings.fxaa === GRAPHICS_TIERS[settings.graphicsQuality].fxaa
     && settings.msaa === 0
+    && !settings.taa
     && settings.shadows === shadowModeDefault(settings.graphicsQuality)
     && settings.frameRateLimit === null
     && (settings.graphicsQuality === 'retro'
@@ -1004,6 +1013,8 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // a boolean, then most tiers' default rather than a choice; it reads as off, so it
     // changes no one's picture.
     msaa: (MSAA_SAMPLES as readonly unknown[]).includes(obj.msaa) ? (obj.msaa as MsaaSamples) : 0,
+    // Off unless stored as chosen: a save from before it draws as it did.
+    taa: obj.taa === true,
     // Missing means a save from before the upscaler: the compositor's stretch it drew.
     upscaling: (UPSCALINGS as readonly unknown[]).includes(obj.upscaling) ? (obj.upscaling as Upscaling) : 'off',
     // Snapped to the slider's step (divided back by the steps per unit, so 0.85 stays

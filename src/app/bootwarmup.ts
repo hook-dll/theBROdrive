@@ -252,8 +252,8 @@ export async function warmUpBoot(ctx: BootWarmupContext): Promise<void> {
         : {
           ...current,
           graphicsQuality: tier,
-          // The rung's FXAA, unless the player chose MSAA instead (the two are one row).
-          fxaa: current.msaa === 0 && GRAPHICS_TIERS[tier].fxaa,
+          // The rung's FXAA, unless the player chose MSAA or TAA instead (one row).
+          fxaa: current.msaa === 0 && !current.taa && GRAPHICS_TIERS[tier].fxaa,
           shadows: shadowModeDefault(tier),
         };
       ctx.world.apply({ t: 'settings', settings });

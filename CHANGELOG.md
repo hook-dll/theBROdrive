@@ -4,6 +4,37 @@
 
 ### Added
 
+- TAA, TEMPORAL ANTIALIASING, AS AN ANTIALIASING CHOICE (`Settings.taa`; `render/taa.ts`;
+  `core/renderer.ts` `setTaa`, `drawFrame`, `drawResolved`, `resetTemporalHistory`; menu
+  Settings → Quality → **Antialiasing**: Off / FXAA / TAA / MSAA 2x / MSAA 4x).
+  - The scene camera's projection is jittered by a sub-pixel Halton (2, 3) offset, 16 per
+    cycle, in scene-frame pixels; mirrors, shadow and cloud cameras are not, and the
+    projection is put back right after the scene and motion passes, so nothing reading it
+    later in the frame sees the jitter (the wires' minimum width reads its unjittered
+    scale term).
+  - Resolved AFTER the post pass, on its display-encoded picture, so the ink outlines,
+    the grade and the weather are antialiased too; BEFORE FSR's EASU; then RCAS sharpens
+    the result by the **Sharpness** setting (now shown under TAA as well as FSR; 0%
+    copies). The finishing pass draws into the frame target under TAA.
+  - Reprojection: the world from the depth and the two frames' cameras (current view to
+    previous clip, made in doubles); cars, trailers and the held item from a motion pass
+    (`trackMotion`): their meshes again with last frame's model matrices, one raw-shader
+    program (kit skinning included), writing screen motion only where the mesh is the
+    visible surface by the scene's own depth. The player's car moves with the camera, so
+    it stays sharp. Nearest-depth 3x3 dilation, Catmull-Rom history, variance clipping in
+    YCoCg intersected with the min-max box, disocclusion by the previous distance kept in
+    the history's alpha, a little more of the current frame for fast pixels. Panini-aware
+    under the cinema lens.
+  - History restarts on a camera jump over 50 m (teleport, respawn, rebase), a gap over
+    250 ms (menu, pause, hidden tab), a floating-origin rebase, a resize, the cinema lens
+    and a switch.
+  - One choice with FXAA and MSAA (the renderer enforces it too); off for everyone until
+    picked, part of the preset (on, the settings read as Custom); never on Very Low, nor
+    without half-float render targets. The frame report says `taa on`.
+  - Programs: the resolve, the motion pass and RCAS into the frame target are linked at
+    boot (`waitForFrameShaders`); switching links none. Targets (two half-float histories
+    and a half-float motion target at the frame's size) stay 1x1 while off.
+
 - MSAA IS BACK AS AN ANTIALIASING CHOICE, TO COMPARE WITH FXAA (`Settings.msaa`,
   `MSAA_SAMPLES`; `core/renderer.ts` `setMsaa`; menu Settings → Quality →
   **Antialiasing**: Off / FXAA / MSAA 2x / MSAA 4x).
@@ -222,6 +253,30 @@
   moved to zilfront.ts with all its sizes as data in zil.ts (the ZIL identical).
 
 ### Changed
+
+- FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
+  `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
+  (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow
+  casters were one InstancedMesh per model and field, so their draws grew with the
+  number of models about, not the cars: in the cabin view with 30 traffic cars of 18
+  models (seed 3186138141, km 5) they were ~90 of the scene pass's ~300 draws (mid 40,
+  far 30, shadow casters 20) and ~45 of each live mirror's ~110. Now every instance of
+  every model is one instance of a three `BatchedMesh` per vertex layout (the far and
+  mid meshes share one, the shadow hulls have their own), drawn with one multi-draw,
+  culled and sorted per camera: 1 draw in the scene pass, 2 in the sun's (far meshes,
+  hulls) and 1 per mirror, however many models. A caster instance draws in shadow
+  passes alone (the batch shows it only from `onBeforeShadow`), and a batch holding
+  casters only sits on `SHADOW_ONLY_LAYER`. Each instance's paint is the batch's colour
+  texture and its six lens levels two texels of the batch's own lamp texture, read in
+  the far-car shader by the multi-draw's instance; the buffers grow by doubling as models
+  are met. Programs: the far-car program and its depth program are now the batched
+  variants (key `far-car-batch-v1`), linked at boot by the far batch every scene makes
+  with its first field; the instanced ones are gone (`config/program-budget.json` to be
+  rewritten). Fixed with it: the far, mid, mirror and shadow fields each set their own
+  lamp attributes on the SAME far geometry, so all of them drew with whichever field
+  made its mesh last. The shadow hull no longer needs a second geometry for the field
+  (`carModelShadowHull`). Near kit cars are unchanged: already one skinned body, its
+  glass and its wheels (render/kitdraw.ts).
 
 - KIT CAR GLASS IS LIT BY THE SUN AND THE SKY ONLY (`render/materials.ts`
   `kitGlassLightsBegin`, `makeCarGrimeMaterial` `panes`; `render/carsurface.ts`). From

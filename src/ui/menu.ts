@@ -1526,11 +1526,11 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      ...(settings.upscaling === 'fsr' ? [sliderField(
+      ...(settings.upscaling === 'fsr' || settings.taa ? [sliderField(
         'Sharpness',
         'pixels',
-        'How hard FSR sharpens the finished picture (its RCAS pass), at every frame size up to Screen. '
-          + '0% leaves the upscale unsharpened; the default is 85%; near 100% thin lines can ring.',
+        'How hard RCAS sharpens the finished picture: after FSR, and after TAA, which softens it a touch. '
+          + '0% leaves it unsharpened; the default is 85%; near 100% thin lines can ring.',
         0,
         1,
         SHARPNESS_STEP,
@@ -1715,18 +1715,19 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
-      // FXAA in the post pass, or the scene target multisampled: one choice, the two never
-      // stacked. Not on Very Low: its square pixels are the look. Every row runs from the
-      // cheapest choice on the left to the dearest on the right.
+      // FXAA in the post pass, TAA after it, or the scene target multisampled: one choice,
+      // never stacked. Not on Very Low: its square pixels are the look. Every row runs from
+      // the cheapest choice on the left to the dearest on the right.
       ...(settings.graphicsQuality === 'retro' ? [] : [segmented('Antialiasing', [
         {
           label: 'Off',
           icon: 'gfx1',
           hint: 'Jagged edges left as they are. Resolution and the drawn outlines still apply.',
-          active: () => !settings.fxaa && settings.msaa === 0,
+          active: () => !settings.fxaa && settings.msaa === 0 && !settings.taa,
           pick: () => {
             settings.fxaa = false;
             settings.msaa = 0;
+            settings.taa = false;
             changed();
           },
         },
@@ -1734,10 +1735,23 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           label: 'FXAA',
           icon: 'gfx2',
           hint: 'Smooths the jagged steps along edges in the finished picture. Costs little; fine texture softens a touch. Left off at ×1.5 and ×2, whose extra pixels smooth the edges already.',
-          active: () => settings.fxaa && settings.msaa === 0,
+          active: () => settings.fxaa && settings.msaa === 0 && !settings.taa,
           pick: () => {
             settings.fxaa = true;
             settings.msaa = 0;
+            settings.taa = false;
+            changed();
+          },
+        },
+        {
+          label: 'TAA',
+          icon: 'gfx2',
+          hint: 'Temporal: each frame is drawn a fraction of a pixel off the last and blended with the frames before, so edges, the drawn outlines and thin wires stop stepping and shimmering, also in motion. Sharpened afterwards (Sharpness). Fast-moving things can leave a faint trail, and a cut takes a few frames to settle.',
+          active: () => settings.taa,
+          pick: () => {
+            settings.fxaa = false;
+            settings.msaa = 0;
+            settings.taa = true;
             changed();
           },
         },
@@ -1745,10 +1759,11 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           label: `MSAA ${samples}x`,
           icon: 'gfx3' as const,
           hint: `Draws ${samples} samples per pixel along every geometry edge and averages them: sharp texture, but the edges inside leaves and shading stay as they are. Costs the most, and more at ×1.5 and ×2.`,
-          active: () => settings.msaa === samples,
+          active: () => settings.msaa === samples && !settings.taa,
           pick: () => {
             settings.fxaa = false;
             settings.msaa = samples;
+            settings.taa = false;
             changed();
           },
         })),
@@ -2669,6 +2684,7 @@ export class MainMenu {
         retroLines: base.retroLines,
         fxaa: base.fxaa,
         msaa: base.msaa,
+        taa: base.taa,
         upscaling: base.upscaling,
         sharpness: base.sharpness,
         shadows: base.shadows,
@@ -2707,6 +2723,7 @@ export class MainMenu {
           retroLines: settings.retroLines,
           fxaa: settings.fxaa,
           msaa: settings.msaa,
+          taa: settings.taa,
           upscaling: settings.upscaling,
           sharpness: settings.sharpness,
           shadows: settings.shadows,

@@ -601,7 +601,7 @@ export async function bootCarLab(): Promise<void> {
 
   const view = new THREE.Vector3();
   // Mid traffic's shared parts (trim, glass, lenses, wheels), drawn unlit as parked cars' are.
-  const midField = new FarCarField(renderer.scene, 'lab-mid-cars');
+  const midField = new FarCarField(renderer.scene);
   const midAt = new THREE.Vector3();
   const darkLamps = { lensLevel: () => 0 } as unknown as VehicleLamps;
   const labFov = renderer.camera.fov;

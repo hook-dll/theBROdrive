@@ -8,7 +8,7 @@ import { gamepads, PAD, type RumbleFrame } from './core/gamepad';
 import { GameLoop } from './core/loop';
 import { installScreenWakeLock } from './core/wakelock';
 import { PhysicsWorld } from './core/physics';
-import { prefersMobilePresentation, Renderer, SHADOW_ONLY_LAYER } from './core/renderer';
+import { prefersMobilePresentation, Renderer } from './core/renderer';
 import { FIXED_DT } from './core/physics';
 import { DAY_LENGTH, GameWorld, newWorldState, type CarState } from './game/state';
 import { parseCalendarEpoch } from './game/calendar';
@@ -408,6 +408,7 @@ async function boot(): Promise<void> {
   );
   renderer.setRetroLines(world.state.settings.retroLines);
   renderer.setMsaa(world.state.settings.msaa);
+  renderer.setTaa(world.state.settings.taa);
   renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
@@ -592,15 +593,16 @@ async function boot(): Promise<void> {
     mirrorProgramAnchor(),
     marketProgramAnchor(),
   );
-  // Far traffic draws as one instance per model; built now so its hidden anchor links the
-  // shared far-car program behind the loading cover (render/farcars.ts).
+  // Far traffic draws as instances in the scene's far-car batches, one draw per batch and
+  // pass for every model; built now so the far batch links its program behind the loading
+  // cover (render/farcars.ts).
   const farCars = new FarCarField(renderer.scene);
-  // Mid traffic's shared parts (trim, glass, lenses, wheels): the same program, so the same
-  // kind of field; each car's paint draws in its own root (render/farcars.ts, MID TRAFFIC).
-  const midCars = new FarCarField(renderer.scene, 'mid-cars');
-  // Near traffic's shadows: every near traffic car casts as its far mesh here, a field on
-  // the shadow-only layer that no picture draws (core/renderer.ts `SHADOW_ONLY_LAYER`).
-  const shadowCars = new FarCarField(renderer.scene, 'shadow-cars', SHADOW_ONLY_LAYER);
+  // Mid traffic's shared parts (trim, glass, lenses, wheels): the same batches; each car's
+  // paint draws in its own root (render/farcars.ts, MID TRAFFIC).
+  const midCars = new FarCarField(renderer.scene);
+  // Near traffic's shadows: every near traffic car casts as its far mesh or hull here,
+  // instances the batches draw in shadow passes alone.
+  const shadowCars = new FarCarField(renderer.scene, true);
 
   // Shared exact nearest-road field: the tile streamer uses it to grade the open
   // lattice into the road corridor without searching the full spine per vertex.
@@ -836,8 +838,8 @@ async function boot(): Promise<void> {
           `presenting ${framesPerSecond}, shadows `
             + `${shadowModeFor(s.shadows, s.graphicsQuality, mobilePresentation)}, `
             + `grass ${s.groundCover}, fxaa ${s.fxaa ? 'on' : 'off'}, msaa ${s.msaa ? `${s.msaa}x` : 'off'}, `
-            + `upscaling ${s.upscaling}`
-            + (s.upscaling === 'fsr' ? ` (sharpness ${Math.round(s.sharpness * 100)}%)` : ''),
+            + `taa ${s.taa ? 'on' : 'off'}, upscaling ${s.upscaling}`
+            + (s.upscaling === 'fsr' || s.taa ? ` (sharpness ${Math.round(s.sharpness * 100)}%)` : ''),
           gpuLine,
           `simulation fixed at ${simulationHz} Hz`,
           `light slots ${spotSlots} spot per lit fragment, stars to magnitude ${stars}`,
@@ -2155,6 +2157,8 @@ async function boot(): Promise<void> {
         streamer.rebase();
         desert.rebase();
         rebasedThisFrame = true;
+        // Every position moved a kilometre at once: TAA's reprojection has nothing to hold.
+        renderer.resetTemporalHistory();
       }
     }
 
@@ -3469,7 +3473,8 @@ async function boot(): Promise<void> {
       // `mirrors.stats.renders` counts mirror passes; `mirrors.enabled = false` is the A/B.
       mirrors: carMirrors,
       // `farCars.enabled = false` draws every traffic car in full, for the A/B; `stats`
-      // counts this frame's far cars, the models they drew as, and the draws they save.
+      // counts this frame's far cars, the models they drew as, the batches they are in, and
+      // the draws they save.
       farCars: {
         get enabled(): boolean {
           return farCars.enabled;
@@ -3477,19 +3482,20 @@ async function boot(): Promise<void> {
         set enabled(on: boolean) {
           farCars.enabled = on;
         },
-        get stats(): { cars: number; models: number; drawsSaved: number } {
+        get stats(): { cars: number; models: number; batches: number; drawsSaved: number } {
           let full = 0;
           traffic.forEachVehicle((_, vehicle) => {
             if (!vehicle.root.visible) full += nearDrawEstimate(vehicle.nearParts);
           });
-          // Each model drawn far is one draw in the scene pass and one in the sun's.
-          return { ...farCars.stats, drawsSaved: full - farCars.stats.models * 2 };
+          // Each batch is one draw in the scene pass and one in the sun's, shared with the
+          // mid cars' parts.
+          return { ...farCars.stats, drawsSaved: full - farCars.stats.batches * 2 };
         },
       },
       // `midCars.enabled = false` draws every traffic car inside the far line in full, for
-      // the A/B. `stats`: this frame's mid cars, the shared meshes they used (body rest per
-      // model, wheel per set; one draw each and one in the sun's), every draw they cost
-      // (their own paint too, also casting), and the draws they save.
+      // the A/B. `stats`: this frame's mid cars, the far batches their shared parts are in
+      // (one draw each and one in the sun's, shared with the far cars), every draw they
+      // cost (their own paint too, also casting), and the draws they save.
       midCars: {
         get enabled(): boolean {
           return midCars.enabled;
@@ -3497,7 +3503,7 @@ async function boot(): Promise<void> {
         set enabled(on: boolean) {
           midCars.enabled = on;
         },
-        get stats(): { cars: number; sharedMeshes: number; draws: number; drawsSaved: number } {
+        get stats(): { cars: number; batches: number; draws: number; drawsSaved: number } {
           let cars = 0;
           let own = 0;
           let full = 0;
@@ -3507,8 +3513,8 @@ async function boot(): Promise<void> {
             own += vehicle.midOwnDraws;
             full += nearDrawEstimate(vehicle.nearParts);
           });
-          const draws = (own + midCars.stats.models) * 2;
-          return { cars, sharedMeshes: midCars.stats.models, draws, drawsSaved: full - draws };
+          const draws = (own + midCars.stats.batches) * 2;
+          return { cars, batches: midCars.stats.batches, draws, drawsSaved: full - draws };
         },
       },
     });
@@ -3659,6 +3665,7 @@ async function boot(): Promise<void> {
       audio.applySettings(world.state.settings);
       renderer.setFxaa(world.state.settings.fxaa);
       renderer.setMsaa(world.state.settings.msaa);
+      renderer.setTaa(world.state.settings.taa);
       renderer.setShadowMode(world.state.settings.shadows);
       sky.setShadowMode(world.state.settings.shadows);
       renderer.setFrameScale(world.state.settings.frameScale);

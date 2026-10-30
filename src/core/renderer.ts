@@ -10,6 +10,7 @@ import { setSceneFrameHeight } from '../render/sceneframe';
 import { DEFAULT_EYE_HEIGHT_M, HAZE_FRAGMENT, HAZE_VERTEX } from '../render/hazeshader';
 import { PRESENT_FRAGMENT, PRESENT_VERTEX } from '../render/presentshader';
 import { EASU_FRAGMENT, RCAS_FRAGMENT } from '../render/fsr';
+import { TemporalAA } from '../render/taa';
 import {
   DEFAULT_INK_STRENGTH,
   DEFAULT_SHARPNESS,
@@ -440,6 +441,15 @@ export class Renderer {
   private fxaa: boolean;
   /** `Settings.msaa`, kept so a rung change can apply it (never on the retro rung). */
   private msaa: MsaaSamples = 0;
+  /** `Settings.taa`, kept so a rung change can apply it (never on the retro rung); see `taaActive`. */
+  private taa = false;
+  /**
+   * The temporal antialiasing (render/taa.ts): its history, motion pass and jitter. Its
+   * targets stay 1x1 while it is off.
+   */
+  private readonly temporal: TemporalAA;
+  /** Whether the context renders to half float, which TAA's motion pass needs. */
+  private readonly taaSupported: boolean;
   /** `Settings.shadows`, kept so a rung change can apply it (phones may still force off). */
   private shadowMode: ShadowMode;
   /** Reused 2D target for compact photographs; created only when the shutter fires. */
@@ -487,9 +497,10 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       // NOT antialiased. Every rung draws scene pixels into `hazeTarget`; the
-      // antialiasing, where the player wants it, is FXAA in the fullscreen pass or that
-      // target's own multisampling (`setMsaa`). A multisampled backbuffer would allocate
-      // and resolve an image that cannot differ by one pixel after that pass.
+      // antialiasing, where the player wants it, is FXAA in the fullscreen pass, that
+      // target's own multisampling (`setMsaa`) or TAA after the pass (`setTaa`). A
+      // multisampled backbuffer would allocate and resolve an image that cannot differ by
+      // one pixel after that pass.
       antialias: false,
       // Never ask a phone for its highest-performance configuration. On a desktop this
       // hint picks the discrete GPU, which is what it is for; on a phone there is only
@@ -710,6 +721,11 @@ export class Renderer {
     rcasMesh.frustumCulled = false;
     this.rcasScene.add(rcasMesh);
 
+    // TAA (render/taa.ts): reads the finished frame from `frameTarget` and this target's
+    // depth, on the same triangle.
+    this.temporal = new TemporalAA(sceneType, hazeDepth, this.reversedDepth, this.hazeGeometry);
+    this.taaSupported = sceneType === THREE.HalfFloatType;
+
     // The window's resize event still drives it (a DPR change on a move between screens
     // arrives there everywhere); the observer adds the exact device-pixel size and the
     // layout changes no window event reports.
@@ -730,6 +746,7 @@ export class Renderer {
     this.hazeTarget.dispose();
     this.frameTarget.dispose();
     this.upscaleTarget.dispose();
+    this.temporal.dispose();
     this.hazeMaterial.dispose();
     this.presentMaterial.dispose();
     this.easuMaterial.dispose();
@@ -746,6 +763,7 @@ export class Renderer {
    */
   setCinema(on: boolean): void {
     this.cinemaLens = on;
+    this.temporal.reset();
     this.resize();
   }
 
@@ -768,9 +786,11 @@ export class Renderer {
    * Waits until every program variant the live frame draws is ready — the scene pass,
    * the finishing pass both to the canvas and into the frame target (a render target is
    * a different program key: linear output), the present pass, EASU both to the canvas
-   * and into `upscaleTarget`, and RCAS — and the plain shadow depth variants
-   * (`depthVariantSamples`) with them. Every presentation variant always, because the
-   * player can change the frame's size and the upscaling from the pause menu at any time.
+   * and into `upscaleTarget`, RCAS both to the canvas and into the frame target (after
+   * TAA on a frame that is shrunk), and TAA's resolve and motion passes — and the plain
+   * shadow depth variants (`depthVariantSamples`) with them. Every presentation variant
+   * always, because the player can change the frame's size, the upscaling and the
+   * antialiasing from the pause menu at any time.
    */
   async waitForFrameShaders(): Promise<void> {
     const sceneReady = this.compileForScenePass(this.scene);
@@ -783,6 +803,9 @@ export class Renderer {
       const framedReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
       this.renderer.setRenderTarget(this.upscaleTarget);
       const easuFramedReady = compileAsyncSafe(this.renderer, this.easuScene, this.hazeCamera);
+      this.renderer.setRenderTarget(this.frameTarget);
+      const rcasFramedReady = compileAsyncSafe(this.renderer, this.rcasScene, this.hazeCamera);
+      const temporalReady = this.temporal.compile(this.renderer, this.hazeCamera);
       this.renderer.setRenderTarget(null);
       const postReady = compileAsyncSafe(this.renderer, this.hazeScene, this.hazeCamera);
       const presentReady = compileAsyncSafe(this.renderer, this.presentScene, this.hazeCamera);
@@ -790,7 +813,8 @@ export class Renderer {
       const rcasReady = compileAsyncSafe(this.renderer, this.rcasScene, this.hazeCamera);
       const shadeReady = this.cloudShadowPass?.compile();
       await Promise.all([
-        sceneReady, depthReady, framedReady, easuFramedReady, postReady, presentReady, easuReady, rcasReady, shadeReady,
+        sceneReady, depthReady, framedReady, easuFramedReady, rcasFramedReady, temporalReady, postReady, presentReady,
+        easuReady, rcasReady, shadeReady,
       ]);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
@@ -1224,10 +1248,28 @@ export class Renderer {
     // `frameTarget` too, then EASU brings it up to the canvas (into `upscaleTarget`
     // while RCAS follows) and RCAS sharpens it onto the canvas (render/fsr.ts).
     //
+    // Under TAA (render/taa.ts) the scene pass is jittered and followed by the motion
+    // pass; pass 2 goes into `frameTarget`, the resolve blends it into the history, and
+    // RCAS sharpens the result on its way to the screen (`drawResolved`).
+    //
     // Before both, the clouds' shadow map, for the game's own scene only: the ending
     // cutscene's ground does not read it.
     if (scene === this.scene) this.cloudShadowPass?.draw();
+    const temporal = this.taaActive();
     this.renderer.setRenderTarget(this.hazeTarget);
+    if (temporal) {
+      const now = performance.now();
+      this.temporal.begin(camera, now);
+      try {
+        this.renderer.render(scene, camera);
+      } finally {
+        this.temporal.drawMotion(this.renderer, scene, camera);
+      }
+      this.renderer.setRenderTarget(this.frameTarget);
+      this.renderer.render(this.hazeScene, this.hazeCamera);
+      this.drawResolved(this.temporal.resolve(this.renderer, this.frameTarget.texture, camera, this.hazeCamera, now));
+      return;
+    }
     this.renderer.render(scene, camera);
     if (this.shrinking) {
       this.renderer.setRenderTarget(this.frameTarget);
@@ -1249,6 +1291,44 @@ export class Renderer {
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.hazeScene, this.hazeCamera);
     }
+  }
+
+  /**
+   * TAA's resolved frame (`resolved`, display-encoded at the scene's size) to the canvas:
+   * sharpened by RCAS at the scene's size (`Settings.sharpness`; at 0 RCAS copies), then
+   * shrunk by the present pass; or, under FSR below the screen, upscaled by EASU and
+   * sharpened by RCAS at the screen's size as without TAA. The passes' inputs are put back
+   * to the frame target afterwards, where the other paths expect them.
+   */
+  private drawResolved(resolved: THREE.Texture): void {
+    const r = this.renderer;
+    const rcasInput = this.rcasMaterial.uniforms.tFrame;
+    if (this.shrinking) {
+      if (this.sharpness > 0) {
+        rcasInput.value = resolved;
+        r.setRenderTarget(this.frameTarget);
+        r.render(this.rcasScene, this.hazeCamera);
+      } else {
+        this.presentMaterial.uniforms.tFrame.value = resolved;
+      }
+      r.setRenderTarget(null);
+      r.render(this.presentScene, this.hazeCamera);
+    } else if (this.easu) {
+      this.easuMaterial.uniforms.tFrame.value = resolved;
+      r.setRenderTarget(this.rcas ? this.upscaleTarget : null);
+      r.render(this.easuScene, this.hazeCamera);
+      if (this.rcas) {
+        r.setRenderTarget(null);
+        r.render(this.rcasScene, this.hazeCamera);
+      }
+    } else {
+      rcasInput.value = resolved;
+      r.setRenderTarget(null);
+      r.render(this.rcasScene, this.hazeCamera);
+    }
+    rcasInput.value = this.easu ? this.upscaleTarget.texture : this.frameTarget.texture;
+    this.presentMaterial.uniforms.tFrame.value = this.frameTarget.texture;
+    this.easuMaterial.uniforms.tFrame.value = this.frameTarget.texture;
   }
 
   /**
@@ -1332,10 +1412,12 @@ export class Renderer {
   private resizeHazeTarget(): void {
     const { x: width, y: height } = this.sceneSize;
     const uniforms = this.hazeMaterial.uniforms;
-    const framed = this.shrinking || this.easu || this.rcas;
+    const temporal = this.taaActive();
+    const framed = this.shrinking || this.easu || this.rcas || temporal;
     this.hazeTarget.setSize(width, height);
     uniforms.uResolution.value.set(width, height);
     uniforms.uPanini.value = this.cinemaLens ? this.paniniStrength : 0;
+    this.temporal.setLens(uniforms.uPanini.value as number);
     uniforms.uEncodeOutput.value = framed ? 1 : 0;
     // Back to 1x1 when unused: `setSize` disposes the full-sized texture, and Three
     // allocates the small one only if something draws into it.
@@ -1343,6 +1425,7 @@ export class Renderer {
     const canvas = this.renderer.domElement;
     const upscaled = this.easu && this.rcas;
     this.upscaleTarget.setSize(upscaled ? canvas.width : 1, upscaled ? canvas.height : 1);
+    this.temporal.setSize(temporal ? width : 1, temporal ? height : 1);
     (this.presentMaterial.uniforms.uFrameSize.value as THREE.Vector2).set(width, height);
     (this.presentMaterial.uniforms.uScale.value as THREE.Vector2).set(
       width / Math.max(1, canvas.width),
@@ -1408,7 +1491,7 @@ export class Renderer {
         : this.easu
           ? 'upscaled'
           : this.sceneSize.x === displayWidth && this.sceneSize.y === displayHeight
-            ? this.rcas ? 'sharpened' : 'native'
+            ? this.rcas || (this.taaActive() && this.sharpness > 0) ? 'sharpened' : 'native'
             : 'stretched';
     return { width: canvas.width, height: canvas.height, shrunk: this.shrinking, displayWidth, displayHeight, fit };
   }
@@ -1651,7 +1734,7 @@ export class Renderer {
   }
 
   private applyFxaa(): void {
-    const on = this.fxaa && this.quality !== 'retro' && this.supersample < SUPERSAMPLE_WITHOUT_FXAA;
+    const on = this.fxaa && !this.taaActive() && this.quality !== 'retro' && this.supersample < SUPERSAMPLE_WITHOUT_FXAA;
     this.hazeMaterial.uniforms.uFxaa.value = on ? 1 : 0;
   }
 
@@ -1671,12 +1754,41 @@ export class Renderer {
   }
 
   private applyMsaa(): void {
-    const samples = this.quality === 'retro' ? 0 : this.msaa;
+    const samples = this.quality === 'retro' || this.taaActive() ? 0 : this.msaa;
     if (this.hazeTarget.samples === samples) return;
     this.hazeTarget.samples = samples;
     // Sample count is allocation state: the next `setRenderTarget` builds the target
     // again, its colour and depth textures included (the objects the pass holds stay).
     this.hazeTarget.dispose();
+  }
+
+  /**
+   * `Settings.taa`: temporal antialiasing (render/taa.ts). Excludes FXAA and MSAA whatever
+   * they say; never on the retro rung, nor where the context cannot render to half float
+   * (the motion pass's target). Every program it draws is linked at boot, so a switch
+   * links none; it sizes its targets, restarts the history and forgets the GPU average.
+   */
+  setTaa(enabled: boolean): void {
+    if (enabled === this.taa) return;
+    this.taa = enabled;
+    this.applyFxaa();
+    this.applyMsaa();
+    this.temporal.reset();
+    this.applyResolution();
+  }
+
+  /** Whether this frame draws through TAA. */
+  private taaActive(): boolean {
+    return this.taa && this.taaSupported && this.quality !== 'retro';
+  }
+
+  /**
+   * Drops TAA's history and every mesh's previous position: the next frame is drawn
+   * from itself alone. For a floating-origin rebase, where every position moves by a
+   * kilometre at once; camera cuts and stalls are caught by render/taa.ts itself.
+   */
+  resetTemporalHistory(): void {
+    this.temporal.reset();
   }
 
   /** Changes post-process outline opacity without rebuilding the shader pass. */

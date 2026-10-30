@@ -2104,7 +2104,7 @@ function cloneDrivingModel(t: Template, appearanceKey = t.def.id): CarModelInsta
     wheelDraw,
     surface,
     mid: midInstance(t, clones, glass[0] ?? null, set),
-    shadowHull: hull ? carShadowHullMesh(hull.mesh) : null,
+    shadowHull: hull ? carShadowHullMesh(hull) : null,
   };
 }
 
@@ -2282,7 +2282,7 @@ function cloneStaticModel(t: Template, appearanceKey: string): StaticCarInstance
   const set = selectedWheels(t, appearanceKey);
   // The body's shadow hull: a static car's shadow is a solid silhouette like a driven one's.
   const hull = shadowHullOf(t);
-  if (hull) group.add(carShadowHullMesh(hull.mesh));
+  if (hull) group.add(carShadowHullMesh(hull));
   if (t.kit) {
     const parts = kitStaticParts(t);
     const shell = kitShellMesh(parts.paint, kitBodyMaterial());
@@ -2343,25 +2343,16 @@ function cloneStaticModel(t: Template, appearanceKey: string): StaticCarInstance
 
 /**
  * Each model's shadow hull (render/carshadowhull.ts `bakeCarShadowHull`), built as the
- * model loads (`loadCarModel`), or by its first car if one comes sooner: `mesh` for
- * a car's own hull mesh, `field` the same triangles for the shadow-only field
- * (render/farcars.ts `FarCarField.addCaster`), whose instanced attributes stay off the mesh's.
+ * model loads (`loadCarModel`), or by its first car if one comes sooner: a car's own hull
+ * mesh, and the mesh the shadow-only field adds it as (render/farcars.ts
+ * `FarCarField.addCaster`).
  */
-const shadowHulls = new Map<string, { readonly mesh: THREE.BufferGeometry; readonly field: THREE.BufferGeometry } | null>();
+const shadowHulls = new Map<string, THREE.BufferGeometry | null>();
 
-function shadowHullOf(t: Template): { readonly mesh: THREE.BufferGeometry; readonly field: THREE.BufferGeometry } | null {
+function shadowHullOf(t: Template): THREE.BufferGeometry | null {
   let hull = shadowHulls.get(t.def.id);
   if (hull === undefined) {
-    const mesh = bakeCarShadowHull(t.body);
-    let field: THREE.BufferGeometry | null = null;
-    if (mesh) {
-      field = new THREE.BufferGeometry();
-      field.setAttribute('position', mesh.getAttribute('position'));
-      field.setAttribute('normal', mesh.getAttribute('normal'));
-      field.setIndex(mesh.index);
-      field.boundingSphere = mesh.boundingSphere;
-    }
-    hull = mesh && field ? { mesh, field } : null;
+    hull = bakeCarShadowHull(t.body);
     shadowHulls.set(t.def.id, hull);
   }
   return hull;
@@ -2372,7 +2363,7 @@ function shadowHullOf(t: Template): { readonly mesh: THREE.BufferGeometry; reado
  * meshes draw casts it; null before the model's first car or for a body without one.
  */
 export function carModelShadowHull(id: string): THREE.BufferGeometry | null {
-  return shadowHulls.get(id)?.field ?? null;
+  return shadowHulls.get(id) ?? null;
 }
 
 /** Each loaded model's far traffic mesh (`buildFarGeometry`), built once as it loads. */

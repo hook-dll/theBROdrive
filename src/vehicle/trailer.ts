@@ -35,6 +35,7 @@ import { weather, weatherGrip } from '../world/weather';
 import { createTrailerModel, type TrailerFit } from '../render/trailermodel';
 import { createTrailerLoadMesh } from '../render/thingmesh';
 import { TyreContacts, type TyreContact } from './tyrecontact';
+import { trackMotion } from '../render/taa';
 
 /**
  * A towed trailer, and the drawbar hitch that couples it to any car.
@@ -468,6 +469,8 @@ export class Trailer implements Rebasable {
   private readonly propCollider: RAPIER.Collider;
   private readonly propMeshes: THREE.Mesh[] = [];
   private readonly unregisterOrigin: () => void;
+  /** Takes this trailer out of TAA's motion pass (render/taa.ts) when it goes. */
+  private readonly unregisterMotion: () => void;
   /** Procedural geometries owned by this trailer rather than the shared model. */
   private readonly disposables: THREE.BufferGeometry[] = [];
 
@@ -713,6 +716,7 @@ export class Trailer implements Rebasable {
     }
 
     scene.add(this.root);
+    this.unregisterMotion = trackMotion(this.root);
 
     // A trailer restored from a save may already be coupled; the second pass in
     // TrailerField re-hitches it, but until then the stand matches its state.
@@ -1512,6 +1516,7 @@ export class Trailer implements Rebasable {
     this.unregisterOrigin();
     this.physics.removeBody(this.body);
     this.scene.remove(this.root);
+    this.unregisterMotion();
     for (const geo of this.disposables) geo.dispose();
   }
 

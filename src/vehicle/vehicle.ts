@@ -262,6 +262,7 @@ import {
 import { VehicleLamps, type BeamGroup, type HeadlightMode, type IndicatorSide } from './vehiclelamps';
 import { TyreContacts, digressiveRate, type TyreContact } from './tyrecontact';
 import { weather, weatherGrip, weatherSoftness, windAt } from '../world/weather';
+import { trackMotion } from '../render/taa';
 
 const KIT_MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
 /** Each mirror's rig channel prefix: `<prefix>_yaw`, `<prefix>_pitch`. */
@@ -1154,6 +1155,8 @@ export class Vehicle implements Rebasable {
   private readonly origin: WorldOrigin;
   /** Removes this runtime from floating-origin notifications when it despawns. */
   private originDisposer: (() => void) | null = null;
+  /** Takes this car out of TAA's motion pass (render/taa.ts) when it despawns. */
+  private readonly motionDisposer: () => void;
   private disposed = false;
 
 
@@ -1772,6 +1775,7 @@ export class Vehicle implements Rebasable {
     }
 
     this.scene.add(this.rootGroup);
+    this.motionDisposer = trackMotion(this.rootGroup);
     this.primeTransform();
 
     this.statsValue = this.computeStats();
@@ -4340,8 +4344,8 @@ export class Vehicle implements Rebasable {
     }
     // NEAR SHADOWS FROM THE FAR MESH. A shut near car's casters are nearly the far mesh:
     // the shell, its glass and its wheels (carmodel.ts `prepareMaterials`: the cabin, bay,
-    // boot and underbody cast nothing), so one shared draw per model and shadow pass
-    // replaces its own. Not inside the self-shadow line (SELF_SHADOW_ENTER_M), where the
+    // boot and underbody cast nothing), so an instance in the far batches' one draw per
+    // shadow pass replaces its own. Not inside the self-shadow line (SELF_SHADOW_ENTER_M), where the
     // sun's near cascade is sharp enough to tell them apart, and not with a door, lid or
     // pane off its stop, which the far mesh does not have: then the car casts itself.
     const standIn = shadow !== null && !this.castsOwnShadow() && this.addStandIn(shadow);
@@ -5627,6 +5631,7 @@ export class Vehicle implements Rebasable {
     this.physics.removeBody(this.chassisBody);
     this.clearVisuals();
     this.scene.remove(this.rootGroup);
+    this.motionDisposer();
   }
 
   // ---------------------------------------------------------------------------
