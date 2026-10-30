@@ -23,13 +23,15 @@
  *
  * The approximation is parallax. A true mirror has its own viewpoint (the eye reflected
  * through its own glass), and the three glasses sit 0.8-1.4 m apart. The shared image
- * comes from one point at the two door glasses' reflected eyes (outside the car beside
- * the doors), so a near object can sit a few degrees off relative to the background in a
- * face whose glass is not at that point. Far land, sky and the horizon are effectively
- * exact. The inner mirror is the most approximate: its reflected rays pass through the
- * cabin, while the shared camera stands outside at the doors, so it shows the road
- * behind rather than the rear seat and pillars. Side mirrors, which are what a driver
- * checks, keep the world behind and the following traffic.
+ * comes from one point at the player's-side door reflection (outside the car beside that
+ * door), so a near object can sit a few degrees off relative to the background in a face
+ * whose glass is not at that point. Far land, sky and the horizon are effectively exact.
+ * The inner mirror is the most approximate: its reflected rays pass through the cabin,
+ * while the shared camera stands outside at the door, so it shows the road behind rather
+ * than the rear seat and pillars. Side mirrors, which are what a driver checks, keep the
+ * world behind and the following traffic. Averaging the two door reflections was tried
+ * and rejected: it puts the eye on the centreline inside the cabin, and the pass then
+ * shades the interior (25-32 ms of GPU against 5-7 ms from the door).
  *
  * Sampling. For each face vertex the reflected direction is `d - 2 (d.n) n`, where `d`
  * is eye-to-glass and `n` the glass normal. That direction is projected into the shared
@@ -271,18 +273,21 @@ export class CarMirrors {
     this.configureShared(kit);
     const faces = kit.mirrorFaces;
     const inner = faces.find((face) => face.userData.kitMirror === 'inner') ?? faces[0]!;
-    // THE SHARED EYE STANDS WHERE THE DOOR GLASSES DO, not behind the car. A mirror sees
-    // from the eye reflected through its glass; the two door reflections are outside the
-    // car beside the doors, so their average is a viewpoint close to the mirrors and
-    // clear of the body behind them. The inner glass would pull that average in front of
-    // the windshield (and its rays run through the cabin), so it is left out of the
-    // position when both doors exist; it still shapes the union window and its own UVs.
+    // THE SHARED EYE STANDS AT ONE DOOR'S REFLECTION, NOT AT THE AVERAGE OF THE TWO.
+    // A mirror sees from the eye reflected through its glass; the left and right door
+    // reflections sit outside the car on their own sides. Their average lands on the
+    // centreline, INSIDE the cabin, and the pass then shades the interior and its glass:
+    // measured 25-32 ms of GPU against 5-7 ms with the eye outside. So the closest door
+    // reflection to the player's own eye is used — the driver's side for a left-hand
+    // drive, the passenger's when he sits there — and the other door's view is sampled
+    // from it with the usual parallax. The inner glass never places the eye (it would
+    // pull it in front of the windshield); it still shapes the union and its own UVs.
     const sideFaces = faces.filter(
       (face) => face.userData.kitMirror === 'left' || face.userData.kitMirror === 'right',
     );
     const positionFaces = sideFaces.length > 0 ? sideFaces : faces;
-    _average.set(0, 0, 0);
-    let mirrored = 0;
+    let chosen = false;
+    let bestDistance = Infinity;
     _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
     for (const face of positionFaces) {
       _world.setFromMatrixPosition(face.matrixWorld);
@@ -291,12 +296,17 @@ export class CarMirrors {
       if (distance <= 0.02) continue;
       // The eye reflected through the glass: `E - 2 ((E - P) . n) n`.
       _mirrored.copy(_eye).addScaledVector(_normal, -2 * distance);
-      _average.add(_mirrored);
-      mirrored++;
+      const toEye = _mirrored.distanceToSquared(_eye);
+      if (toEye < bestDistance) {
+        bestDistance = toEye;
+        _average.copy(_mirrored);
+        chosen = true;
+      }
     }
-    if (mirrored > 0) {
-      _average.multiplyScalar(1 / mirrored);
-    } else {
+    if (!chosen) {
+      // No usable door reflection (a model mid-load, a malformed glass): the average of
+      // the glasses themselves, which is still on the car rather than behind it.
+      _average.set(0, 0, 0);
       for (const face of faces) _average.add(_world.setFromMatrixPosition(face.matrixWorld));
       _average.multiplyScalar(1 / faces.length);
     }

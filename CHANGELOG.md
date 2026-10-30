@@ -264,10 +264,12 @@
   512..4096 by 256..2048 cap. A 4K display or a larger cabin view grows it; a phone's
   half-scale tier shrinks it. Recomputed only when the car, display, camera fov or tier
   changes; the camera itself is re-aimed every pass. Still one pass, three faces. The
-  camera stands at the average reflected eye of the two door glasses — outside the car
-  beside the doors, where the mirrors are — not 3 m behind the body; the inner glass is
-  left out of that position when both doors exist (it would pull the eye in front of the
-  windshield), but still shapes the union and its own UVs.
+  camera stands at the **player's-side door glass's reflected eye** — outside the car
+  beside that door, where the mirror is — not 3 m behind the body. The average of the two
+  door reflections is not used: it lands on the centreline inside the cabin, and the pass
+  then shades the interior (25-32 ms of GPU against 5-7 ms from the door). The inner
+  glass never places the eye (it would pull it in front of the windshield), but still
+  shapes the union and its own UVs.
 
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
