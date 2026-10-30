@@ -254,6 +254,17 @@
 
 ### Changed
 
+- THE MIRROR SHARED VIEW IS THE UNION OF THE THREE GLASSES, SIZED FROM THE SCREEN
+  (`render/carmirrors.ts` `configureShared`). The shared camera no longer covers a wide
+  100-degree rear panorama: it covers the yaw/pitch bounds of every reflected ray of
+  every glass, plus a small margin, expressed in the inner glass's frame. The target's
+  size is measured, not invented: each face's projected bounding box in device pixels is
+  divided by its own angular span, the sharpest face sets pixels per radian, and the
+  target is that figure times the union's window, times the tier's `mirrorScale`, with a
+  512..4096 by 256..2048 cap. A 4K display or a larger cabin view grows it; a phone's
+  half-scale tier shrinks it. Recomputed only when the car, display, camera fov or tier
+  changes; the camera itself is re-aimed every pass. Still one pass, three faces.
+
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
   decision (12 Hz, 30 cars, plus the player's own), and each ask used to allocate the
@@ -292,7 +303,8 @@
   that, a static kit car found no shell and the game refused to start.
 
 - ONE REAR PASS FOR ALL THREE LIVE MIRRORS (`render/carmirrors.ts`; one shared
-  1024×384 half-float target, one wide rear camera, the same three unlit face materials).
+  half-float target sized from the glasses and the display, one rear camera, the same
+  three unlit face materials).
   The old path drew the whole scene three times, once per glass, 58–99 draws a pass. Now
   one pass per frame serves every face: each face's UVs are the eye-to-glass ray
   reflected by that glass and projected into the shared camera. No new program, no shadow
