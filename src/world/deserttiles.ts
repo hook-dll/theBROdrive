@@ -103,6 +103,8 @@ const ROCK_COLLIDER_MIN = 0.55;
  */
 const RECYCLED_TILE_LIMIT = 12;
 const instanceScratch = new THREE.Object3D();
+/** The ground's matrix in its tile's frame: the lattice is written about the centre. */
+const IDENTITY = new THREE.Matrix4();
 const shadowScratch = new THREE.Matrix4();
 /** Lean axis and the turn about it. A lean is measured from vertical in world space,
  *  which the instance's own euler triple cannot express once it has a yaw. */
@@ -211,7 +213,34 @@ function desertPropKind(form: DesertPropForm): BatchKind {
  * every desert form as `desertPropKind` gives it to the batches.
  */
 export function desertPropProgramAnchor(): THREE.Object3D {
-  return batchedProgramAnchor('desert-prop-anchor', [...sandForms(), ...rockForms()].map(desertPropKind));
+  const ground = new THREE.BufferGeometry();
+  ground.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+  ground.setAttribute('aTerrainDetail', new THREE.BufferAttribute(new Float32Array(3), 1));
+  ground.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3));
+  ground.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3));
+  ground.setIndex(new THREE.BufferAttribute(new Uint32Array([0, 1, 2]), 1));
+  return batchedProgramAnchor('desert-prop-anchor', [
+    ...[...sandForms(), ...rockForms()].map(desertPropKind),
+    // The ground, attribute for attribute as a tile's (`groundKind`).
+    { geometry: ground, material: DESERT_TILE_MATERIAL, castShadow: false, receiveShadow: true },
+  ]);
+}
+
+/** The most a tile's ground holds: the full lattice and every cell drawn fine. */
+const GROUND_RESERVE = { vertices: TILE_VERTS * TILE_VERTS, indices: DESERT_TILE_CELLS * DESERT_TILE_CELLS * 6 };
+
+/**
+ * A tile's ground as the batches take it: its own attributes, and an index of only the
+ * triangles it draws. A coarse tile writes fewer indices than its buffer holds (the
+ * rest is a recycled tile's, `setDrawRange` hides them on a mesh), and a batch copies
+ * the whole index it is given, never a draw range.
+ */
+function groundKind(tile: DesertTile): BatchKind {
+  const view = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(tile.geometry.attributes)) view.setAttribute(name, attribute);
+  view.setIndex(new THREE.BufferAttribute(tile.data.indices.subarray(0, tile.data.indexCount), 1));
+  view.computeBoundingSphere();
+  return { geometry: view, material: DESERT_TILE_MATERIAL, castShadow: false, receiveShadow: true, reserve: GROUND_RESERVE };
 }
 
 interface DesertTile {
@@ -226,6 +255,8 @@ interface DesertTile {
   readonly meshes: readonly THREE.InstancedMesh[];
   /** The frame its props are placed in: the tile centre, in its band of tiles (see `tileBatchChunk`). */
   readonly batchChunk: BatchChunk;
+  /** The ground's slot in the batches while the tile is live; its own mesh stays hidden. */
+  ground: BatchSlot | null;
   readonly heights: Float32Array;
   /**
    * The buffer set backing `heights`, `geometry` and the collider, kept so teardown
@@ -613,6 +644,8 @@ export class DesertTileStreamer {
     const mesh = new THREE.Mesh(geometry, DESERT_TILE_MATERIAL);
     mesh.receiveShadow = true;
     mesh.castShadow = false;
+    // Drawn by the batches (`goLive`); the mesh is the tile's record of its ground.
+    mesh.visible = false;
     group.add(mesh);
 
     const { props, meshes } = this.buildProps(
@@ -635,6 +668,7 @@ export class DesertTileStreamer {
       geometry,
       meshes,
       batchChunk: tileBatchChunk(tx, tz, centreX, centreZ),
+      ground: null,
       heights: data.heights,
       data,
       props,
@@ -655,6 +689,8 @@ export class DesertTileStreamer {
     tile.group.updateMatrix();
     this.scene.add(tile.group);
     this.tiles.set(tile.key, tile);
+    // The ground is one instance of the band's ground batch, in the tile centre's frame.
+    tile.ground = this.propBatches.allocate(tile.batchChunk, groundKind(tile), IDENTITY);
     // The props join the shared batches now, as the tile becomes the drawn one; their
     // matrices are relative to the tile centre (`batchChunk.origin`), at their fade.
     for (const prop of tile.props) {
@@ -1312,6 +1348,10 @@ export class DesertTileStreamer {
     this.scene.remove(tile.group);
     tile.geometry.dispose();
     for (const mesh of tile.meshes) mesh.dispose();
+    if (tile.ground) {
+      this.propBatches.release(tile.ground);
+      tile.ground = null;
+    }
     // A live tile's props give their batch slots back, after `demote` above has forgotten
     // their breakables; a replacement that never went live holds none.
     for (const prop of tile.props) {

@@ -170,10 +170,19 @@ varying vec3 vViewPosition;
 varying vec3 vComicWorld;
 varying vec3 vComicNormal;`;
 
+// COMIC_WORLD_BATCHED (the desert ground and the shoulder, world/terrainmesh.ts): their
+// stipple and contours are anchored in the world, so a multi-draw instance's own offset
+// (batchingMatrix) belongs in it. Props and poles keep the pattern local to the
+// instance, which is what an instanced draw has always given them.
 const VERTEX_HOOK = /* glsl */ `
 #include <worldpos_vertex>
+#if defined( USE_BATCHING ) && defined( COMIC_WORLD_BATCHED )
+  vComicWorld = ( modelMatrix * batchingMatrix * vec4( transformed, 1.0 ) ).xyz;
+  vComicNormal = normalize( mat3( modelMatrix ) * mat3( batchingMatrix ) * objectNormal );
+#else
   vComicWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
-  vComicNormal = normalize( mat3( modelMatrix ) * objectNormal );`;
+  vComicNormal = normalize( mat3( modelMatrix ) * objectNormal );
+#endif`;
 
 const FRAGMENT_PARS = /* glsl */ `
 varying vec3 vViewPosition;

@@ -695,7 +695,7 @@ transformed.y -= aTerrainDetail * detailFade;${grit ? '\nvShoulderGrit = aShould
 }
 
 function createTerrainMaterial(options: DesertGroundOptions): THREE.MeshStandardMaterial {
-  return applyGroundLight(applyDesertGround(
+  const material = applyGroundLight(applyDesertGround(
     applyCloudShadow(
       applyComicShading(
         new THREE.MeshStandardMaterial({
@@ -713,6 +713,10 @@ function createTerrainMaterial(options: DesertGroundOptions): THREE.MeshStandard
     ),
     options,
   ));
+  // The tiles' ground and the shoulder draw in multi-draw batches (props/instancebatch.ts):
+  // the comic stipple must read their world position with the instance's offset.
+  material.defines = { ...material.defines, COMIC_WORLD_BATCHED: '' };
+  return material;
 }
 export const TERRAIN_MATERIAL = createTerrainMaterial({});
 /** Fine player-centred tiles whose small-scale height relaxes into the vista base. */

@@ -81,6 +81,14 @@ export interface BatchKind {
   readonly receiveShadow?: boolean;
   readonly renderOrder?: number;
   readonly lod?: BatchLod;
+  /**
+   * For a kind whose every instance has a geometry of its own (a desert tile's ground):
+   * the most vertices and indices one may have. Its geometry slot in the batch is that
+   * size, and when the instance is released the slot is kept and rewritten by the next
+   * such instance (`setGeometryAt`), so streaming tiles neither grows nor fragments the
+   * batch's buffers.
+   */
+  readonly reserve?: { readonly vertices: number; readonly indices: number };
 }
 
 /**
@@ -150,8 +158,11 @@ interface Batch {
   readonly anchorX: number;
   readonly anchorZ: number;
   readonly sphere: THREE.Sphere;
-  /** Each kind geometry's id in `mesh`. */
+  /** Each shared kind geometry's id in `mesh`. */
   readonly geometryIds: Map<THREE.BufferGeometry, number>;
+  /** Geometry slots of `reserve` kinds: those in use, and those free to be rewritten. */
+  readonly reserved: Set<number>;
+  readonly freeGeometry: number[];
   live: number;
 }
 
@@ -306,7 +317,9 @@ export class InstanceBatches {
     if (slot.mesh instanceof THREE.BatchedMesh) {
       const batch = this.batchOf.get(slot.mesh);
       if (!batch) return;
+      const geometryId = batch.mesh.getGeometryIdAt(slot.instance);
       batch.mesh.deleteInstance(slot.instance);
+      if (batch.reserved.has(geometryId)) batch.freeGeometry.push(geometryId);
       batch.live--;
       if (batch.live === 0) this.closeBatch(batch);
       return;
@@ -377,10 +390,12 @@ export class InstanceBatches {
     const batch = this.batches.get(key) ?? this.openBatch(key, kind, source.geometry);
     const mesh = batch.mesh;
 
-    let geometryId = batch.geometryIds.get(kind.geometry);
-    if (geometryId === undefined) {
-      const vertices = source.geometry.getAttribute('position').count;
-      const indices = source.geometry.index!.count;
+    let geometryId = kind.reserve ? batch.freeGeometry.pop() : batch.geometryIds.get(kind.geometry);
+    if (geometryId !== undefined && kind.reserve) {
+      mesh.setGeometryAt(geometryId, source.geometry);
+    } else if (geometryId === undefined) {
+      const vertices = kind.reserve?.vertices ?? source.geometry.getAttribute('position').count;
+      const indices = kind.reserve?.indices ?? source.geometry.index!.count;
       if (vertices > mesh.unusedVertexCount || indices > mesh.unusedIndexCount) {
         let vertexCapacity = mesh.geometry.getAttribute('position').count;
         let indexCapacity = mesh.geometry.index!.count;
@@ -390,8 +405,13 @@ export class InstanceBatches {
         while (usedIndices + indices > indexCapacity) indexCapacity *= 2;
         mesh.setGeometrySize(vertexCapacity, indexCapacity);
       }
-      geometryId = mesh.addGeometry(source.geometry);
-      batch.geometryIds.set(kind.geometry, geometryId);
+      if (kind.reserve) {
+        geometryId = mesh.addGeometry(source.geometry, vertices, indices);
+        batch.reserved.add(geometryId);
+      } else {
+        geometryId = mesh.addGeometry(source.geometry);
+        batch.geometryIds.set(kind.geometry, geometryId);
+      }
     }
     if (mesh.instanceCount >= mesh.maxInstanceCount) mesh.setInstanceCount(mesh.maxInstanceCount * 2);
     const instance = mesh.addInstance(geometryId);
@@ -412,8 +432,11 @@ export class InstanceBatches {
   }
 
   private openBatch(key: string, kind: BatchKind, first: THREE.BufferGeometry): Batch {
-    const vertexCapacity = Math.max(BATCHED_FIRST_VERTICES, first.getAttribute('position').count * 2);
-    const mesh = new THREE.BatchedMesh(BATCHED_FIRST_INSTANCES, vertexCapacity, vertexCapacity * 2, kind.material as THREE.Material);
+    // Room for two of the first geometry (or of a reserved slot): a batch's buffers only
+    // exist after its first `addGeometry`, so the first must fit without growing.
+    const vertexCapacity = Math.max(BATCHED_FIRST_VERTICES, (kind.reserve?.vertices ?? first.getAttribute('position').count) * 2);
+    const indexCapacity = Math.max(vertexCapacity * 2, (kind.reserve?.indices ?? first.index?.count ?? 0) * 2);
+    const mesh = new THREE.BatchedMesh(BATCHED_FIRST_INSTANCES, vertexCapacity, indexCapacity, kind.material as THREE.Material);
     mesh.castShadow = kind.castShadow ?? false;
     mesh.receiveShadow = kind.receiveShadow ?? false;
     mesh.renderOrder = kind.renderOrder ?? 0;
@@ -429,6 +452,8 @@ export class InstanceBatches {
       anchorZ: this.origin.z,
       sphere,
       geometryIds: new Map(),
+      reserved: new Set(),
+      freeGeometry: [],
       live: 0,
     };
     mesh.position.set(0, 0, 0);

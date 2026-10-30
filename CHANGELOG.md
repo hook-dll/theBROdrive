@@ -318,6 +318,26 @@
   (texture, shoulder, skid marks), and a drive across two origin rebases left the road,
   its paint and the props exactly in place (every tile prop within 0.000 m).
 
+- THE DESERT TILES' GROUND IN THE SAME BATCHES, IN SLOTS THAT ARE REUSED
+  (`world/deserttiles.ts`, `InstanceBatches` `BatchKind.reserve`, `render/comic.ts`,
+  `world/terrainmesh.ts`). Each live tile's ground is an instance of its band's ground
+  batch, taken when it goes live and given back at teardown; the mesh stays in the tile's
+  group, hidden. A tile's ground is a geometry of its own, so a `reserve` kind gets a
+  geometry slot of the full lattice's size, and a released slot is kept and rewritten by
+  the next tile (`setGeometryAt`): streaming neither grows nor fragments the buffers
+  (over a 3-minute drive they stayed between 278k and 459k vertices, 25 slots in use for
+  25 tiles at every check). The batch is given only the indices a tile draws: a coarse
+  tile's buffer holds a recycled tile's beyond `indexCount`, which a draw range hides and
+  a batch would copy. A new batch is sized for its first geometry or reserved slot, since
+  its buffers exist only after the first `addGeometry`.
+  - The comic stipple read the world position as `modelMatrix * position`: under a
+    batch the pebbles moved by each tile's offset. `COMIC_WORLD_BATCHED`, set on the
+    terrain materials only, adds `batchingMatrix` there; props and poles keep the
+    instance-local pattern they always had. The road's shoulder (previous entry) had the
+    same fault, visible only on chunks built after a rebase.
+  - Cabin, km 21, Blessing: the main pass 72 → 62 draws, each mirror 38 → 33; the same
+    ground and pebbles at two fixed cameras.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow
