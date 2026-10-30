@@ -207,6 +207,23 @@
 
 ### Changed
 
+- KIT CAR GLASS IS LIT BY THE SUN AND THE SKY ONLY (`render/materials.ts`
+  `kitGlassLightsBegin`, `makeCarGrimeMaterial` `panes`; `render/carsurface.ts`). From
+  the cabin the windows cover much of the screen, and hiding them saved 1.3-2.5 ms at
+  3840x1982, the most of any part; most of that was light the pane barely shows. Every
+  kit car's glass (the driven car's and traffic's, near and far panes) now skips three's
+  point and spot loops (every headlamp slot, the driven car's shadowed headlamp map), the
+  pooled lamp pair (`setCarPoolLight`) and the sun's shadow cascade taps. It keeps its
+  tint and opacity, the sun's specular glint (the directional loop without shadows; the
+  near cascade's black light skipped as everywhere), the sky's reflection with its
+  Fresnel at a glancing angle and the sky's diffuse light (env radiance and irradiance,
+  ambient, hemisphere), the dust, the drop panes' clip and the view through. Changes the
+  eye can find: no headlamp glint in the rear window from a car behind at night, and the
+  sun glints where something shades the pane. The glass no longer takes `uKitSpotReach`
+  or `uKitPoolLight`; the body still does. Same program key (`-panes-v3`), same mesh
+  shadow flags: nothing new to anchor, no new program, the budget list unchanged. Not
+  measured or looked at in the game.
+
 - NEAR TRAFFIC HEADLAMPS GET A REAL SLOT FIRST, AND THE TOP RUNG HAS 15 (`main.ts`
   `NEAR_SLOT_RANGE_SQ`, `game/settings.ts` blessing `vehicleLightSlots`). A pool lights
   the ground only, so a near car's beam on a post, a wall or a parked car showed only

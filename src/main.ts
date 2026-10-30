@@ -456,7 +456,7 @@ async function boot(): Promise<void> {
     lampOccluders,
   );
   const lampView = new LampView();
-  // The car whose body and glass skip the spot slots that cannot reach it (`syncSpotReach`).
+  // The car whose body skips the spot slots that cannot reach it (`syncSpotReach`).
   let spotReachCar: Vehicle | null = null;
   // Contact shadows are not a night effect and are not gated on the light rig: they are
   // the only thing on screen that reports what each tyre is carrying, they are the one
@@ -3022,7 +3022,7 @@ async function boot(): Promise<void> {
     lampPools.endFrame();
     vehicleLights.endFrame();
     // Every car near enough to see takes the pooled light that reaches it on its body
-    // and glass (render/lamppools.ts `lightOn`): a slot lights a car, so must a pool.
+    // (render/lamppools.ts `lightOn`): a slot lights a car, so must a pool.
     for (const vehicle of vehicles.values()) {
       vehicle.syncPoolLight(vehicle.root.position.distanceToSquared(cam) < POOL_LIT_CAR_RANGE_SQ ? lampPools : null);
     }
@@ -3031,7 +3031,7 @@ async function boot(): Promise<void> {
     });
     // The car the player sits in fills the screen from the cabin, and every spot slot
     // that lights nothing of it is a whole light per pixel of it (render/lightshader.ts
-    // `SPOT_REACH`): its body and glass skip the beams that cannot reach it. A car left
+    // `SPOT_REACH`): its body skips the beams that cannot reach it. A car left
     // behind takes every slot again, since only this one is tested each frame.
     if (spotReachCar !== driving) {
       spotReachCar?.syncSpotReach(null);

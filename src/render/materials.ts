@@ -683,8 +683,8 @@ interface KitBodyUniforms {
 const kitBodyUniforms = new WeakMap<THREE.Material, KitBodyUniforms>();
 
 /**
- * A kit car's body and glass: which spot slots can reach the car (`setCarSpotReach`), bit
- * `i` for the shader's spot light `i`, all of them unless told otherwise.
+ * A kit car's body: which spot slots can reach the car (`setCarSpotReach`), bit `i` for
+ * the shader's spot light `i`, all of them unless told otherwise.
  */
 const carSpotReach = new WeakMap<THREE.Material, { value: number }>();
 
@@ -696,7 +696,7 @@ const KIT_SPOT_REACH_PARS = `uniform int uKitSpotReach;
 #define SPOT_REACH( index ) ( ( uKitSpotReach & ( 1 << ( index ) ) ) != 0 )`;
 
 /**
- * A kit car's body and glass: the pooled lamp light on the car (render/lamppools.ts
+ * A kit car's body: the pooled lamp light on the car (render/lamppools.ts
  * `lightOn`, `setCarPoolLight`), as `vec4[ 5 ]` in scene coordinates: lamp A, lamp B,
  * the beam's axis, its colour (zero: none), and its cone cosine, penumbra cosine, decay
  * and cutoff.
@@ -1796,6 +1796,39 @@ const KIT_PANE_CLIP = `if ( vKitPaneClip < 0.0 ) discard;
 #include <clipping_planes_fragment>`;
 
 /**
+ * A kit car's glass is lit by the sun and the sky alone: three's light block with its
+ * point and spot loops and every shadow lookup taken out. What glass shows is the tint,
+ * the sky's reflection (Fresnel at a glancing angle, `lights_fragment_maps`), the sun's
+ * glint and the dust; through it you see the cabin. The headlamp slots (up to a dozen
+ * cones per pixel, the pooled lamp pair, the beam's shadow map) and the sun's cascade
+ * taps put almost nothing on a pane 72% clear, yet were most of its cost, and from the
+ * cabin the glass covers much of the screen (hiding it saved 1.3-2.5 ms at 4K,
+ * 2026-10-30). A headlamp behind no longer glints in the rear window; the sun glints
+ * even where a roof shades the pane. The ambient, probe and hemisphere part is three's
+ * own. The near cascade's black light is skipped as `installSunShadowCascade` skips it.
+ * No variant: the program key is the glass's as before, and `receiveShadow` (a uniform
+ * in three) is left as the meshes have it.
+ */
+function kitGlassLightsBegin(): string {
+  const chunk = THREE.ShaderChunk.lights_fragment_begin;
+  const direct = chunk.indexOf('IncidentLight directLight;');
+  const indirect = chunk.indexOf('#if defined( RE_IndirectDiffuse )');
+  if (direct < 0 || indirect < direct) throw new Error('Three lights_fragment_begin layout changed: no direct/indirect split');
+  return `${chunk.slice(0, direct)}IncidentLight directLight;
+#if ( NUM_DIR_LIGHTS > 0 ) && defined( RE_Direct )
+	#pragma unroll_loop_start
+	for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {
+		#if !( NUM_DIR_LIGHT_SHADOWS == 2 && UNROLLED_LOOP_INDEX == 1 )
+		getDirectionalLightInfo( directionalLights[ i ], directLight );
+		${KIT_DIRECT_CALL}
+		#endif
+	}
+	#pragma unroll_loop_end
+#endif
+${chunk.slice(indirect)}`;
+}
+
+/**
  * Gives a glass or lamp material the grime, in place, and returns it. The material
  * must be this car's own (a clone): the uniform is per material. With `frame` (window
  * glass stamped with chassis positions) the dust is the paint's crust continued over
@@ -1803,8 +1836,8 @@ const KIT_PANE_CLIP = `if ( vKitPaneClip < 0.0 ) discard;
  *
  * `panes` (a kit car's glass, which also carries `KIT_PANE_ATTRIBUTE`): a drop pane
  * winding into its door is not drawn below the door's top (carkit/rig.ts `SinkingPane`
- * slides it, `setCarGlassPaneDrop` says how far), and the glass takes the car's spot
- * reach as its body does (`setCarSpotReach`).
+ * slides it, `setCarGlassPaneDrop` says how far), and the pane is lit by the sun and the
+ * sky only (`kitGlassLightsBegin`).
  */
 export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshPhongMaterial>(
   material: T,
@@ -1817,12 +1850,6 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
   const glass = standard && frame !== null;
   const drops = glass && panes ? ([new THREE.Vector4(), new THREE.Vector4()] as const) : null;
   if (drops) kitPaneDrops.set(material, drops);
-  // A kit car's glass is the car's too, so it takes the body's spot reach (`setCarSpotReach`)
-  // and pooled lamp light (`setCarPoolLight`).
-  const spotReach = drops ? { value: SPOT_REACH_ALL } : null;
-  if (spotReach) carSpotReach.set(material, spotReach);
-  const poolLight = drops ? { value: new Float32Array(POOL_LIGHT_FLOATS) } : null;
-  if (poolLight) carPoolLight.set(material, poolLight);
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uGrime = grime;
     shader.uniforms.uGrimeSkyScale = {
@@ -1839,18 +1866,16 @@ export function makeCarGrimeMaterial<T extends THREE.MeshStandardMaterial | THRE
         .replace('#include <common>', drops ? GLASS_GRIME_VERTEX_PARS + KIT_PANE_VERTEX_PARS : GLASS_GRIME_VERTEX_PARS)
         .replace('#include <worldpos_vertex>', drops ? GLASS_GRIME_VERTEX_HOOK + KIT_PANE_VERTEX : GLASS_GRIME_VERTEX_HOOK);
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;\n${KIT_SPOT_REACH_PARS}\n${KIT_POOL_LIGHT_PARS}` : GLASS_GRIME_FRAGMENT_PARS)
+        .replace('#include <common>', drops ? `${GLASS_GRIME_FRAGMENT_PARS}\nvarying float vKitPaneClip;` : GLASS_GRIME_FRAGMENT_PARS)
         .replace('#include <color_fragment>', GLASS_GRIME_DECLARE)
         .replace('#include <normal_fragment_maps>', GLASS_GRIME_BODY)
         .replace('#include <lights_fragment_maps>', GRIME_SKY);
       if (drops) {
         shader.uniforms.uKitPaneDropA = { value: drops[0] };
         shader.uniforms.uKitPaneDropB = { value: drops[1] };
-        shader.uniforms.uKitSpotReach = spotReach!;
-        shader.uniforms.uKitPoolLight = poolLight!;
         shader.fragmentShader = shader.fragmentShader
           .replace('#include <clipping_planes_fragment>', KIT_PANE_CLIP)
-          .replace('#include <lights_fragment_begin>', `#include <lights_fragment_begin>\n${kitPoolLight(KIT_DIRECT_CALL)}`);
+          .replace('#include <lights_fragment_begin>', kitGlassLightsBegin());
       }
       return;
     }
@@ -1880,7 +1905,7 @@ export function setCarGlassPaneDrop(material: THREE.Material, slot: number, drop
 
 /**
  * Which spot slots can reach this car (render/vehiclelights.ts `spotReachMask`), written
- * into a kit car's body and glass; `SPOT_REACH_ALL` for every slot. Any other material is
+ * into a kit car's body; `SPOT_REACH_ALL` for every slot. Any other material is
  * left alone. A uniform write: the program is the one every kit car draws with.
  */
 export function setCarSpotReach(materials: readonly THREE.Material[], mask: number): void {
@@ -1892,7 +1917,7 @@ export function setCarSpotReach(materials: readonly THREE.Material[], mask: numb
 
 /**
  * The pooled lamp light on this car (render/lamppools.ts `lightOn`, `POOL_LIGHT_FLOATS`
- * in scene coordinates), written into a kit car's body and glass; null for none. Any
+ * in scene coordinates), written into a kit car's body; null for none. Any
  * other material is left alone. A uniform write, on the one program every kit car shares.
  */
 export function setCarPoolLight(materials: readonly THREE.Material[], light: Float32Array | null): void {

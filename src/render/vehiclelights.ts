@@ -364,7 +364,7 @@ export class VehicleLightRig {
 
   /**
    * The slots that can light a sphere (world `centre`, `radius`) this frame, as the
-   * mask a kit car's body and glass skip the rest by (render/materials.ts
+   * mask a kit car's body skips the rest by (render/materials.ts
    * `setCarSpotReach`, render/lightshader.ts `SPOT_REACH`). Call after `endFrame`.
    *
    * Bit `i` is the renderer's spot light `i`. Three numbers them shadow-casting first,

@@ -39,7 +39,7 @@ export const SPOT_REACH_ALL = -1;
  *    still ran the whole physical light for each: on the driven car seen from the cabin,
  *    8.4 ms of its 8.65 ms at 1440 lines on the M2 Pro (11 slots; 0.25 ms with none).
  *  - Slots out of reach (`SPOT_REACH`, a macro a material defines before this chunk:
- *    render/materials.ts gives a kit car's body and glass a per-car mask, which main.ts
+ *    render/materials.ts gives a kit car's body a per-car mask, which main.ts
  *    fills for the occupied car from render/vehiclelights.ts `spotReachMask`, a test of
  *    each lit beam's cone against the car). Everyone else's is `true`.
  *

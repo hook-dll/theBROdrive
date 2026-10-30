@@ -80,24 +80,23 @@ export class CarBodySurface {
 
   /**
    * Which spot slots can reach this car (render/vehiclelights.ts `spotReachMask`), for
-   * a kit car's body and glass; `SPOT_REACH_ALL` for every slot. Free when unchanged.
+   * a kit car's body; `SPOT_REACH_ALL` for every slot. Free when unchanged. The glass
+   * has no spot loop (render/materials.ts `kitGlassLightsBegin`).
    */
   setSpotReach(mask: number): void {
     if (mask === this.appliedSpotReach) return;
     this.appliedSpotReach = mask;
     setCarSpotReach(this.paint, mask);
-    setCarSpotReach(this.glass, mask);
   }
 
   /**
    * The pooled lamp light on this car (render/lamppools.ts `lightOn`), for a kit car's
-   * body and glass; null for none, which is free when it was none already.
+   * body (the glass takes none); null for none, which is free when it was none already.
    */
   setPoolLight(light: Float32Array | null): void {
     if (light === null && !this.poolLit) return;
     this.poolLit = light !== null;
     setCarPoolLight(this.paint, light);
-    setCarPoolLight(this.glass, light);
   }
 
   /** Frees this car's own paint, glass and decal materials and its bone textures. */

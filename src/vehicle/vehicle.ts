@@ -4604,11 +4604,11 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Tells this car's body and glass which spot slots can light it this frame
+   * Tells this car's body which spot slots can light it this frame
    * (render/vehiclelights.ts `spotReachMask`; call after the rig's `endFrame`), or with
    * no rig, every slot. A kit car's alone: any other model's materials ignore it. The
    * sphere is the measured body with its doors and lids swung out (render/kitdraw.ts
-   * `SWING_REACH_M`), which is all its body and glass draw.
+   * `SWING_REACH_M`), which is all its body draws.
    */
   syncSpotReach(rig: VehicleLightRig | null): void {
     const surface = this.surface;
@@ -4628,7 +4628,7 @@ export class Vehicle implements Rebasable {
   }
 
   /**
-   * Lights this car's body and glass with the pooled lamps that reach it
+   * Lights this car's body with the pooled lamps that reach it
    * (render/lamppools.ts `lightOn`; call after the field's last `add`), or with none.
    * A kit car's alone, as `syncSpotReach`.
    */
