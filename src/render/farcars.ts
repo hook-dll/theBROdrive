@@ -480,7 +480,6 @@ class FarBatch extends THREE.BatchedMesh {
   private lampData: Float32Array;
   private vertexCapacity: number;
   private indexCapacity: number;
-  private inShadowPass = false;
 
   constructor(first: THREE.BufferGeometry) {
     const vertexCapacity = Math.max(4096, first.getAttribute('position').count * BATCH_FIRST_ROOM);
@@ -593,7 +592,12 @@ class FarBatch extends THREE.BatchedMesh {
     this.layers.set(pictures ? 0 : SHADOW_ONLY_LAYER);
   }
 
-  /** Three's batch runs `onBeforeRender` for a shadow camera from here. */
+  /**
+   * A shadow pass: the wanted instances, casters included. Three r187 builds a shadow
+   * camera's draw list here directly; r185 went through `onBeforeRender`, where this
+   * used to be decided, so after the upgrade no stand-in or hull cast: a traffic car
+   * between the self-shadow line and the wide map's reach had no shadow at all.
+   */
   override onBeforeShadow(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
@@ -603,15 +607,11 @@ class FarBatch extends THREE.BatchedMesh {
     depthMaterial: THREE.Material,
     group: THREE.Group,
   ): void {
-    this.inShadowPass = true;
-    try {
-      super.onBeforeShadow(renderer, scene, camera, shadowCamera, geometry, depthMaterial, group);
-    } finally {
-      this.inShadowPass = false;
-    }
+    for (let i = 0; i < this.wanted.length; i++) this.setVisibleAt(i, this.wanted[i]!);
+    super.onBeforeShadow(renderer, scene, camera, shadowCamera, geometry, depthMaterial, group);
   }
 
-  /** Before each pass's draw: the wanted instances, casters only in a shadow pass. */
+  /** A picture pass (the frame, a mirror): the wanted instances, without the casters. */
   override onBeforeRender(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
@@ -620,8 +620,7 @@ class FarBatch extends THREE.BatchedMesh {
     material: THREE.Material,
     group: THREE.Group,
   ): void {
-    const shadow = this.inShadowPass;
-    for (let i = 0; i < this.wanted.length; i++) this.setVisibleAt(i, this.wanted[i]! && (shadow || !this.casterOnly[i]));
+    for (let i = 0; i < this.wanted.length; i++) this.setVisibleAt(i, this.wanted[i]! && !this.casterOnly[i]);
     super.onBeforeRender(renderer, scene, camera, geometry, material, group);
   }
 }

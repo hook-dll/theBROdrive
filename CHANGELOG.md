@@ -371,6 +371,18 @@
   ground 189k → 127k triangles in the main pass; fixed-camera shots across the threshold
   unchanged. The light builds, whose tiles are coarse already, carry no second index.
 
+- TRAFFIC KEEPS ITS SHADOW BETWEEN THE SELF-SHADOW LINE AND THE WIDE MAP (`render/
+  farcars.ts` `FarBatch.onBeforeShadow`). Since the r187 upgrade a near traffic car
+  past 16 m from the eye, which hands its shadow to a caster-only instance of its far
+  mesh (or its hull), cast nothing: three r187's `BatchedMesh.onBeforeShadow` builds the
+  shadow camera's draw list itself, where r185 went through `onBeforeRender`, and the
+  caster-only instances were made visible only there. An oncoming car showed a shadow
+  far off (its own far mesh, a picture instance), lost it as it came near and got it
+  back inside 16 m. The shadow hook now shows every wanted instance, the picture hook
+  every wanted one but the casters. Shadow-only batch in the sun's maps: 0 → 6 draws
+  with a car at 29 m; at 21 m the stand-in's shadow and the car's own are the same
+  picture.
+
 - GROUND COVER IN ONE MULTI-DRAW, RANGED PER INSTANCE (`world/props/instancebatch.ts`
   `lodSort`, `addBatchGeometry`; `world/props/forms.ts` `matCover`; `scatter.ts`
   `scatterProgramAnchor`). The tufts, bushes and rosettes were pages of one
