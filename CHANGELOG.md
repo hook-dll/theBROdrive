@@ -349,6 +349,16 @@
   each mirror 33 → 29; the same disc under the same cactus at a fixed camera; batch slots
   equal two per prop plus one per tile at every check of a 2-minute drive.
 
+- POWER-LINE WIRES IN TWO BATCHES (`world/props/poles.ts` `wireKinds`). Each chunk's
+  wires were a depth mesh and a colour mesh, so the ~7 chunks in view cost 14 draws in
+  the frame and more in each mirror. Both passes are now `orderFree` batches, still
+  drawn depth first by `renderOrder`; the meshes stay in the chunk's group, hidden. The
+  pixel clamp sized the wire at `modelViewMatrix * centre`, which under a batch misses
+  the chunk's offset from the batch anchor; it now includes `batchingMatrix`. The batch
+  programs are linked at boot (`pole-wire-anchor`). Cabin, km 21, Blessing: the main
+  pass 54 → 42 draws, each mirror 29 → 25; near and sub-pixel far spans unchanged at
+  fixed cameras.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow

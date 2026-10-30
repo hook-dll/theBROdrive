@@ -47,6 +47,8 @@ const _poleQuat = new THREE.Quaternion();
 const _poleAt = new THREE.Vector3();
 const _unitScale = new THREE.Vector3(1, 1, 1);
 const _poleMatrix = new THREE.Matrix4();
+/** A chunk's wires in its own frame: their vertices are written there. */
+const IDENTITY = new THREE.Matrix4();
 /** Each design geometry's kind: instances of the props' multi-draw batch, casting and receiving. */
 const poleBodyKinds = new WeakMap<THREE.BufferGeometry, BatchKind>();
 function poleBodyKind(geometry: THREE.BufferGeometry): BatchKind {
@@ -762,7 +764,13 @@ varying float vWireCoverage;`;
 const WIRE_VERTEX_WIDEN = /* glsl */ `#include <begin_vertex>
 {
 	vec3 wireCentre = position - normal * ${WIRE_RADIUS_ATTRIBUTE};
+	// A multi-draw instance's own offset (the chunk's origin against the batch's anchor)
+	// is in batchingMatrix, not in modelViewMatrix.
+	#ifdef USE_BATCHING
+	float wireDepth = max( -( modelViewMatrix * batchingMatrix * vec4( wireCentre, 1.0 ) ).z, 0.0 );
+	#else
 	float wireDepth = max( -( modelViewMatrix * vec4( wireCentre, 1.0 ) ).z, 0.0 );
+	#endif
 	float wirePixel = sceneFrameHeight > 0.0
 		? 2.0 * wireDepth / ( projectionMatrix[ 1 ][ 1 ] * sceneFrameHeight )
 		: 0.0;
@@ -863,6 +871,21 @@ function wireMeshes(geometry: THREE.BufferGeometry): [THREE.Mesh, THREE.Mesh] {
 }
 
 /**
+ * A chunk's wires as the shared batches take them: the depth pass and the colour pass,
+ * each a batch of its own, still ordered depth first by `renderOrder`. Both are
+ * `orderFree`: the depth pass writes no colour, and the colour pass is one dark tone a
+ * wire, faded only where it is thinner than a pixel, so wires blend alike in either
+ * order among themselves.
+ */
+function wireKinds(geometry: THREE.BufferGeometry): [BatchKind, BatchKind] {
+  const { depth, colour } = wireMaterials();
+  return [
+    { geometry, material: depth, renderOrder: WIRE_DEPTH_ORDER, orderFree: true },
+    { geometry, material: colour, renderOrder: WIRE_COLOUR_ORDER, orderFree: true },
+  ];
+}
+
+/**
  * Every wire of a chunk as one INDEXED geometry: position, normal, colour and the true
  * radius `wireMaterial` widens about. It replaces `DwellingBuilder.tube`, which emits
  * every triangle's three corners apart and carries no extra stream. Same rings, same
@@ -959,6 +982,8 @@ export class PoleProvider implements ChunkProvider {
     // Pole bodies: instances of the props' multi-draw batch, culled one by one
     // (props/instancebatch.ts).
     const bodySlots: BatchSlot[] = [];
+    /** The wires' depth and colour instances in the shared batches. */
+    const wireSlots: BatchSlot[] = [];
 
     const seed = ctx.world.seed;
     const ox = ctx.originX;
@@ -1049,8 +1074,12 @@ export class PoleProvider implements ChunkProvider {
       group.add(new THREE.LineSegments(wireGeometry, retroWireMaterial()));
     } else if (wireCount > 0) {
       wireGeometry = wires.geometry();
-      // Shadow flags left off, as `poleProgramAnchor`'s wire stand-ins copy them.
-      group.add(...wireMeshes(wireGeometry));
+      // Drawn by the shared batches (one draw per pass for every chunk's wires in view);
+      // the meshes stay in the group, hidden, as the record of what the chunk strung.
+      for (const kind of wireKinds(wireGeometry)) wireSlots.push(ctx.batches.allocate(ctx, kind, IDENTITY));
+      const meshes = wireMeshes(wireGeometry);
+      for (const mesh of meshes) mesh.visible = false;
+      group.add(...meshes);
     }
 
     return {
@@ -1058,6 +1087,7 @@ export class PoleProvider implements ChunkProvider {
       bodies,
       colliders,
       dispose: () => {
+        for (const slot of wireSlots) ctx.batches.release(slot);
         wireGeometry?.dispose();
         for (const slot of bodySlots) ctx.batches.release(slot);
       },
@@ -1073,9 +1103,9 @@ export class PoleProvider implements ChunkProvider {
  * hangs on it (tarp and rope, nest, transformer can or loudspeaker, `poleFitting`), on
  * the same plain material: the `plain` anchor holds that program (before, the fittings
  * had materials of their own, and the first nest in view linked one mid-drive: 17 ms on
- * the Mac, seed `flick`). The wires are plain Meshes too, on `wireMaterials`
- * (transparent, their own patches: two programs of their own), and exist only once a
- * chunk with a span streams in, so the `wire` anchors are a real wire from
+ * the Mac, seed `flick`). The wires are instances of two batches of their own
+ * (`wireMaterials`: transparent, their own patches), and exist only once a chunk with a
+ * span streams in, so the `wires` anchor is those batches over a real wire from
  * `WireBuilder`, attribute for attribute. The anchors are never drawn: their group stays
  * invisible. Each copies the shadow flags of the mesh it stands for.
  */
@@ -1092,6 +1122,6 @@ export function poleProgramAnchor(): THREE.Object3D {
   plain.receiveShadow = true;
   const wires = new WireBuilder();
   wires.tube([[0, 0, 0], [0, 0, 0.01]], 0.001, 0xffffff);
-  group.add(bodies, plain, ...wireMeshes(wires.geometry()));
+  group.add(bodies, plain, batchedProgramAnchor('pole-wire-anchor', wireKinds(wires.geometry())));
   return group;
 }
