@@ -1213,6 +1213,8 @@ export class RoadMeshProvider implements ChunkProvider {
       // The mirror merges this exact surface (material and every look attribute) into
       // one far mesh (render/farworld.ts); the chunk group is hidden in that pass.
       roadMesh.userData.farWorldSurface = true;
+      roadMesh.userData.farWorldChunkStart = ctx.sStart;
+      roadMesh.userData.farWorldChunkEnd = ctx.sEnd;
       // The whole asphalt surface receives the same vehicle contact shadow as the
       // surrounding desert without casting into the map.
       roadMesh.receiveShadow = true;

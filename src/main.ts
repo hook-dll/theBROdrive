@@ -46,7 +46,7 @@ import { MarketField, marketProgramAnchor } from './world/market';
 import { FixtureField } from './world/fixturefield';
 import { FarCarField, nearDrawEstimate } from './render/farcars';
 import { CarMirrors, mirrorProgramAnchor } from './render/carmirrors';
-import { FarWorld } from './render/farworld';
+import { FarWorld, MAIN_FAR_LAYER } from './render/farworld';
 import { DEFAULT_CAR_MODEL_ID, carModel } from './vehicle/carmodels';
 import { Interaction } from './player/interaction';
 import { MachineFocus } from './player/machinefocus';
@@ -413,6 +413,16 @@ async function boot(): Promise<void> {
   renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
   // The mirror world's ground and road: the real meshes merged into a few draws.
   const farWorld = new FarWorld(renderer.scene);
+  // The main camera's far world: everything past the 200 m chunk boundary, merged
+  // and replacing the far chunks' own ground. The near chunks stay whole.
+  const mainFarWorld = new FarWorld(renderer.scene, {
+    layer: MAIN_FAR_LAYER,
+    rangeAhead: 200,
+    rangeBehind: 200,
+    hideGroups: true,
+    visible: true,
+  });
+  renderer.camera.layers.enable(MAIN_FAR_LAYER);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
     const transition = document.fullscreenElement
@@ -3399,6 +3409,7 @@ async function boot(): Promise<void> {
       }
     }
     farWorld.update(activeS, origin.x, origin.z);
+    mainFarWorld.update(activeS, origin.x, origin.z);
     carMirrors.update(driving?.kit ?? null, camera.mode === 'cabin');
     frameProfiler?.begin('draw');
     renderer.render();

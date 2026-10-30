@@ -1285,6 +1285,8 @@ export class TerrainMeshProvider implements ChunkProvider {
     // The mirror merges this exact terrain (material and colours) into the far world;
     // the chunk group is hidden in that pass (render/farworld.ts).
     mesh.userData.farWorldSurface = true;
+    mesh.userData.farWorldChunkStart = ctx.sStart;
+    mesh.userData.farWorldChunkEnd = ctx.sEnd;
     const group = new THREE.Group();
     group.userData.mirrorSkip = true;
     group.add(mesh);
