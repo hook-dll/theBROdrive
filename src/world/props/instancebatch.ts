@@ -89,6 +89,13 @@ export interface BatchKind {
    * batch's buffers.
    */
   readonly reserve?: { readonly vertices: number; readonly indices: number };
+  /**
+   * A transparent kind whose instances may blend in any order among themselves (the
+   * contact shadows: one dark colour, so two overlapping discs give the same result in
+   * either order). Such a kind can be a multi-draw batch, still placed among the other
+   * transparent objects by its `renderOrder`.
+   */
+  readonly orderFree?: boolean;
 }
 
 /**
@@ -229,7 +236,7 @@ function batchSource(geometry: THREE.BufferGeometry, material: THREE.Material): 
 
 /** Whether `kind` draws as an instance of a multi-draw batch rather than in a page. */
 function batchable(kind: BatchKind): boolean {
-  return !Array.isArray(kind.material) && !kind.material.transparent && !kind.lod;
+  return !Array.isArray(kind.material) && (!kind.material.transparent || kind.orderFree === true) && !kind.lod;
 }
 
 /**

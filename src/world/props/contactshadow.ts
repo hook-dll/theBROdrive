@@ -4,15 +4,16 @@
  * receive a shadow map far out and the shadow map's own contact is a few texels, so
  * without this the eye has nothing that says where an object meets the desert.
  *
- * One instanced draw per batch of props, sharing one geometry and one material: a
- * disc, bowed down towards its rim, whose vertex alpha falls from the centre to nothing at the rim, drawn
- * without depth writes and pulled towards the camera so it sits on the sand it lies
+ * Instances of one order-free multi-draw batch per band (`contactShadowKind`), sharing
+ * one geometry and one material: a disc, bowed down towards its rim, whose vertex alpha
+ * falls from the centre to nothing at the rim, drawn without depth writes and pulled
+ * towards the camera so it sits on the sand it lies
  * on. It is not a light, so it does not move with the sun; it is the ground-contact
  * darkening every photograph of a desert shows under anything standing on it.
  */
 
 import * as THREE from 'three';
-import type { BatchChunk, BatchSlot, InstanceBatches } from './instancebatch';
+import type { BatchChunk, BatchKind, BatchSlot, InstanceBatches } from './instancebatch';
 
 /** Disc radius: the prop's footprint times this, plus a fixed reach past its foot. */
 export const CONTACT_SHADOW_SPREAD = 1.5;
@@ -127,24 +128,28 @@ export function contactShadowMatrix(spot: ContactShadowSpot, fade: number, out: 
   return out.copy(dummy.matrix);
 }
 
-/** One instanced batch of discs, full size. Null for an empty batch. */
-export function buildContactShadows(spots: readonly ContactShadowSpot[]): THREE.InstancedMesh | null {
-  if (spots.length === 0) return null;
-  const mesh = new THREE.InstancedMesh(contactShadowGeometry(), material, spots.length);
-  const m = new THREE.Matrix4();
-  for (let i = 0; i < spots.length; i++) mesh.setMatrixAt(i, contactShadowMatrix(spots[i]!, 1, m));
-  mesh.instanceMatrix.needsUpdate = true;
-  mesh.computeBoundingSphere();
-  // Drawn after the opaque ground it lies on, and never shadowing anything itself.
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.renderOrder = 1;
-  return mesh;
+/**
+ * The discs as the shared batches take them (`instancebatch.ts`): drawn after the opaque
+ * ground they lie on, never shadowing anything, and `orderFree`: every disc is the same
+ * dark, so overlapping ones blend alike in either order, and one multi-draw serves every
+ * disc in a band instead of a page (or, on the desert tiles, a mesh) each.
+ */
+export function contactShadowKind(): BatchKind {
+  kind ??= {
+    geometry: contactShadowGeometry(),
+    material,
+    castShadow: false,
+    receiveShadow: false,
+    renderOrder: 1,
+    orderFree: true,
+  };
+  return kind;
 }
+let kind: BatchKind | null = null;
 
 /**
- * The same discs as `buildContactShadows`, taken as slots in the shared batches of the
- * chunk's band (see `instancebatch.ts`). One slot per spot, in `spots` order.
+ * The discs as slots in the shared batches of the chunk's band. One slot per spot, in
+ * `spots` order.
  */
 export function allocateContactShadows(
   spots: readonly ContactShadowSpot[],
@@ -153,14 +158,6 @@ export function allocateContactShadows(
 ): BatchSlot[] {
   const slots: BatchSlot[] = [];
   const m = new THREE.Matrix4();
-  // Drawn after the opaque ground it lies on, and never shadowing anything itself.
-  const kind = {
-    geometry: contactShadowGeometry(),
-    material,
-    castShadow: false,
-    receiveShadow: false,
-    renderOrder: 1,
-  };
-  for (const spot of spots) slots.push(batches.allocate(chunk, kind, contactShadowMatrix(spot, 1, m)));
+  for (const spot of spots) slots.push(batches.allocate(chunk, contactShadowKind(), contactShadowMatrix(spot, 1, m)));
   return slots;
 }

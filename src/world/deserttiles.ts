@@ -16,7 +16,7 @@ import {
   type BreakableSink,
   type DesertPropForm,
 } from './props/forms';
-import { buildContactShadows, contactShadowMatrix } from './props/contactshadow';
+import { contactShadowKind, contactShadowMatrix } from './props/contactshadow';
 import { batchedProgramAnchor, InstanceBatches, type BatchChunk, type BatchKind, type BatchSlot } from './props/instancebatch';
 import type { Road } from './road';
 import type { RoadDistance } from './roaddistance';
@@ -106,6 +106,11 @@ const instanceScratch = new THREE.Object3D();
 /** The ground's matrix in its tile's frame: the lattice is written about the centre. */
 const IDENTITY = new THREE.Matrix4();
 const shadowScratch = new THREE.Matrix4();
+/** A prop's contact-shadow slot, rebuilt in place from `prop.shadow` / `shadowInstance`. */
+const shadowSlot: { mesh: THREE.InstancedMesh | THREE.BatchedMesh; instance: number } = {
+  mesh: null as unknown as THREE.BatchedMesh,
+  instance: 0,
+};
 /** Lean axis and the turn about it. A lean is measured from vertical in world space,
  *  which the instance's own euler triple cannot express once it has a yaw. */
 const leanAxis = new THREE.Vector3();
@@ -145,7 +150,7 @@ interface DesertPropPlacement {
   readonly groundY: number;
   /** Standing height, metres: a tall prop's contact shadow reaches further. */
   readonly height: number;
-  shadow: THREE.InstancedMesh | null;
+  shadow: THREE.InstancedMesh | THREE.BatchedMesh | null;
   shadowInstance: number;
 }
 
@@ -223,6 +228,8 @@ export function desertPropProgramAnchor(): THREE.Object3D {
     ...[...sandForms(), ...rockForms()].map(desertPropKind),
     // The ground, attribute for attribute as a tile's (`groundKind`).
     { geometry: ground, material: DESERT_TILE_MATERIAL, castShadow: false, receiveShadow: true },
+    // The contact shadows' order-free batch (the scatter's discs share it).
+    contactShadowKind(),
   ]);
 }
 
@@ -698,6 +705,14 @@ export class DesertTileStreamer {
       const slot = this.propBatches.allocate(tile.batchChunk, desertPropKind(prop.form), instanceScratch.matrix);
       prop.mesh = slot.mesh;
       prop.instance = slot.instance;
+      // Its contact shadow, a disc in the same band's order-free shadow batch.
+      const shadow = this.propBatches.allocate(
+        tile.batchChunk,
+        contactShadowKind(),
+        contactShadowMatrix(prop, prop.scale > 0 ? prop.renderScale / prop.scale : 1, shadowScratch),
+      );
+      prop.shadow = shadow.mesh;
+      prop.shadowInstance = shadow.instance;
     }
   }
 
@@ -775,21 +790,10 @@ export class DesertTileStreamer {
       });
     }
 
-    // The props themselves are instances of the shared batches, taken when the tile goes
-    // live (`goLive`). They used to be one InstancedMesh per form per tile — about two
-    // dozen draws in the frame for the 5×5 square, each drawing its whole tile.
+    // The props and their contact shadows are instances of the shared batches, taken when
+    // the tile goes live (`goLive`). They used to be one InstancedMesh per form per tile
+    // and one of discs: about three dozen draws in the frame for the 5×5 square.
     const meshes: THREE.InstancedMesh[] = [];
-    const shadows = buildContactShadows(
-      props.map((prop) => ({ x: prop.x, groundY: prop.groundY, z: prop.z, radius: prop.radius, height: prop.height })),
-    );
-    if (shadows) {
-      props.forEach((prop, i) => {
-        prop.shadow = shadows;
-        prop.shadowInstance = i;
-      });
-      group.add(shadows);
-      meshes.push(shadows);
-    }
     return { props, meshes };
   }
 
@@ -818,8 +822,9 @@ export class DesertTileStreamer {
         writeInstanceTransform(prop, fade);
         this.propBatches.place(prop as BatchSlot, tile.batchChunk, instanceScratch.matrix);
         if (prop.shadow) {
-          prop.shadow.setMatrixAt(prop.shadowInstance, contactShadowMatrix(prop, fade, shadowScratch));
-          prop.shadow.instanceMatrix.needsUpdate = true;
+          shadowSlot.mesh = prop.shadow;
+          shadowSlot.instance = prop.shadowInstance;
+          this.propBatches.place(shadowSlot, tile.batchChunk, contactShadowMatrix(prop, fade, shadowScratch));
         }
       }
     }
@@ -1358,6 +1363,12 @@ export class DesertTileStreamer {
       if (!prop.mesh) continue;
       this.propBatches.release(prop as BatchSlot);
       prop.mesh = null;
+      if (prop.shadow) {
+        shadowSlot.mesh = prop.shadow;
+        shadowSlot.instance = prop.shadowInstance;
+        this.propBatches.release(shadowSlot);
+        prop.shadow = null;
+      }
     }
     // Every caller drops the tile from `tiles` or `replacements` around this call, and
     // the geometry above is gone, so nothing can read these buffers again: they are

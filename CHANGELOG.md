@@ -338,6 +338,17 @@
   - Cabin, km 21, Blessing: the main pass 72 → 62 draws, each mirror 38 → 33; the same
     ground and pebbles at two fixed cameras.
 
+- CONTACT SHADOWS IN ONE ORDER-FREE BATCH PER BAND (`world/props/contactshadow.ts`
+  `contactShadowKind`, `InstanceBatches` `BatchKind.orderFree`, `world/deserttiles.ts`).
+  The discs under props were one InstancedMesh per desert tile and a page per band of
+  the scatter, transparent and so kept out of the multi-draw batches. Every disc is the
+  same dark, so overlapping discs blend alike in either order: a kind marked `orderFree`
+  may be a batch, still placed among the transparent objects by its `renderOrder`. The
+  tiles' discs take slots with their props when the tile goes live, fade through `place`
+  and are given back at teardown. Cabin, km 21, Blessing: the main pass 62 → 54 draws,
+  each mirror 33 → 29; the same disc under the same cactus at a fixed camera; batch slots
+  equal two per prop plus one per tile at every check of a 2-minute drive.
+
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts
   (trim, glass, lenses, wheels), the live mirrors' stand-ins and near traffic's shadow
