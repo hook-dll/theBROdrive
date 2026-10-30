@@ -4,6 +4,12 @@
 
 ### Added
 
+- CABIN MIRRORS CAN BE TURNED OFF (`Settings.cabinMirrors`; menu Settings →
+  **Cabin mirrors**: On / Off; `render/carmirrors.ts` `setEnabled`, `main.ts`). Off hides
+  the live faces and runs no mirror pass; the static glass shows. On by default, and an
+  older save reads as on. Live, no reload; the mirror frame rate is kept for when it is
+  switched back on.
+
 - TAA, TEMPORAL ANTIALIASING, AS AN ANTIALIASING CHOICE (`Settings.taa`; `render/taa.ts`;
   `core/renderer.ts` `setTaa`, `drawFrame`, `drawResolved`, `resetTemporalHistory`; menu
   Settings → Quality → **Antialiasing**: Off / FXAA / TAA / MSAA 2x / MSAA 4x).
@@ -254,27 +260,6 @@
 
 ### Changed
 
-- THE MIRROR SHARED VIEW IS THE UNION OF THE THREE GLASSES, SIZED FROM THE SCREEN
-  (`render/carmirrors.ts` `configureShared`). The shared camera no longer covers a wide
-  100-degree rear panorama: it covers the yaw/pitch bounds of every reflected ray of
-  every glass, plus a small margin, expressed in the inner glass's frame. The target's
-  size is measured, not invented: each face's projected bounding box in device pixels is
-  divided by its own angular span, the sharpest face sets pixels per radian, and the
-  target is that figure times the union's window, times the tier's `mirrorScale`, with a
-  512..4096 by 256..2048 cap. A 4K display or a larger cabin view grows it; a phone's
-  half-scale tier shrinks it. Recomputed only when the car, display, camera fov or tier
-  changes; the camera itself is re-aimed every pass. Still one pass, three faces. The
-  camera stands at the **player's-side door glass's reflected eye** — outside the car
-  beside that door, where the mirror is — not 3 m behind the body. The average of the two
-  door reflections is not used: it lands on the centreline inside the cabin, and the pass
-  then shades the interior (25-32 ms of GPU against 5-7 ms from the door). A glass whose
-  built normal points away from the driver (a mirrored door half) has the normal flipped
-  before reflecting, or the eye lands on the cabin side again; the chosen reflection is
-  then pushed 0.4 m further out, and the player's own car is hidden for the shared pass,
-  so its mirror housing, door skin and cabin cannot fill the view or the pass. The inner
-  glass never places the eye (it would pull it in front of the windshield), but still
-  shapes the union and its own UVs.
-
 - TRAFFIC FIELDS ARE BUILT ONCE PER DRIVER (`world/traffic.ts` `fieldFor`,
   `makeField`). A driver asks the coordinator for its view of the stream at every
   decision (12 Hz, 30 cars, plus the player's own), and each ask used to allocate the
@@ -311,26 +296,6 @@
   walk (`render/farcars.ts` `collectPieces`) keeps a `kitPickProxy` part even when it is
   hidden, so the static shell and the far/mid meshes still read the whole model; without
   that, a static kit car found no shell and the game refused to start.
-
-- ONE REAR PASS FOR ALL THREE LIVE MIRRORS (`render/carmirrors.ts`; one shared
-  half-float target sized from the glasses and the display, one rear camera, the same
-  three unlit face materials).
-  The old path drew the whole scene three times, once per glass, 58–99 draws a pass. Now
-  one pass per frame serves every face: each face's UVs are the eye-to-glass ray
-  reflected by that glass and projected into the shared camera. No new program, no shadow
-  pass, no post pass; `Renderer.renderMirror` still turns off the scene matrix walk and
-  the sun's shadow update for the pass, and the shared target scales with the tier's
-  `mirrorScale` (none on Very Low). `Settings.mirrorFrameRate` now paces the shared pass,
-  so at 10/s all three faces update together.
-  - The approximation is parallax: the three glasses sit 0.8–1.4 m apart, and the shared
-    image comes from one point about 3 m behind the car, so a near object can be a few
-    degrees off relative to the background in a face whose glass is not at that point
-    (about 1 m at 10 m, 1° at 50 m). Far land, sky and the horizon are effectively exact.
-  - The inner mirror is the most approximate: its reflected rays pass through the cabin,
-    while the shared camera stands behind the car, so it shows the road behind rather
-    than the rear seat and pillars. Side mirrors keep the following traffic.
-  - The shared camera is aimed by the inner glass's outward normal (the car's rear), not
-    the main camera's forward, so a turned head cannot swing it; its up follows the car.
 
 - FAR, MID, MIRROR AND SHADOW TRAFFIC IN ONE DRAW PER PASS (`render/farcars.ts`
   `FarBatch`, `FarBatchPool`, `FarCarField`). The far cars, the mid cars' shared parts

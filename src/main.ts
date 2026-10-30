@@ -561,6 +561,7 @@ async function boot(): Promise<void> {
       for (const [id, vehicle] of vehicles) visit(id, vehicle);
     },
   );
+  carMirrors.setEnabled(world.state.settings.cabinMirrors);
   const trunkView = new TrunkView(renderer.scene);
   // The opening of the card machine the player stands at (world/cardmachine.ts), drawn
   // as a boot's grid; its own instance, so an open boot on the lay-by stays drawn beside it.
@@ -3684,6 +3685,7 @@ async function boot(): Promise<void> {
       renderer.setQuality(tier);
       carMirrors.setQuality(tier);
       carMirrors.setRate(world.state.settings.mirrorFrameRate);
+      carMirrors.setEnabled(world.state.settings.cabinMirrors);
       sky.setQuality(tier, mobilePresentation);
       const horizon = viewDistanceFor(world.state.settings.viewDistance, mobilePresentation);
       renderer.setViewDistance(horizon);

@@ -635,6 +635,11 @@ export interface Settings {
   /** Redraws a second of each live car mirror, or null for every frame; see `MIRROR_FRAME_RATES`. */
   mirrorFrameRate: MirrorFrameRate;
   /**
+   * Whether the car the player sits in draws live mirrors at all. Off, the static glass
+   * shows and no mirror pass runs; the mirror frame rate is kept for when it is on.
+   */
+  cabinMirrors: boolean;
+  /**
    * MOUSE DRIVING (M while driving): pointer-locked horizontal mouse motion turns the
    * steering wheel and it stays exactly where the mouse put it; the left button is the
    * throttle, the right the brake, and holding the middle button or the look key (Shift)
@@ -759,6 +764,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // to make (heat, noise), not a default to discover.
   frameRateLimit: null,
   mirrorFrameRate: DEFAULT_MIRROR_FRAME_RATE,
+  cabinMirrors: true,
   // Off by default; M switches it while driving, and the pause menu remembers which.
   mouseDriving: false,
   cameraShake: true,
@@ -1039,6 +1045,8 @@ export function sanitizeSettings(raw: unknown, mobilePresentation: boolean): Set
     // the cap its player chose instead of silently becoming uncapped and hot.
     frameRateLimit: frameRateLimitFrom(obj.frameRateLimit ?? obj.mobileFrameRate),
     mirrorFrameRate: mirrorFrameRateFrom(obj.mirrorFrameRate),
+    // Missing means an older save: on, as every drive has had them.
+    cabinMirrors: obj.cabinMirrors !== false,
     // Older saves stored the mouse-held wheel as `preciseSteering`, and before that as
     // `mouseSteering`; either switched on means mouse driving on. Only the new field
     // is written back.

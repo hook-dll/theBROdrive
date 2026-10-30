@@ -1689,6 +1689,29 @@ function openSettings(panel: HTMLElement, host: SettingsHost): SettingsScreen {
           },
         },
       ]),
+      // The live mirrors can be switched off outright; the static glass stays.
+      segmented('Cabin mirrors', [
+        {
+          label: 'On',
+          icon: 'gfx2',
+          hint: 'The car draws live mirrors in the cabin view. Each is a second render of the scene behind the car.',
+          active: () => settings.cabinMirrors,
+          pick: () => {
+            settings.cabinMirrors = true;
+            changed();
+          },
+        },
+        {
+          label: 'Off',
+          icon: 'gfx1',
+          hint: 'No live mirror passes; the static glass shows. The biggest single mirror cost is gone.',
+          active: () => !settings.cabinMirrors,
+          pick: () => {
+            settings.cabinMirrors = false;
+            changed();
+          },
+        },
+      ]),
       // The car's mirrors are each a second render of the scene, so how often they
       // redraw is its own choice, beside the frame rate and independent of it.
       segmented('Mirrors', [
@@ -2691,6 +2714,7 @@ export class MainMenu {
         groundCover: base.groundCover,
         frameRateLimit: base.frameRateLimit,
         mirrorFrameRate: base.mirrorFrameRate,
+        cabinMirrors: base.cabinMirrors,
         mouseDriving: base.mouseDriving,
         cameraShake: base.cameraShake,
         bouncyCars: base.bouncyCars,
@@ -2730,6 +2754,7 @@ export class MainMenu {
           groundCover: settings.groundCover,
           frameRateLimit: settings.frameRateLimit,
           mirrorFrameRate: settings.mirrorFrameRate,
+          cabinMirrors: settings.cabinMirrors,
           mouseDriving: settings.mouseDriving,
           cameraShake: settings.cameraShake,
           bouncyCars: settings.bouncyCars,

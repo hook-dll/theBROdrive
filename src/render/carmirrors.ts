@@ -1,54 +1,37 @@
 /**
  * Live mirrors for the kit car the player sits in, seen from the cabin view.
  *
- * ONE REAR PASS FOR ALL THREE FACES. A single rear camera draws the world behind the
- * car once into one render target, and each face samples that image along the
- * direction its own glass reflects. The old path drew the whole scene three times, once
- * per mirror; this draws it once.
+ * A mirror shows the scene from the viewing eye reflected through the mirror's plane,
+ * through an off-axis (generalised perspective) projection whose window is the mirror's
+ * own rectangle and whose near plane lies on its glass: the true mirror image for any
+ * seat. A cabin eye is fixed in the car and only turns, so this is no dearer than a
+ * camera fixed to the mirror. The image lands on the mirror's live face (carkit/context.ts
+ * `addMirrorFace`), which lies over the static glass and is hidden on every other car.
  *
- * THE SHARED VIEW IS THE UNION OF THE THREE GLASSES, NOT A WIDE REAR PANORAMA. The
- * camera's window is measured from the faces themselves: every reflected ray of every
- * glass corner is expressed in the inner glass's frame, and the camera covers their
- * yaw/pitch bounds plus a small margin. A 100-degree panorama spends most of its texels
- * on directions no mirror shows; the union is roughly 50-70 degrees across, so the same
- * pixels are several times denser where the glasses look.
+ * Programs. The targets are ordinary render targets like the scene pass's `hazeTarget`,
+ * and Three keys a program on "a render target" (working colour space, no tone mapping),
+ * so every scene material draws into a mirror with the program it already has; so do the
+ * stand-in cars, whose far-car program the far field links at boot. The face material is
+ * one more program, linked at boot through
+ * `mirrorProgramAnchor`.
  *
- * THE TARGET SIZE COMES FROM THE SCREEN, NOT FROM A CONSTANT. Each face's projected
- * bounding box on the display (device pixels) is compared with its own angular window;
- * the sharpest face sets a pixels-per-radian figure, and the shared target is that
- * figure times the union's window (times the tier's `mirrorScale`, with a cap). A 4K
- * display or a larger cabin view grows the target; a phone's half-scale tier shrinks
- * it. It is recomputed only when the car, the display or the tier changes, never per
- * frame.
+ * Brightness. A mirror holds linear radiance like the scene target, and its face is
+ * unlit, so the face writes that radiance into the scene target unchanged and the post
+ * pass maps it to the display with the rest of the frame: one exposure, one tone curve.
  *
- * The approximation is parallax. A true mirror has its own viewpoint (the eye reflected
- * through its own glass), and the three glasses sit 0.8-1.4 m apart. The shared image
- * comes from one point at the player's-side door reflection (outside the car beside that
- * door), so a near object can sit a few degrees off relative to the background in a face
- * whose glass is not at that point. Far land, sky and the horizon are effectively exact.
- * The inner mirror is the most approximate: its reflected rays pass through the cabin,
- * while the shared camera stands outside at the door, so it shows the road behind rather
- * than the rear seat and pillars. Side mirrors, which are what a driver checks, keep the
- * world behind and the following traffic. Averaging the two door reflections was tried
- * and rejected: it puts the eye on the centreline inside the cabin, and the pass then
- * shades the interior (25-32 ms of GPU against 5-7 ms from the door).
+ * Cost. Each mirror redraws `Settings.mirrorFrameRate` times a second, in turn, so the
+ * renders spread over the frames instead of landing together (null: all, every frame);
+ * no shadow pass, no scene matrix walk and no post pass (`Renderer.renderMirror`); small
+ * fixed targets, halved on the low rung and none on Very Low (`GraphicsTier.mirrorScale`).
  *
- * Sampling. For each face vertex the reflected direction is `d - 2 (d.n) n`, where `d`
- * is eye-to-glass and `n` the glass normal. That direction is projected into the shared
- * camera, and its image coordinates become the face's UVs. The face material is the
- * same unlit `MeshBasicMaterial` with `SCENE_RADIANCE`, so the face still writes linear
- * radiance into the scene target and the main post pass maps it to the display with one
- * exposure and one tone curve. No new program: the face material keeps its map and its
- * program key.
- *
- * Cost. One pass a frame, one target (sized as above; none on Very Low), no shadow pass,
- * no scene matrix walk and no post pass (`Renderer.renderMirror`).
- * `Settings.mirrorFrameRate` now paces the shared pass: at 10/s all three faces update
- * ten times a second, where the old path paced each face separately.
- *
- * Every car but the player's own is drawn in the shared pass as its model's far mesh, an
- * instance in the scene's far-car batches (render/farcars.ts). A car with a door, lid or
- * pane off its stop keeps its own body, which the far mesh does not show.
+ * Every car but the player's own is drawn in a mirror as its model's far mesh, an instance
+ * in the scene's far-car batches (render/farcars.ts), which draw it with the far and mid
+ * traffic in one draw per batch: a near kit car in full was some 60 draws of a mirror's
+ * ~200 (measured on the M2 Pro, High traffic), in a picture a few centimetres across. A
+ * car with a door, lid or pane off its stop keeps its own body, which the far mesh does
+ * not show. The draw distance is the scene's: a mirror's nearer far plane cut its draws by
+ * under five percent (the world's batches each span hundreds of metres) and would clip
+ * the sky dome.
  */
 
 import * as THREE from 'three';
@@ -59,60 +42,39 @@ import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../g
 import type { Vehicle } from '../vehicle/vehicle';
 import { FarCarField } from './farcars';
 import { adoptReversedDepth } from './depthconvention';
-import { mirrorFaceGeometry } from './mirrorview';
+import { aimMirrorCamera, mirrorFaceGeometry } from './mirrorview';
 
 /** Visits every car a mirror may show: traffic and the player's own. */
 export type MirrorCarSource = (visit: (id: string, vehicle: Vehicle) => void) => void;
 
 const MIRRORS: readonly KitMirror[] = ['inner', 'left', 'right'];
 
-/** Size before the first cabin frame measures the faces; replaced at once in `show`. */
-const SHARED_FALLBACK_WIDTH = 1024;
-const SHARED_FALLBACK_HEIGHT = 512;
-const SHARED_MIN_WIDTH = 512;
-const SHARED_MAX_WIDTH = 4096;
-const SHARED_MIN_HEIGHT = 256;
-const SHARED_MAX_HEIGHT = 2048;
-/** The union window is never narrower than this, however small the glasses are on screen. */
-const SHARED_MIN_H_FOV_DEG = 20;
-const SHARED_MAX_H_FOV_DEG = 120;
-const SHARED_MIN_V_FOV_DEG = 15;
-const SHARED_MAX_V_FOV_DEG = 80;
-/** Margin round the union, degrees and as a share of the span. */
-const SHARED_MARGIN_DEG = 2;
-const SHARED_MARGIN_SHARE = 0.06;
-/** Sharpness headroom over the face's own screen pixels, and the clamps on the density. */
-const SHARED_DENSITY_HEADROOM = 1.12;
-const SHARED_MIN_PX_PER_RAD = 256;
-const SHARED_MAX_PX_PER_RAD = 6000;
-/**
- * How far past the chosen door reflection the shared eye stands, metres. The exact
- * reflection lies on the glass's outer side but can still sit in the mirror housing or
- * against the door skin; this clears it without changing the view's direction.
- */
-const SHARED_EYE_OUT_M = 0.4;
+/** Target pixels at full scale, about each glass's aspect (19 x 4.4 cm, 10 x 7 cm). */
+const PIXELS: Readonly<Record<KitMirror, readonly [number, number]>> = {
+  inner: [320, 96],
+  left: [160, 128],
+  right: [160, 128],
+};
 
 interface View {
+  readonly target: THREE.WebGLRenderTarget;
   readonly material: THREE.MeshBasicMaterial;
 }
 
-/** One shared image and one face material per mirror for the whole game. */
-const sharedTarget = new THREE.WebGLRenderTarget(SHARED_FALLBACK_WIDTH, SHARED_FALLBACK_HEIGHT, { type: THREE.HalfFloatType });
+/** One target and face material per mirror for the whole game: only one car shows them. */
 const views: Partial<Record<KitMirror, View>> = {};
 
 function view(mirror: KitMirror): View {
   let found = views[mirror];
   if (!found) {
+    const [width, height] = PIXELS[mirror];
+    // Linear radiance like the scene target, of its type (`CarMirrors.setQuality`).
+    const target = new THREE.WebGLRenderTarget(width, height, { type: THREE.HalfFloatType });
     // `glass` in the name keeps the face out of carmodel.ts's paint-slot rule.
     // SCENE_RADIANCE: the map is radiance, not a screen colour (render/lightshader.ts).
-    const material = new THREE.MeshBasicMaterial({
-      name: `mirror_glass_${mirror}`,
-      map: sharedTarget.texture,
-      toneMapped: false,
-      fog: false,
-    });
+    const material = new THREE.MeshBasicMaterial({ name: `mirror_glass_${mirror}`, map: target.texture, toneMapped: false, fog: false });
     material.defines = { SCENE_RADIANCE: '' };
-    found = views[mirror] = { material };
+    found = views[mirror] = { target, material };
   }
   return found;
 }
@@ -143,51 +105,28 @@ export function mirrorProgramAnchor(): THREE.Object3D {
 }
 
 const _eye = new THREE.Vector3();
-const _normal = new THREE.Vector3();
-const _rear = new THREE.Vector3();
-const _right = new THREE.Vector3();
-const _up = new THREE.Vector3();
-const _average = new THREE.Vector3();
-const _look = new THREE.Vector3();
-const _world = new THREE.Vector3();
-const _ndc = new THREE.Vector3();
-const _direction = new THREE.Vector3();
-const _reflected = new THREE.Vector3();
-const _mirrored = new THREE.Vector3();
-const _chosenNormal = new THREE.Vector3();
-const _projected = new THREE.Vector3();
-const _view = new THREE.Vector3();
 
-/** Drives the live mirrors: which car shows them, and one shared rear pass per frame. */
+/** Drives the live mirrors: which car shows them, and one mirror's render per frame. */
 export class CarMirrors {
   /** Dev A/B (`__bro.mirrors.enabled`): false leaves every mirror static and runs no pass. */
   enabled = true;
-  /** Shared mirror passes since boot (`__bro.mirrors.stats`). */
+  /** Mirror renders since boot (`__bro.mirrors.stats`). */
   readonly stats = { renders: 0 };
-  /** Target size as a share of the measured union; 0 keeps the static glass. */
+  /** Target size as a share of `PIXELS`; 0 keeps the static glass. */
   private scale = -1;
   /** The car whose faces are live, if any. */
   private shown: KitRig | null = null;
-  /** Renders a second for the shared pass, null for every frame; see `setRate`. */
+  private next = 0;
+  /** Renders a second per mirror, null for all of them every frame; see `setRate`. */
   private rate: MirrorFrameRate = null;
-  /** Shared passes owed by the clock and not yet drawn, and when that was counted. */
+  /** Mirror renders owed by the clock and not yet drawn, and when that was counted. */
   private owed = 0;
   private lastMs = -1;
-  private readonly sharedCamera: THREE.PerspectiveCamera;
-  /** The cars drawn in the mirrors as their far mesh, in the far batches; shown only while the pass draws. */
+  private readonly camera = new THREE.PerspectiveCamera();
+  /** The cars drawn in the mirrors as their far mesh, in the far batches; shown only while a mirror draws. */
   private readonly standIns: FarCarField;
-  /** Roots hidden for the mirror pass under way, put back after it. */
+  /** Roots hidden for the mirror renders under way, put back after them. */
   private readonly hidden: THREE.Object3D[] = [];
-
-  /** The measured union's camera window, and the face-measured target size. */
-  private sharedWidth = SHARED_FALLBACK_WIDTH;
-  private sharedHeight = SHARED_FALLBACK_HEIGHT;
-  private sharedAspect = SHARED_FALLBACK_WIDTH / SHARED_FALLBACK_HEIGHT;
-  private sharedFovDeg = 60;
-  private sharedCenterYaw = 0;
-  private sharedCenterPitch = 0;
-  /** Car, display, camera and tier the measurement above was made for. */
-  private sharedKey = '';
 
   constructor(
     private readonly renderer: Renderer,
@@ -196,17 +135,16 @@ export class CarMirrors {
     private readonly cars: MirrorCarSource,
   ) {
     this.rate = rate;
-    this.sharedCamera = new THREE.PerspectiveCamera(this.sharedFovDeg, this.sharedAspect, 0.1, 1);
-    // Its matrix is written by `aimShared`, so the camera takes the scene's depth
+    // Its off-axis projection is built by `aim`, so the camera takes the scene's depth
     // convention now, not at its first draw (render/depthconvention.ts).
-    adoptReversedDepth(this.sharedCamera, renderer.reversedDepth);
+    adoptReversedDepth(this.camera, renderer.reversedDepth);
     this.standIns = new FarCarField(renderer.scene);
     this.standIns.setVisible(false);
     this.setQuality(quality);
     renderer.setMirrorPass(this);
   }
 
-  /** Whether the shared mirror pass runs this frame. */
+  /** Whether a mirror pass runs this frame. */
   get active(): boolean {
     return this.shown !== null;
   }
@@ -215,19 +153,38 @@ export class CarMirrors {
     const scale = GRAPHICS_TIERS[quality].mirrorScale;
     if (scale === this.scale) return;
     this.scale = scale;
-    // A resized target is reallocated empty: its faces wait for the next pass.
+    // A resized target is reallocated empty: its face waits for the next render.
     this.show(null);
-    this.sharedKey = '';
-    if (scale <= 0) {
-      sharedTarget.setSize(1, 1);
-      return;
+    if (scale <= 0) return;
+    // The scene target's texel type (core/renderer.ts `sceneTargetType`): half float, so
+    // the sun and a following car's lamps keep their excess and roll off as in the main
+    // view; eight-bit sRGB on a context that cannot render half floats.
+    const type = this.renderer.sceneTextureType;
+    for (const mirror of MIRRORS) {
+      const [width, height] = PIXELS[mirror];
+      const target = view(mirror).target;
+      // Float depth on the reversed buffer, like the scene target: the far desert and its
+      // mesas are in the mirrors too.
+      if (this.renderer.reversedDepth && !target.depthTexture) {
+        target.depthTexture = new THREE.DepthTexture(1, 1, THREE.FloatType);
+      }
+      if (target.texture.type !== type) {
+        target.dispose();
+        target.texture.type = type;
+        target.texture.colorSpace = type === THREE.UnsignedByteType ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      }
+      target.setSize(Math.round(width * scale), Math.round(height * scale));
     }
-    this.applySharedSize();
   }
 
-  /** `Settings.mirrorFrameRate`: shared passes a second, or null for every frame. */
+  /** `Settings.mirrorFrameRate`: each mirror's redraws a second, or null for every frame. */
   setRate(rate: MirrorFrameRate): void {
     this.rate = rate;
+  }
+
+  /** `Settings.cabinMirrors`: off hides the faces and runs no mirror pass. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
   }
 
   /**
@@ -239,299 +196,40 @@ export class CarMirrors {
   }
 
   /**
-   * Draws the shared rear image when the clock has come round to it; called by
-   * `Renderer.render` after the frame. One pass serves every face, so a long frame does
-   * not queue a burst of per-face renders.
+   * Renders the mirrors the clock has come round to; called by `Renderer.render` after
+   * the frame. At most each mirror once a frame, so a long frame does not queue a burst;
+   * up to one round more is carried to the next frame, so a rate at the frame rate is
+   * not lost to frames a hair longer than the last.
    */
   draw(): void {
     const kit = this.shown;
     if (!kit || kit.mirrorFaces.length === 0) return;
+    const count = kit.mirrorFaces.length;
     const now = performance.now();
     const seconds = this.lastMs < 0 ? 0 : (now - this.lastMs) / 1000;
     this.lastMs = now;
-    this.owed = this.rate === null ? 1 : Math.min(this.owed + seconds * this.rate, 2);
-    if (this.owed < 1) return;
-    this.owed -= 1;
-    const faces = kit.mirrorFaces;
-    if (!this.aimShared(kit)) {
-      for (const face of faces) face.visible = false;
-      return;
-    }
-    this.updateFaceUvs(kit);
-    this.standInCars();
+    this.owed = this.rate === null ? count : Math.min(this.owed + seconds * this.rate * count, 2 * count);
+    let swapped = false;
     try {
-      // The faces lie on the near plane of the shared pass and would sample the image
-      // being drawn; hidden for the pass, shown again for the next frame.
-      for (const face of faces) face.visible = false;
-      this.renderer.renderMirror(sharedTarget, this.sharedCamera);
-      this.stats.renders++;
+      for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
+        const face = kit.mirrorFaces[this.next++ % count]!;
+        if (!this.aim(face)) {
+          face.visible = false;
+          continue;
+        }
+        if (!swapped) {
+          this.standInCars();
+          swapped = true;
+        }
+        // Its own face lies on the near plane, and drawing it would sample the target being drawn.
+        face.visible = false;
+        this.renderer.renderMirror(view(face.userData.kitMirror as KitMirror).target, this.camera);
+        // Shown only once drawn, so a face never shows an empty or another car's target.
+        face.visible = true;
+        this.stats.renders++;
+      }
     } finally {
-      for (const face of faces) face.visible = true;
-      this.restoreCars();
-    }
-  }
-
-  /**
-   * Measures the three glasses and places the one rear camera. The union window and the
-   * target size are rebuilt only when the car, display, camera or tier changed; the
-   * camera itself is re-aimed every pass from the live face matrices.
-   */
-  private aimShared(kit: KitRig): boolean {
-    this.configureShared(kit);
-    const faces = kit.mirrorFaces;
-    const inner = faces.find((face) => face.userData.kitMirror === 'inner') ?? faces[0]!;
-    // THE SHARED EYE STANDS AT ONE DOOR'S REFLECTION, NOT AT THE AVERAGE OF THE TWO.
-    // A mirror sees from the eye reflected through its glass; the left and right door
-    // reflections sit outside the car on their own sides. Their average lands on the
-    // centreline, INSIDE the cabin, and the pass then shades the interior and its glass:
-    // measured 25-32 ms of GPU against 5-7 ms with the eye outside. So the closest door
-    // reflection to the player's own eye is used — the driver's side for a left-hand
-    // drive, the passenger's when he sits there — and the other door's view is sampled
-    // from it with the usual parallax. The inner glass never places the eye (it would
-    // pull it in front of the windshield); it still shapes the union and its own UVs.
-    const sideFaces = faces.filter(
-      (face) => face.userData.kitMirror === 'left' || face.userData.kitMirror === 'right',
-    );
-    const positionFaces = sideFaces.length > 0 ? sideFaces : faces;
-    let chosen = false;
-    let bestDistance = Infinity;
-    _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
-    for (const face of positionFaces) {
-      _world.setFromMatrixPosition(face.matrixWorld);
-      _normal.set(0, 0, -1).transformDirection(face.matrixWorld).normalize();
-      let distance = _direction.subVectors(_eye, _world).dot(_normal);
-      if (Math.abs(distance) <= 0.02) continue;
-      // The glass normal is the build's local -Z, which some mirrored door halves turn
-      // away from the driver. Orient it towards the eye before reflecting; otherwise the
-      // reflection lands on the cabin side and the eye ends up inside the car.
-      if (distance < 0) {
-        _normal.negate();
-        distance = -distance;
-      }
-      // The eye reflected through the glass: `E - 2 ((E - P) . n) n`.
-      _mirrored.copy(_eye).addScaledVector(_normal, -2 * distance);
-      const toEye = _mirrored.distanceToSquared(_eye);
-      if (toEye < bestDistance) {
-        bestDistance = toEye;
-        _average.copy(_mirrored);
-        _chosenNormal.copy(_normal);
-        chosen = true;
-      }
-    }
-    if (chosen) {
-      // Clear the glass and its housing: the eye stays on the outer side the reflection
-      // already put it on, just far enough that no part of the car sits on the near
-      // plane. The view direction is unchanged.
-      _average.addScaledVector(_chosenNormal, -SHARED_EYE_OUT_M);
-    }
-    if (!chosen) {
-      // No usable door reflection (a model mid-load, a malformed glass): the average of
-      // the glasses themselves, which is still on the car rather than behind it.
-      _average.set(0, 0, 0);
-      for (const face of faces) _average.add(_world.setFromMatrixPosition(face.matrixWorld));
-      _average.multiplyScalar(1 / faces.length);
-    }
-    // The inner glass faces the driver, so its outward normal is the car's rear. It is
-    // car-relative, unlike the main camera's forward, which turns with the head.
-    _rear.set(0, 0, -1).transformDirection(inner.matrixWorld).normalize();
-    _right.set(1, 0, 0).transformDirection(inner.matrixWorld).normalize();
-    _up.set(0, 1, 0).transformDirection(inner.matrixWorld).normalize();
-    if (_rear.lengthSq() < 1e-6) return false;
-    const cy = Math.cos(this.sharedCenterYaw);
-    const sy = Math.sin(this.sharedCenterYaw);
-    const cp = Math.cos(this.sharedCenterPitch);
-    const sp = Math.sin(this.sharedCenterPitch);
-    _view.copy(_rear).multiplyScalar(cy * cp)
-      .addScaledVector(_right, sy * cp)
-      .addScaledVector(_up, sp)
-      .normalize();
-    this.sharedCamera.position.copy(_average);
-    this.sharedCamera.up.copy(_up);
-    _look.copy(this.sharedCamera.position).add(_view);
-    this.sharedCamera.lookAt(_look);
-    this.sharedCamera.near = 0.1;
-    this.sharedCamera.far = this.renderer.camera.far;
-    this.sharedCamera.fov = this.sharedFovDeg;
-    this.sharedCamera.aspect = this.sharedAspect;
-    this.sharedCamera.updateProjectionMatrix();
-    this.sharedCamera.updateMatrixWorld();
-    return true;
-  }
-
-  /**
-   * Rebuilds the shared window and target from the faces' reflected rays and their
-   * projected screen size. Called from `aimShared`, so it runs after a cabin frame has
-   * current matrices; a change resizes the target once, never per frame.
-   */
-  private configureShared(kit: KitRig): void {
-    const viewport = this.renderer.viewport();
-    const displayWidth = Math.max(1, viewport.deviceWidth);
-    const displayHeight = Math.max(1, viewport.deviceHeight);
-    const key = `${this.scale}|${displayWidth}x${displayHeight}|${kit.mirrorFaces.length}|${Math.round(this.renderer.camera.fov * 10)}`;
-    if (key === this.sharedKey) return;
-    const faces = kit.mirrorFaces;
-    const inner = faces.find((face) => face.userData.kitMirror === 'inner') ?? faces[0];
-    if (!inner) return;
-    _rear.set(0, 0, -1).transformDirection(inner.matrixWorld).normalize();
-    _right.set(1, 0, 0).transformDirection(inner.matrixWorld).normalize();
-    _up.set(0, 1, 0).transformDirection(inner.matrixWorld).normalize();
-    _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
-    const main = this.renderer.camera;
-    let minYaw = Infinity;
-    let maxYaw = -Infinity;
-    let minPitch = Infinity;
-    let maxPitch = -Infinity;
-    let density = 0;
-
-    for (const face of faces) {
-      _normal.set(0, 0, -1).transformDirection(face.matrixWorld).normalize();
-      const position = face.geometry.getAttribute('position');
-      if (!position) continue;
-      let fMinYaw = Infinity;
-      let fMaxYaw = -Infinity;
-      let fMinPitch = Infinity;
-      let fMaxPitch = -Infinity;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      for (let i = 0; i < position.count; i++) {
-        _world.fromBufferAttribute(position, i).applyMatrix4(face.matrixWorld);
-        // The face's own pixels on the display: the density the mirror has to feed.
-        _ndc.copy(_world).project(main);
-        if (Number.isFinite(_ndc.x) && Number.isFinite(_ndc.y)) {
-          const px = (_ndc.x * 0.5 + 0.5) * displayWidth;
-          const py = (_ndc.y * 0.5 + 0.5) * displayHeight;
-          if (px > -displayWidth && px < displayWidth * 2 && py > -displayHeight && py < displayHeight * 2) {
-            if (px < minX) minX = px;
-            if (px > maxX) maxX = px;
-            if (py < minY) minY = py;
-            if (py > maxY) maxY = py;
-          }
-        }
-        _direction.subVectors(_world, _eye);
-        _reflected.copy(_direction).addScaledVector(_normal, -2 * _direction.dot(_normal));
-        const x = _reflected.dot(_right);
-        const y = _reflected.dot(_up);
-        const z = _reflected.dot(_rear);
-        // A ray that leaves the glass forward is not a rear-view direction; it cannot
-        // shape the union (a malformed face would otherwise open it to the whole sphere).
-        if (z <= 0.05) continue;
-        const yaw = Math.atan2(x, z);
-        const pitch = Math.atan2(y, Math.hypot(x, z));
-        if (yaw < fMinYaw) fMinYaw = yaw;
-        if (yaw > fMaxYaw) fMaxYaw = yaw;
-        if (pitch < fMinPitch) fMinPitch = pitch;
-        if (pitch > fMaxPitch) fMaxPitch = pitch;
-        if (yaw < minYaw) minYaw = yaw;
-        if (yaw > maxYaw) maxYaw = yaw;
-        if (pitch < minPitch) minPitch = pitch;
-        if (pitch > maxPitch) maxPitch = pitch;
-      }
-      if (!Number.isFinite(fMinYaw) || !Number.isFinite(minX)) continue;
-      const faceWidth = Math.max(1, maxX - minX);
-      const faceHeight = Math.max(1, maxY - minY);
-      const yawSpan = Math.max(1e-4, fMaxYaw - fMinYaw);
-      const pitchSpan = Math.max(1e-4, fMaxPitch - fMinPitch);
-      density = Math.max(density, faceWidth / yawSpan, faceHeight / pitchSpan);
-    }
-
-    let hFov: number;
-    let vFov: number;
-    let pxPerRad: number;
-    if (Number.isFinite(minYaw) && Number.isFinite(minPitch) && density > 0) {
-      const yawMargin = Math.max(THREE.MathUtils.degToRad(SHARED_MARGIN_DEG), (maxYaw - minYaw) * SHARED_MARGIN_SHARE);
-      const pitchMargin = Math.max(THREE.MathUtils.degToRad(SHARED_MARGIN_DEG), (maxPitch - minPitch) * SHARED_MARGIN_SHARE);
-      hFov = THREE.MathUtils.clamp(
-        maxYaw - minYaw + 2 * yawMargin,
-        THREE.MathUtils.degToRad(SHARED_MIN_H_FOV_DEG),
-        THREE.MathUtils.degToRad(SHARED_MAX_H_FOV_DEG),
-      );
-      vFov = THREE.MathUtils.clamp(
-        maxPitch - minPitch + 2 * pitchMargin,
-        THREE.MathUtils.degToRad(SHARED_MIN_V_FOV_DEG),
-        THREE.MathUtils.degToRad(SHARED_MAX_V_FOV_DEG),
-      );
-      this.sharedCenterYaw = (minYaw + maxYaw) / 2;
-      this.sharedCenterPitch = (minPitch + maxPitch) / 2;
-      pxPerRad = THREE.MathUtils.clamp(density, SHARED_MIN_PX_PER_RAD, SHARED_MAX_PX_PER_RAD)
-        * Math.max(0.25, this.scale)
-        * SHARED_DENSITY_HEADROOM;
-    } else {
-      // No usable face (a model still loading, a malformed glass): a conservative rear
-      // window, sized from the display rather than a constant.
-      hFov = THREE.MathUtils.degToRad(100);
-      vFov = THREE.MathUtils.degToRad(60);
-      this.sharedCenterYaw = 0;
-      this.sharedCenterPitch = 0;
-      pxPerRad = Math.max(256, displayHeight / vFov) * Math.max(0.25, this.scale);
-    }
-    const aspect = Math.tan(hFov / 2) / Math.tan(vFov / 2);
-    let width = Math.round(pxPerRad * hFov);
-    let height = Math.round(pxPerRad * vFov);
-    width = THREE.MathUtils.clamp(width, SHARED_MIN_WIDTH, SHARED_MAX_WIDTH);
-    height = THREE.MathUtils.clamp(height, SHARED_MIN_HEIGHT, SHARED_MAX_HEIGHT);
-    // Keep the camera's own aspect: the vertical fov follows from the width and height,
-    // so the union's horizontal span is covered exactly by construction.
-    this.sharedWidth = width;
-    this.sharedHeight = height;
-    this.sharedAspect = width / height;
-    this.sharedFovDeg = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(hFov / 2) / this.sharedAspect));
-    if (this.sharedFovDeg < THREE.MathUtils.radToDeg(vFov)) {
-      // The height was clamped or rounded under the union's vertical span: widen the
-      // vertical fov instead of cropping the top or bottom of a glass.
-      this.sharedFovDeg = THREE.MathUtils.radToDeg(vFov);
-    }
-    this.sharedKey = key;
-    this.applySharedSize();
-  }
-
-  /** Installs the measured target size and the scene's texel type; no-op if unchanged. */
-  private applySharedSize(): void {
-    if (this.scale <= 0) {
-      sharedTarget.setSize(1, 1);
-      return;
-    }
-    const type = this.renderer.sceneTextureType;
-    if (this.renderer.reversedDepth && !sharedTarget.depthTexture) {
-      sharedTarget.depthTexture = new THREE.DepthTexture(1, 1, THREE.FloatType);
-    }
-    if (sharedTarget.texture.type !== type) {
-      sharedTarget.dispose();
-      sharedTarget.texture.type = type;
-      sharedTarget.texture.colorSpace = type === THREE.UnsignedByteType ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    }
-    sharedTarget.setSize(this.sharedWidth, this.sharedHeight);
-  }
-
-  /**
-   * Rewrites each face's UVs to the shared image: for a glass vertex, the direction the
-   * eye's ray leaves the glass, projected into the shared camera. Projective, so the
-   * quad's four corners carry the image without a shader of its own.
-   */
-  private updateFaceUvs(kit: KitRig): void {
-    _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
-    for (const face of kit.mirrorFaces) {
-      const uv = face.geometry.getAttribute('uv');
-      const position = face.geometry.getAttribute('position');
-      if (!uv || !position) continue;
-      _normal.set(0, 0, -1).transformDirection(face.matrixWorld).normalize();
-      for (let i = 0; i < position.count; i++) {
-        _world.fromBufferAttribute(position, i).applyMatrix4(face.matrixWorld);
-        _direction.subVectors(_world, _eye);
-        _reflected.copy(_direction).addScaledVector(_normal, -2 * _direction.dot(_normal));
-        let u = 0.5;
-        let v = 0.5;
-        if (_reflected.lengthSq() > 1e-8) {
-          _projected.copy(this.sharedCamera.position).addScaledVector(_reflected, 1000).project(this.sharedCamera);
-          if (Number.isFinite(_projected.x) && Number.isFinite(_projected.y)) {
-            u = THREE.MathUtils.clamp(_projected.x * 0.5 + 0.5, 0, 1);
-            v = THREE.MathUtils.clamp(_projected.y * 0.5 + 0.5, 0, 1);
-          }
-        }
-        uv.setXY(i, u, v);
-      }
-      uv.needsUpdate = true;
+      if (swapped) this.restoreCars();
     }
   }
 
@@ -550,17 +248,7 @@ export class CarMirrors {
    */
   private readonly standIn = (_id: string, vehicle: Vehicle): void => {
     const root = vehicle.root;
-    if (vehicle.kit === this.shown) {
-      // The car the mirrors belong to is hidden for the shared pass: its mirror housing,
-      // door skin and cabin would otherwise be drawn by the eye standing at the glass,
-      // which read as "the mirror shows a mirror" and filled the pass with interior.
-      if (root.visible) {
-        root.visible = false;
-        this.hidden.push(root);
-      }
-      return;
-    }
-    if (!root.visible || !vehicle.addStandIn(this.standIns)) return;
+    if (vehicle.kit === this.shown || !root.visible || !vehicle.addStandIn(this.standIns)) return;
     root.visible = false;
     this.hidden.push(root);
   };
@@ -575,11 +263,20 @@ export class CarMirrors {
     if (kit === this.shown) return;
     if (this.shown) for (const face of this.shown.mirrorFaces) face.visible = false;
     this.shown = kit;
-    // A newly shown car waits for the first shared image rather than showing an empty
-    // or another car's target.
-    if (kit) for (const face of kit.mirrorFaces) face.visible = false;
-    this.sharedKey = '';
-    this.owed = kit ? 1 : 0;
+    this.next = 0;
+    // A car newly shown draws every mirror at once, so no face waits a slow rate's
+    // interval for its first picture.
+    this.owed = kit ? kit.mirrorFaces.length : 0;
     this.lastMs = -1;
+  }
+
+  /**
+   * Places the mirror camera for `face` from this frame's eye (render/mirrorview.ts
+   * `aimMirrorCamera`). Matrices are this frame's: the frame was drawn just before. False
+   * when the eye is not in front of the glass.
+   */
+  private aim(face: THREE.Mesh): boolean {
+    _eye.setFromMatrixPosition(this.renderer.camera.matrixWorld);
+    return aimMirrorCamera(this.camera, face, _eye, this.renderer.camera.far);
   }
 }
