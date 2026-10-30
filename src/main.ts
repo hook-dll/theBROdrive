@@ -411,8 +411,8 @@ async function boot(): Promise<void> {
   renderer.setMsaa(world.state.settings.msaa);
   renderer.setTaa(world.state.settings.taa);
   renderer.setUpscaling(world.state.settings.upscaling, world.state.settings.sharpness);
-  // The mirror world's road: the real road surfaces merged into one draw.
-  const farRoad = new FarRoad(renderer.scene);
+  // The mirror world's road: one low-poly ribbon, no near chunks, no shadow.
+  const farRoad = new FarRoad(road, renderer.scene);
   /** Fullscreen API mode shared by the plus key and the touch fullscreen button. */
   const toggleFullscreen = (): void => {
     const transition = document.fullscreenElement

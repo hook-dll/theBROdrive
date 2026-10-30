@@ -1,124 +1,123 @@
 /**
- * THE FAR ROAD: the mirror world's road, merged from the road's own surfaces.
+ * THE FAR ROAD: the mirror world's road, as one low-poly ribbon.
  *
- * A flat ribbon lost the thing a mirror is read by — the surface type, its texture, the
- * paint and the shoulder line. So this does not invent a road. Every road chunk's
- * surface mesh is tagged `farRoadSurface` (world/roadmesh.ts); this collects those
- * geometries, applies their world matrices and merges them into ONE mesh with the very
- * same `roadMaterial` and every attribute it reads (`color`, `uv`, `aRoadCourse`,
- * `aRoadEdge`). The result is the real road, one draw, on `FAR_WORLD_LAYER`.
+ * A mirror never needs the near road's material detail — its skirt, shoulder, paint,
+ * aggregate and per-chunk seams. It needs the same line on the ground, far enough that a
+ * following car sits on something. This is the analogues of a car's far mesh: one mesh,
+ * one material, one draw, following the road for `FAR_ROAD_BEHIND_M` behind and
+ * `FAR_ROAD_AHEAD_M` ahead of the player, rebuilt only when the player has moved
+ * `FAR_ROAD_REBUILD_M`.
  *
- * The near surface meshes themselves are hidden for the mirror pass: their chunk group
- * is tagged `mirrorSkip` and `CarMirrors` hides it. Their bed, skirt and shoulder go with
- * them; the merged surfaces carry the asphalt, gravel, paint and wear the player sees.
- * The road casts no shadow, so replacing it cannot leave a shadow without its object.
- *
- * The merge is rebuilt only when the streamed surface set changes or the floating origin
- * rebases — a handful of times a kilometre, never per frame.
+ * It lives on `FAR_WORLD_LAYER`, so the main camera never draws it; the mirror's world
+ * camera enables the layer. The near road chunks are tagged `mirrorSkip` and hidden for
+ * the mirror pass (roadmesh.ts), so the two never overlap. The road does not cast a
+ * shadow, which is why replacing it cannot leave a shadow without its object.
  */
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import type { Road } from '../world/road';
+import { makeFlatMaterial } from './materials';
 
-/** The layer of the world that only a mirror draws: the merged road (and, later, far props). */
+/** The layer of the world that only a mirror draws: the far road (and, later, far props). */
 export const FAR_WORLD_LAYER = 4;
 
+/** Metres between rows: enough for a curve at the size a mirror shows. */
+const STEP_M = 12;
+const BEHIND_M = 700;
+const AHEAD_M = 700;
+/** Rebuild once the player has moved this far; only a handful of times a kilometre. */
+const REBUILD_M = 60;
+const ROWS = Math.floor((BEHIND_M + AHEAD_M) / STEP_M) + 1;
+const HALF_WIDTH_SLACK_M = 0.05;
+
+const _right = { x: 0, y: 0, z: 0 };
+const _left = { x: 0, y: 0, z: 0 };
+
 export class FarRoad {
-  private mesh: THREE.Mesh | null = null;
-  private material: THREE.Material | null = null;
-  private visible = false;
-  private dirty = true;
+  private readonly geometry: THREE.BufferGeometry;
+  private readonly positions: Float32Array;
+  private readonly mesh: THREE.Mesh;
+  private lastS = Number.NaN;
   private lastOriginX = Number.NaN;
   private lastOriginZ = Number.NaN;
-  /** Every live road surface mesh, by identity. */
-  private readonly surfaces = new Set<THREE.Mesh>();
 
-  constructor(private readonly scene: THREE.Scene) {
-    scene.traverse(this.collect);
-    scene.addEventListener('childadded', ({ child }) => child.traverse(this.collect));
-    scene.addEventListener('childremoved', ({ child }) => {
-      let changed = false;
-      for (const surface of this.surfaces) {
-        let node: THREE.Object3D | null = surface;
-        while (node !== null && node !== child) node = node.parent;
-        if (node === child) {
-          this.surfaces.delete(surface);
-          changed = true;
-        }
-      }
-      if (changed) this.invalidate();
-    });
+  constructor(
+    private readonly road: Road,
+    scene: THREE.Scene,
+  ) {
+    this.positions = new Float32Array(ROWS * 2 * 3);
+    const normals = new Float32Array(ROWS * 2 * 3);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    const indices = new Uint32Array((ROWS - 1) * 6);
+    for (let row = 0; row < ROWS - 1; row++) {
+      const r0 = row * 2;
+      const l0 = r0 + 1;
+      const r1 = r0 + 2;
+      const l1 = r0 + 3;
+      const at = row * 6;
+      indices[at] = r0;
+      indices[at + 1] = l0;
+      indices[at + 2] = r1;
+      indices[at + 3] = l0;
+      indices[at + 4] = l1;
+      indices[at + 5] = r1;
+    }
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    this.geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    this.mesh = new THREE.Mesh(this.geometry, makeFlatMaterial(0x3d352d, 0.95));
+    this.mesh.name = 'far-road';
+    this.mesh.layers.set(FAR_WORLD_LAYER);
+    this.mesh.matrixAutoUpdate = false;
+    this.mesh.castShadow = false;
+    this.mesh.receiveShadow = false;
+    this.mesh.visible = false;
+    scene.add(this.mesh);
   }
 
   /** Public for the mirror pass: only the mirror shows it. */
   setVisible(on: boolean): void {
-    this.visible = on;
-    if (on && this.dirty) this.rebuild();
-    else if (this.mesh !== null) this.mesh.visible = on;
+    this.mesh.visible = on;
   }
 
   /**
-   * The merged mesh is in the floating origin's frame. A rebase moves the chunk groups,
-   * so the merged geometry is rebuilt then; the movement along the road alone changes
-   * nothing (the surface set is what is merged, not a sampled ribbon).
+   * Follows the player along the road: `s` is the player's arclength, the origin the
+   * floating origin the vertices are written in. A no-op until the player has moved
+   * `REBUILD_M` or the origin rebased.
    */
-  update(_s: number, originX: number, originZ: number): void {
-    if (originX === this.lastOriginX && originZ === this.lastOriginZ) return;
+  update(s: number, originX: number, originZ: number): void {
+    if (
+      Number.isFinite(this.lastS) &&
+      Math.abs(s - this.lastS) < REBUILD_M &&
+      originX === this.lastOriginX &&
+      originZ === this.lastOriginZ
+    ) {
+      return;
+    }
+    this.lastS = s;
     this.lastOriginX = originX;
     this.lastOriginZ = originZ;
-    this.invalidate();
-  }
-
-  private readonly collect = (object: THREE.Object3D): void => {
-    if (object.userData.farRoadSurface !== true || !(object instanceof THREE.Mesh)) return;
-    if (this.surfaces.has(object)) return;
-    this.surfaces.add(object);
-    this.invalidate();
-  };
-
-  private invalidate(): void {
-    this.dirty = true;
-    if (this.visible) this.rebuild();
-  }
-
-  private rebuild(): void {
-    this.dirty = false;
-    if (this.mesh !== null) {
-      this.mesh.removeFromParent();
-      this.mesh.geometry.dispose();
-      this.mesh = null;
+    const positions = this.positions;
+    for (let row = 0; row < ROWS; row++) {
+      const si = Math.min(Math.max(s - BEHIND_M + row * STEP_M, 0), this.road.length);
+      const half = Math.max(0.1, this.road.halfWidthAt(si) + HALF_WIDTH_SLACK_M);
+      this.road.offsetPoint(si, half, _right);
+      this.road.offsetPoint(si, -half, _left);
+      const at = row * 6;
+      positions[at] = _right.x - originX;
+      positions[at + 1] = _right.y;
+      positions[at + 2] = _right.z - originZ;
+      positions[at + 3] = _left.x - originX;
+      positions[at + 4] = _left.y;
+      positions[at + 5] = _left.z - originZ;
     }
-    if (this.surfaces.size === 0) return;
-    const pieces: THREE.BufferGeometry[] = [];
-    for (const surface of this.surfaces) {
-      const material = surface.material;
-      if (Array.isArray(material)) continue;
-      this.material = material;
-      surface.updateWorldMatrix(true, false);
-      pieces.push(surface.geometry.clone().applyMatrix4(surface.matrixWorld));
-    }
-    if (pieces.length === 0 || this.material === null) return;
-    const merged = mergeGeometries(pieces, false);
-    for (const piece of pieces) piece.dispose();
-    if (merged === null) return;
-    const mesh = new THREE.Mesh(merged, this.material);
-    mesh.name = 'far-road';
-    mesh.layers.set(FAR_WORLD_LAYER);
-    // It spans the whole streamed road: one draw, no per-chunk culling.
-    mesh.frustumCulled = false;
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    mesh.visible = this.visible;
-    this.scene.add(mesh);
-    this.mesh = mesh;
+    this.geometry.getAttribute('position').needsUpdate = true;
+    this.geometry.computeBoundingSphere();
   }
 
   dispose(): void {
-    if (this.mesh !== null) {
-      this.mesh.removeFromParent();
-      this.mesh.geometry.dispose();
-      this.mesh = null;
-    }
-    this.surfaces.clear();
+    this.mesh.removeFromParent();
+    this.geometry.dispose();
   }
 }
