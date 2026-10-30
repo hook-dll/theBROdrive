@@ -260,18 +260,6 @@
 
 ### Changed
 
-- MAIN FAR WORLD (`render/farworld.ts`, `main.ts`, `world/roadmesh.ts`,
-  `world/terrainmesh.ts`). A second `FarWorld` merges the real road surface and terrain
-  of the chunks at least 200 m ahead or behind, per material, on `MAIN_FAR_LAYER` (5).
-  The near chunks stay whole; the far chunks' groups are hidden and their surfaces are
-  drawn by the merged meshes, one draw per material. The switch is at the world's 200 m
-  chunk boundary, which is what a 200 m chunk can honestly do without splitting it; the
-  merged copies keep the same materials, attributes and colours, and receive the sun
-  shadow map. The near world ahead of the main camera is therefore replaced at the
-  chunk edge, not faded. Props and every casting object stay in the near world for now;
-  shadows are unchanged. The mirror's all-surface far world is unchanged and on its own
-  layer, so the two never draw in each other's pass.
-
 - MIRROR WORLD: THE FAR GROUND AND ROAD (`render/farworld.ts`,
   `render/carmirrors.ts`, `world/roadmesh.ts`, `world/terrainmesh.ts`, `main.ts`). The
   ground and road are the world a mirror is read by, so this does not invent them. The
