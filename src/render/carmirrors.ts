@@ -41,7 +41,7 @@ import type { Renderer } from '../core/renderer';
 import { GRAPHICS_TIERS, type GraphicsQuality, type MirrorFrameRate } from '../game/settings';
 import type { Vehicle } from '../vehicle/vehicle';
 import { FarCarField } from './farcars';
-import { FAR_WORLD_LAYER, type FarWorld } from './farworld';
+import { FAR_WORLD_LAYER, type FarRoad } from './farroad';
 import { adoptReversedDepth } from './depthconvention';
 import { aimMirrorCamera, mirrorFaceGeometry } from './mirrorview';
 
@@ -128,9 +128,9 @@ export class CarMirrors {
   private readonly standIns: FarCarField;
   /** Roots hidden for the mirror renders under way, put back after them. */
   private readonly hidden: THREE.Object3D[] = [];
-  /** The far world the mirror shows instead of the near ground and road chunks. */
-  private farWorld: FarWorld | null = null;
-  /** Scene objects tagged `mirrorSkip` (the ground and road chunks), and their visible flags. */
+  /** The far road the mirror shows instead of the near road chunks. */
+  private farRoad: FarRoad | null = null;
+  /** Scene objects tagged `mirrorSkip` (the road chunks), and their own visible flags. */
   private readonly skipped: THREE.Object3D[] = [];
   private readonly skippedWas: boolean[] = [];
   private skippedHidden = 0;
@@ -199,9 +199,9 @@ export class CarMirrors {
     this.enabled = enabled;
   }
 
-  /** The far world the mirror draws while the near ground and road chunks are hidden. */
-  setFarWorld(farWorld: FarWorld | null): void {
-    this.farWorld = farWorld;
+  /** The far road the mirror draws while the near road chunks are hidden. */
+  setFarRoad(farRoad: FarRoad | null): void {
+    this.farRoad = farRoad;
   }
 
   /**
@@ -210,8 +210,8 @@ export class CarMirrors {
    */
   update(kit: KitRig | null, cabinView: boolean): void {
     this.show(this.enabled && this.scale > 0 && cabinView ? kit : null);
-    // The far world is the mirror's ground and road; the main camera never sees its layer.
-    this.farWorld?.setVisible(this.shown !== null);
+    // The far road is the mirror's only road; the main camera never sees its layer.
+    this.farRoad?.setVisible(this.shown !== null);
   }
 
   /**
@@ -229,7 +229,7 @@ export class CarMirrors {
     this.lastMs = now;
     this.owed = this.rate === null ? count : Math.min(this.owed + seconds * this.rate * count, 2 * count);
     let swapped = false;
-    // The near ground and road chunks are replaced by `FarWorld` for this pass only.
+    // The near road chunks are replaced by `FarRoad` for this pass only.
     this.hideSkipped();
     try {
       for (let drawn = 0; drawn < count && this.owed >= 1; drawn++, this.owed--) {
