@@ -409,13 +409,15 @@ export type FrameRateLimit = (typeof FRAME_RATE_LIMITS)[number] | null;
 /**
  * How many times a second each live mirror is redrawn, or `null` for every frame. Set
  * apart from the frame rate: each mirror is a second render of the scene, so its cost
- * is chosen on its own. Default every frame (owner, 2026-10-15): with every other car
- * drawn in a mirror as its far mesh and the kit cars a few draws each, a mirror render
- * is cheap. It shipped at 20, one mirror a frame at 60 FPS.
+ * is chosen on its own. Default 60 (owner, 2026-10-31): every frame meant three more
+ * scene renders per frame, 432 a second on a 144 Hz panel, and most of their cost is the
+ * CPU's (each render re-sends every program's uniforms for its camera); at 60 they are
+ * as smooth as a 60 Hz panel's frame. It was every frame from 2026-10-15, and shipped
+ * at 20, one mirror a frame at 60 FPS.
  */
 export const MIRROR_FRAME_RATES = [10, 15, 20, 30, 60] as const;
 export type MirrorFrameRate = (typeof MIRROR_FRAME_RATES)[number] | null;
-const DEFAULT_MIRROR_FRAME_RATE: MirrorFrameRate = null;
+const DEFAULT_MIRROR_FRAME_RATE: MirrorFrameRate = 60;
 
 /** An offered mirror rate, null (every frame) as stored, else the default. */
 export function mirrorFrameRateFrom(raw: unknown): MirrorFrameRate {

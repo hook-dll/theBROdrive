@@ -31,6 +31,74 @@ export const SPOT_LIGHT_LIVE_MIN = 1e-6;
 /** A `SPOT_REACH` mask with every slot in reach (an int uniform: all 32 bits set). */
 export const SPOT_REACH_ALL = -1;
 
+/** Three's uniforms for one spot slot (WebGLLights `state.spot[i]`), the fields read here. */
+interface SpotSlotUniforms {
+  position: THREE.Vector3;
+  direction: THREE.Vector3;
+  readonly color: THREE.Color;
+}
+
+/**
+ * The spot slots in three's per-material properties (`renderer.properties.get(material)`:
+ * `uniforms.spotLights.value`, shared by every lit material of a render state), or null
+ * for a material without lights.
+ */
+export function spotSlotsOf(materialProperties: unknown): SpotSlotUniforms[] | null {
+  if (typeof materialProperties !== 'object' || materialProperties === null || !('uniforms' in materialProperties)) return null;
+  const uniforms = materialProperties.uniforms;
+  if (typeof uniforms !== 'object' || uniforms === null || !('spotLights' in uniforms)) return null;
+  const spot = uniforms.spotLights;
+  if (typeof spot !== 'object' || spot === null || !('value' in spot) || !Array.isArray(spot.value)) return null;
+  return spot.value;
+}
+
+/**
+ * A spot slot's view-space position or direction that stays put while the slot is
+ * dormant. Three writes both from the camera in every pass (WebGLLights `setupView`:
+ * `position.applyMatrix4( viewMatrix )`, `direction.transformDirection( viewMatrix )`),
+ * and a program re-sends a uniform whose value moved. So every program re-sent every
+ * slot in every pass: the frame and each live mirror each have their own camera, and at
+ * noon, with every lamp dark, that was ~1400 `uniform3f` a frame from the mirrors
+ * alone. The spot loop never reads a dormant slot's position or direction
+ * (`installSpotLightDormantGuard`), so they are held at one value and nothing is sent.
+ */
+class DormantSpotVector extends THREE.Vector3 {
+  constructor(
+    private readonly slot: SpotSlotUniforms,
+    private readonly held: THREE.Vector3,
+  ) {
+    super();
+  }
+
+  private dormant(): boolean {
+    const c = this.slot.color;
+    return Math.max(c.r, c.g, c.b) < SPOT_LIGHT_LIVE_MIN;
+  }
+
+  override applyMatrix4(m: THREE.Matrix4): this {
+    return this.dormant() ? this.copy(this.held) : super.applyMatrix4(m);
+  }
+
+  override transformDirection(m: THREE.Matrix4): this {
+    return this.dormant() ? this.copy(this.held) : super.transformDirection(m);
+  }
+}
+
+const HELD_SPOT_POSITION = new THREE.Vector3(0, 0, -1);
+const HELD_SPOT_DIRECTION = new THREE.Vector3(0, 0, 1);
+
+/**
+ * Gives each of three's spot slots (`spotLights` uniform value: one object per light,
+ * kept for the light's life) the held vectors of `DormantSpotVector`. Idempotent.
+ */
+export function holdDormantSpots(slots: readonly SpotSlotUniforms[]): void {
+  for (const slot of slots) {
+    if (slot.position instanceof DormantSpotVector) continue;
+    slot.position = new DormantSpotVector(slot, HELD_SPOT_POSITION).copy(slot.position);
+    slot.direction = new DormantSpotVector(slot, HELD_SPOT_DIRECTION).copy(slot.direction);
+  }
+}
+
 /**
  * The spot loop skips every slot that cannot light this fragment's material, by a branch
  * on uniforms alone, the same for every fragment of the draw:

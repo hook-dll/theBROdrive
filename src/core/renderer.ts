@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { compileAsyncSafe } from '../render/compileasync';
 import { adoptReversedDepth, installReversedDepth } from '../render/depthconvention';
 import { SandColor } from '../render/desertdust';
-import '../render/lightshader';
+import '../render/batchindirect';
+import { holdDormantSpots, spotSlotsOf } from '../render/lightshader';
 import { setAirFogEdge } from '../render/airfog';
 import { primeMaxAnisotropy } from '../render/texturequality';
 import { retroActive, retroPixelRatio } from '../render/retro';
@@ -579,11 +580,23 @@ export class Renderer {
       }
     };
     // The scene pass's transparent list follows its opaque one in the same `render`:
-    // its first draw starts the `transparent` part.
+    // its first draw starts the `transparent` part. And the spot slots three keeps for a
+    // lit material get their dormant hold (render/lightshader.ts `holdDormantSpots`) the
+    // first time they are seen; they live as long as their lights, which are fixed slots
+    // (render/vehiclelights.ts), so only a new array or a new slot count is looked at.
     const drawBuffer = this.renderer.renderBufferDirect.bind(this.renderer);
+    const properties = this.renderer.properties;
+    let heldSpots: unknown = null;
+    let heldSpotCount = -1;
     this.renderer.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
       if (this.gpuPartOpen === 'opaque' && material.transparent) this.gpuPart('transparent');
       drawBuffer(camera, scene, geometry, material, object, group);
+      const spots = spotSlotsOf(properties.get(material));
+      if (spots !== null && (spots !== heldSpots || spots.length !== heldSpotCount)) {
+        holdDormantSpots(spots);
+        heldSpots = spots;
+        heldSpotCount = spots.length;
+      }
     };
     // No Three tone mapping: the display transform is the fullscreen pass's own
     // (render/displaytransform.ts), applied once to the whole frame. Every scene material

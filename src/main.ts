@@ -105,6 +105,18 @@ const MIN_SLOT_VIEW_SCORE = 0.02;
  * alone decides.
  */
 const NEAR_SLOT_RANGE_SQ = 80 * 80;
+/**
+ * Below this `Sky.artificialLightFactor` no lamp lays light: no beam takes a spot slot
+ * and no lamp pool is drawn (the hand torch and the courtesy lamp are not daylight-
+ * scaled and keep theirs). Every lamp's beam is scaled by that factor, which is 0.005 at
+ * clear noon: two hundred times dimmer than at night, under full sun, and nothing any
+ * pixel shows. But a live spot slot costs its lighting in every fragment it reaches and
+ * its uniforms in every program of every pass, and at noon among traffic 14 of 15 slots
+ * were live (tail and stop lamps, headlamps left on): the opaque pass grew with the cars
+ * about and the mirrors re-sent ~1400 `uniform3f` a frame. 0.02 is reached on the way
+ * into dusk or under a storm deck's gloom, where the lamps start to read.
+ */
+const LAMP_LIGHT_MIN_VISIBILITY = 0.02;
 /** The player's car as a lit target for that ranking: a sphere round the cabin, metres. */
 const PLAYER_CAR_LIT_RADIUS_M = 2.4;
 /** Cars past this from the eye (squared, m2) take no pooled lamp light on their bodies. */
@@ -2919,6 +2931,8 @@ async function boot(): Promise<void> {
       if (vehicle.hasLitLamps) litVehicles.push(vehicle);
     }
     traffic.collectLitVehicles(litVehicles, headlightVisibility);
+    const lampsLight = headlightVisibility >= LAMP_LIGHT_MIN_VISIBILITY;
+    if (!lampsLight) litVehicles.length = 0;
     if (litVehicles.length > 1) {
       litVehicles.sort(
         (a, b) =>
@@ -2970,7 +2984,7 @@ async function boot(): Promise<void> {
     // what gives way to it, and lays a pool instead.
     if (driving) {
       for (let g = 0; g < BEAM_GROUPS.length; g++) {
-        if (driving.hasLitLamps) {
+        if (lampsLight && driving.hasLitLamps) {
           const slots = driving.beamCount(BEAM_GROUPS[g], g === 0 && shadowedHeadlamps);
           beamPool.request(driving, g, slots, true);
         }
@@ -2986,7 +3000,7 @@ async function boot(): Promise<void> {
     beamPool.resolve(frameDt);
     vehicleLights.beginFrame();
     if (beamPool.share(TORCH_BEAM_OWNER, 0) > 0) vehicleLights.addTorchBeam(renderer.camera);
-    if (driving && driving.hasLitLamps && shadowedHeadlamps) {
+    if (driving && lampsLight && driving.hasLitLamps && shadowedHeadlamps) {
       driving.syncProjectedLights(vehicleLights, 'front', 1, true);
     }
     if (driving) {

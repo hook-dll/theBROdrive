@@ -272,6 +272,37 @@
 
 ### Changed
 
+- MIRRORS REDRAW 60 TIMES A SECOND BY DEFAULT (`game/settings.ts`
+  `DEFAULT_MIRROR_FRAME_RATE`). Every frame was three more scene renders a frame, 432 a
+  second on a 144 Hz panel, and on the owner's Windows PC the frame was held by the CPU's
+  draw submission (`limit: CPU main (draw)`, 10.4 ms at 91 fps, GPU 7.7 ms); capping
+  the mirrors at 60 lowered it there. A save that stored "every frame" (the old default)
+  keeps it until the player picks a rate.
+
+- NO LAMP LIGHT BY DAY (`main.ts` `LAMP_LIGHT_MIN_VISIBILITY`). Every lamp's beam is
+  scaled by `Sky.artificialLightFactor`, 0.005 at clear noon, so a traffic car's tail,
+  stop and left-on head lamps at noon were spot slots two hundred times dimmer than at
+  night under full sun: nothing on screen, yet live, so the spot loop lit every fragment
+  in their reach and every program re-sent them in every pass. In the cabin at km 3 with
+  traffic, 14 of 15 slots were live. Below 0.02 no beam takes a slot and no lamp pool is
+  drawn; the torch and the courtesy lamp are not daylight-scaled and keep theirs.
+  `uniform3f` a frame with every mirror drawn: 1742 → 230.
+
+- A DORMANT SPOT SLOT SENDS NOTHING (`render/lightshader.ts` `holdDormantSpots`,
+  `core/renderer.ts`). Three writes each spot slot's view-space position and direction
+  from the camera of every pass, so each program re-sent every slot, dark ones included,
+  for the frame and for each mirror. A dormant slot's vectors (colour under
+  `SPOT_LIGHT_LIVE_MIN`, which the spot loop skips) now hold one value whatever the
+  camera. At night the live beams are sent as before.
+
+- A MULTI-DRAW BATCH'S DRAW LIST IS UPLOADED ONLY WHEN IT CHANGED
+  (`render/batchindirect.ts`). Three's `BatchedMesh` re-uploads its indirect texture
+  (`texSubImage2D` and its parameters) every time any camera draws it; the list is now
+  compared with the one last left to upload and, when equal, the texture's version is
+  put back so nothing is sent. With every mirror drawn every frame the lists alternate
+  between cameras and little is saved (85 → 80 uploads a frame); with the mirrors at
+  60 a second, frames in which a pass sees what it saw last frame skip theirs.
+
 - THE SEATED KIT RAY IS NOT RUN EVERY TICK (`player/interaction.ts`
   `SEATED_KIT_AIM_INTERVAL_S`, `fixedUpdate`, `seatedKitPart`). In the cabin it walked
   the whole car — 151 pick proxies, about 15.9k triangles — on every fixed step, because
