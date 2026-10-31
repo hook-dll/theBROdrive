@@ -177,6 +177,7 @@ import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
 import { Hud, newMapView } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
+import { Tutorial, emptyTutorialFrame } from './ui/tutorial/tutorial';
 import {
   autosaveNow,
   IndexedDbSaves,
@@ -510,6 +511,9 @@ async function boot(): Promise<void> {
     },
   });
   hud.setDashboardScale(world.state.settings.dashboardSize);
+  // The controls tutorial (ui/tutorial): off unless picked in the dev menu, where its
+  // three presentations are being tried. Off, `tickTutorial` returns at once.
+  const tutorial = new Tutorial(uiRoot, (action) => input.keyCodes(action), (text) => hud.setToast(text));
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
   });
@@ -2363,6 +2367,7 @@ async function boot(): Promise<void> {
       activeS,
       camera.mode === 'cabin',
     );
+    tutorial.noteTick(interacted.sound, interacted.continuous === 'pour');
     // F with nothing aimed is the held item's (`InteractionResult.useHeld`): this tick's
     // aim, so a press that picked something up or opened a door never also toggles it.
     const useHeld = interacted.useHeld;
@@ -2710,6 +2715,77 @@ async function boot(): Promise<void> {
     rumbleFrame.leftTrigger = 0;
     rumbleFrame.rightTrigger = 0;
     pads.vibrate(rumbleFrame, performance.now());
+  };
+
+  /** The tutorial's frame, filled in place; and where the eye and view were last frame. */
+  const tutorialFrame = emptyTutorialFrame();
+  const tutorialLast = { x: 0, z: 0, yaw: 0, fresh: true };
+  const tickTutorial = (frameDt: number, driving: Vehicle | null): void => {
+    if (!tutorial.active) {
+      tutorialLast.fresh = true;
+      return;
+    }
+    const s = world.state;
+    const f = tutorialFrame;
+    f.dt = frameDt;
+    f.blocked = dying || story !== null || machineFocus.working || race.active;
+    f.seated = driving !== null;
+    f.driver = driving !== null && s.player.seat === 'driver';
+    f.carId = s.player.drivingCarId;
+    f.seat = s.player.seat;
+    f.cabinView = driving !== null && camera.mode === 'cabin';
+    f.engineRunning = driving?.engineRunning ?? false;
+    f.autoStopped = driving?.engineAutoStopped ?? false;
+    f.engineOff = driving !== null && driving.engineStopped && !driving.engineCranking
+      && !driving.engineAutoStopped && !driving.engineDestroyed;
+    f.speedKmh = driving ? Math.abs(driving.speedKmh) : 0;
+    f.steer = driving?.steeringFraction ?? 0;
+    f.brake = driving?.brakeCommand ?? 0;
+    f.throttle = driving?.throttleCommand ?? 0;
+    f.handbrake = driving?.handbrakeOn ?? false;
+    f.gear = driving?.gearLabel ?? 'N';
+    f.manualGearbox = s.settings.gearboxMode !== 'automatic' && driving?.physicallyAutomatic !== true;
+    f.notch = Math.max(0, input.pedalLever?.notch ?? 0);
+    f.mouseDriving = s.settings.mouseDriving;
+    f.autopilot = autopilot.engaged;
+    f.headlightsOn = driving !== null && driving.headlights !== 'off';
+    f.indicatorOn = driving !== null && (driving.indicator === 'left' || driving.indicator === 'right');
+    f.night = sky.lampFactor > 0.5;
+    f.aimingMirror = interaction.aimingKit?.control.id.startsWith('mirror') === true;
+    f.actionable = actionable;
+    f.bay = boot?.side ?? null;
+    f.holdingCan = inventory.held?.type === 'fluid_can';
+    const eye = camera.eyePosition;
+    let nearM = Infinity;
+    let flap = (driving?.kit?.get('flap') ?? 0) > 0.5;
+    if (driving === null) {
+      for (const vehicle of vehicles.values()) {
+        const kit = vehicle.kit;
+        if (kit === null) continue;
+        const p = vehicle.root.position;
+        const m = Math.hypot(p.x - eye.x, p.z - eye.z);
+        if (m < nearM) {
+          nearM = m;
+          flap = m < 6 && kit.get('flap') > 0.5;
+        }
+      }
+    }
+    f.nearKitCarM = nearM;
+    f.flapOpen = flap;
+    const yaw = camera.yaw;
+    if (tutorialLast.fresh || driving !== null) {
+      f.walkedM = 0;
+      f.turnedRad = 0;
+    } else {
+      // Capped: a floating-origin shift is not a walk.
+      f.walkedM = Math.min(2, Math.hypot(eye.x - tutorialLast.x, eye.z - tutorialLast.z));
+      f.turnedRad = Math.abs(Math.atan2(Math.sin(yaw - tutorialLast.yaw), Math.cos(yaw - tutorialLast.yaw)));
+    }
+    tutorialLast.x = eye.x;
+    tutorialLast.z = eye.z;
+    tutorialLast.yaw = yaw;
+    tutorialLast.fresh = false;
+    tutorial.frame(f);
   };
 
   const render = (alpha: number, frameDt: number): void => {
@@ -3315,6 +3391,7 @@ async function boot(): Promise<void> {
     hud.setRadio(audio.radioReadout);
 
     hud.setPrompt(prompt, actionable);
+    tickTutorial(frameDt, driving);
     hud.setRace(race.readout);
     trunkView.update(
       boot,
@@ -3733,6 +3810,13 @@ async function boot(): Promise<void> {
     jumpToLake: devTools?.jumpToLake,
     giveShells: devTools?.giveShells,
     jumpToKm: devTools?.jumpTo,
+    tutorial: import.meta.env.DEV
+      ? {
+          variant: () => tutorial.variant,
+          start: (variant) => tutorial.start(variant),
+          stop: () => tutorial.stop(),
+        }
+      : undefined,
   };
 
   /**
@@ -3780,6 +3864,28 @@ async function boot(): Promise<void> {
     })();
   };
 
+  /**
+   * The tutorial's manual (ui/tutorial/manual.ts): the game stands still under it the
+   * way it does under the pause, and the pointer comes back on the key or click that
+   * shuts it.
+   */
+  const openManual = (): void => {
+    if (paused || dying || story !== null || endingStarted || !booted) return;
+    const relock = input.pointerLocked;
+    if (document.pointerLockElement !== null) document.exitPointerLock();
+    paused = true;
+    loop.stop();
+    audio.setPaused(true);
+    pads.stopRumble();
+    void tutorial.openManual().then(() => {
+      input.resyncPad();
+      if (relock) void canvas.requestPointerLock().catch(() => undefined);
+      paused = false;
+      audio.setPaused(false);
+      loop.start();
+    });
+  };
+
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || paused) return;
     if (e.code === 'Escape') {
@@ -3793,6 +3899,9 @@ async function boot(): Promise<void> {
     } else if (e.key === '-') {
       e.preventDefault();
       toggleCinema();
+    } else if (e.code === 'KeyH' && tutorial.active) {
+      e.preventDefault();
+      if (tutorial.pressHelp()) openManual();
     }
   });
 

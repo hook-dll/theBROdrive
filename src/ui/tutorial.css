@@ -1,0 +1,850 @@
+/* ------------------------------------------------------------------ *
+ *  The controls tutorial (src/ui/tutorial/*): keycaps, the whisper,   *
+ *  the notebook card and the owner's manual. Warm paper and ink, the  *
+ *  HUD's own off-white; nothing glassy, nothing that blinks for long. *
+ * ------------------------------------------------------------------ */
+
+.tut-layer {
+  --tut-paper: #efe5cb;
+  --tut-paper-edge: #d9cba7;
+  --tut-ink: #34291c;
+  --tut-ink-soft: #6d5c44;
+  --tut-accent: #b9532f;
+  --tut-amber: #f0b35a;
+  --tut-tick: #5e8a3a;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+body.is-machine-focus .tut-layer {
+  display: none;
+}
+
+/* ---- Glyphs --------------------------------------------------------- */
+
+.tut-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.8em;
+  height: 1.8em;
+  padding: 0 0.42em;
+  margin: 0 0.16em;
+  vertical-align: 0.06em;
+  font-family: var(--menu-font-cond);
+  font-size: 0.8em;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #2b231a;
+  background: linear-gradient(#f6eedc, #ddd0b3);
+  border: 1px solid rgba(43, 33, 20, 0.6);
+  border-radius: 0.34em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0.17em 0 #9a8b6c,
+    0 0.26em 0.45em rgba(0, 0, 0, 0.32);
+  transform: translateY(-0.1em);
+  transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.15s ease;
+}
+
+.tut-key.is-wide {
+  min-width: 3.1em;
+}
+
+.tut-cluster {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.18em;
+  margin: 0 0.2em;
+  vertical-align: middle;
+  font-size: 0.82em;
+}
+
+.tut-cluster > span {
+  display: inline-flex;
+}
+
+.tut-cluster .tut-key {
+  margin: 0 0.08em;
+}
+
+.tut-mouse {
+  display: inline-block;
+  height: 1.9em;
+  margin: 0 0.18em;
+  vertical-align: middle;
+  overflow: visible;
+}
+
+.tut-mouse.is-mouse {
+  height: 1.9em;
+}
+
+.tut-mouse path,
+.tut-mouse rect {
+  fill: #ece2c9;
+  stroke: #2b231a;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.tut-mouse .tut-mouse-arrow {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.tut-mouse.is-lmb .tut-mouse-l,
+.tut-mouse.is-rmb .tut-mouse-r,
+.tut-mouse.is-mmb .tut-mouse-m,
+.tut-mouse.is-wheel .tut-mouse-m {
+  fill: var(--tut-amber);
+}
+
+@keyframes tut-breathe {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0.17em 0 #9a8b6c,
+      0 0 0 0 rgba(240, 179, 90, 0);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
+      0 0.17em 0 #9a8b6c,
+      0 0 0.7em 0.2em rgba(240, 179, 90, 0.55);
+  }
+}
+
+/* ---- A: the whisper --------------------------------------------------- */
+
+.tut-whisper {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24vh + env(safe-area-inset-bottom));
+  max-width: 88vw;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition: opacity 1s ease, transform 1.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.tut-whisper.is-shown {
+  opacity: calc(0.94 * var(--tut-dim, 1));
+  transform: translate(-50%, 0);
+}
+
+.tut-whisper-line {
+  padding: 9px 22px 10px;
+  font-family: var(--menu-font);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  text-align: center;
+  color: var(--hud-fg);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  background: radial-gradient(closest-side, rgba(16, 13, 9, 0.62), rgba(16, 13, 9, 0.38) 70%, rgba(16, 13, 9, 0));
+  border-radius: 999px;
+}
+
+.tut-whisper.is-ready .tut-key[data-action='interact'] {
+  animation: tut-breathe 1.8s ease-in-out infinite;
+}
+
+.tut-whisper.is-done .tut-key {
+  background: linear-gradient(#e6f1d3, #bdd59f);
+}
+
+.tut-whisper.is-done .tut-whisper-line::after {
+  content: '\2713';
+  margin-left: 0.5em;
+  color: #a9df86;
+  font-weight: 700;
+}
+
+/* ---- B: the notebook -------------------------------------------------- */
+
+.tut-note {
+  position: absolute;
+  top: calc(16px + env(safe-area-inset-top));
+  left: calc(16px + env(safe-area-inset-left));
+  width: 262px;
+  padding: 11px 16px 10px 34px;
+  color: var(--tut-ink);
+  font-family: var(--menu-font-cond);
+  background:
+    linear-gradient(90deg, transparent 23px, rgba(185, 83, 47, 0.45) 23px, rgba(185, 83, 47, 0.45) 24px, transparent 24px),
+    repeating-linear-gradient(transparent 0 25px, rgba(84, 110, 140, 0.16) 25px 26px),
+    var(--tut-paper);
+  background-position: 0 0, 0 9px, 0 0;
+  border-radius: 2px 2px 3px 3px;
+  box-shadow:
+    0 1px 0 var(--tut-paper-edge),
+    0 8px 22px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: rotate(-1.3deg) translateY(-8px);
+  transform-origin: 20% 0;
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.tut-note.is-shown {
+  opacity: 0.95;
+  transform: rotate(-1.3deg);
+}
+
+.tut-note.is-shown.is-faded {
+  opacity: 0.38;
+}
+
+.tut-note.is-shown.is-blocked {
+  opacity: 0;
+}
+
+.tut-note-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.tut-note-title {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tut-note-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tut-ink-soft);
+}
+
+.tut-note-list {
+  list-style: none;
+}
+
+.tut-note-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  font-family: var(--menu-font);
+  font-size: 14.5px;
+  color: var(--tut-ink);
+  transition: color 0.6s ease;
+}
+
+.tut-note-box {
+  position: absolute;
+  left: -27px;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid var(--tut-ink-soft);
+  border-radius: 2px;
+}
+
+.tut-note-item.is-next .tut-note-text {
+  font-weight: 600;
+}
+
+.tut-note-item.is-next .tut-note-box {
+  border-color: var(--tut-accent);
+}
+
+/* The ink stroke through a line done. */
+.tut-note-text {
+  position: relative;
+}
+
+.tut-note-text::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: 52%;
+  width: 0;
+  height: 2px;
+  background: var(--tut-accent);
+  border-radius: 2px;
+  transform: rotate(-1.5deg);
+  transition: width 0.7s cubic-bezier(0.6, 0.1, 0.3, 1);
+}
+
+.tut-note-item.is-done {
+  color: var(--tut-ink-soft);
+}
+
+.tut-note-item.is-done .tut-note-text::after {
+  width: calc(100% + 6px);
+}
+
+.tut-note-item.is-done .tut-note-box::after {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  top: -9px;
+  color: var(--tut-tick);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tut-note.is-turning .tut-note-text::after {
+  transition: none;
+}
+
+.tut-note-how {
+  display: none;
+  margin: 7px 0 2px -18px;
+  padding: 7px 9px 8px;
+  font-family: var(--menu-font);
+  font-size: 13px;
+  line-height: 1.75;
+  color: #f1e6cc;
+  background: rgba(40, 32, 22, 0.86);
+  border-radius: 4px;
+  animation: tut-rise 0.5s ease;
+}
+
+.tut-note.has-how .tut-note-how {
+  display: block;
+}
+
+@keyframes tut-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tut-note.is-ready .tut-note-how .tut-key[data-action='interact'] {
+  animation: tut-breathe 1.8s ease-in-out infinite;
+}
+
+.tut-note-foot {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--tut-ink-soft);
+  text-align: right;
+}
+
+.tut-note.is-folded .tut-note-list,
+.tut-note.is-folded .tut-note-how,
+.tut-note.is-folded .tut-note-foot {
+  display: none;
+}
+
+.tut-note.is-folded {
+  width: auto;
+  min-width: 170px;
+  padding-bottom: 6px;
+}
+
+/* ---- C: the manual's bookmark ----------------------------------------- */
+
+.tut-bookmark {
+  position: absolute;
+  top: calc(16px + env(safe-area-inset-top));
+  left: calc(16px + env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 12px 6px 8px;
+  font-family: var(--menu-font-cond);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--hud-fg);
+  background: var(--hud-panel-soft);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.8s ease, border-color 0.8s ease, background 0.8s ease;
+}
+
+.tut-bookmark.is-shown {
+  opacity: 0.55;
+}
+
+.tut-bookmark.is-shown.has-news {
+  opacity: 0.95;
+  border-color: rgba(240, 179, 90, 0.55);
+  animation: tut-news 2.4s ease-in-out 2;
+}
+
+.tut-bookmark.is-shown.is-faded {
+  opacity: 0.3;
+}
+
+.tut-bookmark.is-shown.is-blocked {
+  opacity: 0;
+}
+
+@keyframes tut-news {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 179, 90, 0); }
+  50% { box-shadow: 0 0 14px 2px rgba(240, 179, 90, 0.45); }
+}
+
+.tut-bookmark-book {
+  position: relative;
+  width: 18px;
+  height: 22px;
+  background: var(--tut-paper);
+  border-left: 4px solid var(--tut-accent);
+  border-radius: 1px 3px 3px 1px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+.tut-bookmark-book::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: -2px;
+  width: 4px;
+  height: 9px;
+  background: var(--tut-amber);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%);
+}
+
+/* ---- C: the manual ----------------------------------------------------- */
+
+.tut-manual {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 9, 6, 0.6);
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.tut-manual.is-shown {
+  opacity: 1;
+}
+
+.tut-book {
+  display: grid;
+  grid-template-columns: 172px 1fr;
+  grid-template-rows: 1fr auto;
+  width: min(900px, 94vw);
+  height: min(620px, 90vh);
+  color: var(--tut-ink);
+  background: var(--tut-paper);
+  border-radius: 4px 10px 10px 4px;
+  box-shadow:
+    inset 6px 0 14px -8px rgba(60, 40, 20, 0.45),
+    0 2px 0 var(--tut-paper-edge),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+  transform: translateY(14px) rotate(-0.4deg);
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.tut-manual.is-shown .tut-book {
+  transform: rotate(-0.4deg);
+}
+
+.tut-book-tabs {
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 22px 0 22px 10px;
+  background: #e2d5b4;
+  border-right: 1px solid rgba(52, 41, 28, 0.25);
+  border-radius: 4px 0 0 4px;
+}
+
+.tut-book-tab {
+  padding: 8px 10px 8px 12px;
+  font-family: var(--menu-font-cond);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  color: var(--tut-ink-soft);
+  background: transparent;
+  border: 0;
+  border-radius: 4px 0 0 4px;
+  cursor: pointer;
+}
+
+.tut-book-tab:hover {
+  color: var(--tut-ink);
+}
+
+.tut-book-tab.is-current {
+  color: var(--tut-ink);
+  background: var(--tut-paper);
+  box-shadow: -2px 1px 3px rgba(60, 40, 20, 0.15);
+}
+
+.tut-book-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 24px 34px 10px;
+  overflow: auto;
+}
+
+.tut-book-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--tut-ink);
+}
+
+.tut-book-head h2 {
+  font-family: var(--menu-font-cond);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.tut-book-folio {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-family: var(--menu-font-cond);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--tut-paper);
+  background: var(--tut-accent);
+  border-radius: 50%;
+}
+
+.tut-book-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  padding: 18px 0 12px;
+}
+
+.tut-book-rows {
+  list-style: none;
+  font-family: var(--menu-font);
+  font-size: 15.5px;
+  line-height: 1.9;
+}
+
+.tut-book-rows li {
+  padding: 3px 0 3px 18px;
+  position: relative;
+}
+
+.tut-book-rows li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 1.05em;
+  width: 6px;
+  height: 6px;
+  background: var(--tut-accent);
+  border-radius: 50%;
+}
+
+.tut-book-tried {
+  margin-top: auto;
+  padding-top: 12px;
+  font-family: var(--menu-font-cond);
+  font-size: 13px;
+  color: var(--tut-ink-soft);
+}
+
+.tut-book-mark {
+  margin: 0 0 0 10px;
+  white-space: nowrap;
+}
+
+.tut-book-mark::before {
+  content: '\25CB\00a0';
+}
+
+.tut-book-mark.is-done {
+  color: var(--tut-tick);
+}
+
+.tut-book-mark.is-done::before {
+  content: '\2713\00a0';
+}
+
+.tut-book-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 34px 16px;
+  font-family: var(--menu-font-cond);
+  font-size: 14px;
+  color: var(--tut-ink-soft);
+}
+
+.tut-book-help {
+  flex: 1;
+  text-align: center;
+}
+
+.tut-book-turn,
+.tut-book-close {
+  font-family: var(--menu-font-cond);
+  font-weight: 700;
+  color: var(--tut-ink);
+  background: transparent;
+  border: 1.5px solid rgba(52, 41, 28, 0.45);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tut-book-turn {
+  width: 34px;
+  height: 30px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.tut-book-turn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.tut-book-close {
+  padding: 5px 14px;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tut-book-turn:hover:not(:disabled),
+.tut-book-close:hover {
+  background: rgba(52, 41, 28, 0.08);
+}
+
+/* The manual's keyboard: the keys of the page lit, the rest a faint outline. */
+.tut-board {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 17px;
+}
+
+.tut-board-row {
+  display: flex;
+  gap: 2px;
+}
+
+.tut-board-row.is-row1 {
+  margin-left: 0.7em;
+}
+
+.tut-board-row.is-row2 {
+  margin-left: -0.6em;
+}
+
+.tut-board-row.is-row3 {
+  justify-content: center;
+}
+
+.tut-board .tut-key {
+  min-width: 2.1em;
+  height: 2.1em;
+  color: rgba(52, 41, 28, 0.38);
+  background: transparent;
+  border-color: rgba(52, 41, 28, 0.25);
+  box-shadow: none;
+  transform: none;
+}
+
+.tut-board .tut-key.is-lit {
+  color: #2b231a;
+  background: linear-gradient(#ffd99a, var(--tut-amber));
+  border-color: rgba(43, 33, 20, 0.7);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0.17em 0 #a8743a;
+  transform: translateY(-0.1em);
+}
+
+.tut-board .tut-key.is-space {
+  min-width: 13em;
+}
+
+.tut-book-rows .tut-key,
+.tut-book-help .tut-key,
+.tut-bookmark .tut-key {
+  font-size: 0.86em;
+}
+
+/* The car from above. */
+.tut-car {
+  width: 230px;
+  height: 230px;
+  overflow: visible;
+}
+
+.tut-car-body {
+  fill: #e6d9b8;
+  stroke: var(--tut-ink);
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+
+.tut-car-glass {
+  fill: rgba(90, 120, 140, 0.25);
+  stroke: var(--tut-ink);
+  stroke-width: 1.4;
+}
+
+.tut-car-part {
+  fill: none;
+  stroke: var(--tut-ink);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+}
+
+.tut-car-part.is-lit {
+  fill: rgba(240, 179, 90, 0.55);
+  stroke: var(--tut-accent);
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+
+.tut-car-callouts path {
+  fill: none;
+  stroke: var(--tut-ink-soft);
+  stroke-width: 1;
+}
+
+.tut-car-callouts text {
+  font-family: var(--menu-font-cond);
+  font-size: 15px;
+  font-weight: 600;
+  fill: var(--tut-ink);
+}
+
+.tut-car-callouts text.is-small {
+  font-size: 14px;
+}
+
+/* The pedal lever. */
+.tut-lever {
+  width: 260px;
+  height: 200px;
+}
+
+.tut-lever-slot {
+  fill: rgba(52, 41, 28, 0.12);
+  stroke: var(--tut-ink);
+  stroke-width: 1.5;
+}
+
+.tut-lever-tick {
+  stroke: var(--tut-ink);
+  stroke-width: 2;
+}
+
+.tut-lever-tick.is-brake {
+  stroke: var(--tut-accent);
+}
+
+.tut-lever-label {
+  font-family: var(--menu-font-cond);
+  font-size: 17px;
+  font-weight: 700;
+  fill: var(--tut-ink);
+}
+
+.tut-lever-label.is-neutral {
+  fill: var(--tut-ink-soft);
+}
+
+.tut-lever-label.is-brake {
+  fill: var(--tut-accent);
+}
+
+.tut-lever-how {
+  font-family: var(--menu-font-cond);
+  font-size: 14px;
+  font-style: italic;
+  fill: var(--tut-ink-soft);
+}
+
+.tut-lever-knob {
+  fill: var(--tut-amber);
+  stroke: var(--tut-ink);
+  stroke-width: 1.5;
+}
+
+/* The mouse page and the fluids page. */
+.tut-mouse-art {
+  display: flex;
+  gap: 34px;
+}
+
+.tut-mouse-art figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--menu-font-cond);
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tut-mouse-art .tut-mouse,
+.tut-fluids-art .tut-mouse {
+  height: 74px;
+  color: var(--tut-ink);
+}
+
+.tut-fluids-art {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, auto);
+  align-items: center;
+  column-gap: 40px;
+  row-gap: 10px;
+  font-family: var(--menu-font-cond);
+  font-size: 18px;
+}
+
+.tut-fluids-art .tut-mouse {
+  grid-row: 1 / 4;
+}
+
+.tut-fluid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tut-fluid-can {
+  width: 22px;
+  height: 28px;
+  border: 2px solid var(--tut-ink);
+  border-radius: 3px 8px 3px 3px;
+  background: var(--can, #888);
+}
+
+.tut-fluid.is-oil {
+  --can: #c8a23c;
+}
+
+.tut-fluid.is-water {
+  --can: #5f93b8;
+}
+
+.tut-fluid.is-petrol {
+  --can: #b9532f;
+}

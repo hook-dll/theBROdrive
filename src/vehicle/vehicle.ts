@@ -1930,6 +1930,11 @@ export class Vehicle implements Rebasable {
     return this.drivetrain.gearLabel;
   }
 
+  /** The fitted gearbox shifts itself whatever the player's gearbox setting. */
+  get physicallyAutomatic(): boolean {
+    return this.drivetrain.isPhysicallyAutomatic;
+  }
+
   /** A forward pull cannot come from the gears right now (N, R or mid-shift); see `Drivetrain`. */
   get forwardDriveInterrupted(): boolean {
     return this.drivetrain.isForwardDriveInterrupted;

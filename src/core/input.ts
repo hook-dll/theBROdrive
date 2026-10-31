@@ -702,6 +702,11 @@ export class InputReader {
     return code === undefined ? '' : formatKey(code);
   }
 
+  /** Every key bound to `action`, the main one first (KeyboardEvent codes). */
+  keyCodes(action: string): readonly string[] {
+    return this.keys[action] ?? [];
+  }
+
   /**
    * Produces the frame for this tick. Mutates and returns an internal object, so
    * callers must not retain it across ticks.

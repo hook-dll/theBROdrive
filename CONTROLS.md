@@ -7,6 +7,10 @@ are `BINDABLE_ACTIONS` in `src/core/input.ts` and the authoritative list is that
 array plus `Settings.keyBindings` in `src/game/settings.ts`. Fixed, non-remappable
 controls: `Escape`/`` ` `` pause, `+` fullscreen, `-` the cinema viewport.
 
+`H` answers only while a controls tutorial is on (dev menu, `src/ui/tutorial`): it
+hushes the whispers, folds the notebook, or opens the manual (the game stands still
+until H, Escape or Close shuts it).
+
 ## On foot: crouching with C
 
 `C` (the pad's Y, the touch overlay's C on foot) toggles a crouch (`Player`,
