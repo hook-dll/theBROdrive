@@ -4,27 +4,26 @@
 
 ### Added
 
-- A CONTROLS TUTORIAL, THREE WAYS, ON TRIAL FROM THE DEV MENU (`ui/tutorial/*`,
-  `ui/tutorial.css`; pause → Developer build → **Tutorial A / B / C**, **Tutorial: off**).
-  One set of 22 lessons (`ui/tutorial/lessons.ts`: walking, a door, getting in, the
-  bonnet, the boot, the fuel flap, pouring a fluid, the engine, the handbrake, moving
-  off, steering, braking, the view, a mirror, another seat, getting out, the pedal
-  lever's cruise notches, gears on a manual box, blinkers, headlights at night, mouse
-  driving, the autopilot). A lesson is done when the player does the thing, hint or no
-  hint; its context says where a hint would help, and its dwell how long to leave him to
-  find it alone. Keys are drawn as keycaps of the player's own bindings, the mouse as a
-  mouse with the button lit.
-  - **A, whispers**: one quiet line low on the screen, after the dwell; the F key glows
-    when the crosshair is on the thing; a tick, then gone. Unanswered, a lesson waits
-    longer each time and stops after three. H hushes them.
-  - **B, notebook**: a paper card top left with what to try on foot, at the wheel or on
-    the road, crossed out in ink as it is done; the line whose context holds carries its
-    keys. Fades at speed; H folds it.
-  - **C, manual**: an owner's handbook of eight drawn pages (keyboard, the car from above,
-    fluids, the pedal lever, the mouse) opened with H, the game standing still under it.
-    A corner bookmark glows once when a page would help and has not been read.
-  Progress lives in localStorage (`brodrive-tutorial-v1`), not the save. Off by
-  default; off, it costs one early return a frame. `InputReader.keyCodes`,
+- A CONTROLS TUTORIAL OF QUIET WHISPERS, ON TRIAL FROM THE DEV MENU (`ui/tutorial/*`,
+  `ui/tutorial.css`; pause → Developer build → **Tutorial: on / restart / off**). Keys are
+  drawn as keycaps the size of a real keyboard's, from the player's own bindings, the
+  mouse as a mouse. Everything fades in and out; nothing ticks. Every lesson counts only
+  when the player really does the thing, and is never shown again.
+  - The first steps: a player who has just appeared on foot sees WASD, the arrow keys
+    and the mouse, no words, until he has walked and looked round.
+  - The aim: the F key beside the crosshair while it rests on a door, the bonnet, the boot
+    or tailgate, the fuel flap, a seat, a mirror (F and the mouse) or a cabin fitting
+    (light switch, stalks, hazards, radio, horn, cranks, visors) of a kind not used yet
+    (`Interaction.aimId`/`aimPressed`). Gone the moment the aim leaves; done on F pressed
+    at it, the mirror on turning it.
+  - One line where it helps, after time to find it alone: pouring, the engine, the
+    handbrake, moving off, braking, the view, getting out, the pedal lever's cruise
+    notches, gears on a manual box, mouse or keyboard driving (`M`), blinkers,
+    headlights at night, the autopilot. Switching to mouse driving says at once "Hold
+    Shift to look around". Unanswered, a line waits longer each time and stops after
+    three. H hushes the lines.
+  Progress lives in localStorage (`brodrive-tutorial-v2`), not the save. Off by default;
+  off, it costs one early return a frame. `InputReader.keyCodes`/`mouseLookHeld`,
   `Vehicle.physicallyAutomatic` added for it.
 
 - THE GPU'S FRAME BY PASS IN THE PERFORMANCE OVERLAY (`core/renderer.ts` `GPU_PARTS`,

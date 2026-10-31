@@ -706,6 +706,11 @@ export class InputReader {
   keyCodes(action: string): readonly string[] {
     return this.keys[action] ?? [];
   }
+  /** The look hold (middle button or the look key) was down at the last sample. */
+  get mouseLookHeld(): boolean {
+    return this.mouseLookHeldValue;
+  }
+  private mouseLookHeldValue = false;
 
   /**
    * Produces the frame for this tick. Mutates and returns an internal object, so
@@ -775,6 +780,7 @@ export class InputReader {
     // While mouse driving, the middle button or the look key (Shift) gives the mouse to
     // the view; the wheel holds the angle it had.
     const mouseLook = this.held.has('Mouse1') || this.anyHeld(this.keys.mouseLook);
+    this.mouseLookHeldValue = mouseLook;
     const steerWithMouse = mouseDriving && !mouseLook;
     const mouseSteerPx = steerWithMouse ? this.rawDX : 0;
     const rightHeld = this.anyHeld(this.keys.right);

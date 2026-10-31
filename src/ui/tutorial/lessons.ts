@@ -1,16 +1,21 @@
 /**
  * THE CONTROLS TUTORIAL'S LESSONS: what there is to learn, when it is worth saying, and
- * how the game shows it has been learnt. Three presenters (whisper.ts, notebook.ts,
- * manual.ts) draw the same lessons; this file only reads the game.
+ * how the game shows it has been learnt. whisper.ts draws them; this file only reads.
  *
- * A lesson is never "taught" by a click-through: it is done when the player does the
- * thing (a door opens, the car moves off, a mirror turns), whether a hint was on screen
- * or not. Its context (`when`) says where a hint would be welcome, so nothing is shown
- * to a player who is busy with something else, and nothing is shown twice once done.
+ * Three kinds, each counted done only when the player really does the thing, hint or no
+ * hint, and never shown again after:
+ *
+ *  - THE FIRST STEPS (`walk`): the movement keys and the mouse, no words, shown to a
+ *    player who has just appeared on foot, gone once he has walked and looked round.
+ *  - AIM HINTS (`AIM_KINDS`): the F key beside the crosshair while it rests on a door,
+ *    a lid, the fuel flap, a seat, a mirror or a cabin fitting nobody has used yet.
+ *    Gone the moment the aim leaves it; done on F pressed at it (the mirror: on turning it).
+ *  - WHISPERS (`LESSONS`): one short line where it helps, after the player has had time
+ *    to find it alone (`Lesson.dwell`).
  *
  * main.ts fills one `TutorialFrame` per rendered frame and reports the fixed step's
- * one-shot events (`noteTick`); the tracker turns them into edges and timers. It reads
- * the game and writes nothing back but its own progress (localStorage).
+ * events (`noteTick`); the tracker turns them into edges and timers. It reads the game
+ * and writes nothing back but its own progress (localStorage).
  */
 import type { FoleyEvent } from '../../audio/foley';
 
@@ -24,7 +29,6 @@ export interface TutorialFrame {
   /** ...in its driver's seat. */
   driver: boolean;
   carId: string | null;
-  seat: string;
   /** The drawing camera is the cabin view (not the chase). */
   cabinView: boolean;
   engineRunning: boolean;
@@ -33,8 +37,6 @@ export interface TutorialFrame {
   /** Stopped by the key or stalled, the starter not turning: `I` would start it. */
   engineOff: boolean;
   speedKmh: number;
-  /** The steering wheel, −1..1 of lock. */
-  steer: number;
   brake: number;
   throttle: number;
   handbrake: boolean;
@@ -43,18 +45,18 @@ export interface TutorialFrame {
   /** The pedal lever's throttle notch (core/pedallever.ts), 0 when none or not on keys. */
   notch: number;
   mouseDriving: boolean;
+  /** The mouse-driving look hold (Shift or the middle button) is down. */
+  mouseLookHeld: boolean;
   autopilot: boolean;
   headlightsOn: boolean;
   indicatorOn: boolean;
   night: boolean;
   /** F is held on a mirror and the mouse turns it. */
   aimingMirror: boolean;
-  /** The crosshair lit on something F works (`InteractionResult.actionable`). */
-  actionable: boolean;
+  /** What F would work in the aim now (`aimKindOf`), or null. */
+  aim: AimKind | null;
   /** An opened compartment's grid under the eye. */
   bay: 'bonnet' | 'trunk' | null;
-  /** On foot, metres to the nearest kit car's centre (Infinity: none near). */
-  nearKitCarM: number;
   /** The nearest kit car's (or the driven car's) fuel flap is open. */
   flapOpen: boolean;
   holdingCan: boolean;
@@ -66,24 +68,41 @@ export interface TutorialFrame {
 
 export function emptyTutorialFrame(): TutorialFrame {
   return {
-    dt: 0, blocked: true, seated: false, driver: false, carId: null, seat: 'driver', cabinView: false,
-    engineRunning: false, autoStopped: false, engineOff: false, speedKmh: 0, steer: 0, brake: 0, throttle: 0, handbrake: false,
-    gear: 'N', manualGearbox: false, notch: 0, mouseDriving: false, autopilot: false, headlightsOn: false,
-    indicatorOn: false, night: false, aimingMirror: false, actionable: false, bay: null,
-    nearKitCarM: Infinity, flapOpen: false, holdingCan: false, walkedM: 0, turnedRad: 0,
+    dt: 0, blocked: true, seated: false, driver: false, carId: null, cabinView: false,
+    engineRunning: false, autoStopped: false, engineOff: false, speedKmh: 0, brake: 0, throttle: 0,
+    handbrake: false, gear: 'N', manualGearbox: false, notch: 0, mouseDriving: false, mouseLookHeld: false,
+    autopilot: false, headlightsOn: false, indicatorOn: false, night: false, aimingMirror: false, aim: null,
+    bay: null, flapOpen: false, holdingCan: false, walkedM: 0, turnedRad: 0,
   };
+}
+
+/** The unnamed kit things F works, grouped as the player learns them. */
+export type AimKind = 'door' | 'bonnet' | 'boot' | 'flap' | 'seat' | 'mirror' | 'fitting';
+
+/** The lesson id of an aim hint. */
+export const aimLesson = (kind: AimKind): string => `aim:${kind}`;
+
+/**
+ * An aimed kit control (`Interaction.aimId`) as a hint: a side door or sliding door, the
+ * bonnet, the boot lid or tailgate (and a truck's boards and tent flap), the fuel flap, a
+ * seat, any mirror, and everything else in the cabin F works (the light switch, stalks,
+ * hazards, the radio knob, the horn, window cranks, visors, the courtesy lamp).
+ */
+export function aimKindOf(id: string | null): AimKind | null {
+  if (id === null) return null;
+  if (id === 'seat') return 'seat';
+  if (id.startsWith('door_')) return 'door';
+  if (id === 'bonnet') return 'bonnet';
+  if (id === 'boot' || id.startsWith('tailgate') || id.startsWith('board_') || id === 'tent_flap') return 'boot';
+  if (id === 'flap') return 'flap';
+  if (id.startsWith('mirror')) return 'mirror';
+  return 'fitting';
 }
 
 /** Edges (true for the one frame they happen) and running totals, kept by `LessonTracker`. */
 export interface Signals {
-  doorOpened: boolean;
-  bonnetOpened: boolean;
-  bootOpened: boolean;
-  flapOpened: boolean;
   poured: boolean;
-  gotIn: boolean;
   gotOut: boolean;
-  seatChanged: boolean;
   engineStarted: boolean;
   handbrakeReleased: boolean;
   cameraSwitched: boolean;
@@ -91,12 +110,9 @@ export interface Signals {
   indicatorOn: boolean;
   lightsChanged: boolean;
   autopilotOn: boolean;
+  mouseDrivingOn: boolean;
   walkedM: number;
   turnedRad: number;
-  /** Seconds since a door was last opened (Infinity: never). */
-  sinceDoorS: number;
-  /** Seconds steered (|wheel| > 0.2) while moving. */
-  steerS: number;
   /** Seconds braking (> 0.3) above 10 km/h. */
   brakeS: number;
   /** Seconds on a throttle notch above 15 km/h. */
@@ -104,231 +120,142 @@ export interface Signals {
   /** Seconds holding the throttle key past 30 km/h without a notch. */
   heldThrottleS: number;
   mirrorS: number;
-  /** Seconds driven with the mouse above 10 km/h. */
-  mouseS: number;
+  /** Seconds the look hold has been down while mouse driving. */
+  mouseLookS: number;
   /** Seconds driven by hand above 5 km/h, this whole session. */
   drivenS: number;
   /** Seconds sat in a car standing still (under 3 km/h), since it last moved. */
   standingS: number;
 }
 
-export type Chapter = 'foot' | 'cabin' | 'road';
-
-export const CHAPTER_TITLE: Readonly<Record<Chapter, string>> = {
-  foot: 'On foot',
-  cabin: 'At the wheel',
-  road: 'On the road',
-};
-
-/** The manual's pages (manual.ts draws them). */
-export type PageId = 'foot' | 'car' | 'fluids' | 'wheel' | 'cabin' | 'lever' | 'mouse' | 'road';
+/** The first steps: on foot, no words; done once he has walked and looked round. */
+export const WALK = 'walk';
+const walkDone = (s: Signals): boolean => s.walkedM > 6 && s.turnedRad > 1;
 
 export interface Lesson {
   readonly id: string;
-  readonly chapter: Chapter;
-  /** The notebook's line: what to try, in a few words. */
-  readonly title: string;
   /**
-   * The hint, with key glyphs: `{action}` is the key bound to a `BINDABLE_ACTIONS` id,
-   * `{wasd}` the four movement keys, `{lmb}` `{rmb}` `{mmb}` `{mouse}` `{wheel}` the mouse.
+   * The line, with key glyphs: `{action}` is the key bound to a `BINDABLE_ACTIONS` id,
+   * `{lmb}` `{rmb}` `{mmb}` `{mouse}` the mouse.
    */
   readonly hint: string;
-  /** The manual page that explains it. */
-  readonly page: PageId;
+  /** Said at once, over whatever line is showing: the player has just switched into it. */
+  readonly urgent?: boolean;
   /** Whether it applies to this player at all (a manual gearbox's gears). */
   readonly applies?: (f: TutorialFrame) => boolean;
-  /** Where a hint for it would be welcome. */
+  /** Where a line for it would be welcome. */
   readonly when: (f: TutorialFrame, s: Signals) => boolean;
-  /** Seconds `when` must hold before a hint is shown: room to find it first. */
+  /** Seconds `when` must hold before the line is shown: room to find it first. */
   readonly dwell: number;
   readonly done: (f: TutorialFrame, s: Signals) => boolean;
-  /** The F key is the answer and the crosshair is lit: the hint's key can light up too. */
-  readonly interact?: boolean;
 }
 
-const NEAR_CAR_M = 6;
-const nearCar = (f: TutorialFrame): boolean => !f.seated && f.nearKitCarM < NEAR_CAR_M;
 const driving = (f: TutorialFrame): boolean => f.driver && !f.autopilot;
+const ready = (f: TutorialFrame): boolean => f.engineRunning || f.autoStopped;
 
 export const LESSONS: readonly Lesson[] = [
-  // ---- On foot ------------------------------------------------------------------
   {
-    id: 'walk', chapter: 'foot', page: 'foot', dwell: 2.5,
-    title: 'Walk and look around',
-    hint: '{wasd} walk · {mouse} look around · hold {sprint} to hurry',
-    when: (f) => !f.seated,
-    done: (_f, s) => s.walkedM > 8 && s.turnedRad > 1.2,
-  },
-  {
-    id: 'door', chapter: 'foot', page: 'car', dwell: 3, interact: true,
-    title: 'Open a car door',
-    hint: 'Look at a door and press {interact}',
-    when: nearCar,
-    done: (_f, s) => s.doorOpened,
-  },
-  {
-    id: 'getIn', chapter: 'foot', page: 'car', dwell: 2.5, interact: true,
-    title: 'Get in',
-    hint: 'Look through the open door at a seat · {interact} to sit down',
-    when: (f, s) => nearCar(f) && s.sinceDoorS < 90,
-    done: (_f, s) => s.gotIn,
-  },
-  {
-    id: 'bonnet', chapter: 'foot', page: 'car', dwell: 5, interact: true,
-    title: 'Look under the bonnet',
-    hint: 'Aim at the bonnet · {interact} lifts it, {interact} again lets it down',
-    when: nearCar,
-    done: (_f, s) => s.bonnetOpened,
-  },
-  {
-    id: 'boot', chapter: 'foot', page: 'car', dwell: 6, interact: true,
-    title: 'Open the boot',
-    hint: 'The boot lid or tailgate opens on {interact} too',
-    when: nearCar,
-    done: (_f, s) => s.bootOpened,
-  },
-  {
-    id: 'flap', chapter: 'foot', page: 'car', dwell: 8, interact: true,
-    title: 'Find the fuel flap',
-    hint: 'A small flap on the body is the tank · {interact} opens it',
-    when: nearCar,
-    done: (_f, s) => s.flapOpened,
-  },
-  {
-    id: 'fluids', chapter: 'foot', page: 'fluids', dwell: 2,
-    title: 'Top up oil, water or petrol',
-    hint: 'Can in hand, aim at the engine, the radiator or the open flap · hold {lmb} to pour',
-    when: (f) => !f.seated && (f.holdingCan || f.bay === 'bonnet' || f.flapOpen),
+    id: 'fluids', dwell: 2,
+    hint: 'Hold {lmb} to pour',
+    when: (f) => !f.seated && f.holdingCan && (f.bay === 'bonnet' || f.flapOpen),
     done: (_f, s) => s.poured,
   },
-  // ---- At the wheel -------------------------------------------------------------
   {
-    // The display already reads ENGINE OFF - I START: the whisper waits a little longer.
-    id: 'engine', chapter: 'cabin', page: 'wheel', dwell: 4,
-    title: 'Start the engine',
-    hint: '{engine} turns the key',
+    // The display already reads ENGINE OFF - I START: the line waits a little longer.
+    id: 'engine', dwell: 4,
+    hint: '{engine} start the engine',
     when: (f) => f.driver && f.engineOff,
     done: (_f, s) => s.engineStarted,
   },
   {
-    id: 'handbrake', chapter: 'cabin', page: 'wheel', dwell: 2.5,
-    title: 'Let the handbrake off',
-    hint: 'The red P is the handbrake · {handbrake} lets it off',
-    when: (f) => driving(f) && (f.engineRunning || f.autoStopped) && f.handbrake,
+    id: 'handbrake', dwell: 2.5,
+    hint: '{handbrake} handbrake off',
+    when: (f) => driving(f) && ready(f) && f.handbrake,
     done: (_f, s) => s.handbrakeReleased,
   },
   {
-    id: 'go', chapter: 'cabin', page: 'wheel', dwell: 2,
-    title: 'Move off',
-    hint: 'Hold {throttle} to go · {brake} to slow down',
-    when: (f) => driving(f) && (f.engineRunning || f.autoStopped) && !f.handbrake && f.speedKmh < 3,
+    id: 'go', dwell: 2,
+    hint: '{throttle} go · {brake} brake',
+    when: (f) => driving(f) && ready(f) && !f.handbrake && f.speedKmh < 3,
     done: (f) => f.driver && f.speedKmh > 12,
   },
   {
-    id: 'steer', chapter: 'cabin', page: 'wheel', dwell: 3,
-    title: 'Steer',
-    hint: '{left} {right} turn the steering wheel · let go and it comes back',
-    when: (f) => driving(f) && f.speedKmh > 5,
-    done: (_f, s) => s.steerS > 1.5,
-  },
-  {
-    id: 'brake', chapter: 'cabin', page: 'wheel', dwell: 6,
-    title: 'Brake to a stop',
-    hint: 'Hold {brake} to brake · held at a standstill it backs up',
+    id: 'brake', dwell: 6,
+    hint: 'Hold {brake} to brake · at a stop it backs up',
     when: (f) => driving(f) && f.speedKmh > 20,
     done: (_f, s) => s.brakeS > 0.6,
   },
   {
-    id: 'camera', chapter: 'cabin', page: 'wheel', dwell: 4,
-    title: 'Switch the view',
-    hint: '{camera} chase view or the seat · {recenterCamera} looks ahead again',
+    id: 'camera', dwell: 4,
+    hint: '{camera} behind the car or in the seat',
     when: (f, s) => f.seated && s.drivenS > 12,
     done: (_f, s) => s.cameraSwitched,
   },
   {
-    id: 'mirror', chapter: 'cabin', page: 'cabin', dwell: 8,
-    title: 'Set a mirror',
-    hint: 'Look at a mirror · hold {interact} and move {mouse}',
-    when: (f) => f.seated && f.cabinView,
-    done: (_f, s) => s.mirrorS > 0.4,
-  },
-  {
-    id: 'seat', chapter: 'cabin', page: 'cabin', dwell: 12, interact: true,
-    title: 'Try another seat',
-    hint: 'Standing still, look at another seat · {interact} moves you there',
-    when: (f) => f.seated && f.cabinView && f.speedKmh < 3,
-    done: (_f, s) => s.seatChanged,
-  },
-  {
-    id: 'getOut', chapter: 'cabin', page: 'cabin', dwell: 3,
-    title: 'Get out',
-    hint: 'Stopped, look out at the road · {interact} gets out by the nearest door',
-    when: (f, s) => f.seated && s.standingS > 25,
+    id: 'getOut', dwell: 3,
+    hint: 'Look out at the road · {interact} get out',
+    when: (f, s) => f.seated && f.aim === null && s.standingS > 25,
     done: (_f, s) => s.gotOut,
   },
-  // ---- On the road --------------------------------------------------------------
   {
-    id: 'cruise', chapter: 'road', page: 'lever', dwell: 1,
-    title: 'Cruise on the lever',
-    hint: 'Tap {throttle}: the lever stays at 20 · 40 · 60 · 80 % · a tap of {brake} drops a notch',
+    id: 'cruise', dwell: 1,
+    hint: 'Tap {throttle} to cruise: each tap a notch, 20 to 80 %',
     when: (f, s) => driving(f) && s.heldThrottleS > 8,
     done: (_f, s) => s.cruiseS > 2,
   },
   {
-    id: 'gears', chapter: 'road', page: 'wheel', dwell: 3,
-    title: 'Change gear',
-    hint: '{shiftUp} up a gear · {shiftDown} down',
+    id: 'gears', dwell: 3,
+    hint: '{shiftUp} gear up · {shiftDown} gear down',
     applies: (f) => f.manualGearbox,
     when: (f) => driving(f) && f.manualGearbox && f.speedKmh > 5,
     done: (_f, s) => s.gearChanged,
   },
   {
-    id: 'indicators', chapter: 'road', page: 'road', dwell: 25,
-    title: 'Signal a turn',
-    hint: '{indicatorLeft} left blinker · {indicatorRight} right',
+    id: 'mouse', dwell: 1,
+    hint: '{mouseDriving} drive with the mouse or the keyboard',
+    when: (f, s) => driving(f) && !f.mouseDriving && f.speedKmh > 10 && s.drivenS > 40,
+    done: (_f, s) => s.mouseDrivingOn,
+  },
+  {
+    id: 'mouseLook', dwell: 1, urgent: true,
+    hint: 'Hold {mouseLook} to look around',
+    when: (f) => driving(f) && f.mouseDriving,
+    done: (_f, s) => s.mouseLookS > 0.4,
+  },
+  {
+    id: 'indicators', dwell: 25,
+    hint: '{indicatorLeft} {indicatorRight} blinkers',
     when: (f) => driving(f) && f.speedKmh > 15,
     done: (_f, s) => s.indicatorOn,
   },
   {
-    id: 'lights', chapter: 'road', page: 'road', dwell: 3,
-    title: 'Headlights',
-    hint: '{lights} dipped · main beam · off',
+    id: 'lights', dwell: 3,
+    hint: '{lights} headlights',
     when: (f) => f.driver && f.night && !f.headlightsOn,
     done: (_f, s) => s.lightsChanged,
   },
   {
-    id: 'mouse', chapter: 'road', page: 'mouse', dwell: 1,
-    title: 'Drive with the mouse',
-    hint: '{mouseDriving} mouse driving: {mouse} turns the wheel · {lmb} gas · {rmb} brake · hold {mouseLook} to look',
-    when: (f, s) => driving(f) && f.speedKmh > 10 && s.drivenS > 50,
-    done: (_f, s) => s.mouseS > 3,
-  },
-  {
-    id: 'autopilot', chapter: 'road', page: 'road', dwell: 1,
-    title: 'Let the car drive',
-    hint: '{autopilot} autopilot: sleeper · hurried · frantic · off',
+    id: 'autopilot', dwell: 1,
+    hint: '{autopilot} autopilot',
     when: (f, s) => driving(f) && f.speedKmh > 30 && s.drivenS > 110,
     done: (_f, s) => s.autopilotOn,
   },
 ];
 
-export const CHAPTERS: readonly Chapter[] = ['foot', 'cabin', 'road'];
-
 /** Watches frames, keeps the edges and timers, and marks lessons done. */
 export class LessonTracker {
   readonly done = new Set<string>();
   readonly signals: Signals = {
-    doorOpened: false, bonnetOpened: false, bootOpened: false, flapOpened: false, poured: false,
-    gotIn: false, gotOut: false, seatChanged: false, engineStarted: false, handbrakeReleased: false,
-    cameraSwitched: false, gearChanged: false, indicatorOn: false, lightsChanged: false, autopilotOn: false,
-    walkedM: 0, turnedRad: 0, sinceDoorS: Infinity, steerS: 0, brakeS: 0, cruiseS: 0, heldThrottleS: 0,
-    mirrorS: 0, mouseS: 0, drivenS: 0, standingS: 0,
+    poured: false, gotOut: false, engineStarted: false, handbrakeReleased: false, cameraSwitched: false,
+    gearChanged: false, indicatorOn: false, lightsChanged: false, autopilotOn: false, mouseDrivingOn: false,
+    walkedM: 0, turnedRad: 0, brakeS: 0, cruiseS: 0, heldThrottleS: 0, mirrorS: 0, mouseLookS: 0,
+    drivenS: 0, standingS: 0,
   };
   /** Seconds each lesson's context has held without a break. */
   private readonly contextS = new Map<string, number>();
-  /** The fixed step's events since the last frame. */
-  private pendingFoley = 0;
   private pendingPour = false;
+  /** Aim kinds F was pressed at since the last frame. */
+  private readonly pendingUsed = new Set<AimKind>();
   private prev: TutorialFrame | null = null;
   /** Called with a lesson's id the frame it is done. */
   onDone: ((id: string) => void) | null = null;
@@ -337,12 +264,11 @@ export class LessonTracker {
     for (const id of done) this.done.add(id);
   }
 
-  /** One fixed step's sound and continuous action (`InteractionResult`). */
-  noteTick(sound: FoleyEvent | null, pouring: boolean): void {
-    if (sound === 'door-open') this.pendingFoley |= 1;
-    else if (sound === 'bonnet-open') this.pendingFoley |= 2;
-    else if (sound === 'boot-open') this.pendingFoley |= 4;
+  /** One fixed step: its continuous action, and F pressed at an aimed kit thing. */
+  noteTick(_sound: FoleyEvent | null, pouring: boolean, aim: AimKind | null, pressed: boolean): void {
     if (pouring) this.pendingPour = true;
+    // The mirror is learnt by turning it (`aimingMirror`), not by the press that starts it.
+    if (pressed && aim !== null && aim !== 'mirror') this.pendingUsed.add(aim);
   }
 
   /** Seconds the lesson's context has held, 0 when it does not hold now. */
@@ -350,21 +276,22 @@ export class LessonTracker {
     return this.contextS.get(id) ?? 0;
   }
 
+  private mark(id: string): void {
+    if (this.done.has(id)) return;
+    this.done.add(id);
+    this.contextS.delete(id);
+    this.onDone?.(id);
+  }
+
   update(f: TutorialFrame): void {
     const s = this.signals;
     const p = this.prev;
     const dt = f.dt;
-    s.doorOpened = (this.pendingFoley & 1) !== 0;
-    s.bonnetOpened = (this.pendingFoley & 2) !== 0;
-    s.bootOpened = (this.pendingFoley & 4) !== 0;
     s.poured = this.pendingPour;
-    this.pendingFoley = 0;
     this.pendingPour = false;
-    s.sinceDoorS = s.doorOpened ? 0 : s.sinceDoorS + dt;
-    s.flapOpened = p !== null && f.flapOpen && !p.flapOpen;
-    s.gotIn = p !== null && f.seated && !p.seated;
+    for (const kind of this.pendingUsed) this.mark(aimLesson(kind));
+    this.pendingUsed.clear();
     s.gotOut = p !== null && !f.seated && p.seated;
-    s.seatChanged = p !== null && f.seated && p.seated && f.carId === p.carId && f.seat !== p.seat;
     // A stop-start restart is the throttle's doing, not the key's.
     s.engineStarted = p !== null && f.driver && p.driver && f.engineRunning && !p.engineRunning && !p.autoStopped;
     s.handbrakeReleased = p !== null && f.driver && p.driver && !f.handbrake && p.handbrake;
@@ -374,27 +301,26 @@ export class LessonTracker {
     s.indicatorOn = p !== null && f.driver && f.indicatorOn && !p.indicatorOn;
     s.lightsChanged = p !== null && f.driver && p.driver && f.headlightsOn !== p.headlightsOn;
     s.autopilotOn = p !== null && f.driver && f.autopilot && !p.autopilot;
+    s.mouseDrivingOn = p !== null && f.mouseDriving && !p.mouseDriving;
     if (!f.seated) {
       s.walkedM += f.walkedM;
       s.turnedRad += f.turnedRad;
     }
     const byHand = f.driver && !f.autopilot;
-    const moving = f.speedKmh > 5;
-    s.steerS += byHand && moving && Math.abs(f.steer) > 0.2 ? dt : 0;
     s.brakeS += byHand && f.speedKmh > 10 && f.brake > 0.3 ? dt : 0;
     s.cruiseS = byHand && f.notch > 0 && f.speedKmh > 15 ? s.cruiseS + dt : 0;
     s.heldThrottleS = byHand && f.notch === 0 && f.speedKmh > 30 && f.throttle > 0.3 ? s.heldThrottleS + dt : 0;
     s.mirrorS = f.aimingMirror ? s.mirrorS + dt : 0;
-    s.mouseS = byHand && f.mouseDriving && f.speedKmh > 10 ? s.mouseS + dt : 0;
-    s.drivenS += byHand && moving ? dt : 0;
+    s.mouseLookS = byHand && f.mouseDriving && f.mouseLookHeld ? s.mouseLookS + dt : 0;
+    s.drivenS += byHand && f.speedKmh > 5 ? dt : 0;
     s.standingS = f.seated && f.speedKmh < 3 ? s.standingS + dt : 0;
 
+    if (s.mirrorS > 0.3) this.mark(aimLesson('mirror'));
+    if (walkDone(s)) this.mark(WALK);
     for (const lesson of LESSONS) {
       if (this.done.has(lesson.id)) continue;
       if (lesson.done(f, s)) {
-        this.done.add(lesson.id);
-        this.contextS.delete(lesson.id);
-        this.onDone?.(lesson.id);
+        this.mark(lesson.id);
         continue;
       }
       if (!f.blocked && lesson.when(f, s)) this.contextS.set(lesson.id, (this.contextS.get(lesson.id) ?? 0) + dt);
@@ -405,21 +331,11 @@ export class LessonTracker {
   }
 }
 
-/** The situation's chapter: what the player is doing now. */
-export function chapterNow(f: TutorialFrame): Chapter {
-  if (!f.seated) return 'foot';
-  return f.driver && f.speedKmh > 25 ? 'road' : 'cabin';
-}
-
-const STORE_KEY = 'brodrive-tutorial-v1';
-
-export type TutorialVariant = 'whisper' | 'notebook' | 'manual';
+const STORE_KEY = 'brodrive-tutorial-v2';
 
 export interface TutorialProgress {
-  variant: TutorialVariant | null;
+  on: boolean;
   done: string[];
-  /** Manual pages opened at least once. */
-  read: string[];
 }
 
 export function loadProgress(): TutorialProgress {
@@ -427,19 +343,15 @@ export function loadProgress(): TutorialProgress {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<TutorialProgress>;
-      const variant = parsed.variant === 'whisper' || parsed.variant === 'notebook' || parsed.variant === 'manual'
-        ? parsed.variant
-        : null;
       return {
-        variant,
+        on: parsed.on === true,
         done: Array.isArray(parsed.done) ? parsed.done.filter((x) => typeof x === 'string') : [],
-        read: Array.isArray(parsed.read) ? parsed.read.filter((x) => typeof x === 'string') : [],
       };
     }
   } catch {
     // A broken record is no tutorial.
   }
-  return { variant: null, done: [], read: [] };
+  return { on: false, done: [] };
 }
 
 export function saveProgress(progress: TutorialProgress): void {

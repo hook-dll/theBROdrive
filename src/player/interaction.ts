@@ -743,6 +743,12 @@ export class Interaction {
   private seatedAimClock = 0;
   /** A seated press main.ts answers; see `takeCabinPress`. */
   private cabinPress: 'hazard' | 'radio' | null = null;
+  /**
+   * The kit thing F works in the aim this tick, for the tutorial: a part's control id,
+   * or 'seat'; null when F has nothing unnamed to work. With `aimPressed`, F's press.
+   */
+  aimId: string | null = null;
+  aimPressed = false;
   /** Panels set swinging shut, slammed by `listenForShut` as each lands. */
   private readonly shutting: { rig: KitRig; channel: string; sound: FoleyEvent; left: number }[] = [];
   /** This tick's car-to-car bar action, or null; see `towAction`. */
@@ -930,6 +936,8 @@ export class Interaction {
     this.continuous = null;
     this.prevPrimary = input.usePrimary;
     this.prevSecondary = input.useSecondary;
+    this.aimId = null;
+    this.aimPressed = pressed;
     this.listenForShut(dt);
     if (this.kitPress) {
       this.kitPress.left -= dt;
@@ -984,6 +992,7 @@ export class Interaction {
       // Another seat in the aim, from the cabin view, at any speed: F moves the occupant
       // into it (over the tunnel, between the seats) instead of out.
       const seat = this.seatedSeat;
+      this.aimId = aimed ? aimed.control.id : seat ? 'seat' : null;
       // ONE F, SEATED, first match wins: the part in the aim, another seat in the aim, out
       // of the car. The held item is never used from a seat.
       if (pressed) {
@@ -1091,6 +1100,8 @@ export class Interaction {
       || (resolved.kitSeat !== null && !stickerBlocksCar && prompt === null)
       || (aimedAt.kind === 'filler' && this.inventory.held?.type === 'fluid_can' && this.aimedReservoir(resolved) !== null)
       || (this.nozzle !== null && this.aimedReservoir(resolved) !== null);
+    // The seat wins over a door in the same ray, as F does below.
+    this.aimId = resolved.kitSeat !== null && !stickerBlocksCar && prompt === null ? 'seat' : kitPart?.control.id ?? null;
     // ONE F, ON FOOT. It belongs to the aim when the aim shows it something: a named world
     // target (the tow bar, a fixture, a loose thing, a trailer, a compartment), a prompt,
     // a lit crosshair, or a kit car's body within reach (`kitHit`: the car is what the

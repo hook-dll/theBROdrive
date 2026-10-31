@@ -56,7 +56,6 @@ import { RADIO_RECOMMENDATIONS } from '../audio/radio';
 import { prefersMobilePresentation, sceneFrameSize, type CanvasPixels } from '../core/renderer';
 import { buildProfileFor, retroPixelRatio } from '../render/retro';
 import type { SpawnRequest } from '../game/spawn';
-import type { TutorialVariant } from './tutorial/lessons';
 import { CAR_MODELS, modelEngine, modelGearbox, type CarModelDef } from '../vehicle/carmodels';
 import { CAR_PAINTS } from '../vehicle/carpaint';
 import { ALL_VARIANTS } from '../parts/registry';
@@ -882,13 +881,10 @@ export interface PauseHooks {
   giveShells?: () => void;
   /** Puts the player and the driven car on the road at a kilometre. Dev only. */
   jumpToKm?: (km: number) => void;
-  /**
-   * The controls tutorial's three presentations (ui/tutorial), tried from here while
-   * one is chosen. Dev only, absent in a production build.
-   */
+  /** The controls tutorial (ui/tutorial), switched on from here while it is tried. Dev only. */
   tutorial?: {
-    variant: () => TutorialVariant | null;
-    start: (variant: TutorialVariant) => void;
+    on: () => boolean;
+    start: () => void;
     stop: () => void;
   };
 }
@@ -2930,23 +2926,15 @@ export class MainMenu {
             finish('resume');
           });
         }
-        // Each start is from the beginning (every lesson untried), so a variant can be
-        // walked through again; the current one is marked.
+        // A start is from the beginning (every lesson unlearnt), so it can be walked again.
         if (import.meta.env.DEV && hooks.tutorial) {
           const tutorial = hooks.tutorial;
-          const current = tutorial.variant();
-          const variants = [
-            ['whisper', 'Tutorial A: whispers'],
-            ['notebook', 'Tutorial B: notebook'],
-            ['manual', 'Tutorial C: manual (H)'],
-          ] as const;
-          for (const [variant, label] of variants) {
-            devButton(current === variant ? `${label} ✓ restart` : label, () => {
-              tutorial.start(variant);
-              finish('resume');
-            });
-          }
-          if (current !== null) {
+          const on = tutorial.on();
+          devButton(on ? 'Tutorial: restart' : 'Tutorial: on', () => {
+            tutorial.start();
+            finish('resume');
+          });
+          if (on) {
             devButton('Tutorial: off', () => {
               tutorial.stop();
               finish('resume');

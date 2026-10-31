@@ -177,7 +177,7 @@ import { Terrain } from './world/terrain';
 import { WorldWorkScheduler } from './world/workqueue';
 import { Hud, newMapView } from './ui/hud';
 import { MainMenu, type PauseHooks } from './ui/menu';
-import { Tutorial, emptyTutorialFrame } from './ui/tutorial/tutorial';
+import { Tutorial, aimKindOf, emptyTutorialFrame } from './ui/tutorial/tutorial';
 import {
   autosaveNow,
   IndexedDbSaves,
@@ -511,8 +511,8 @@ async function boot(): Promise<void> {
     },
   });
   hud.setDashboardScale(world.state.settings.dashboardSize);
-  // The controls tutorial (ui/tutorial): off unless picked in the dev menu, where its
-  // three presentations are being tried. Off, `tickTutorial` returns at once.
+  // The controls tutorial (ui/tutorial): off unless switched on in the dev menu, where it
+  // is being tried. Off, `tickTutorial` returns at once.
   const tutorial = new Tutorial(uiRoot, (action) => input.keyCodes(action), (text) => hud.setToast(text));
   const vitals = new PlayerVitals(world.state.player.health, (health) => {
     world.apply({ t: 'player_health', health });
@@ -2367,7 +2367,7 @@ async function boot(): Promise<void> {
       activeS,
       camera.mode === 'cabin',
     );
-    tutorial.noteTick(interacted.sound, interacted.continuous === 'pour');
+    tutorial.noteTick(interacted.sound, interacted.continuous === 'pour', interaction.aimId, interaction.aimPressed);
     // F with nothing aimed is the held item's (`InteractionResult.useHeld`): this tick's
     // aim, so a press that picked something up or opened a door never also toggles it.
     const useHeld = interacted.useHeld;
@@ -2732,14 +2732,12 @@ async function boot(): Promise<void> {
     f.seated = driving !== null;
     f.driver = driving !== null && s.player.seat === 'driver';
     f.carId = s.player.drivingCarId;
-    f.seat = s.player.seat;
     f.cabinView = driving !== null && camera.mode === 'cabin';
     f.engineRunning = driving?.engineRunning ?? false;
     f.autoStopped = driving?.engineAutoStopped ?? false;
     f.engineOff = driving !== null && driving.engineStopped && !driving.engineCranking
       && !driving.engineAutoStopped && !driving.engineDestroyed;
     f.speedKmh = driving ? Math.abs(driving.speedKmh) : 0;
-    f.steer = driving?.steeringFraction ?? 0;
     f.brake = driving?.brakeCommand ?? 0;
     f.throttle = driving?.throttleCommand ?? 0;
     f.handbrake = driving?.handbrakeOn ?? false;
@@ -2752,11 +2750,12 @@ async function boot(): Promise<void> {
     f.indicatorOn = driving !== null && (driving.indicator === 'left' || driving.indicator === 'right');
     f.night = sky.lampFactor > 0.5;
     f.aimingMirror = interaction.aimingKit?.control.id.startsWith('mirror') === true;
-    f.actionable = actionable;
+    f.aim = aimKindOf(interaction.aimId);
+    f.mouseLookHeld = input.mouseLookHeld;
     f.bay = boot?.side ?? null;
     f.holdingCan = inventory.held?.type === 'fluid_can';
     const eye = camera.eyePosition;
-    let nearM = Infinity;
+    let nearM = 6;
     let flap = (driving?.kit?.get('flap') ?? 0) > 0.5;
     if (driving === null) {
       for (const vehicle of vehicles.values()) {
@@ -2766,11 +2765,10 @@ async function boot(): Promise<void> {
         const m = Math.hypot(p.x - eye.x, p.z - eye.z);
         if (m < nearM) {
           nearM = m;
-          flap = m < 6 && kit.get('flap') > 0.5;
+          flap = kit.get('flap') > 0.5;
         }
       }
     }
-    f.nearKitCarM = nearM;
     f.flapOpen = flap;
     const yaw = camera.yaw;
     if (tutorialLast.fresh || driving !== null) {
@@ -3812,8 +3810,8 @@ async function boot(): Promise<void> {
     jumpToKm: devTools?.jumpTo,
     tutorial: import.meta.env.DEV
       ? {
-          variant: () => tutorial.variant,
-          start: (variant) => tutorial.start(variant),
+          on: () => tutorial.active,
+          start: () => tutorial.start(),
           stop: () => tutorial.stop(),
         }
       : undefined,
@@ -3864,28 +3862,6 @@ async function boot(): Promise<void> {
     })();
   };
 
-  /**
-   * The tutorial's manual (ui/tutorial/manual.ts): the game stands still under it the
-   * way it does under the pause, and the pointer comes back on the key or click that
-   * shuts it.
-   */
-  const openManual = (): void => {
-    if (paused || dying || story !== null || endingStarted || !booted) return;
-    const relock = input.pointerLocked;
-    if (document.pointerLockElement !== null) document.exitPointerLock();
-    paused = true;
-    loop.stop();
-    audio.setPaused(true);
-    pads.stopRumble();
-    void tutorial.openManual().then(() => {
-      input.resyncPad();
-      if (relock) void canvas.requestPointerLock().catch(() => undefined);
-      paused = false;
-      audio.setPaused(false);
-      loop.start();
-    });
-  };
-
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || paused) return;
     if (e.code === 'Escape') {
@@ -3901,7 +3877,7 @@ async function boot(): Promise<void> {
       toggleCinema();
     } else if (e.code === 'KeyH' && tutorial.active) {
       e.preventDefault();
-      if (tutorial.pressHelp()) openManual();
+      tutorial.pressHelp();
     }
   });
 
